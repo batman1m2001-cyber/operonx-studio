@@ -27,6 +27,7 @@ from typing import Any, List, Tuple
 
 __all__ = [
     "PyEditError",
+    "set_op_param",
     "set_op_resource",
     "rename_op",
     "find_graph",
@@ -182,6 +183,42 @@ def set_op_resource(text: str, graph: str, op_name: str, resource: Any) -> str:
         return _apply(text, [(start, end, _render_literal(resource, quote))])
 
     raise PyEditError(f"{op_name!r} has no resource= argument")
+
+
+def set_op_param(text: str, graph: str, op_name: str, param: str, value: Any) -> str:
+    """Replace one literal keyword argument in an op's construction call.
+
+    The generalisation of :func:`set_op_resource`, and the write half of the
+    studio's inspector: a param whose value is a literal in the source is
+    editable in place, and only that token changes. A param bound to a Ref,
+    a SCRATCH read or any computed expression is refused — those are wiring,
+    and rewriting wiring by value would silently sever the connection the
+    author chose.
+
+    Raises:
+        PyEditError: the graph, the op or the keyword is absent, or the
+            keyword's value is not a literal.
+    """
+    tree = _parse(text)
+    offsets = _line_offsets(text)
+    assign = _assignment_for(find_graph(tree, graph), op_name)
+    if not isinstance(assign.value, ast.Call):
+        raise PyEditError(f"{op_name!r} is not built by a call")
+
+    for keyword in assign.value.keywords:
+        if keyword.arg != param:
+            continue
+        if not isinstance(keyword.value, (ast.Constant, ast.List, ast.Tuple, ast.Dict)):
+            raise PyEditError(
+                f"{op_name}.{param} is wiring, not a literal — edit the code, "
+                f"not the value"
+            )
+        start, end = _span(keyword.value, offsets)
+        existing = text[start:end]
+        quote = '"' if existing[:1] == '"' or '"' in existing else "'"
+        return _apply(text, [(start, end, _render_literal(value, quote))])
+
+    raise PyEditError(f"{op_name!r} has no {param}= argument")
 
 
 def rename_op(text: str, graph: str, old: str, new: str) -> str:

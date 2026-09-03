@@ -334,3 +334,47 @@ class TestBuilderEntries:
 
     def test_graph_names_lists_the_graph_not_the_builder(self):
         assert graph_names(self.BUILDER) == ["pipeline"]
+
+
+# ── set_op_param ────────────────────────────────────────────────────────
+
+SRC_PARAMS = '''
+from operonx.core import graph, op, START, END
+
+@op
+def greet(name: str = "", times: int = 1):
+    return {"text": name * times}
+
+@graph
+def main():
+    a = greet(name="minh", times=2)  # keep me
+    START >> a >> END
+'''
+
+
+def test_set_op_param_changes_one_token_only():
+    from operonx_project.pyedit import set_op_param
+
+    out = set_op_param(SRC_PARAMS, "main", "a", "times", 5)
+    assert 'times=5' in out
+    assert '"minh"' in out                  # neighbour untouched
+    assert "# keep me" in out               # comment survives
+    # the contract shared with every editor here: a no-op is byte-identical
+    assert set_op_param(out, "main", "a", "times", 5) == out
+
+
+def test_set_op_param_refuses_wiring():
+    from operonx_project.pyedit import PyEditError, set_op_param
+
+    src = SRC_PARAMS.replace('name="minh"', "name=some_ref")
+    import pytest
+    with pytest.raises(PyEditError, match="wiring"):
+        set_op_param(src, "main", "a", "name", "x")
+
+
+def test_set_op_param_names_a_missing_keyword():
+    from operonx_project.pyedit import PyEditError, set_op_param
+    import pytest
+
+    with pytest.raises(PyEditError, match="no nope"):
+        set_op_param(SRC_PARAMS, "main", "a", "nope", 1)

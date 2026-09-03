@@ -24,6 +24,7 @@ from operonx_project.pyedit import (
     insert_op_after,
     insert_op_between,
     rename_op,
+    set_op_param,
     set_op_resource,
 )
 
@@ -68,6 +69,7 @@ class EditPlan:
 ACTIONS: Dict[str, Callable[..., str]] = {
     "rename": rename_op,
     "set_resource": set_op_resource,
+    "set_param": set_op_param,
     "delete": delete_op,
     "insert_after": insert_op_after,
     "insert_between": insert_op_between,
