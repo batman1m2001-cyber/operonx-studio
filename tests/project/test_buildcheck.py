@@ -7,6 +7,7 @@ import socket
 from pathlib import Path
 
 import pytest
+
 from operonx_project.buildcheck import NetworkAttempt, check_build, no_network
 from operonx_project.manifest import Manifest
 

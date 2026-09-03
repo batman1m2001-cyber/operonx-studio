@@ -8,6 +8,7 @@ rather than exact pixel values, which would break on any spacing tweak.
 from __future__ import annotations
 
 import pytest
+
 from operonx_studio.layout import layout_graph
 
 pytestmark = pytest.mark.unit

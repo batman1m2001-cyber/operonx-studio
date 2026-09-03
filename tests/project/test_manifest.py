@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from operonx_project import GraphSpec, Manifest, ManifestError
 
 pytestmark = pytest.mark.unit

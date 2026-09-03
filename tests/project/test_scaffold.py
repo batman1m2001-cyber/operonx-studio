@@ -9,6 +9,7 @@ linter is worse than no generator.
 from __future__ import annotations
 
 import pytest
+
 from operonx_project.lint import lint_path
 from operonx_project.manifest import Manifest
 from operonx_project.scaffold import OPERONX_PIN, ScaffoldError, scaffold

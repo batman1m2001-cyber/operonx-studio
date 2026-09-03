@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 
 import pytest
+from operonx.core import END, PARENT, SCRATCH, START, GraphOp, Operon, graph, op
+
 from operonx_project.extract import (
     IR_VERSION,
     ExtractError,
@@ -20,8 +22,6 @@ from operonx_project.extract import (
     extract_project,
 )
 from operonx_project.manifest import Manifest
-
-from operonx.core import END, PARENT, SCRATCH, START, GraphOp, Operon, graph, op
 
 pytestmark = pytest.mark.unit
 

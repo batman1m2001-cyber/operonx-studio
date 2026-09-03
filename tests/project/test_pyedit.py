@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 
 import pytest
+
 from operonx_project.pyedit import (
     PyEditError,
     delete_op,
@@ -373,8 +374,9 @@ def test_set_op_param_refuses_wiring():
 
 
 def test_set_op_param_names_a_missing_keyword():
-    from operonx_project.pyedit import PyEditError, set_op_param
     import pytest
+
+    from operonx_project.pyedit import PyEditError, set_op_param
 
     with pytest.raises(PyEditError, match="no nope"):
         set_op_param(SRC_PARAMS, "main", "a", "nope", 1)

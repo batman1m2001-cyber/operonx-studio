@@ -10,6 +10,7 @@ records what was written, and it rejects what cannot be true.
 from __future__ import annotations
 
 import pytest
+
 from operonx_project import Manifest, ManifestError, ServeSpec
 
 pytestmark = pytest.mark.unit

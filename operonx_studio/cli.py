@@ -1,73 +1,53 @@
-"""``operonx-studio`` — render a project's graphs as a browsable page.
+"""``operonx-studio`` — open the studio.
 
-    operonx-studio [PATH]              write studio.html for PATH
-    operonx-studio [PATH] -o out.html  choose the output file
-    operonx-studio [PATH] --open       open it in a browser afterwards
-    operonx-studio [PATH] --serve      live-reloading daemon on localhost
+    operonx-studio                open the app: pick, open or create a project
+    operonx-studio PATH           open the app with PATH already opened
+    operonx-studio --port 9000    a different port
 
-Extraction and rendering both run locally: the page is one self-contained
-file with no network calls, so it works on a machine with no internet, which
-is usually where a workflow needs looking at.
+The studio is a local web app. The old static-export mode is gone — it
+existed so a diagram could be mailed around, but a page that cannot
+re-extract lies the moment the code moves, and the daemon costs nothing
+to run. Everything still works offline: no CDN, no calls out.
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
+import threading
 import webbrowser
 from pathlib import Path
 from typing import Sequence
-
-from operonx_project.extract import ExtractError, extract_project
-from operonx_project.manifest import Manifest, ManifestError
-
-from operonx_studio.envstatus import env_status
-from operonx_studio.render import render_html
 
 __all__ = ["main"]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="operonx-studio", description=__doc__)
-    parser.add_argument("path", nargs="?", default=".", help="project root (default: cwd)")
-    parser.add_argument("-o", "--output", default="studio.html", help="output file")
-    parser.add_argument("--open", action="store_true", help="open in a browser when done")
-    parser.add_argument("--serve", action="store_true", help="run the live-reloading daemon")
-    parser.add_argument("--host", default="127.0.0.1", help="serve host (loopback by default)")
-    parser.add_argument("--port", type=int, default=8765, help="serve port")
+    parser.add_argument("path", nargs="?", default=None,
+                        help="a project root to open immediately (optional)")
+    parser.add_argument("--host", default="127.0.0.1", help="bind host (loopback by default)")
+    parser.add_argument("--port", type=int, default=8765, help="bind port")
+    parser.add_argument("--no-open", action="store_true", help="do not open a browser")
     args = parser.parse_args(argv)
 
-    root = Path(args.path)
-    if args.serve:
-        if not root.exists():
-            print(f"operonx-studio: {root} does not exist", file=sys.stderr)
+    open_path = None
+    if args.path is not None:
+        open_path = Path(args.path).resolve()
+        if not (open_path / "operonx.toml").is_file():
+            print(f"error: no operonx.toml in {open_path}")
             return 2
-        from operonx_studio.daemon import serve
 
-        if args.open:
-            webbrowser.open(f"http://{args.host}:{args.port}/")
-        return serve(root, host=args.host, port=args.port)
+    from operonx_studio.app import serve_studio
+    from operonx_studio.registry import project_id
 
-    try:
-        manifest = Manifest.load(root)
-        ir = extract_project(manifest)
-    except (ManifestError, ExtractError) as exc:
-        print(f"operonx-studio: {exc}", file=sys.stderr)
-        return 1
+    url = f"http://{args.host}:{args.port}/"
+    if open_path is not None:
+        url = f"http://{args.host}:{args.port}/p/{project_id(open_path)}"
+    print(f"operonx studio · {url}")
+    if not args.no_open:
+        threading.Timer(0.8, webbrowser.open, args=(url,)).start()
 
-    resources = ir.get("resources") or {}
-    env = resources.get("env") or {}
-    status = env_status(
-        manifest.root, env.get("required") or [], (env.get("optional") or {}).keys()
-    )
-
-    out = Path(args.output)
-    out.write_text(render_html(ir, env_status=status), encoding="utf-8")
-    graphs = len(ir["graphs"])
-    nodes = sum(len(g["nodes"]) for g in ir["graphs"])
-    print(f"operonx-studio: {graphs} graph(s), {nodes} node(s) -> {out}")
-    if args.open:
-        webbrowser.open(out.resolve().as_uri())
+    serve_studio(host=args.host, port=args.port, open_path=open_path)
     return 0
 
 

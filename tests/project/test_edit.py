@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from operonx_project.edit import EditError, set_env_var, set_resource_field, unset_env_var
 
 pytestmark = pytest.mark.unit

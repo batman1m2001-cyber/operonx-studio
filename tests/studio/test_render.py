@@ -11,6 +11,7 @@ import json
 import re
 
 import pytest
+
 from operonx_studio.render import render_html, render_project
 
 pytestmark = pytest.mark.unit
@@ -307,7 +308,7 @@ class TestGeneratedScript:
             ir(
                 [
                     graph(
-                        nodes=[node_ := node_maker("a"), node_maker("b")],
+                        nodes=[node_maker("a"), node_maker("b")],
                         edges=[{"from": "a", "to": "b", "soft": True, "origin": "auto_soft"}],
                     )
                 ],

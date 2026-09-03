@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from operonx_project.cli import main, suggest_manifest
 from operonx_project.lint import lint_source
 

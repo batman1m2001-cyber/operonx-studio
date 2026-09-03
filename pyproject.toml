@@ -53,3 +53,11 @@ operonx = { path = "../Operon", editable = true }
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = ["unit: fast, no subprocess, no network"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+extend-ignore = ["E712", "F401", "F541", "E501"]

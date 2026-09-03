@@ -11,6 +11,7 @@ import itertools
 from pathlib import Path
 
 import pytest
+
 from operonx_project.apply import EditPlan, PlanError, apply_plan, plan_edit
 from operonx_project.manifest import Manifest
 from operonx_project.pyedit import PyEditError

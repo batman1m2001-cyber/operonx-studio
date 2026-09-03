@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 import pytest
+
 from operonx_studio.daemon import ProjectWatcher, build_app, page_for
 
 pytestmark = pytest.mark.unit

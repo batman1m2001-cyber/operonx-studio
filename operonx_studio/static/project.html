@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>operonx studio</title>
+<link rel="stylesheet" href="/static/studio.css">
+</head>
+<body>
+<div class="shell">
+  <header class="bar">
+    <a class="crumb" href="/">studio</a>
+    <span class="crumb">/</span>
+    <span class="pname" id="pname">…</span>
+    <select id="graph-pick" title="graph"></select>
+    <nav class="tabs">
+      <button data-tab="flow" class="active">Flow</button>
+      <button data-tab="traces">Traces</button>
+    </nav>
+    <div class="spacer"></div>
+    <button id="btn-fit" title="fit graph to view">Fit</button>
+    <span class="live" id="live"><span class="dot"></span><span id="live-text">live</span></span>
+  </header>
+
+  <div id="runbanner">
+    <span>Run <b id="run-name"></b> painted on the canvas — durations and errors per op.</span>
+    <button id="run-clear">Clear</button>
+  </div>
+
+  <div class="main">
+    <div id="stage">
+      <div id="world">
+        <svg id="edges"></svg>
+        <div id="nodes"></div>
+      </div>
+    </div>
+    <aside id="inspector"></aside>
+    <div id="traces" hidden></div>
+  </div>
+</div>
+<script src="/static/studio.js"></script>
+</body>
+</html>
