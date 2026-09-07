@@ -868,6 +868,11 @@ async function load(first) {
     opt.value = g.name;
     pick.append(opt);
   }
+  // The convention is ONE main served graph per project, so with one
+  // graph there is nothing to pick — the chrome would only suggest a
+  // choice that does not exist. The picker returns if a project ever
+  // declares extra unserved [[graph]] entries.
+  pick.hidden = data.graphs.length <= 1;
   state.graph = data.graphs.find(g => g.name === current) || data.graphs[0];
   if (state.graph) pick.value = state.graph.name;
   render();

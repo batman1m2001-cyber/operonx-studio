@@ -634,6 +634,10 @@ def build_studio_app(recents: Optional[Recents] = None):
             else:
                 payload["root"] = str(root)
                 for entry in root.iterdir():
+                    # `latest` is LocalConsumer's alias symlink, not a run;
+                    # listing it would show every run twice.
+                    if entry.is_symlink():
+                        continue
                     nodes = entry / "nodes.jsonl"
                     if not nodes.is_file():
                         continue
