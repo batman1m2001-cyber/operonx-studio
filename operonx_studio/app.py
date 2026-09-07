@@ -176,7 +176,8 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                 "y": n.y,
                 **{k: nodes_by_id.get(n.id, {}).get(k) for k in
                    ("bound", "start", "end", "outputs", "inputs", "source",
-                    "loop", "is_gen", "transient", "serve_role")},
+                    "loop", "is_gen", "transient", "serve_role", "code",
+                    "resource")},
                 "subgraph_ops": len((nodes_by_id.get(n.id, {}).get("graph") or {}).get("nodes") or []) or None,
                 "graph": _subgraph(n.id),
             }
@@ -380,25 +381,51 @@ def _lf_runs(cfg: Dict[str, str], limit: int = 50) -> List[Dict[str, Any]]:
 
 def build_studio_app(recents: Optional[Recents] = None):
     from fastapi import FastAPI
-    from fastapi.responses import FileResponse, JSONResponse
+    from fastapi.responses import JSONResponse
     from fastapi.staticfiles import StaticFiles
 
     recents = recents if recents is not None else Recents()
     watchers: Dict[str, ProjectWatcher] = {}
 
+    import hashlib
+
+    from fastapi.middleware.gzip import GZipMiddleware
+    from fastapi.responses import HTMLResponse
+
     app = FastAPI(title="operonx studio", docs_url=None, redoc_url=None)
     app.state.recents = recents
     app.state.watchers = watchers
+    # IR payloads carry every binding, source snippet and layout — tens to
+    # hundreds of KB of very compressible JSON, often over a slow tunnel.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+    # Cache-busting without staleness: pages reference their assets as
+    # /static/x.js?v=<content hash>, so assets cache forever and a deploy
+    # changes the URL. Only the two small HTML pages revalidate per load —
+    # one round trip instead of one per asset, which over a tunnel is the
+    # difference the user feels.
+    def _asset_version() -> str:
+        digest = hashlib.sha1()
+        for f in sorted(STATIC.glob("*")):
+            stat = f.stat()
+            digest.update(f"{f.name}:{stat.st_mtime_ns}:{stat.st_size};".encode())
+        return digest.hexdigest()[:10]
+
+    asset_v = _asset_version()
+
+    def _page(name: str) -> HTMLResponse:
+        text = (STATIC / name).read_text(encoding="utf-8")
+        for asset in ("studio.css", "studio.js", "home.css", "home.js"):
+            text = text.replace(f"/static/{asset}", f"/static/{asset}?v={asset_v}")
+        return HTMLResponse(text, headers={"Cache-Control": "no-cache"})
 
     @app.middleware("http")
-    async def _fresh_pages(request, call_next):
-        """Pages and static assets revalidate on every load (ETag makes it
-        a 304, not a re-download). A studio serving yesterday's JS after a
-        deploy shows yesterday's features and gets called a liar."""
+    async def _cache_headers(request, call_next):
         response = await call_next(request)
-        path = request.url.path
-        if path == "/" or path.startswith("/static") or path.startswith("/p/"):
-            response.headers["Cache-Control"] = "no-cache"
+        if request.url.path.startswith("/static"):
+            response.headers["Cache-Control"] = (
+                "public, max-age=31536000, immutable"
+                if "v" in request.query_params else "no-cache")
         return response
 
     def _watcher(pid: str) -> Optional[ProjectWatcher]:
@@ -413,8 +440,8 @@ def build_studio_app(recents: Optional[Recents] = None):
     # ── home ────────────────────────────────────────────────────────────
 
     @app.get("/")
-    def home() -> FileResponse:
-        return FileResponse(STATIC / "home.html")
+    def home():
+        return _page("home.html")
 
     @app.get("/api/projects")
     def projects() -> JSONResponse:
@@ -498,7 +525,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     def project_page(pid: str) -> Any:
         if _watcher(pid) is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
-        return FileResponse(STATIC / "project.html")
+        return _page("project.html")
 
     def _declared_roles(root: Path, graphs: List[Dict[str, Any]]) -> None:
         """Boundary ops the manifest names outright.

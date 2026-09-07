@@ -126,6 +126,26 @@ def test_ir_extracts_and_carries_layout(client, project):
     # and the literal binding the inspector edits is present
     literals = {i["name"] for i in node["inputs"] if i["binding"]["kind"] == "literal"}
     assert {"text", "times"} <= literals
+    # a FuncOp ships its body — the inspector's collapsed code block
+    assert "def shout" in (node.get("code") or "")
+
+
+def test_pages_fingerprint_their_assets(client, project):
+    """Assets cache forever under a content-hashed URL; only the small
+    HTML page revalidates. Over a tunnel that is the difference between
+    one round trip and one per asset."""
+    page = client.get("/")
+    assert page.headers["cache-control"] == "no-cache"
+    import re
+    m = re.search(r"/static/studio\.css\?v=([0-9a-f]{10})", page.text)
+    assert m, "asset URLs must carry the version fingerprint"
+    pid = _open(client, project)
+    proj = client.get(f"/p/{pid}")
+    assert f"/static/studio.js?v={m.group(1)}" in proj.text
+    asset = client.get(f"/static/studio.js?v={m.group(1)}")
+    assert "immutable" in asset.headers["cache-control"]
+    bare = client.get("/static/studio.js")
+    assert bare.headers["cache-control"] == "no-cache"
 
 
 def test_a_broken_project_reports_instead_of_500(client, tmp_path):

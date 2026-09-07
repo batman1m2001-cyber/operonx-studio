@@ -426,6 +426,13 @@ function fit() {
 
 /* ── inspector ────────────────────────────────────────────────────── */
 
+/* The inspector's contract: the most important thing first.
+ *
+ * With a run painted, that is what the op actually DID — its recorded
+ * output and input values, then its execution history. Without one, it
+ * is what the op IS — its wiring and params. Identity chips always lead;
+ * code, prompts and source live in collapsed sections underneath, so
+ * they are one click away but never in the way. */
 function select(key) {
   state.sel = (state.sel === key) ? null : key;
   render();
@@ -436,93 +443,156 @@ function select(key) {
   const n = it.node;
   panel.classList.add("open");
   panel.textContent = "";
+
+  // ── identity ──────────────────────────────────────────────────────
   panel.append(el("h3", null, n.name));
-  panel.append(el("div", "kind",
-    n.kind + (n.bound ? ` · bound=${n.bound}` : "") + (n.is_gen ? " · generator" : "")));
-  if (n.serve_role) {
-    const note = el("div", "srcline",
-      n.serve_role === "ingress"
-        ? "Serve boundary — this is where the client's data enters the run. Its stream is what the session feeds; it holds no business logic."
-        : "Serve boundary — this is where the run's answers leave for the client. It holds no business logic.");
-    panel.append(note);
-  }
+  const chips = el("div", "chips");
+  const kindChip = el("span", "chip kindchip", n.kind);
+  kindChip.style.setProperty("--kind", kindColor(n));
+  chips.append(kindChip);
+  if (n.bound) chips.append(el("span", "chip", n.bound));
   if (n.is_gen) {
-    const note = el("div", "srcline",
-      "Yields a stream: downstream ops dispatch once per yield. Edge counts in a run are per item, not per invocation.");
-    panel.append(note);
+    const c = el("span", "chip cgen", "⚡ generator");
+    c.title = "Invoked once, yields many — every consumer dispatches per yield.";
+    chips.append(c);
+  }
+  if (n.transient) {
+    const c = el("span", "chip", "transient");
+    c.title = "Outputs are delivered and then evicted; a long stream retains nothing.";
+    chips.append(c);
+  }
+  if (n.resource) {
+    chips.append(el("span", "chip cres",
+      "⛁ " + (Array.isArray(n.resource) ? n.resource.join(" · ") : n.resource)));
   }
   if (n.loop) {
-    const sec = el("section");
-    sec.append(el("div", "stitle", "Loop"));
-    sec.append(el("div", "srcline",
-      `Synthetic while-loop (${n.loop.group}) — the authored cycle, rewritten by the compiler. ` +
-      `Ceiling: ${n.loop.max_iterations ?? "none"} iterations.`));
-    panel.append(sec);
+    const c = el("span", "chip cloop", `↺ while ≤${n.loop.max_iterations ?? "∞"}`);
+    c.title = `Member of the authored cycle '${n.loop.group}', rewritten by the compiler into a synthetic loop.`;
+    chips.append(c);
+  }
+  panel.append(chips);
+
+  if (n.serve_role) {
+    panel.append(el("div", "rolenote",
+      n.serve_role === "ingress"
+        ? "⇥ Serve boundary — the client's data enters the run here. No business logic inside."
+        : "⇥ Serve boundary — the run's answers leave for the client here. No business logic inside."));
   }
   if (n.graph) {
-    const sec = el("section");
-    sec.append(el("div", "stitle", "Nested graph"));
-    sec.append(el("div", "srcline",
-      `${n.subgraph_ops} ops inside. ` +
-      (state.expanded.has(it.key) ? "Open on the canvas." : "Double-click the node (or its ▣ badge) to open it in place.")));
-    panel.append(sec);
+    panel.append(el("div", "rolenote",
+      `▣ Nested graph · ${n.subgraph_ops} ops. ` +
+      (state.expanded.has(it.key) ? "Open on the canvas." : "Double-click the node to open it in place.")));
   }
 
-  const src = n.source || {};
-  const srcSec = el("section");
-  srcSec.append(el("div", "stitle", "Source"));
-  for (const [label, loc] of [["defined", src.defined_at], ["wired", src.wired_at]]) {
-    if (loc && loc.file) {
-      srcSec.append(el("div", "srcline mono", `${label}  ${loc.file}:${loc.line}`));
-    }
-  }
-  panel.append(srcSec);
-
-  // Value slots: when a run is painted, the latest recorded value of
-  // every input and output lands inline under its name. The wiring says
-  // where a value comes from; the run says what it actually was — the
-  // inspector owes the user both.
   const slots = {in: {}, out: {}};
 
-  const inSec = el("section");
-  inSec.append(el("div", "stitle", "Inputs"));
-  for (const inp of n.inputs || []) inSec.append(inputRow(it, inp, slots));
-  if (!(n.inputs || []).length) inSec.append(el("div", "note", "none"));
-  panel.append(inSec);
+  // ── with a run painted: values first, history second ──────────────
+  if (state.run) {
+    panel.append(valuesSection(n, slots));
+    panel.append(executionsSection(n, slots));
+  }
 
-  const outSec = el("section");
-  outSec.append(el("div", "stitle", "Outputs"));
+  // ── what the op is made of ────────────────────────────────────────
+  if (n.code) panel.append(codeSection(n));
+  const llm = llmSection(n);
+  if (llm) panel.append(llm);
+
+  // Wiring, params and source: the main event without a run, one click
+  // away with one — the values above already answer the first question.
+  panel.append(wiringSection(it, !state.run));
+}
+
+function valuesSection(n, slots) {
+  const sec = el("section");
+  sec.append(el("div", "stitle", `Latest values · ${state.run.run}`));
+  const rows = el("div");
+  // outputs first: "what did this op produce" is the question a painted
+  // run gets clicked for
   for (const o of n.outputs || []) {
-    const row = el("div", "inrow");
-    row.append(el("div", "iname mono", o));
-    slots.out[o] = el("div");
+    const row = el("div", "valrow");
+    row.append(el("div", "vname mono", `${o} →`));
+    slots.out[o] = el("div", "vslot", "…");
     row.append(slots.out[o]);
-    outSec.append(row);
+    rows.append(row);
   }
-  if (!(n.outputs || []).length) outSec.append(el("div", "note", "none"));
-  panel.append(outSec);
+  for (const inp of n.inputs || []) {
+    const row = el("div", "valrow vin");
+    row.append(el("div", "vname mono", `→ ${inp.name}`));
+    slots.in[inp.name] = el("div", "vslot", "…");
+    row.append(slots.in[inp.name]);
+    rows.append(row);
+  }
+  if (!rows.childNodes.length) rows.append(el("div", "note", "no declared ports"));
+  sec.append(rows);
+  return sec;
+}
 
-  const runinfo = state.run && state.run.ops[n.name];
-  if (runinfo) {
-    const runSec = el("section");
-    runSec.append(el("div", "stitle", `Run · ${state.run.run}`));
-    const avg = runinfo.runs ? runinfo.total_ms / runinfo.runs : 0;
-    runSec.append(el("div", "srcline",
-      `${runinfo.runs} execution(s) · avg ${avg.toFixed(1)} ms · max ${runinfo.max_ms.toFixed(1)} ms`));
-    if (runinfo.last_error) {
-      runSec.append(el("div", "srcline", `last error: ${runinfo.last_error}`));
+function codeSection(n) {
+  const sec = el("details", "foldbox");
+  const sum = el("summary");
+  sum.append(el("span", "stitle", "Code"));
+  const loc = (n.source || {}).defined_at;
+  if (loc && loc.file) sum.append(el("span", "srcline mono", ` ${loc.file}:${loc.line}`));
+  sec.append(sum);
+  sec.append(el("pre", "codeblock mono", n.code));
+  return sec;
+}
+
+function llmSection(n) {
+  if (!(n.kind || "").includes("LLM")) return null;
+  const byName = {};
+  for (const inp of n.inputs || []) byName[inp.name] = inp.binding || {};
+  const sec = el("section");
+  sec.append(el("div", "stitle", "Prompt"));
+
+  const prompt = byName.prompt;
+  if (prompt && prompt.kind === "literal" && prompt.value && typeof prompt.value === "object") {
+    for (const part of ["system", "user"]) {
+      if (prompt.value[part] === undefined) continue;
+      sec.append(el("div", "plabel", part));
+      sec.append(el("pre", "promptblock mono", String(prompt.value[part])));
     }
-    panel.append(runSec);
+  } else if (byName.messages) {
+    const b = byName.messages;
+    sec.append(el("div", "srcline",
+      b.kind === "ref" ? `messages ← ${(b.from || "").split(".").pop()}.${b.output} (conversation is data, never templated)`
+                       : "messages: bound at run time"));
+  } else {
+    sec.append(el("div", "note", "no prompt literal — see wiring below"));
   }
-  // The drill-down renders for EVERY node while a run is painted — a
-  // GraphOp has no aggregate under its own name (only its members ran),
-  // and the answer to "what happened here" must never be silence.
-  if (state.run) panel.append(executionsSection(n, slots));
-  else {
-    const hint = el("div", "note",
-      "Pick a run in the Traces tab to see the recorded values of these inputs and outputs.");
-    panel.append(hint);
+
+  const params = el("div", "chips");
+  for (const [name, b] of Object.entries(byName)) {
+    if (b.kind !== "literal") continue;
+    if (name === "prompt" || name === "messages") continue;
+    const v = b.value;
+    if (v === null || ["string", "number", "boolean"].includes(typeof v))
+      params.append(el("span", "chip", `${name}=${JSON.stringify(v)}`));
   }
+  if (params.childNodes.length) sec.append(params);
+  return sec;
+}
+
+function wiringSection(it, open) {
+  const n = it.node;
+  const box = el("details", "foldbox");
+  box.open = open;
+  const sum = el("summary");
+  sum.append(el("span", "stitle", "Wiring & params"));
+  box.append(sum);
+
+  for (const inp of n.inputs || []) box.append(inputRow(it, inp));
+  if (!(n.inputs || []).length) box.append(el("div", "note", "no inputs"));
+
+  const outs = el("div", "outrow");
+  for (const o of n.outputs || []) outs.append(el("span", "outchip mono", o));
+  if (outs.childNodes.length) box.append(outs);
+
+  const src = n.source || {};
+  for (const [label, loc] of [["defined", src.defined_at], ["wired", src.wired_at]]) {
+    if (loc && loc.file) box.append(el("div", "srcline mono", `${label}  ${loc.file}:${loc.line}`));
+  }
+  return box;
 }
 
 function valueBlock(v) {
@@ -538,6 +608,15 @@ function valueBlock(v) {
 function executionsSection(n, slots) {
   const sec = el("section");
   sec.append(el("div", "stitle", "Executions"));
+  const runinfo = state.run.ops[n.name];
+  if (runinfo) {
+    const avg = runinfo.runs ? runinfo.total_ms / runinfo.runs : 0;
+    const stats = el("div", "srcline",
+      `${runinfo.runs}× · avg ${avg.toFixed(1)} ms · max ${runinfo.max_ms.toFixed(1)} ms`
+      + (runinfo.errors ? ` · ${runinfo.errors} err` : ""));
+    if (runinfo.errors) stats.classList.add("bad");
+    sec.append(stats);
+  }
   const box = el("div", "execbox", "loading…");
   sec.append(box);
   api(`/api/p/${PID}/trace/${encodeURIComponent(state.run.run)}/op/${encodeURIComponent(n.name)}`)
@@ -576,7 +655,8 @@ function executionsSection(n, slots) {
         d.append(sum);
         if (i === data.executions.length - 1) d.open = true;
         if (ex.error) d.append(el("div", "srcline bad", String(ex.error)));
-        for (const [label, val] of [["inputs", ex.inputs], ["outputs", ex.outputs]]) {
+        // outputs first — "what came out" is the question, inputs the context
+        for (const [label, val] of [["outputs", ex.outputs], ["inputs", ex.inputs]]) {
           d.append(el("div", "stitle", label));
           d.append(el("pre", "execjson mono", JSON.stringify(val ?? null, null, 2)));
         }
@@ -587,11 +667,10 @@ function executionsSection(n, slots) {
   return sec;
 }
 
-function inputRow(it, inp, slots) {
+function inputRow(it, inp) {
   const node = it.node;
   const row = el("div", "inrow");
   row.append(el("div", "iname mono", inp.name + (inp.required ? " *" : "")));
-  if (slots) { slots.in[inp.name] = el("div"); row.append(slots.in[inp.name]); }
   const b = inp.binding || {};
   const from = el("div", "ifrom");
   if (b.kind === "ref") {

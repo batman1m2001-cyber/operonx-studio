@@ -303,6 +303,18 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
     if (getattr(code_fn, "__module__", None) == "operonx.core.serve.ops"
             and getattr(code_fn, "__name__", "") in ("ingress", "egress")):
         node["serve_role"] = code_fn.__name__
+    elif code_fn is not None:
+        # A FuncOp's body IS its documentation — the inspector shows it as
+        # a collapsed code block. Bounded so one giant function cannot
+        # bloat the IR; the source location is always there for the rest.
+        try:
+            import inspect
+
+            source = inspect.getsource(code_fn)
+            if len(source) <= 8000:
+                node["code"] = source
+        except (OSError, TypeError):
+            pass
     if _slot(op, "_ops"):
         node["graph"] = _subgraph(op, root, anchors, module)
     return node

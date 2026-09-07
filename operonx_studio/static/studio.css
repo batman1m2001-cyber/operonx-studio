@@ -247,6 +247,48 @@ header.bar select {
 .errbox { margin: 20px; padding: 14px 16px; background: #2a1418; border: 1px solid var(--err);
   border-radius: 10px; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
 
+/* inspector: identity chips, values, code, prompt, folded wiring */
+.chips { display: flex; gap: 5px; flex-wrap: wrap; margin: 6px 0 10px; }
+.chip {
+  font-size: 11px; padding: 2px 9px; border-radius: 9px;
+  background: var(--panel-2); color: var(--muted); border: 1px solid var(--line);
+}
+.chip.kindchip { color: var(--text); border-left: 3px solid var(--kind, var(--k-func)); }
+.chip.cgen { color: var(--k-io); border-color: var(--k-io); }
+.chip.cres { color: var(--k-llm); border-color: var(--k-llm); }
+.chip.cloop { color: var(--warn); border-color: var(--warn); }
+.rolenote {
+  font-size: 12px; color: #fbbf7a; background: #241a10;
+  border: 1px dashed #4d3a20; border-radius: 8px;
+  padding: 7px 10px; margin-bottom: 10px;
+}
+.valrow { margin-bottom: 7px; }
+.valrow .vname { font-weight: 600; font-size: 12px; color: var(--accent); margin-bottom: 2px; }
+.valrow.vin .vname { color: var(--muted); }
+.valrow .vslot { font-size: 12px; color: var(--muted); }
+.foldbox {
+  margin-top: 14px; border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; background: var(--panel-2);
+}
+.foldbox summary { cursor: pointer; list-style: revert; }
+.foldbox summary .stitle { display: inline; }
+.foldbox[open] summary { margin-bottom: 8px; }
+.codeblock {
+  margin: 0; padding: 10px 12px; background: var(--bg);
+  border-radius: 6px; font-size: 11.5px; line-height: 1.5;
+  white-space: pre; overflow: auto; max-height: 360px; color: #c9d1e0;
+}
+.plabel {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--k-llm); margin: 8px 0 3px;
+}
+.promptblock {
+  margin: 0; padding: 8px 10px; background: var(--bg); border-left: 3px solid var(--k-llm);
+  border-radius: 6px; font-size: 12px; white-space: pre-wrap; word-break: break-word;
+}
+.outrow { margin-top: 8px; }
+.srcline.bad, .execrow .bad { color: var(--err); }
+
 /* executions drill-down in the inspector */
 .execbox { font-size: 12px; }
 .execrow { background: var(--panel-2); border-radius: 8px; margin-bottom: 5px; padding: 5px 9px; }
