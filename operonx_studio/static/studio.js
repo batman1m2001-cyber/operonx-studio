@@ -56,6 +56,41 @@ function bezier(x1, y1, x2, y2) {
   return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
 }
 
+function returnPath(a, b) {
+  // A loop's return edge: out of the source's underside, bowing beneath
+  // everything it passes over, back into the target's underside. Drawn
+  // differently from a forward edge on purpose — this is the arrow that
+  // makes an agent while-loop look like what the author wrote instead of
+  // one opaque compiler box.
+  const x1 = a.x + NODE_W / 2, y1 = a.y + NODE_H;
+  const x2 = b.x + NODE_W / 2, y2 = b.y + NODE_H;
+  const dip = Math.max(y1, y2) + 60 + Math.abs(x1 - x2) * 0.08;
+  return `M ${x1} ${y1} C ${x1} ${dip}, ${x2} ${dip}, ${x2} ${y2}`;
+}
+
+function consumeOf(edge, pos) {
+  // `.parallel()` / `.collect()` live on the CONSUMER's binding: find the
+  // dst node's input that a ref from src feeds, and read its mode.
+  const dst = pos[edge.dst];
+  const srcName = (pos[edge.src] || {}).name;
+  if (!dst || !srcName) return null;
+  for (const inp of dst.inputs || []) {
+    const b = inp.binding || {};
+    if (b.kind === "ref" && (b.from || "").split(".").pop() === srcName && b.consume)
+      return b.consume;
+  }
+  return null;
+}
+
+function edgeGlyph(svg, x, y, text, cls) {
+  const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  t.setAttribute("x", x); t.setAttribute("y", y);
+  t.setAttribute("text-anchor", "middle");
+  if (cls) t.setAttribute("class", cls);
+  t.textContent = text;
+  svg.append(t);
+}
+
 function serveNodesFor(graph) {
   // A [[serve]] naming this graph is its front door; drawing it is the
   // whole reason the manifest block exists — no pipeline begins from
@@ -108,8 +143,25 @@ function render() {
     const a = pos[e.src], b = pos[e.dst];
     if (!a || !b) continue;
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    p.setAttribute("d", bezier(a.x + NODE_W, a.y + NODE_H / 2, b.x, b.y + NODE_H / 2));
     let cls = e.soft ? "soft" : "";
+    if (e.back) {
+      p.setAttribute("d", returnPath(a, b));
+      cls += " back";
+      const dip = Math.max(a.y, b.y) + NODE_H + 58 + Math.abs(a.x - b.x) * 0.06;
+      edgeGlyph(svg, (a.x + b.x + NODE_W) / 2, dip, "↺ loop", "back-label");
+    } else {
+      p.setAttribute("d", bezier(a.x + NODE_W, a.y + NODE_H / 2, b.x, b.y + NODE_H / 2));
+      const mx = (a.x + NODE_W + b.x) / 2, my = (a.y + b.y + NODE_H) / 2 - 6;
+      // A generator's edge is not one item; a consumer's mode is not
+      // sequential. Both change what the run does, so both are on the wire.
+      if (a.is_gen) { cls += " stream"; edgeGlyph(svg, mx, my, "≋"); }
+      const consume = consumeOf(e, pos);
+      if (consume) {
+        edgeGlyph(svg, mx, my + (a.is_gen ? 14 : 0),
+                  consume.mode === "collect" ? "⧉ collect"
+                  : `∥ parallel${consume.max ? "≤" + consume.max : ""}`);
+      }
+    }
     if (state.sel && (e.src === state.sel || e.dst === state.sel)) cls += " hot";
     p.setAttribute("class", cls.trim());
     svg.append(p);
@@ -143,7 +195,27 @@ function render() {
     const badges = el("div", "badges");
     if (n.start) badges.append(el("span", "badge", "entry"));
     if (n.end) badges.append(el("span", "badge", "exit"));
-    if (n.loop) badges.append(el("span", "badge", "loop"));
+    if (n.is_gen) {
+      const b = el("span", "badge gen", "⚡ stream");
+      b.title = "Generator: invoked once, yields many — every consumer dispatches per yield, not per run.";
+      badges.append(b);
+    }
+    if (n.transient) {
+      const b = el("span", "badge", "transient");
+      b.title = "Outputs are delivered and then evicted; a long stream retains nothing.";
+      badges.append(b);
+    }
+    if (n.loop) {
+      const cap = n.loop.max_iterations;
+      const b = el("span", "badge loop", `↺ while${cap ? " ≤" + cap : ""}`);
+      b.title = "Member of a rewritten cycle: the compiler runs this as a synthetic loop; the return edge below is what the author wrote.";
+      badges.append(b);
+    }
+    if (n.subgraph_ops) {
+      const b = el("span", "badge sub", `▣ ${n.subgraph_ops} ops`);
+      b.title = "A nested @graph. Collapsed here; its ops run inside this node.";
+      badges.append(b);
+    }
 
     const runinfo = state.run && state.run.ops[n.name];
     if (runinfo) {
@@ -201,7 +273,21 @@ function select(id) {
   panel.classList.add("open");
   panel.textContent = "";
   panel.append(el("h3", null, n.name));
-  panel.append(el("div", "kind", n.kind + (n.bound ? ` · bound=${n.bound}` : "")));
+  panel.append(el("div", "kind",
+    n.kind + (n.bound ? ` · bound=${n.bound}` : "") + (n.is_gen ? " · generator" : "")));
+  if (n.is_gen) {
+    const note = el("div", "srcline",
+      "Yields a stream: downstream ops dispatch once per yield. Edge counts in a run are per item, not per invocation.");
+    panel.append(note);
+  }
+  if (n.loop) {
+    const sec = el("section");
+    sec.append(el("div", "stitle", "Loop"));
+    sec.append(el("div", "srcline",
+      `Synthetic while-loop (${n.loop.group}) — the authored cycle, rewritten by the compiler. ` +
+      `Ceiling: ${n.loop.max_iterations ?? "none"} iterations.`));
+    panel.append(sec);
+  }
 
   const src = n.source || {};
   const srcSec = el("section");
@@ -249,6 +335,11 @@ function inputRow(node, inp) {
     const src = el("span", "src mono", `${(b.from || "").split(".").pop()}.${b.output}`);
     from.append(src);
     if (b.transforms) from.append(` (+${b.transforms} transform)`);
+    if (b.consume) {
+      from.append(b.consume.mode === "collect"
+        ? " · collect (buffers every yield until EOF, delivers a list)"
+        : ` · parallel${b.consume.max ? " ≤" + b.consume.max : ""} (yields fan out concurrently)`);
+    }
     row.append(from);
   } else if (b.kind === "scratch") {
     from.append(`← SCRATCH[${JSON.stringify(b.key ?? b.value ?? "?")}]`);

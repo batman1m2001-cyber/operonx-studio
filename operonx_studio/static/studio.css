@@ -120,6 +120,13 @@ header.bar select {
 #edges path.soft { stroke-dasharray: 6 5; }
 #edges path.hot { stroke: var(--accent); }
 #edges path.serve { stroke: var(--k-serve); stroke-dasharray: 2 4; }
+#edges path.back { stroke: var(--warn); stroke-dasharray: 7 4; }
+#edges path.stream { stroke-width: 2.5; }
+#edges text {
+  fill: var(--muted); font: 11px ui-monospace, monospace;
+  paint-order: stroke; stroke: var(--bg); stroke-width: 4px;
+}
+#edges text.back-label { fill: var(--warn); }
 
 /* nodes */
 .node {
@@ -142,6 +149,9 @@ header.bar select {
   background: var(--panel-2); color: var(--muted); border: 1px solid var(--line);
 }
 .badge.err { color: var(--err); border-color: var(--err); }
+.badge.gen { color: var(--k-io); border-color: var(--k-io); }
+.badge.loop { color: var(--warn); border-color: var(--warn); }
+.badge.sub { color: var(--k-graph); border-color: var(--k-graph); }
 .badge.run { color: var(--text); }
 .node .port { position: absolute; width: 10px; height: 10px; border-radius: 50%;
   background: var(--panel-2); border: 2px solid #4a4a5e; top: 50%; margin-top: -5px; }

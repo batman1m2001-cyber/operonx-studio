@@ -94,16 +94,39 @@ def _source_id(source: Any) -> Optional[str]:
     return full if isinstance(full, str) else repr(source)[:200]
 
 
+def _consume_of(ref: Any) -> Optional[Dict[str, Any]]:
+    """How a streamed input is consumed — `.parallel()` / `.collect()`.
+
+    Sequential is the default and stays implicit. The other two change the
+    run's shape: parallel fans one generator's yields out concurrently,
+    collect buffers every yield until EOF and delivers a list — an edge
+    the canvas must not draw as a plain arrow.
+    """
+    if _slot(ref, "_stream_collect", False):
+        return {"mode": "collect"}
+    if _slot(ref, "_stream_parallel", False):
+        out: Dict[str, Any] = {"mode": "parallel"}
+        cap = _slot(ref, "_stream_parallel_max")
+        if cap:
+            out["max"] = cap
+        return out
+    return None
+
+
 def _binding(value: Any) -> Dict[str, Any]:
     """Describe where an input comes from, without probing unknown objects."""
     kind = type(value).__name__
     if kind == _REF:
-        return {
+        out = {
             "kind": "ref",
             "from": _source_id(_slot(value, "_source")),
             "output": _slot(value, "var"),
             "transforms": len(_slot(value, "_transforms") or []),
         }
+        consume = _consume_of(value)
+        if consume is not None:
+            out["consume"] = consume
+        return out
     if kind == _SCRATCH_REF:
         return {"kind": "scratch", "key": _slot(value, "key")}
     if value is None:
@@ -254,6 +277,14 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
         "name": op.name,
         "kind": type(op).__name__,
         "bound": _slot(op, "bound"),
+        # Semantics a normal workflow tool does not have, and the reason a
+        # viewer must carry them: a generator op is invoked once and its
+        # consumers dispatch PER YIELD, so one edge carries many items per
+        # run — a diagram that draws it like a batch op lies about the
+        # system's central mechanism. Transient marks the ports whose
+        # values are evicted once consumed.
+        "is_gen": bool(_slot(op, "is_gen", False)),
+        "transient": bool(_slot(op, "transient", False)),
         "start": bool(_slot(op, "start", False)),
         "end": bool(_slot(op, "end", False)),
         "inputs": inputs,

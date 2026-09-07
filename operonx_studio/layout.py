@@ -201,10 +201,20 @@ def layout_graph(graph: Dict) -> Layout:
     forward: Dict[str, List[str]] = {i: [] for i in ids}
     backward: Dict[str, List[str]] = {i: [] for i in ids}
     for e in edges:
+        # An edge the author wrote as a loop return (origin "back_edge",
+        # reconstructed from the compiler's cycle rewrite) never joins the
+        # forward structure at all. DFS below would otherwise rediscover
+        # the cycle and pick whichever edge ITS traversal closed on — for
+        # `s >> g` then `g >> s` it blamed `s >> g`, laying the loop out
+        # backwards with the author's forward edge drawn as the return.
+        # The author already said which edge goes back; believe them.
+        if e.origin == "back_edge":
+            continue
         forward[e.src].append(e.dst)
         backward[e.dst].append(e.src)
 
-    # Cyclic edges cannot drive layering — see _find_back_edges.
+    # Any cycle still present was not authored as one — a lookback edge the
+    # rewrite deliberately left alone. It cannot drive layering either.
     cyclic = _find_back_edges(ids, forward)
     acyclic: Dict[str, List[str]] = {
         src: [d for d in dsts if (src, d) not in cyclic] for src, dsts in forward.items()
@@ -240,7 +250,8 @@ def layout_graph(graph: Dict) -> Layout:
     # than a straight line, so it reads as a loop instead of a stray arrow.
     depth_by_id = {n.id: n.layer for n in nodes}
     for e in edges:
-        e.back = depth_by_id.get(e.dst, 0) <= depth_by_id.get(e.src, 0)
+        e.back = (e.origin == "back_edge"
+                  or depth_by_id.get(e.dst, 0) <= depth_by_id.get(e.src, 0))
 
     width = MARGIN * 2 + (max(depth_by_id.values(), default=0) + 1) * (NODE_W + H_GAP)
     rows = max((len(v) for v in layers.values()), default=1)

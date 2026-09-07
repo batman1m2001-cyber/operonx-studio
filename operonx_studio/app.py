@@ -62,8 +62,88 @@ def _traces_root(root: Path) -> Optional[Path]:
     return path
 
 
+def _inline_synthetic_loops(graph: Dict[str, Any]) -> Dict[str, Any]:
+    """Open the compiler's hidden loop boxes back up, for the canvas.
+
+    An agent while-loop is authored as a cycle — ``g >> s`` after
+    ``s >> g`` — and the compiler rewrites it into one hidden ``GraphOp``
+    (``__loop_0__``) so the scheduler sees a DAG. Correct for execution,
+    a lie for a viewer: the extraction of such a graph is one opaque node
+    and zero edges, which tells the person who *wrote the cycle* nothing.
+
+    The interior survives (the hidden node carries its subgraph, and
+    ``rewritten_from`` records the authored back-edges and the seam), so
+    this reverses the rewrite for display only: members come back as
+    nodes, the back-edge comes back as an edge marked ``back``, and every
+    member is tagged with its loop so the canvas can badge it. The
+    scheduler never sees any of this.
+    """
+    loops = graph.get("loops") or {}
+    rewritten = graph.get("rewritten_from") or {}
+    if not any(v.get("synthetic") for v in loops.values()):
+        return graph
+
+    nodes: list = []
+    edges = list(graph.get("edges") or [])
+    hidden: Dict[str, Dict[str, Any]] = {}
+
+    for node in graph.get("nodes") or []:
+        meta = loops.get(node["id"])
+        if not (meta and meta.get("synthetic") and node.get("graph")):
+            nodes.append(node)
+            continue
+        seam = rewritten.get(node["name"], {})
+        hidden[node["name"]] = {"meta": meta, "seam": seam}
+        inner = node["graph"]
+        for member in inner.get("nodes") or []:
+            member = dict(member)
+            member["loop"] = {
+                "group": node["name"],
+                "mode": "synthetic",
+                "max_iterations": meta.get("max_iterations"),
+            }
+            nodes.append(member)
+        edges.extend(inner.get("edges") or [])
+        for src, dst in meta.get("back_edges") or []:
+            edges.append({"from": src, "to": dst, "type": "back",
+                          "soft": False, "origin": "back_edge"})
+
+    # Reconnect the seam: edges that touched the hidden box now touch the
+    # members the rewrite recorded as its entry and exits.
+    fixed = []
+    for e in edges:
+        e = dict(e)
+        for box, info in hidden.items():
+            seam = info["seam"]
+            if e["to"] == box:
+                e["to"] = seam.get("entry") or e["to"]
+            if e["from"] == box:
+                exits = seam.get("exits") or []
+                e["from"] = exits[0][0] if exits else e["from"]
+        if e["from"] not in hidden and e["to"] not in hidden:
+            fixed.append(e)
+
+    out = dict(graph)
+    out["nodes"] = nodes
+    out["edges"] = fixed
+    # entries/exits may name the hidden box; map them to the seam too
+    for key in ("entries", "exits"):
+        names = []
+        for name in out.get(key) or []:
+            info = hidden.get(name)
+            if info is None:
+                names.append(name)
+            elif key == "entries":
+                names.append(info["seam"].get("entry") or name)
+            else:
+                names.extend(x for x, _ in (info["seam"].get("exits") or [(name, None)]))
+        out[key] = names
+    return out
+
+
 def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
     """One IR graph plus its layout, as the canvas consumes it."""
+    graph = _inline_synthetic_loops(graph)
     layout = layout_graph(graph)
     nodes_by_id = {n["id"]: n for n in graph.get("nodes") or []}
     return {
@@ -80,14 +160,18 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                 "x": n.x,
                 "y": n.y,
                 **{k: nodes_by_id.get(n.id, {}).get(k) for k in
-                   ("bound", "start", "end", "outputs", "inputs", "source", "loop")},
+                   ("bound", "start", "end", "outputs", "inputs", "source",
+                    "loop", "is_gen", "transient")},
+                "subgraph_ops": len((nodes_by_id.get(n.id, {}).get("graph") or {}).get("nodes") or []) or None,
             }
             for n in layout.nodes
         ],
         "edges": [
-            {"src": e.src, "dst": e.dst, "type": e.type, "soft": e.soft, "origin": e.origin}
+            {"src": e.src, "dst": e.dst, "type": e.type, "soft": e.soft,
+             "origin": e.origin, "back": bool(getattr(e, "back", False))}
             for e in layout.edges
         ],
+        "loops": graph.get("loops") or {},
     }
 
 

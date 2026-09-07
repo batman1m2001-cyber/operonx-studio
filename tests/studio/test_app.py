@@ -222,3 +222,116 @@ def test_trace_run_names_cannot_walk_out_of_the_root(client, project, tmp_path):
     pid = _open(client, project)
     res = client.get(f"/api/p/{pid}/trace/..%2F..%2Fetc")
     assert res.status_code == 404
+
+
+# ── the semantics a normal workflow tool does not have ──────────────────
+
+LOOP_MAIN = '''
+from operonx.core import graph, op, START, END, PARENT
+from operonx.core.ops.flow.branch_op import if_
+
+@op
+def feed(items: list):
+    for item in items:
+        yield {"item": item}
+
+@op
+def work(item: str = ""):
+    return {"out": item}
+
+@op
+def gather(outs: list):
+    return {"n": len(outs)}
+
+@graph
+def streaming(items):
+    src = feed(items=items)
+    fan = work(item=src["item"].parallel())
+    done = gather(outs=fan["out"].collect())
+    START >> src >> fan >> done >> END
+
+@op
+def think(x: int = 0):
+    return {"x": x + 1}
+
+@op
+def proceed():
+    return {"go": True}
+
+@graph
+def agent():
+    PARENT.declare(x=0)
+    t = think(x=PARENT["x"])
+    t["x"] >> PARENT["x"]
+    again = proceed()
+    START >> t
+    t >> if_(PARENT["x"] >= 3, END).else_(again)
+    again >> t
+'''
+
+LOOP_MANIFEST = '''
+[project]
+name = "semantics"
+[[graph]]
+name = "streaming"
+entry = "main:streaming"
+[[graph]]
+name = "agent"
+entry = "main:agent"
+'''
+
+
+@pytest.fixture()
+def semantics_project(tmp_path: Path) -> Path:
+    root = tmp_path / "semantics"
+    root.mkdir()
+    (root / "main.py").write_text(LOOP_MAIN, encoding="utf-8")
+    (root / "operonx.toml").write_text(LOOP_MANIFEST, encoding="utf-8")
+    return root
+
+
+def test_generators_and_consume_modes_reach_the_canvas(client, semantics_project):
+    """A generator dispatches per yield; parallel and collect change the
+    run's shape. A canvas that hides any of them draws a different system
+    than the one that runs."""
+    pid = _open(client, semantics_project)
+    data = client.get(f"/api/p/{pid}/ir").json()
+    graph = next(g for g in data["graphs"] if g["name"] == "streaming")
+    by_name = {n["name"]: n for n in graph["nodes"]}
+
+    assert by_name["src"]["is_gen"] is True
+    assert by_name["fan"]["is_gen"] is False
+
+    fan_in = next(i for i in by_name["fan"]["inputs"] if i["name"] == "item")
+    assert fan_in["binding"]["consume"] == {"mode": "parallel"}
+    done_in = next(i for i in by_name["done"]["inputs"] if i["name"] == "outs")
+    assert done_in["binding"]["consume"] == {"mode": "collect"}
+
+
+def test_a_synthetic_loop_is_opened_back_up_for_display(client, semantics_project):
+    """The compiler rewrites an authored cycle into one hidden GraphOp,
+    which extracts as a single opaque node with zero edges — correct for
+    the scheduler, a lie for the person who wrote the cycle. The canvas
+    payload reverses it: members back as nodes, the authored back-edge
+    back as an edge marked `back`, every member tagged with its loop."""
+    pid = _open(client, semantics_project)
+    data = client.get(f"/api/p/{pid}/ir").json()
+    graph = next(g for g in data["graphs"] if g["name"] == "agent")
+
+    names = {n["name"] for n in graph["nodes"]}
+    assert {"t", "again"} <= names, f"loop members missing: {names}"
+    assert not any(n.startswith("__loop_") for n in names), "the hidden box leaked"
+
+    members = [n for n in graph["nodes"] if n.get("loop")]
+    assert members and all(m["loop"]["mode"] == "synthetic" for m in members)
+    assert all(m["loop"]["max_iterations"] == 1000 for m in members)
+
+    backs = [(e["src"].split(".")[-1], e["dst"].split(".")[-1])
+             for e in graph["edges"] if e["back"]]
+    assert backs == [("again", "t")], (
+        f"the AUTHORED return edge must be the back edge, got {backs}")
+
+    # and the members are laid out forward: t strictly left of again
+    by_name = {n["name"]: n for n in graph["nodes"]}
+    assert by_name["t"]["x"] < by_name["again"]["x"], (
+        "layout let the DFS pick the back edge instead of the author")
