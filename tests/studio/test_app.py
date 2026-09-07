@@ -308,6 +308,59 @@ def test_generators_and_consume_modes_reach_the_canvas(client, semantics_project
     assert done_in["binding"]["consume"] == {"mode": "collect"}
 
 
+NESTED_MAIN = '''
+from operonx.core import graph, op, START, END
+
+@op
+def double(x: int = 1):
+    return {"result": x * 2}
+
+@graph
+def double_flow(val):
+    step = double(x=val)
+    START >> step >> END
+
+@graph
+def quad(val):
+    d1 = double_flow(val=val)
+    d2 = double_flow(val=d1["result"])
+    START >> d1 >> d2 >> END
+'''
+
+NESTED_MANIFEST = '''
+[project]
+name = "nested"
+[[graph]]
+name = "quad"
+entry = "main:quad"
+'''
+
+
+def test_a_graphop_ships_its_inner_graph_laid_out(client, tmp_path):
+    """A GraphOp is a container the canvas can open in place. A box that
+    opens onto an unplaced pile of ops would be worse than one that stays
+    shut — so the nested graph arrives with coordinates, recursively."""
+    root = tmp_path / "nested"
+    root.mkdir()
+    (root / "main.py").write_text(NESTED_MAIN, encoding="utf-8")
+    (root / "operonx.toml").write_text(NESTED_MANIFEST, encoding="utf-8")
+    pid = _open(client, root)
+    data = client.get(f"/api/p/{pid}/ir").json()
+    assert data.get("error") is None, data
+
+    graph = next(g for g in data["graphs"] if g["name"] == "quad")
+    subs = [n for n in graph["nodes"] if n.get("graph")]
+    assert len(subs) == 2, f"expected two GraphOp containers, got {len(subs)}"
+    for sub in subs:
+        inner = sub["graph"]
+        assert inner["nodes"], "inner graph lost its nodes"
+        for m in inner["nodes"]:
+            assert isinstance(m.get("x"), (int, float)), "inner node not laid out"
+    # a plain op carries no payload — the container is the exception
+    plain = [n for n in graph["nodes"] if not n.get("graph")]
+    assert all(n.get("subgraph_ops") is None for n in plain)
+
+
 def test_a_synthetic_loop_is_opened_back_up_for_display(client, semantics_project):
     """The compiler rewrites an authored cycle into one hidden GraphOp,
     which extracts as a single opaque node with zero edges — correct for

@@ -142,10 +142,24 @@ def _inline_synthetic_loops(graph: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
-    """One IR graph plus its layout, as the canvas consumes it."""
+    """One IR graph plus its layout, as the canvas consumes it.
+
+    A ``GraphOp``'s nested graph rides along *recursively laid out* — the
+    node is a container the canvas can open in place, and a box that opens
+    onto an unplaced pile of ops would be worse than one that stays shut.
+    Synthetic loop boxes are already inlined by the time we recurse, so
+    only author-written subgraphs become containers.
+    """
     graph = _inline_synthetic_loops(graph)
     layout = layout_graph(graph)
     nodes_by_id = {n["id"]: n for n in graph.get("nodes") or []}
+
+    def _subgraph(node_id: str) -> Optional[Dict[str, Any]]:
+        inner = nodes_by_id.get(node_id, {}).get("graph")
+        if not inner or not inner.get("nodes"):
+            return None
+        return _placed(inner)
+
     return {
         "name": graph.get("name"),
         "entries": graph.get("entries") or [],
@@ -163,6 +177,7 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                    ("bound", "start", "end", "outputs", "inputs", "source",
                     "loop", "is_gen", "transient")},
                 "subgraph_ops": len((nodes_by_id.get(n.id, {}).get("graph") or {}).get("nodes") or []) or None,
+                "graph": _subgraph(n.id),
             }
             for n in layout.nodes
         ],

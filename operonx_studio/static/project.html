@@ -18,7 +18,12 @@
       <button data-tab="traces">Traces</button>
     </nav>
     <div class="spacer"></div>
-    <button id="btn-fit" title="fit graph to view">Fit</button>
+    <div class="zoomctl" title="scroll = pan · ctrl+scroll or pinch = zoom · drag or middle-drag = pan">
+      <button id="btn-zoom-out">−</button>
+      <button id="btn-zoom-pct" title="reset to 100%">100%</button>
+      <button id="btn-zoom-in">+</button>
+      <button id="btn-fit" title="fit graph to view (0)">Fit</button>
+    </div>
     <span class="live" id="live"><span class="dot"></span><span id="live-text">live</span></span>
   </header>
 

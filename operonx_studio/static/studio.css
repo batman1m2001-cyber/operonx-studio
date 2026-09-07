@@ -160,6 +160,40 @@ header.bar select {
 .node.serve-node::before { background: var(--k-serve); }
 .node.errorlit { border-color: var(--err); }
 
+/* an opened GraphOp — a container whose members are real nodes on the
+   canvas; the box itself is just the boundary and a title strip */
+.node.container {
+  background: rgba(52, 211, 153, .045);
+  border: 1.5px dashed color-mix(in srgb, var(--kind, var(--k-graph)) 55%, var(--line));
+  padding: 0; cursor: default;
+}
+.node.container::before { top: 0; bottom: auto; height: 34px; border-radius: 4px 0 0 4px; }
+.node.container .chead {
+  display: flex; align-items: baseline; gap: 10px;
+  height: 34px; padding: 7px 12px 0 16px; cursor: pointer;
+  border-bottom: 1px dashed var(--line);
+  overflow: hidden; white-space: nowrap;
+}
+.node.container .chead .nname { font-weight: 600; font-size: 13px; }
+.node.container .chead .nkind { color: var(--muted); font-size: 11px; }
+.node.container .collapse {
+  margin-left: auto; border: none; background: none; color: var(--muted);
+  font-size: 11px; padding: 0 2px;
+}
+.node.container .collapse:hover { color: var(--text); }
+.badge.expand { cursor: pointer; }
+.badge.expand:hover { background: var(--k-graph); color: #0b0b10; }
+
+/* wrap seam — where a long chain breaks to the next band, like a newline */
+#edges path.wrap { stroke: #4a4a5e; stroke-dasharray: 10 5; opacity: .9; }
+
+/* pan/zoom controls */
+.zoomctl { display: flex; gap: 4px; align-items: center; }
+.zoomctl button { padding: 5px 10px; font-size: 12px; }
+#btn-zoom-pct { min-width: 54px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#stage.panmode { cursor: grab; }
+#stage.panmode .node { pointer-events: none; }
+
 /* inspector */
 #inspector {
   width: 340px; flex: none; background: var(--panel);

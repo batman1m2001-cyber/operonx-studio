@@ -96,6 +96,59 @@ class TestEdgeSemantics:
         assert any(e.back for e in out.edges)
 
 
+class TestWrapping:
+    def test_a_long_chain_wraps_into_bands(self):
+        """Thirty ops in a row is a strip nobody can read at fit-zoom.
+
+        Past the aspect threshold the layer sequence breaks into bands,
+        like text into lines: total width shrinks, height grows, and the
+        graph gains more than one distinct row of y positions."""
+        from operonx_studio.layout import NODE_H, NODE_W
+
+        names = [f"op{i:02d}" for i in range(30)]
+        chain = list(zip(names, names[1:]))
+        out = layout_graph(ir(names, chain, entries=[names[0]]))
+
+        unwrapped_width = 48 * 2 + 30 * (NODE_W + 96)
+        assert out.width < unwrapped_width / 2, (
+            f"chain did not wrap: width {out.width} vs unwrapped {unwrapped_width}")
+        rows = sorted({n.y for n in out.nodes})
+        assert len(rows) >= 3, f"expected several bands, got y rows {rows}"
+        # every node stays on the canvas
+        assert all(n.x + NODE_W <= out.width and n.y + NODE_H <= out.height
+                   for n in out.nodes)
+
+    def test_wrapped_bands_read_left_to_right(self):
+        """Reading direction never reverses at a fold — each consecutive
+        layer is either one step right in the same band, or at the left
+        margin of a lower band (the carriage return)."""
+        names = [f"op{i:02d}" for i in range(30)]
+        out = layout_graph(ir(names, list(zip(names, names[1:])), entries=[names[0]]))
+        by_layer = sorted(out.nodes, key=lambda n: n.layer)
+        for prev, cur in zip(by_layer, by_layer[1:]):
+            if cur.y == prev.y:
+                assert cur.x > prev.x, "same band must advance rightwards"
+            else:
+                assert cur.y > prev.y, "a fold must move down, never up"
+                assert cur.x == min(n.x for n in out.nodes), "a fold restarts at the left margin"
+
+    def test_a_short_chain_does_not_wrap(self):
+        names = ["a", "b", "c", "d", "e"]
+        out = layout_graph(ir(names, list(zip(names, names[1:])), entries=["a"]))
+        assert len({n.y for n in out.nodes}) == 1
+
+    def test_a_tall_graph_does_not_wrap(self):
+        """Wide fan-out is not strip-shaped; wrapping it would only hurt."""
+        names = [f"L{i}" for i in range(10)]
+        fans = [f"f{i}" for i in range(8)]
+        edges = list(zip(names, names[1:])) + [(names[0], f) for f in fans]
+        out = layout_graph(ir(names + fans, edges, entries=[names[0]]))
+        # a single band: one distinct column per layer, all rows anchored
+        # at the same top
+        assert len({n.x for n in out.nodes}) == 10
+        assert len({n.y for n in out.nodes if n.order == 0}) == 1
+
+
 class TestDeterminism:
     def test_same_ir_gives_the_same_picture(self):
         graph = ir(

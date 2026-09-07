@@ -22,6 +22,7 @@ layer that contradicts the loop boundary it belongs to.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Sequence, Set, Tuple
 
@@ -32,8 +33,17 @@ NODE_H = 76
 H_GAP = 96
 V_GAP = 34
 MARGIN = 48
+BAND_GAP = 110
 
 _SWEEPS = 6
+
+# A pipeline of thirty ops laid out strictly left-to-right is a strip the
+# height of one node and the width of a football pitch: fit-to-view zooms
+# until every label is illegible. Past this width-to-height ratio the
+# layer sequence wraps into bands, like text wraps into lines.
+_WRAP_ASPECT = 3.2
+_TARGET_ASPECT = 2.0
+_MIN_WRAP_LAYERS = 8
 
 
 @dataclass
@@ -172,6 +182,66 @@ def _order_layers(
             layers[depth].sort(key=barycentre)
 
 
+def _band_split(depths: Sequence[int], rows_at: Dict[int, int]) -> List[List[int]]:
+    """Group consecutive layers into bands so a long chain wraps.
+
+    Reading direction never reverses — every band runs left-to-right and
+    the seam edge routes down to the next band, the way a line of text
+    breaks. A graph that is not strip-shaped comes back as a single band
+    and lays out exactly as before.
+    """
+    depths = list(depths)
+    count = len(depths)
+    if count < _MIN_WRAP_LAYERS or not rows_at:
+        return [depths]
+    unit_w, unit_h = NODE_W + H_GAP, NODE_H + V_GAP
+    full_w = count * unit_w
+    full_h = max(rows_at.values()) * unit_h
+    if full_w <= _WRAP_ASPECT * full_h:
+        return [depths]
+
+    best, best_score = [depths], None
+    for per in range(4, count):
+        bands = [depths[i:i + per] for i in range(0, count, per)]
+        width = per * unit_w
+        height = (sum(max(rows_at[d] for d in band) * unit_h for band in bands)
+                  + (len(bands) - 1) * BAND_GAP)
+        score = abs(math.log((width / height) / _TARGET_ASPECT))
+        if best_score is None or score < best_score:
+            best, best_score = bands, score
+    return best
+
+
+def _band_split(depths: Sequence[int], rows_at: Dict[int, int]) -> List[List[int]]:
+    """Group consecutive layers into bands so a long chain wraps.
+
+    Reading direction never reverses — every band runs left-to-right and
+    the seam edge routes down to the next band, the way a line of text
+    breaks. A graph that is not strip-shaped comes back as a single band
+    and lays out exactly as before.
+    """
+    depths = list(depths)
+    count = len(depths)
+    if count < _MIN_WRAP_LAYERS or not rows_at:
+        return [depths]
+    unit_w, unit_h = NODE_W + H_GAP, NODE_H + V_GAP
+    full_w = count * unit_w
+    full_h = max(rows_at.values()) * unit_h
+    if full_w <= _WRAP_ASPECT * full_h:
+        return [depths]
+
+    best, best_score = [depths], None
+    for per in range(4, count):
+        bands = [depths[i:i + per] for i in range(0, count, per)]
+        width = per * unit_w
+        height = (sum(max(rows_at[d] for d in band) * unit_h for band in bands)
+                  + (len(bands) - 1) * BAND_GAP)
+        score = abs(math.log((width / height) / _TARGET_ASPECT))
+        if best_score is None or score < best_score:
+            best, best_score = bands, score
+    return best
+
+
 def layout_graph(graph: Dict) -> Layout:
     """Place one IR graph's nodes and edges on a grid."""
     ir_nodes = graph.get("nodes") or []
@@ -228,9 +298,23 @@ def layout_graph(graph: Dict) -> Layout:
         layers.setdefault(depth_of[node_id], []).append(node_id)
     _order_layers(layers, forward, backward)
 
+    sorted_depths = sorted(layers)
+    bands = _band_split(sorted_depths, {d: len(layers[d]) for d in sorted_depths})
+    depth_x: Dict[int, float] = {}
+    depth_y: Dict[int, float] = {}
+    y_cursor = float(MARGIN)
+    for band in bands:
+        if not band:
+            continue
+        for column, depth in enumerate(band):
+            depth_x[depth] = MARGIN + column * (NODE_W + H_GAP)
+            depth_y[depth] = y_cursor
+        band_rows = max(len(layers[d]) for d in band)
+        y_cursor += band_rows * (NODE_H + V_GAP) + BAND_GAP
+
     nodes: List[Node] = []
     ir_by_id = {n["id"]: n for n in ir_nodes}
-    for depth in sorted(layers):
+    for depth in sorted_depths:
         for order, node_id in enumerate(layers[depth]):
             raw = ir_by_id[node_id]
             nodes.append(
@@ -240,8 +324,8 @@ def layout_graph(graph: Dict) -> Layout:
                     kind=raw.get("kind", "Op"),
                     layer=depth,
                     order=order,
-                    x=MARGIN + depth * (NODE_W + H_GAP),
-                    y=MARGIN + order * (NODE_H + V_GAP),
+                    x=depth_x[depth],
+                    y=depth_y[depth] + order * (NODE_H + V_GAP),
                     meta=raw,
                 )
             )
@@ -253,7 +337,7 @@ def layout_graph(graph: Dict) -> Layout:
         e.back = (e.origin == "back_edge"
                   or depth_by_id.get(e.dst, 0) <= depth_by_id.get(e.src, 0))
 
-    width = MARGIN * 2 + (max(depth_by_id.values(), default=0) + 1) * (NODE_W + H_GAP)
-    rows = max((len(v) for v in layers.values()), default=1)
-    height = MARGIN * 2 + rows * (NODE_H + V_GAP)
+    columns = max((len(band) for band in bands), default=1) if nodes else 1
+    width = MARGIN * 2 + columns * (NODE_W + H_GAP)
+    height = (y_cursor - BAND_GAP if nodes else 0) + MARGIN
     return Layout(nodes=nodes, edges=edges, width=width, height=height)

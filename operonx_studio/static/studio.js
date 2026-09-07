@@ -3,13 +3,15 @@
  * Vanilla JS on purpose: the page must open on a machine with no internet,
  * and the graph sizes here (tens of nodes) never justify a framework.
  * Layout comes from the server so the picture is deterministic and
- * testable; this file only draws it and answers clicks.
+ * testable; this file draws it, opens GraphOp containers in place, and
+ * answers clicks.
  */
 
 "use strict";
 
 const PID = location.pathname.split("/").pop();
 const NODE_W = 210, NODE_H = 76;
+const HEADER = 34;              // a container's title strip
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const el = (tag, cls, text) => {
@@ -22,7 +24,10 @@ const el = (tag, cls, text) => {
 const state = {
   ir: null,          // the whole /ir payload
   graph: null,       // current graph object
-  sel: null,         // selected node id
+  sel: null,         // selected render key
+  expanded: new Set(), // render keys of opened GraphOp containers
+  rendered: new Map(), // render key -> placed item {node, x, y, w, h, depth}
+  extent: null,      // {minX, minY, maxX, maxY} of the last render
   view: {x: 60, y: 60, scale: 1},
   run: null,         // {run, ops: {name: {runs, errors, total_ms, max_ms}}}
   stamp: 0,
@@ -49,7 +54,73 @@ function kindColor(node) {
   return "var(--k-func)";
 }
 
-/* ── rendering ────────────────────────────────────────────────────── */
+/* ── placement: expansion opens a GraphOp in place ────────────────── */
+
+/* The server lays every graph on a grid, nested graphs included. A
+ * GraphOp the user opens becomes a container sized to its inner layout;
+ * every column to its right and row below shifts by the growth, so the
+ * grid stays a grid and nothing overlaps. Recursion makes a container
+ * inside a container work for free. */
+function placeGraph(g, prefix, depth) {
+  const size = new Map();
+  for (const n of g.nodes) {
+    const key = prefix + n.id;
+    let inner = null, w = NODE_W, h = NODE_H;
+    if (n.graph && state.expanded.has(key)) {
+      inner = placeGraph(n.graph, key + "/", depth + 1);
+      w = Math.max(NODE_W + 40, inner.w);
+      h = inner.h + HEADER;
+    }
+    size.set(n.id, {key, w, h, inner});
+  }
+
+  const xs = [...new Set(g.nodes.map(n => n.x))].sort((a, b) => a - b);
+  const ys = [...new Set(g.nodes.map(n => n.y))].sort((a, b) => a - b);
+  const extraX = new Map(xs.map(x => [x, 0]));
+  const extraY = new Map(ys.map(y => [y, 0]));
+  for (const n of g.nodes) {
+    const s = size.get(n.id);
+    extraX.set(n.x, Math.max(extraX.get(n.x), s.w - NODE_W));
+    extraY.set(n.y, Math.max(extraY.get(n.y), s.h - NODE_H));
+  }
+  const shiftX = new Map(); let acc = 0;
+  for (const x of xs) { shiftX.set(x, acc); acc += extraX.get(x); }
+  const shiftY = new Map(); acc = 0;
+  for (const y of ys) { shiftY.set(y, acc); acc += extraY.get(y); }
+
+  const items = [];
+  let maxX = NODE_W, maxY = NODE_H;
+  for (const n of g.nodes) {
+    const s = size.get(n.id);
+    const it = {key: s.key, node: n, depth, inner: s.inner,
+                x: n.x + shiftX.get(n.x), y: n.y + shiftY.get(n.y),
+                w: s.w, h: s.h};
+    items.push(it);
+    maxX = Math.max(maxX, it.x + it.w);
+    maxY = Math.max(maxY, it.y + it.h);
+  }
+  return {items, edges: g.edges || [], w: maxX + 48, h: maxY + 48};
+}
+
+function flattenModel(model, ox, oy, out) {
+  const abs = new Map();
+  for (const it of model.items) {
+    const a = {...it, x: it.x + ox, y: it.y + oy};
+    abs.set(it.node.id, a);
+    out.nodes.push(a);
+    state.rendered.set(a.key, a);
+    if (it.inner) flattenModel(it.inner, a.x, a.y + HEADER, out);
+  }
+  for (const e of model.edges) {
+    const a = abs.get(e.src), b = abs.get(e.dst);
+    if (a && b) out.edges.push({e, a, b});
+  }
+  return out;
+}
+
+/* ── edge geometry ────────────────────────────────────────────────── */
+
+const portY = (it) => it.y + Math.min(it.h, NODE_H) / 2;
 
 function bezier(x1, y1, x2, y2) {
   const dx = Math.max(40, Math.abs(x2 - x1) / 2);
@@ -62,22 +133,33 @@ function returnPath(a, b) {
   // differently from a forward edge on purpose — this is the arrow that
   // makes an agent while-loop look like what the author wrote instead of
   // one opaque compiler box.
-  const x1 = a.x + NODE_W / 2, y1 = a.y + NODE_H;
-  const x2 = b.x + NODE_W / 2, y2 = b.y + NODE_H;
+  const x1 = a.x + a.w / 2, y1 = a.y + a.h;
+  const x2 = b.x + b.w / 2, y2 = b.y + b.h;
   const dip = Math.max(y1, y2) + 60 + Math.abs(x1 - x2) * 0.08;
   return `M ${x1} ${y1} C ${x1} ${dip}, ${x2} ${dip}, ${x2} ${y2}`;
 }
 
-function consumeOf(edge, pos) {
+function wrapPath(a, b) {
+  // The seam where a long chain wraps to the next band: out of the
+  // source's right side, down through the band gap, left along the
+  // channel, into the target from its left — a carriage return, not a
+  // backwards sweep across the whole picture.
+  const x1 = a.x + a.w, y1 = portY(a);
+  const x2 = b.x, y2 = portY(b);
+  const ch = b.y - 44;            // the channel above the target's band
+  return `M ${x1} ${y1}`
+    + ` C ${x1 + 70} ${y1}, ${x1 + 70} ${ch}, ${x1 - 10} ${ch}`
+    + ` L ${x2 - 30} ${ch}`
+    + ` C ${x2 - 70} ${ch}, ${x2 - 60} ${y2}, ${x2} ${y2}`;
+}
+
+function consumeOf(edge, a, b) {
   // `.parallel()` / `.collect()` live on the CONSUMER's binding: find the
   // dst node's input that a ref from src feeds, and read its mode.
-  const dst = pos[edge.dst];
-  const srcName = (pos[edge.src] || {}).name;
-  if (!dst || !srcName) return null;
-  for (const inp of dst.inputs || []) {
-    const b = inp.binding || {};
-    if (b.kind === "ref" && (b.from || "").split(".").pop() === srcName && b.consume)
-      return b.consume;
+  for (const inp of b.node.inputs || []) {
+    const bind = inp.binding || {};
+    if (bind.kind === "ref" && (bind.from || "").split(".").pop() === a.node.name && bind.consume)
+      return bind.consume;
   }
   return null;
 }
@@ -106,63 +188,71 @@ function serveNodesFor(graph) {
     }));
 }
 
+/* ── rendering ────────────────────────────────────────────────────── */
+
 function render() {
   const g = state.graph;
   const nodesBox = $("#nodes");
   const svg = $("#edges");
   nodesBox.textContent = "";
   svg.textContent = "";
+  state.rendered.clear();
 
-  const span = 400 + (g.width || 800), tall = 200 + (g.height || 400);
+  const model = placeGraph(g, "", 0);
+  const flat = flattenModel(model, 0, 0, {nodes: [], edges: []});
+
+  const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
+  const maxY = Math.max(model.h, ...flat.nodes.map(n => n.y + n.h));
+  state.extent = {minX: -NODE_W - 110, minY: 0, maxX, maxY: maxY + 120};
+
+  const span = 400 + maxX, tall = 300 + maxY;
   svg.setAttribute("width", span + 400);
   svg.setAttribute("height", tall);
   svg.style.left = "-400px";
   svg.setAttribute("viewBox", `-400 0 ${span + 400} ${tall}`);
 
-  const pos = {};
-  for (const n of g.nodes) pos[n.id] = n;
-
   // serve entry nodes
   const serves = serveNodesFor(g);
-  const entryIds = new Set((g.entries || []).map(name =>
-    (g.nodes.find(n => n.name === name) || {}).id).filter(Boolean));
+  const entryItems = (g.entries || [])
+    .map(name => flat.nodes.find(it => it.depth === 0 && it.node.name === name))
+    .filter(Boolean);
 
   for (const s of serves) {
-    for (const eid of entryIds) {
-      const t = pos[eid];
-      if (!t) continue;
+    for (const t of entryItems) {
       const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      p.setAttribute("d", bezier(s.x + 190, s.y + NODE_H / 2, t.x, t.y + NODE_H / 2));
+      p.setAttribute("d", bezier(s.x + 190, s.y + NODE_H / 2, t.x, portY(t)));
       p.setAttribute("class", "serve");
       svg.append(p);
     }
   }
 
-  // graph edges
-  for (const e of g.edges) {
-    const a = pos[e.src], b = pos[e.dst];
-    if (!a || !b) continue;
+  // graph edges (every open level draws its own)
+  for (const {e, a, b} of flat.edges) {
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
     let cls = e.soft ? "soft" : "";
     if (e.back) {
       p.setAttribute("d", returnPath(a, b));
       cls += " back";
-      const dip = Math.max(a.y, b.y) + NODE_H + 58 + Math.abs(a.x - b.x) * 0.06;
-      edgeGlyph(svg, (a.x + b.x + NODE_W) / 2, dip, "↺ loop", "back-label");
+      const dip = Math.max(a.y + a.h, b.y + b.h) + 58 + Math.abs(a.x - b.x) * 0.06;
+      edgeGlyph(svg, (a.x + b.x + b.w) / 2, dip, "↺ loop", "back-label");
+    } else if (b.x < a.x - 1) {
+      p.setAttribute("d", wrapPath(a, b));
+      cls += " wrap";
     } else {
-      p.setAttribute("d", bezier(a.x + NODE_W, a.y + NODE_H / 2, b.x, b.y + NODE_H / 2));
-      const mx = (a.x + NODE_W + b.x) / 2, my = (a.y + b.y + NODE_H) / 2 - 6;
+      p.setAttribute("d", bezier(a.x + a.w, portY(a), b.x, portY(b)));
+      const mx = (a.x + a.w + b.x) / 2, my = (portY(a) + portY(b)) / 2 - 6;
       // A generator's edge is not one item; a consumer's mode is not
       // sequential. Both change what the run does, so both are on the wire.
-      if (a.is_gen) { cls += " stream"; edgeGlyph(svg, mx, my, "≋"); }
-      const consume = consumeOf(e, pos);
+      if (a.node.is_gen) { cls += " stream"; edgeGlyph(svg, mx, my, "≋"); }
+      const consume = consumeOf(e, a, b);
       if (consume) {
-        edgeGlyph(svg, mx, my + (a.is_gen ? 14 : 0),
+        edgeGlyph(svg, mx, my + (a.node.is_gen ? 14 : 0),
                   consume.mode === "collect" ? "⧉ collect"
                   : `∥ parallel${consume.max ? "≤" + consume.max : ""}`);
       }
     }
-    if (state.sel && (e.src === state.sel || e.dst === state.sel)) cls += " hot";
+    if (state.sel && (state.rendered.get(state.sel)?.node.id === e.src
+                   || state.rendered.get(state.sel)?.node.id === e.dst)) cls += " hot";
     p.setAttribute("class", cls.trim());
     svg.append(p);
   }
@@ -183,79 +273,140 @@ function render() {
     nodesBox.append(card);
   }
 
-  // op cards
-  for (const n of g.nodes) {
-    const card = el("div", "node");
-    card.style.left = `${n.x}px`;
-    card.style.top = `${n.y}px`;
-    card.style.setProperty("--kind", kindColor(n));
-    if (n.id === state.sel) card.classList.add("selected");
-    card.append(el("div", "nname", n.name));
-    card.append(el("div", "nkind", n.kind + (n.bound ? ` · ${n.bound}` : "")));
-    const badges = el("div", "badges");
-    if (n.start) badges.append(el("span", "badge", "entry"));
-    if (n.end) badges.append(el("span", "badge", "exit"));
-    if (n.is_gen) {
-      const b = el("span", "badge gen", "⚡ stream");
-      b.title = "Generator: invoked once, yields many — every consumer dispatches per yield, not per run.";
-      badges.append(b);
-    }
-    if (n.transient) {
-      const b = el("span", "badge", "transient");
-      b.title = "Outputs are delivered and then evicted; a long stream retains nothing.";
-      badges.append(b);
-    }
-    if (n.loop) {
-      const cap = n.loop.max_iterations;
-      const b = el("span", "badge loop", `↺ while${cap ? " ≤" + cap : ""}`);
-      b.title = "Member of a rewritten cycle: the compiler runs this as a synthetic loop; the return edge below is what the author wrote.";
-      badges.append(b);
-    }
-    if (n.subgraph_ops) {
-      const b = el("span", "badge sub", `▣ ${n.subgraph_ops} ops`);
-      b.title = "A nested @graph. Collapsed here; its ops run inside this node.";
-      badges.append(b);
-    }
-
-    const runinfo = state.run && state.run.ops[n.name];
-    if (runinfo) {
-      const avg = runinfo.runs ? (runinfo.total_ms / runinfo.runs) : 0;
-      badges.append(el("span", "badge run",
-        `${runinfo.runs}× · ${avg < 10 ? avg.toFixed(1) : Math.round(avg)} ms`));
-      if (runinfo.errors) {
-        badges.append(el("span", "badge err", `${runinfo.errors} err`));
-        card.classList.add("errorlit");
-      }
-    }
-    card.append(badges);
-    card.append(el("span", "port in"));
-    card.append(el("span", "port out"));
-    card.onclick = (ev) => { ev.stopPropagation(); select(n.id); };
-    nodesBox.append(card);
+  // op cards — flatten order draws a container before its members, so
+  // members paint on top of their box without any z-index bookkeeping
+  for (const it of flat.nodes) {
+    nodesBox.append(it.inner ? containerCard(it) : opCard(it));
   }
 
   applyView();
 }
 
+function toggleExpand(key) {
+  if (state.expanded.has(key)) {
+    state.expanded.delete(key);
+    // children of a closed box close with it, or reopening later surprises
+    for (const k of [...state.expanded]) if (k.startsWith(key + "/")) state.expanded.delete(k);
+  } else {
+    state.expanded.add(key);
+  }
+  render();
+}
+
+function containerCard(it) {
+  const n = it.node;
+  const card = el("div", "node container");
+  card.style.left = `${it.x}px`;
+  card.style.top = `${it.y}px`;
+  card.style.width = `${it.w}px`;
+  card.style.height = `${it.h}px`;
+  card.style.setProperty("--kind", kindColor(n));
+  if (it.key === state.sel) card.classList.add("selected");
+
+  const head = el("div", "chead");
+  head.append(el("span", "nname", n.name));
+  head.append(el("span", "nkind", `${n.kind} · ${n.subgraph_ops} ops`));
+  const close = el("button", "collapse", "▾ collapse");
+  close.title = "Collapse this graph back into a single node";
+  close.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
+  head.append(close);
+  head.onclick = (ev) => { ev.stopPropagation(); select(it.key); };
+  card.append(head);
+
+  card.append(el("span", "port in"));
+  card.append(el("span", "port out"));
+  return card;
+}
+
+function opCard(it) {
+  const n = it.node;
+  const card = el("div", "node");
+  card.style.left = `${it.x}px`;
+  card.style.top = `${it.y}px`;
+  card.style.setProperty("--kind", kindColor(n));
+  if (it.key === state.sel) card.classList.add("selected");
+  card.append(el("div", "nname", n.name));
+  card.append(el("div", "nkind", n.kind + (n.bound ? ` · ${n.bound}` : "")));
+  const badges = el("div", "badges");
+  if (n.start) badges.append(el("span", "badge", "entry"));
+  if (n.end) badges.append(el("span", "badge", "exit"));
+  if (n.is_gen) {
+    const b = el("span", "badge gen", "⚡ stream");
+    b.title = "Generator: invoked once, yields many — every consumer dispatches per yield, not per run.";
+    badges.append(b);
+  }
+  if (n.transient) {
+    const b = el("span", "badge", "transient");
+    b.title = "Outputs are delivered and then evicted; a long stream retains nothing.";
+    badges.append(b);
+  }
+  if (n.loop) {
+    const cap = n.loop.max_iterations;
+    const b = el("span", "badge loop", `↺ while${cap ? " ≤" + cap : ""}`);
+    b.title = "Member of a rewritten cycle: the compiler runs this as a synthetic loop; the return edge below is what the author wrote.";
+    badges.append(b);
+  }
+  if (n.graph) {
+    const b = el("button", "badge sub expand", `▣ ${n.subgraph_ops} ops ▸`);
+    b.title = "A nested @graph — click to open it in place.";
+    b.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
+    badges.append(b);
+  } else if (n.subgraph_ops) {
+    const b = el("span", "badge sub", `▣ ${n.subgraph_ops} ops`);
+    b.title = "A nested @graph. Collapsed here; its ops run inside this node.";
+    badges.append(b);
+  }
+
+  const runinfo = state.run && state.run.ops[n.name];
+  if (runinfo) {
+    const avg = runinfo.runs ? (runinfo.total_ms / runinfo.runs) : 0;
+    badges.append(el("span", "badge run",
+      `${runinfo.runs}× · ${avg < 10 ? avg.toFixed(1) : Math.round(avg)} ms`));
+    if (runinfo.errors) {
+      badges.append(el("span", "badge err", `${runinfo.errors} err`));
+      card.classList.add("errorlit");
+    }
+  }
+  card.append(badges);
+  card.append(el("span", "port in"));
+  card.append(el("span", "port out"));
+  card.onclick = (ev) => { ev.stopPropagation(); select(it.key); };
+  if (n.graph) card.ondblclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
+  return card;
+}
+
+/* ── view: pan, zoom, fit ─────────────────────────────────────────── */
+
 function applyView() {
   const v = state.view;
   $("#world").style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`;
+  $("#btn-zoom-pct").textContent = `${Math.round(v.scale * 100)}%`;
+}
+
+function zoomAt(mx, my, factor) {
+  const old = state.view.scale;
+  const next = Math.min(2.5, Math.max(0.1, old * factor));
+  state.view.x = mx - (mx - state.view.x) * (next / old);
+  state.view.y = my - (my - state.view.y) * (next / old);
+  state.view.scale = next;
+  applyView();
+}
+
+function stageCenter() {
+  const r = $("#stage").getBoundingClientRect();
+  return {x: r.width / 2, y: r.height / 2};
 }
 
 function fit() {
-  const g = state.graph;
-  if (!g || !g.nodes.length) return;
+  const ex = state.extent;
+  if (!ex) return;
   const stage = $("#stage").getBoundingClientRect();
-  const minX = Math.min(-NODE_W - 110, ...g.nodes.map(n => n.x));
-  const maxX = Math.max(...g.nodes.map(n => n.x)) + NODE_W;
-  const minY = Math.min(0, ...g.nodes.map(n => n.y));
-  const maxY = Math.max(...g.nodes.map(n => n.y)) + NODE_H;
   const scale = Math.min(1.2,
-    (stage.width - 80) / Math.max(1, maxX - minX),
-    (stage.height - 80) / Math.max(1, maxY - minY));
+    (stage.width - 80) / Math.max(1, ex.maxX - ex.minX),
+    (stage.height - 80) / Math.max(1, ex.maxY - ex.minY));
   state.view = {
-    x: 40 - minX * scale + (stage.width - 80 - (maxX - minX) * scale) / 2,
-    y: 40 - minY * scale + (stage.height - 80 - (maxY - minY) * scale) / 2,
+    x: 40 - ex.minX * scale + (stage.width - 80 - (ex.maxX - ex.minX) * scale) / 2,
+    y: 40 - ex.minY * scale + (stage.height - 80 - (ex.maxY - ex.minY) * scale) / 2,
     scale,
   };
   applyView();
@@ -263,13 +414,14 @@ function fit() {
 
 /* ── inspector ────────────────────────────────────────────────────── */
 
-function select(id) {
-  state.sel = (state.sel === id) ? null : id;
+function select(key) {
+  state.sel = (state.sel === key) ? null : key;
   render();
   const panel = $("#inspector");
   if (!state.sel) { panel.classList.remove("open"); return; }
-  const n = state.graph.nodes.find(x => x.id === state.sel);
-  if (!n) return;
+  const it = state.rendered.get(state.sel);
+  if (!it) return;
+  const n = it.node;
   panel.classList.add("open");
   panel.textContent = "";
   panel.append(el("h3", null, n.name));
@@ -288,6 +440,14 @@ function select(id) {
       `Ceiling: ${n.loop.max_iterations ?? "none"} iterations.`));
     panel.append(sec);
   }
+  if (n.graph) {
+    const sec = el("section");
+    sec.append(el("div", "stitle", "Nested graph"));
+    sec.append(el("div", "srcline",
+      `${n.subgraph_ops} ops inside. ` +
+      (state.expanded.has(it.key) ? "Open on the canvas." : "Double-click the node (or its ▣ badge) to open it in place.")));
+    panel.append(sec);
+  }
 
   const src = n.source || {};
   const srcSec = el("section");
@@ -301,7 +461,7 @@ function select(id) {
 
   const inSec = el("section");
   inSec.append(el("div", "stitle", "Inputs"));
-  for (const inp of n.inputs || []) inSec.append(inputRow(n, inp));
+  for (const inp of n.inputs || []) inSec.append(inputRow(it, inp));
   if (!(n.inputs || []).length) inSec.append(el("div", "note", "none"));
   panel.append(inSec);
 
@@ -325,7 +485,8 @@ function select(id) {
   }
 }
 
-function inputRow(node, inp) {
+function inputRow(it, inp) {
+  const node = it.node;
   const row = el("div", "inrow");
   row.append(el("div", "iname mono", inp.name + (inp.required ? " *" : "")));
   const b = inp.binding || {};
@@ -343,6 +504,12 @@ function inputRow(node, inp) {
     row.append(from);
   } else if (b.kind === "scratch") {
     from.append(`← SCRATCH[${JSON.stringify(b.key ?? b.value ?? "?")}]`);
+    row.append(from);
+  } else if (b.kind === "literal" && it.depth > 0) {
+    // An op inside an opened container belongs to the nested graph, which
+    // the manifest may not declare — the set_param edit path addresses
+    // graphs by manifest name. Show the value; edit it where it lives.
+    from.textContent = `literal ${JSON.stringify(b.value)} — edit in the nested graph's own source`;
     row.append(from);
   } else if (b.kind === "literal") {
     from.textContent = "literal — editable";
@@ -491,40 +658,73 @@ for (const b of document.querySelectorAll(".tabs button"))
 $("#graph-pick").onchange = (ev) => {
   state.graph = state.ir.graphs.find(g => g.name === ev.target.value);
   state.sel = null;
+  state.expanded.clear();
   $("#inspector").classList.remove("open");
   render(); fit();
 };
 
 $("#btn-fit").onclick = fit;
+$("#btn-zoom-in").onclick = () => { const c = stageCenter(); zoomAt(c.x, c.y, 1.25); };
+$("#btn-zoom-out").onclick = () => { const c = stageCenter(); zoomAt(c.x, c.y, 0.8); };
+$("#btn-zoom-pct").onclick = () => {
+  const c = stageCenter();
+  zoomAt(c.x, c.y, 1 / state.view.scale);   // back to exactly 100%
+};
 
 (() => {
   const stage = $("#stage");
   let drag = null;
+  let spaceHeld = false;
+
+  // Wheel scrolls the canvas; ctrl+wheel (and a trackpad pinch, which the
+  // browser reports as exactly that) zooms about the cursor. This is the
+  // n8n/Figma convention — a two-finger scroll must never fling the zoom.
+  stage.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    if (ev.ctrlKey || ev.metaKey) {
+      const rect = stage.getBoundingClientRect();
+      zoomAt(ev.clientX - rect.left, ev.clientY - rect.top,
+             Math.exp(-ev.deltaY * 0.0022));
+    } else {
+      state.view.x -= ev.deltaX;
+      state.view.y -= ev.deltaY;
+      applyView();
+    }
+  }, {passive: false});
+
   stage.addEventListener("mousedown", (ev) => {
-    if (ev.target.closest(".node")) return;
-    drag = {x: ev.clientX, y: ev.clientY, vx: state.view.x, vy: state.view.y};
+    const overNode = ev.target.closest(".node");
+    const panButton = ev.button === 1 || (ev.button === 0 && spaceHeld);
+    if (overNode && !panButton && ev.button === 0) return;  // node click
+    if (ev.button !== 0 && ev.button !== 1) return;
+    ev.preventDefault();
+    drag = {x: ev.clientX, y: ev.clientY, vx: state.view.x, vy: state.view.y, moved: false};
     stage.classList.add("panning");
   });
   window.addEventListener("mousemove", (ev) => {
     if (!drag) return;
+    drag.moved = drag.moved || Math.abs(ev.clientX - drag.x) + Math.abs(ev.clientY - drag.y) > 3;
     state.view.x = drag.vx + ev.clientX - drag.x;
     state.view.y = drag.vy + ev.clientY - drag.y;
     applyView();
   });
   window.addEventListener("mouseup", () => { drag = null; stage.classList.remove("panning"); });
-  stage.addEventListener("wheel", (ev) => {
-    ev.preventDefault();
-    const rect = stage.getBoundingClientRect();
-    const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
-    const old = state.view.scale;
-    const next = Math.min(2.5, Math.max(0.15, old * (ev.deltaY < 0 ? 1.12 : 0.89)));
-    // zoom about the cursor, not the origin
-    state.view.x = mx - (mx - state.view.x) * (next / old);
-    state.view.y = my - (my - state.view.y) * (next / old);
-    state.view.scale = next;
-    applyView();
-  }, {passive: false});
-  stage.addEventListener("click", () => {
+
+  window.addEventListener("keydown", (ev) => {
+    if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA") return;
+    if (ev.key === " ") { spaceHeld = true; stage.classList.add("panmode"); ev.preventDefault(); return; }
+    const c = stageCenter();
+    if (ev.key === "+" || ev.key === "=") zoomAt(c.x, c.y, 1.25);
+    else if (ev.key === "-" || ev.key === "_") zoomAt(c.x, c.y, 0.8);
+    else if (ev.key === "0") fit();
+    else if (ev.key === "1") zoomAt(c.x, c.y, 1 / state.view.scale);
+  });
+  window.addEventListener("keyup", (ev) => {
+    if (ev.key === " ") { spaceHeld = false; stage.classList.remove("panmode"); }
+  });
+
+  stage.addEventListener("click", (ev) => {
+    if (ev.target.closest(".node")) return;
     state.sel = null;
     $("#inspector").classList.remove("open");
     render();
