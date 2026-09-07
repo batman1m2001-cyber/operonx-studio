@@ -482,7 +482,50 @@ function select(key) {
       runSec.append(el("div", "srcline", `last error: ${runinfo.last_error}`));
     }
     panel.append(runSec);
+    panel.append(executionsSection(n));
   }
+}
+
+/* The drill-down under the aggregate: each recorded execution of this op
+ * in the painted run, with the inputs and outputs the trace consumer
+ * wrote. Fetched lazily — the section renders first, records arrive into
+ * it — so selecting a node stays instant on runs with thousands of
+ * records. */
+function executionsSection(n) {
+  const sec = el("section");
+  sec.append(el("div", "stitle", "Executions"));
+  const box = el("div", "execbox", "loading…");
+  sec.append(box);
+  api(`/api/p/${PID}/trace/${encodeURIComponent(state.run.run)}/op/${encodeURIComponent(n.name)}`)
+    .then(data => {
+      box.textContent = "";
+      if (!data.executions.length) {
+        box.append(el("div", "note", "no records for this op in this run"));
+        return;
+      }
+      if (data.total > data.showing) {
+        box.append(el("div", "srcline",
+          `${data.total} recorded — showing the last ${data.showing}`));
+      }
+      data.executions.forEach((ex, i) => {
+        const d = el("details", "execrow");
+        const sum = el("summary");
+        const idx = data.total - data.showing + i + 1;
+        sum.append(el("span", "mono", `#${idx}`));
+        sum.append(el("span", null,
+          ` ${(ex.duration_ms ?? 0).toFixed(1)} ms`));
+        sum.append(el("span", ex.status === "ok" ? "ok" : "bad", ` ${ex.status ?? "?"}`));
+        d.append(sum);
+        if (ex.error) d.append(el("div", "srcline bad", String(ex.error)));
+        for (const [label, val] of [["inputs", ex.inputs], ["outputs", ex.outputs]]) {
+          d.append(el("div", "stitle", label));
+          d.append(el("pre", "execjson mono", JSON.stringify(val ?? null, null, 2)));
+        }
+        box.append(d);
+      });
+    })
+    .catch(e => { box.textContent = e.message; });
+  return sec;
 }
 
 function inputRow(it, inp) {

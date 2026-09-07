@@ -190,6 +190,43 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _op_executions(run_dir: Path, op_name: str, limit: int = 50) -> Dict[str, Any]:
+    """Every recorded execution of one op in one run — the drill-down
+    under the aggregate, inputs and outputs included.
+
+    Values ship exactly as the trace consumer wrote them: the write side
+    already bounds payload size behind its own ``media_threshold`` config,
+    so no second limit is applied here. What is bounded is the record
+    count — the last ``limit`` executions, because a callbot op can run
+    once per audio packet.
+    """
+    from collections import deque
+
+    keep: deque = deque(maxlen=limit)
+    total = 0
+    with (run_dir / "nodes.jsonl").open(encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            name = rec.get("op_name") or rec.get("op_full_name") or "?"
+            if name != op_name:
+                continue
+            total += 1
+            keep.append({
+                "start_time": rec.get("start_time"),
+                "duration_ms": rec.get("duration_ms"),
+                "status": rec.get("status"),
+                "error": rec.get("error"),
+                "ctx": rec.get("ctx"),
+                "inputs": rec.get("inputs"),
+                "outputs": rec.get("outputs"),
+            })
+    return {"run": run_dir.name, "op": op_name, "total": total,
+            "showing": len(keep), "executions": list(keep)}
+
+
 def _summarise_run(run_dir: Path, limit: int = 20000) -> Dict[str, Any]:
     """Per-op aggregates for one recorded run.
 
@@ -459,6 +496,24 @@ def build_studio_app(recents: Optional[Recents] = None):
         if not (run_dir / "nodes.jsonl").is_file():
             return JSONResponse({"error": "no such run"}, status_code=404)
         return JSONResponse(_summarise_run(run_dir))
+
+    @app.get("/api/p/{pid}/trace/{run}/op/{op_name}")
+    def trace_op(pid: str, run: str, op_name: str, limit: int = 50) -> JSONResponse:
+        """One op's executions in one run — the drill-down under the
+        aggregate, with the recorded inputs and outputs. Same run-name
+        containment rule as the summary endpoint above."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        root = _traces_root(watcher.root)
+        if root is None:
+            return JSONResponse({"error": "no [studio] traces configured"}, status_code=404)
+        run_dir = (root / run).resolve()
+        if root.resolve() not in run_dir.parents:
+            return JSONResponse({"error": "no such run"}, status_code=404)
+        if not (run_dir / "nodes.jsonl").is_file():
+            return JSONResponse({"error": "no such run"}, status_code=404)
+        return JSONResponse(_op_executions(run_dir, op_name, limit=max(1, min(limit, 200))))
 
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
     return app

@@ -214,6 +214,48 @@ def test_traces_lists_runs_and_summarises_one(client, project, tmp_path):
     assert agg["last_error"] == "kaboom"
 
 
+def test_trace_op_drilldown_ships_inputs_and_outputs(client, project, tmp_path):
+    """The trace consumer records what actually went into and came out of
+    every execution; a viewer that shows only averages is hiding evidence.
+    The drill-down must ship those values exactly as recorded — the write
+    side already bounds payload size via its own media_threshold config,
+    so nothing here may re-truncate them."""
+    traces = tmp_path / "traces"
+    run = traces / "call-007"
+    run.mkdir(parents=True)
+    long_text = "x" * 5000   # e.g. an LLM prompt the consumer chose to keep inline
+    records = [
+        {"op_name": "a", "duration_ms": 1.0, "status": "ok",
+         "inputs": {"text": "hello"}, "outputs": {"loud": "HELLO"}},
+        {"op_name": "other", "duration_ms": 9.0, "status": "ok",
+         "inputs": {}, "outputs": {}},
+        {"op_name": "a", "duration_ms": 2.0, "status": "error", "error": "kaboom",
+         "inputs": {"text": long_text}, "outputs": None},
+    ]
+    (run / "nodes.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in records), encoding="utf-8")
+    (project / "operonx.toml").write_text(
+        (project / "operonx.toml").read_text()
+        + f'\n[studio]\ntraces = "{traces}"\n', encoding="utf-8")
+
+    pid = _open(client, project)
+    data = client.get(f"/api/p/{pid}/trace/call-007/op/a").json()
+    assert data["op"] == "a" and data["total"] == 2 and data["showing"] == 2
+    first, second = data["executions"]
+    assert first["outputs"] == {"loud": "HELLO"}
+    assert second["error"] == "kaboom"
+    assert second["inputs"]["text"] == long_text, "values must arrive as recorded"
+
+    # limit bounds the record count, keeping the LAST executions
+    limited = client.get(f"/api/p/{pid}/trace/call-007/op/a", params={"limit": 1}).json()
+    assert limited["total"] == 2 and limited["showing"] == 1
+    assert limited["executions"][0]["status"] == "error"
+
+    # an op with no records answers honestly instead of erroring
+    empty = client.get(f"/api/p/{pid}/trace/call-007/op/ghost").json()
+    assert empty["total"] == 0 and empty["executions"] == []
+
+
 def test_trace_run_names_cannot_walk_out_of_the_root(client, project, tmp_path):
     (project / "operonx.toml").write_text(
         (project / "operonx.toml").read_text()
