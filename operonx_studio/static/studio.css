@@ -243,6 +243,8 @@ header.bar select {
 .execrow summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
 .execrow summary .ok { color: var(--ok); }
 .execrow .bad { color: var(--err); }
+.execrow .dim { color: var(--muted); }
+.inrow .execjson { margin-top: 5px; }
 .execrow .stitle { margin: 8px 0 3px; font-size: 10px; text-transform: uppercase;
   letter-spacing: .06em; color: var(--muted); }
 .execjson {

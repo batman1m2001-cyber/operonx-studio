@@ -459,15 +459,27 @@ function select(key) {
   }
   panel.append(srcSec);
 
+  // Value slots: when a run is painted, the latest recorded value of
+  // every input and output lands inline under its name. The wiring says
+  // where a value comes from; the run says what it actually was — the
+  // inspector owes the user both.
+  const slots = {in: {}, out: {}};
+
   const inSec = el("section");
   inSec.append(el("div", "stitle", "Inputs"));
-  for (const inp of n.inputs || []) inSec.append(inputRow(it, inp));
+  for (const inp of n.inputs || []) inSec.append(inputRow(it, inp, slots));
   if (!(n.inputs || []).length) inSec.append(el("div", "note", "none"));
   panel.append(inSec);
 
   const outSec = el("section");
   outSec.append(el("div", "stitle", "Outputs"));
-  for (const o of n.outputs || []) outSec.append(el("span", "outchip mono", o));
+  for (const o of n.outputs || []) {
+    const row = el("div", "inrow");
+    row.append(el("div", "iname mono", o));
+    slots.out[o] = el("div");
+    row.append(slots.out[o]);
+    outSec.append(row);
+  }
   if (!(n.outputs || []).length) outSec.append(el("div", "note", "none"));
   panel.append(outSec);
 
@@ -482,8 +494,21 @@ function select(key) {
       runSec.append(el("div", "srcline", `last error: ${runinfo.last_error}`));
     }
     panel.append(runSec);
-    panel.append(executionsSection(n));
   }
+  // The drill-down renders for EVERY node while a run is painted — a
+  // GraphOp has no aggregate under its own name (only its members ran),
+  // and the answer to "what happened here" must never be silence.
+  if (state.run) panel.append(executionsSection(n, slots));
+  else {
+    const hint = el("div", "note",
+      "Pick a run in the Traces tab to see the recorded values of these inputs and outputs.");
+    panel.append(hint);
+  }
+}
+
+function valueBlock(v) {
+  const text = typeof v === "string" ? v : JSON.stringify(v, null, 2);
+  return el("pre", "execjson mono", text === undefined ? "null" : text);
 }
 
 /* The drill-down under the aggregate: each recorded execution of this op
@@ -491,7 +516,7 @@ function select(key) {
  * wrote. Fetched lazily — the section renders first, records arrive into
  * it — so selecting a node stays instant on runs with thousands of
  * records. */
-function executionsSection(n) {
+function executionsSection(n, slots) {
   const sec = el("section");
   sec.append(el("div", "stitle", "Executions"));
   const box = el("div", "execbox", "loading…");
@@ -503,6 +528,18 @@ function executionsSection(n) {
         box.append(el("div", "note", "no records for this op in this run"));
         return;
       }
+
+      // The latest execution's values land inline under each input and
+      // output name above — the wiring says where a value comes from,
+      // this says what it actually was.
+      const last = data.executions[data.executions.length - 1];
+      for (const [dir, values] of [["in", last.inputs], ["out", last.outputs]]) {
+        for (const [key, val] of Object.entries(values || {})) {
+          const slot = slots && slots[dir][key];
+          if (slot) { slot.textContent = ""; slot.append(valueBlock(val)); }
+        }
+      }
+
       if (data.total > data.showing) {
         box.append(el("div", "srcline",
           `${data.total} recorded — showing the last ${data.showing}`));
@@ -512,10 +549,13 @@ function executionsSection(n) {
         const sum = el("summary");
         const idx = data.total - data.showing + i + 1;
         sum.append(el("span", "mono", `#${idx}`));
+        // a container's records belong to its members — say which one ran
+        if (ex.op && ex.op !== n.name) sum.append(el("span", "mono dim", ` ${ex.op}`));
         sum.append(el("span", null,
           ` ${(ex.duration_ms ?? 0).toFixed(1)} ms`));
         sum.append(el("span", ex.status === "ok" ? "ok" : "bad", ` ${ex.status ?? "?"}`));
         d.append(sum);
+        if (i === data.executions.length - 1) d.open = true;
         if (ex.error) d.append(el("div", "srcline bad", String(ex.error)));
         for (const [label, val] of [["inputs", ex.inputs], ["outputs", ex.outputs]]) {
           d.append(el("div", "stitle", label));
@@ -528,10 +568,11 @@ function executionsSection(n) {
   return sec;
 }
 
-function inputRow(it, inp) {
+function inputRow(it, inp, slots) {
   const node = it.node;
   const row = el("div", "inrow");
   row.append(el("div", "iname mono", inp.name + (inp.required ? " *" : "")));
+  if (slots) { slots.in[inp.name] = el("div"); row.append(slots.in[inp.name]); }
   const b = inp.binding || {};
   const from = el("div", "ifrom");
   if (b.kind === "ref") {

@@ -204,6 +204,12 @@ def _op_executions(run_dir: Path, op_name: str, limit: int = 50) -> Dict[str, An
 
     keep: deque = deque(maxlen=limit)
     total = 0
+    # A GraphOp never executes under its own name — its members do, and
+    # they carry the container in their dotted path ("engine.asr.recognize"
+    # is a member of "asr"). Matching the path segment as well as the leaf
+    # name makes clicking a container show its members' executions instead
+    # of a wrong "no records".
+    marker = f".{op_name}."
     with (run_dir / "nodes.jsonl").open(encoding="utf-8") as fh:
         for line in fh:
             try:
@@ -211,10 +217,12 @@ def _op_executions(run_dir: Path, op_name: str, limit: int = 50) -> Dict[str, An
             except json.JSONDecodeError:
                 continue
             name = rec.get("op_name") or rec.get("op_full_name") or "?"
-            if name != op_name:
+            full = rec.get("op_full_name") or ""
+            if name != op_name and marker not in full and not full.startswith(op_name + "."):
                 continue
             total += 1
             keep.append({
+                "op": name,
                 "start_time": rec.get("start_time"),
                 "duration_ms": rec.get("duration_ms"),
                 "status": rec.get("status"),
@@ -274,6 +282,17 @@ def build_studio_app(recents: Optional[Recents] = None):
     app = FastAPI(title="operonx studio", docs_url=None, redoc_url=None)
     app.state.recents = recents
     app.state.watchers = watchers
+
+    @app.middleware("http")
+    async def _fresh_pages(request, call_next):
+        """Pages and static assets revalidate on every load (ETag makes it
+        a 304, not a re-download). A studio serving yesterday's JS after a
+        deploy shows yesterday's features and gets called a liar."""
+        response = await call_next(request)
+        path = request.url.path
+        if path == "/" or path.startswith("/static") or path.startswith("/p/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     def _watcher(pid: str) -> Optional[ProjectWatcher]:
         if pid in watchers:

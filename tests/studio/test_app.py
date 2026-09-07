@@ -256,6 +256,40 @@ def test_trace_op_drilldown_ships_inputs_and_outputs(client, project, tmp_path):
     assert empty["total"] == 0 and empty["executions"] == []
 
 
+def test_a_graphop_drilldown_finds_its_members_records(client, project, tmp_path):
+    """A GraphOp never executes under its own name — its members do,
+    carrying the container in their dotted path. Clicking the container
+    must surface the members' executions, labelled with who ran, instead
+    of a wrong 'no records'."""
+    traces = tmp_path / "traces"
+    run = traces / "call-042"
+    run.mkdir(parents=True)
+    records = [
+        {"op_name": "recognize", "op_full_name": "engine.asr.recognize",
+         "duration_ms": 12.0, "status": "ok",
+         "inputs": {"speech_audio": "[frames]"}, "outputs": {"transcript": "alo"}},
+        {"op_name": "embed", "op_full_name": "engine.asr.embed",
+         "duration_ms": 3.0, "status": "ok",
+         "inputs": {}, "outputs": {"embedding": [0.1]}},
+        {"op_name": "tts", "op_full_name": "engine.tts",
+         "duration_ms": 8.0, "status": "ok", "inputs": {}, "outputs": {}},
+    ]
+    (run / "nodes.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in records), encoding="utf-8")
+    (project / "operonx.toml").write_text(
+        (project / "operonx.toml").read_text()
+        + f'\n[studio]\ntraces = "{traces}"\n', encoding="utf-8")
+
+    pid = _open(client, project)
+    data = client.get(f"/api/p/{pid}/trace/call-042/op/asr").json()
+    assert data["total"] == 2, "both members belong to the container"
+    assert [e["op"] for e in data["executions"]] == ["recognize", "embed"]
+    assert data["executions"][0]["outputs"] == {"transcript": "alo"}
+    # and the leaf op still matches by its own name only
+    leaf = client.get(f"/api/p/{pid}/trace/call-042/op/tts").json()
+    assert leaf["total"] == 1 and leaf["executions"][0]["op"] == "tts"
+
+
 def test_trace_run_names_cannot_walk_out_of_the_root(client, project, tmp_path):
     (project / "operonx.toml").write_text(
         (project / "operonx.toml").read_text()
