@@ -21,10 +21,9 @@ from typing import List
 
 __all__ = ["scaffold", "ScaffoldError", "OPERONX_PIN"]
 
-# Pinned at the floor the tutorial uses, not `>=1.0`: 1.0.0 was a breaking
-# release, so a lower floor would let a fresh project resolve to an API the
-# generated code does not speak.
-OPERONX_PIN = "1.3.0"
+# Pinned at the floor the generated code needs: the serve layer (ingress,
+# egress, [[serve]]) shipped in 1.5.0, and every scaffolded flow is served.
+OPERONX_PIN = "1.5.0"
 
 
 class ScaffoldError(Exception):
@@ -43,16 +42,22 @@ dependencies = [
 """
 
 _MANIFEST = """\
-# Declares the graphs a tool may load, and where resources come from.
-# `operonx-lint`, `operonx-extract` and `operonx-studio` all read this.
+# Declares what this project IS to every tool: `operonx-serve` boots it,
+# `operonx-lint`, `operonx-extract` and `operonx-studio` read it.
 
 [project]
 name = "{name}"
 description = "An operonx workflow."
 {resources}
-[[graph]]
-name  = "flow"
-entry = "workflow:flow"
+# The project's one main graph, served. Ingress and egress in the graph
+# are the doors this listener feeds.
+[[serve]]
+kind    = "http"
+method  = "POST"
+path    = "/run"
+graph   = "workflow:flow"
+session = "per_request"
+description = "POST a JSON payload, receive the flow's answer."
 """
 
 _RESOURCES_BLOCK = """
@@ -72,11 +77,12 @@ Two rules keep this loadable by a UI, and both are checked by
   has no stable node to map a generated one back to.
 """
 
-from operonx.core import END, PARENT, START, graph, op
+from operonx.core import END, START, graph, op
+from operonx.core.serve import egress, ingress
 
 
 @op
-def normalise(text: str):
+def normalise(text: str = ""):
     """Trim and collapse whitespace."""
     return {{"cleaned": " ".join((text or "").split())}}
 
@@ -88,11 +94,12 @@ def summarise(cleaned: str):
 
 
 @graph
-def flow(text):
-    clean = normalise(text=text)
+def flow():
+    request = ingress()
+    clean = normalise(text=request["text"])
     report = summarise(cleaned=clean["cleaned"])
-    report["summary"] >> PARENT["summary"]
-    START >> clean >> report >> END
+    out = egress(item=report["summary"])
+    START >> request >> clean >> report >> out >> END
 '''
 
 _WORKFLOW_LLM = '''\
@@ -107,26 +114,28 @@ Two rules keep this loadable by a UI, and both are checked by
   op uses without running the code.
 """
 
-from operonx.core import END, PARENT, START, graph, op
+from operonx.core import END, START, graph, op
+from operonx.core.serve import egress, ingress
 from operonx.providers import LLMOp
 
 
 @op
-def normalise(text: str):
+def normalise(text: str = ""):
     """Trim and collapse whitespace."""
     return {{"cleaned": " ".join((text or "").split())}}
 
 
 @graph
-def flow(text):
-    clean = normalise(text=text)
+def flow():
+    request = ingress()
+    clean = normalise(text=request["text"])
     answer = LLMOp.of(
         resource="gpt-4o-mini",
         prompt={{"system": "Answer in one sentence.", "user": "{{question}}"}},
         question=clean["cleaned"],
     )
-    answer["content"] >> PARENT["answer"]
-    START >> clean >> answer >> END
+    out = egress(item=answer["content"])
+    START >> request >> clean >> answer >> out >> END
 '''
 
 _RESOURCES = """\
@@ -153,10 +162,12 @@ _README = """\
 ```bash
 uv sync
 operonx-lint --build .     # conventions, and the graph builds offline
-operonx-studio . --serve   # graph, resources, env and deps in a browser
+operonx-studio .           # the flow on a canvas
+operonx-serve .            # boot the [[serve]] listener
 ```
 
-`workflow.py` holds the graph; `operonx.toml` declares what a tool may load.
+`workflow.py` holds the one main graph — ingress in, egress out;
+`operonx.toml` declares how it is served and what a tool may load.
 """
 
 
@@ -174,7 +185,8 @@ def scaffold(root: Path | str, name: str | None = None, *, with_llm: bool = Fals
 
     files = {
         "pyproject.toml": _PYPROJECT.format(
-            dist=dist, pin=OPERONX_PIN, extras="[openai]" if with_llm else ""
+            dist=dist, pin=OPERONX_PIN,
+            extras="[openai,serve]" if with_llm else "[serve]",
         ),
         "operonx.toml": _MANIFEST.format(name=name, resources=_RESOURCES_BLOCK if with_llm else ""),
         "workflow.py": (_WORKFLOW_LLM if with_llm else _WORKFLOW_PLAIN).format(),

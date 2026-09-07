@@ -325,11 +325,23 @@ function opCard(it) {
   card.style.top = `${it.y}px`;
   card.style.setProperty("--kind", kindColor(n));
   if (it.key === state.sel) card.classList.add("selected");
-  card.append(el("div", "nname", n.name));
-  card.append(el("div", "nkind", n.kind + (n.bound ? ` · ${n.bound}` : "")));
+  // The serve boundary is a door, not an op: ingress is where the
+  // client's data enters the run, egress where answers leave. Drawn in
+  // the serve family so the eye groups it with the front-door card, and
+  // labelled as a boundary so nobody hunts for business logic inside.
+  if (n.serve_role) {
+    card.classList.add("gate", `gate-${n.serve_role}`);
+    card.append(el("div", "nname",
+      n.serve_role === "ingress" ? `⇥ ${n.name}` : `${n.name} ⇥`));
+    card.append(el("div", "nkind",
+      n.serve_role === "ingress" ? "ingress · client → run" : "egress · run → client"));
+  } else {
+    card.append(el("div", "nname", n.name));
+    card.append(el("div", "nkind", n.kind + (n.bound ? ` · ${n.bound}` : "")));
+  }
   const badges = el("div", "badges");
-  if (n.start) badges.append(el("span", "badge", "entry"));
-  if (n.end) badges.append(el("span", "badge", "exit"));
+  if (n.start && !n.serve_role) badges.append(el("span", "badge", "entry"));
+  if (n.end && !n.serve_role) badges.append(el("span", "badge", "exit"));
   if (n.is_gen) {
     const b = el("span", "badge gen", "⚡ stream");
     b.title = "Generator: invoked once, yields many — every consumer dispatches per yield, not per run.";
@@ -427,6 +439,13 @@ function select(key) {
   panel.append(el("h3", null, n.name));
   panel.append(el("div", "kind",
     n.kind + (n.bound ? ` · bound=${n.bound}` : "") + (n.is_gen ? " · generator" : "")));
+  if (n.serve_role) {
+    const note = el("div", "srcline",
+      n.serve_role === "ingress"
+        ? "Serve boundary — this is where the client's data enters the run. Its stream is what the session feeds; it holds no business logic."
+        : "Serve boundary — this is where the run's answers leave for the client. It holds no business logic.");
+    panel.append(note);
+  }
   if (n.is_gen) {
     const note = el("div", "srcline",
       "Yields a stream: downstream ops dispatch once per yield. Edge counts in a run are per item, not per invocation.");
@@ -688,21 +707,25 @@ async function showTraces() {
     box.append(el("div", "note", `Declared traces dir does not exist yet: ${data.missing}`));
     return;
   }
+  if (data.langfuse_error) {
+    box.append(el("div", "note", `Langfuse (${data.langfuse}) unreachable: ${data.langfuse_error}`));
+  }
   if (!data.runs.length) {
-    box.append(el("div", "note", `No runs recorded yet in ${data.root}`));
+    box.append(el("div", "note", `No runs recorded yet${data.root ? " in " + data.root : ""}`));
     return;
   }
   const table = el("table");
   const thead = el("thead");
   const hr = el("tr");
-  for (const h of ["run", "recorded", "size", ""]) hr.append(el("th", null, h));
+  for (const h of ["run", "recorded", "source", ""]) hr.append(el("th", null, h));
   thead.append(hr); table.append(thead);
   const tbody = el("tbody");
   for (const r of data.runs) {
     const tr = el("tr", "run-row");
-    tr.append(el("td", "mono", r.run));
-    tr.append(el("td", null, new Date(r.mtime * 1000).toLocaleString()));
-    tr.append(el("td", null, `${(r.size / 1024).toFixed(1)} KB`));
+    tr.append(el("td", "mono", r.name || r.run));
+    tr.append(el("td", null, r.mtime ? new Date(r.mtime * 1000).toLocaleString() : ""));
+    tr.append(el("td", null,
+      r.source === "langfuse" ? "langfuse" : `local · ${(r.size / 1024).toFixed(1)} KB`));
     tr.append(el("td", null, "view on canvas →"));
     tr.onclick = () => paintRun(r.run);
     tbody.append(tr);

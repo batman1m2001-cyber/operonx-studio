@@ -300,6 +300,112 @@ def test_trace_run_names_cannot_walk_out_of_the_root(client, project, tmp_path):
     assert res.status_code == 404
 
 
+# ── the Langfuse trace source ───────────────────────────────────────────
+
+
+LF_TRACES = {"data": [
+    {"id": "call-abc", "timestamp": "2026-09-01T10:00:00Z", "name": "callbot"},
+]}
+LF_DETAIL = {"observations": [
+    {"name": "stt", "startTime": "2026-09-01T10:00:00Z", "endTime": "2026-09-01T10:00:01Z",
+     "level": "DEFAULT", "statusMessage": None,
+     "metadata": {"op_full_name": "engine.stt", "status": "ok", "duration_ms": 1000.0},
+     "input": {"speech_audio": "[frames]"}, "output": {"transcript": "alo"}},
+    {"name": "stt", "startTime": "2026-09-01T10:00:02Z", "endTime": "2026-09-01T10:00:02Z",
+     "level": "ERROR", "statusMessage": "kaboom",
+     "metadata": {"op_full_name": "engine.stt", "status": "error", "duration_ms": 250.0},
+     "input": {}, "output": None},
+    {"name": "tts", "startTime": "2026-09-01T10:00:03Z", "endTime": "2026-09-01T10:00:03Z",
+     "level": "DEFAULT", "metadata": {"op_full_name": "engine.tts", "status": "ok",
+                                      "duration_ms": 40.0},
+     "input": {"text": "chào"}, "output": {"audio": "$media_ref"}},
+]}
+
+
+@pytest.fixture()
+def langfuse_project(project, monkeypatch):
+    """A project declaring a Langfuse source, with the API faked at the
+    fetch seam — everything above `_lf_get` (auth, routing, mapping,
+    aggregation) runs for real."""
+    from operonx_studio import app as app_module
+
+    (project / "operonx.toml").write_text(
+        (project / "operonx.toml").read_text()
+        + '\n[studio.langfuse]\nhost = "https://lf.example"\n'
+          'public_key = "pk"\nsecret_key = "sk"\n', encoding="utf-8")
+
+    def fake_get(cfg, path, **params):
+        assert cfg["host"] == "https://lf.example" and cfg["public"] == "pk"
+        if path == "/api/public/traces":
+            return LF_TRACES
+        if path == "/api/public/traces/call-abc":
+            return LF_DETAIL
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(app_module, "_lf_get", fake_get)
+    return project
+
+
+def test_langfuse_runs_join_the_listing(client, langfuse_project):
+    pid = _open(client, langfuse_project)
+    data = client.get(f"/api/p/{pid}/traces").json()
+    assert data["configured"] and data["langfuse"] == "https://lf.example"
+    (run,) = data["runs"]
+    assert run["run"] == "lf:call-abc" and run["source"] == "langfuse"
+    assert run["name"] == "callbot"
+
+
+def test_a_langfuse_trace_paints_like_a_local_one(client, langfuse_project):
+    """The consumer shipped op_name/status/duration to Langfuse verbatim;
+    read back, the same aggregate shape reaches the canvas."""
+    pid = _open(client, langfuse_project)
+    summary = client.get(f"/api/p/{pid}/trace/lf:call-abc").json()
+    stt = summary["ops"]["stt"]
+    assert stt["runs"] == 2 and stt["errors"] == 1
+    assert stt["total_ms"] == 1250.0 and stt["last_error"] == "kaboom"
+    assert summary["ops"]["tts"]["runs"] == 1
+
+
+def test_langfuse_drilldown_carries_inputs_and_outputs(client, langfuse_project):
+    pid = _open(client, langfuse_project)
+    data = client.get(f"/api/p/{pid}/trace/lf:call-abc/op/stt").json()
+    assert data["total"] == 2
+    first, second = data["executions"]
+    assert first["outputs"] == {"transcript": "alo"}
+    assert second["status"] == "error" and second["error"] == "kaboom"
+
+
+def test_a_langfuse_outage_degrades_to_a_note(client, langfuse_project, monkeypatch):
+    """The local run list must not die with someone else's server."""
+    from operonx_studio import app as app_module
+
+    def broken(cfg, path, **params):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(app_module, "_lf_get", broken)
+    pid = _open(client, langfuse_project)
+    data = client.get(f"/api/p/{pid}/traces").json()
+    assert data["configured"] and "connection refused" in data["langfuse_error"]
+    res = client.get(f"/api/p/{pid}/trace/lf:call-abc")
+    assert res.status_code == 502
+
+
+def test_langfuse_env_interpolation(tmp_path, monkeypatch):
+    from operonx_studio.app import _langfuse_cfg
+
+    (tmp_path / "operonx.toml").write_text(
+        '[project]\nname="x"\n[studio.langfuse]\n'
+        'host = "${T_LF_HOST}"\npublic_key = "${T_LF_PK:pk-default}"\n'
+        'secret_key = "sk-literal"\n', encoding="utf-8")
+    monkeypatch.setenv("T_LF_HOST", "https://lf.internal/")
+    cfg = _langfuse_cfg(tmp_path)
+    assert cfg == {"host": "https://lf.internal", "public": "pk-default",
+                   "secret": "sk-literal"}
+    # an unset, defaultless variable leaves the source unconfigured
+    monkeypatch.delenv("T_LF_HOST")
+    assert _langfuse_cfg(tmp_path) is None
+
+
 # ── the semantics a normal workflow tool does not have ──────────────────
 
 LOOP_MAIN = '''
@@ -382,6 +488,19 @@ def test_generators_and_consume_modes_reach_the_canvas(client, semantics_project
     assert fan_in["binding"]["consume"] == {"mode": "parallel"}
     done_in = next(i for i in by_name["done"]["inputs"] if i["name"] == "outs")
     assert done_in["binding"]["consume"] == {"mode": "collect"}
+
+
+def test_manifest_declared_boundary_ops_become_doors(client, project):
+    """A project with stream-level teardown writes its own ingress/egress
+    over current_session(); no function-identity check can see those. The
+    manifest names them and the studio tags them like library doors."""
+    manifest = (project / "operonx.toml").read_text()
+    (project / "operonx.toml").write_text(
+        manifest + '\n[studio]\ningress = ["a"]\n', encoding="utf-8")
+    pid = _open(client, project)
+    data = client.get(f"/api/p/{pid}/ir").json()
+    (node,) = [n for n in data["graphs"][0]["nodes"] if n["name"] == "a"]
+    assert node["serve_role"] == "ingress"
 
 
 NESTED_MAIN = '''

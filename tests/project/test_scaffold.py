@@ -40,16 +40,17 @@ class TestLayout:
         scaffold(tmp_path, "My Project")
         assert 'name = "my-project"' in (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
 
-    def test_pins_above_the_breaking_release(self, tmp_path):
-        """1.0.0 was breaking; a lower floor could resolve to an older API."""
+    def test_pins_at_the_serve_layer_floor(self, tmp_path):
+        """Every scaffolded flow is served; ingress/egress shipped in 1.5.0,
+        so a lower floor would resolve to an operonx the code cannot import."""
         scaffold(tmp_path, "demo")
         text = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
-        assert f"operonx>={OPERONX_PIN}" in text
-        assert tuple(int(p) for p in OPERONX_PIN.split(".")) >= (1, 0, 0)
+        assert f"operonx[serve]>={OPERONX_PIN}" in text
+        assert tuple(int(p) for p in OPERONX_PIN.split(".")) >= (1, 5, 0)
 
     def test_llm_variant_takes_the_openai_extra(self, tmp_path):
         scaffold(tmp_path, "demo", with_llm=True)
-        assert "operonx[openai]" in (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
+        assert "operonx[openai,serve]" in (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
 
 
 class TestNeverClobbers:
@@ -117,5 +118,11 @@ class TestItBuildsAndExtracts:
         assert not report.slow
 
         graph = extract_project(manifest)["graphs"][0]
-        assert [n["name"] for n in graph["nodes"]] == ["clean", "report"]
-        assert [(e["from"], e["to"]) for e in graph["edges"]] == [("clean", "report")]
+        # one main graph: ingress in, the flow's ops, egress out
+        assert [n["name"] for n in graph["nodes"]] == ["request", "clean", "report", "out"]
+        assert [(e["from"], e["to"]) for e in graph["edges"]] == [
+            ("request", "clean"), ("clean", "report"), ("report", "out")]
+        roles = {n["name"]: n.get("serve_role") for n in graph["nodes"]}
+        assert roles["request"] == "ingress" and roles["out"] == "egress", (
+            "the serve boundary must be tagged so the canvas can draw doors")
+        assert roles["clean"] is None and roles["report"] is None

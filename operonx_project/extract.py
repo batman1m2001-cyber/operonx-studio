@@ -295,6 +295,14 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
         value = _slot(op, extra)
         if value is not None:
             node[extra] = _json_safe(value)
+    # The serve boundary is not compute: ingress hands the client's frames
+    # to the run, egress hands the run's answers back. A viewer that draws
+    # them as ordinary ops invites the reader to look for business logic
+    # inside a door.
+    code_fn = _slot(op, "code_fn")
+    if (getattr(code_fn, "__module__", None) == "operonx.core.serve.ops"
+            and getattr(code_fn, "__name__", "") in ("ingress", "egress")):
+        node["serve_role"] = code_fn.__name__
     if _slot(op, "_ops"):
         node["graph"] = _subgraph(op, root, anchors, module)
     return node

@@ -22,6 +22,7 @@ means the tabs say so instead of guessing.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -175,7 +176,7 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                 "y": n.y,
                 **{k: nodes_by_id.get(n.id, {}).get(k) for k in
                    ("bound", "start", "end", "outputs", "inputs", "source",
-                    "loop", "is_gen", "transient")},
+                    "loop", "is_gen", "transient", "serve_role")},
                 "subgraph_ops": len((nodes_by_id.get(n.id, {}).get("graph") or {}).get("nodes") or []) or None,
                 "graph": _subgraph(n.id),
             }
@@ -190,7 +191,23 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _op_executions(run_dir: Path, op_name: str, limit: int = 50) -> Dict[str, Any]:
+# ── trace records: one shape, two sources ───────────────────────────────
+# The studio never invents trace data — it reads what a consumer recorded.
+# `LocalConsumer` writes `<run>/nodes.jsonl`; `LangfuseConsumer` ships the
+# same executions to Langfuse as spans. Both normalise to one record shape
+# here, and the aggregate + drill-down work over that.
+
+
+def _local_records(run_dir: Path):
+    with (run_dir / "nodes.jsonl").open(encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+
+def _op_executions(records, run_name: str, op_name: str, limit: int = 50) -> Dict[str, Any]:
     """Every recorded execution of one op in one run — the drill-down
     under the aggregate, inputs and outputs included.
 
@@ -210,62 +227,152 @@ def _op_executions(run_dir: Path, op_name: str, limit: int = 50) -> Dict[str, An
     # name makes clicking a container show its members' executions instead
     # of a wrong "no records".
     marker = f".{op_name}."
-    with (run_dir / "nodes.jsonl").open(encoding="utf-8") as fh:
-        for line in fh:
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            name = rec.get("op_name") or rec.get("op_full_name") or "?"
-            full = rec.get("op_full_name") or ""
-            if name != op_name and marker not in full and not full.startswith(op_name + "."):
-                continue
-            total += 1
-            keep.append({
-                "op": name,
-                "start_time": rec.get("start_time"),
-                "duration_ms": rec.get("duration_ms"),
-                "status": rec.get("status"),
-                "error": rec.get("error"),
-                "ctx": rec.get("ctx"),
-                "inputs": rec.get("inputs"),
-                "outputs": rec.get("outputs"),
-            })
-    return {"run": run_dir.name, "op": op_name, "total": total,
+    for rec in records:
+        name = rec.get("op_name") or rec.get("op_full_name") or "?"
+        full = rec.get("op_full_name") or ""
+        if name != op_name and marker not in full and not full.startswith(op_name + "."):
+            continue
+        total += 1
+        keep.append({
+            "op": name,
+            "start_time": rec.get("start_time"),
+            "duration_ms": rec.get("duration_ms"),
+            "status": rec.get("status"),
+            "error": rec.get("error"),
+            "ctx": rec.get("ctx"),
+            "inputs": rec.get("inputs"),
+            "outputs": rec.get("outputs"),
+        })
+    return {"run": run_name, "op": op_name, "total": total,
             "showing": len(keep), "executions": list(keep)}
 
 
-def _summarise_run(run_dir: Path, limit: int = 20000) -> Dict[str, Any]:
+def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]:
     """Per-op aggregates for one recorded run.
 
-    Aggregated server-side because a call's ``nodes.jsonl`` can hold tens
-    of thousands of per-item records — the callbot writes one per audio
+    Aggregated server-side because a call's record stream can hold tens
+    of thousands of per-item entries — the callbot writes one per audio
     packet — and the canvas needs per-op numbers, not the firehose.
     """
     per_op: Dict[str, Dict[str, Any]] = {}
-    records = 0
-    with (run_dir / "nodes.jsonl").open(encoding="utf-8") as fh:
-        for line in fh:
-            if records >= limit:
-                break
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            records += 1
-            name = rec.get("op_name") or rec.get("op_full_name") or "?"
-            agg = per_op.setdefault(name, {
-                "runs": 0, "errors": 0, "total_ms": 0.0, "max_ms": 0.0, "last_error": None,
-            })
-            agg["runs"] += 1
-            duration = float(rec.get("duration_ms") or 0.0)
-            agg["total_ms"] += duration
-            agg["max_ms"] = max(agg["max_ms"], duration)
-            if rec.get("status") not in (None, "ok"):
-                agg["errors"] += 1
-                agg["last_error"] = rec.get("error") or rec.get("status")
-    return {"run": run_dir.name, "records": records, "ops": per_op,
-            "truncated": records >= limit}
+    count = 0
+    for rec in records:
+        if count >= limit:
+            break
+        count += 1
+        name = rec.get("op_name") or rec.get("op_full_name") or "?"
+        agg = per_op.setdefault(name, {
+            "runs": 0, "errors": 0, "total_ms": 0.0, "max_ms": 0.0, "last_error": None,
+        })
+        agg["runs"] += 1
+        duration = float(rec.get("duration_ms") or 0.0)
+        agg["total_ms"] += duration
+        agg["max_ms"] = max(agg["max_ms"], duration)
+        if rec.get("status") not in (None, "ok"):
+            agg["errors"] += 1
+            agg["last_error"] = rec.get("error") or rec.get("status")
+    return {"run": run_name, "records": count, "ops": per_op,
+            "truncated": count >= limit}
+
+
+# ── the Langfuse source ─────────────────────────────────────────────────
+
+
+def _langfuse_cfg(root: Path) -> Optional[Dict[str, str]]:
+    """The `[studio.langfuse]` table, env-interpolated, or nothing.
+
+        [studio.langfuse]
+        host       = "${LANGFUSE_HOST}"
+        public_key = "${LANGFUSE_PUBLIC_KEY}"
+        secret_key = "${LANGFUSE_SECRET_KEY}"
+
+    Values may be literal or `${VAR}` / `${VAR:default}`. Keys never land
+    in the IR or the page — they authenticate server-side fetches only.
+    """
+    import re
+
+    table = _studio_table(root).get("langfuse")
+    if not isinstance(table, dict):
+        return None
+
+    def env(value: Any) -> str:
+        value = str(value or "")
+        m = re.fullmatch(r"\$\{([A-Za-z0-9_]+)(?::([^}]*))?\}", value)
+        if m:
+            return os.environ.get(m.group(1)) or (m.group(2) or "")
+        return value
+
+    host = env(table.get("host")).rstrip("/")
+    public = env(table.get("public_key"))
+    secret = env(table.get("secret_key"))
+    if not (host and public and secret):
+        return None
+    return {"host": host, "public": public, "secret": secret}
+
+
+def _lf_get(cfg: Dict[str, str], path: str, **params: Any) -> Any:
+    import base64
+    import urllib.parse
+    import urllib.request
+
+    url = cfg["host"] + path
+    if params:
+        url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
+    token = base64.b64encode(f"{cfg['public']}:{cfg['secret']}".encode()).decode()
+    req = urllib.request.Request(url, headers={"Authorization": f"Basic {token}"})
+    with urllib.request.urlopen(req, timeout=30) as res:
+        return json.loads(res.read().decode("utf-8"))
+
+
+def _iso_epoch(stamp: Any) -> float:
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _lf_records(cfg: Dict[str, str], trace_id: str):
+    """One Langfuse trace's observations, as normal trace records.
+
+    `LangfuseConsumer._span_create` wrote what we need back verbatim:
+    span name = op_name, metadata carries op_full_name / status /
+    duration_ms, statusMessage the error, input/output the payloads.
+    """
+    detail = _lf_get(cfg, f"/api/public/traces/{trace_id}")
+    for obs in detail.get("observations") or []:
+        meta = obs.get("metadata") or {}
+        duration = meta.get("duration_ms")
+        if duration is None and obs.get("startTime") and obs.get("endTime"):
+            duration = (_iso_epoch(obs["endTime"]) - _iso_epoch(obs["startTime"])) * 1000.0
+        status = meta.get("status") or ("error" if obs.get("level") == "ERROR" else "ok")
+        yield {
+            "op_name": obs.get("name"),
+            "op_full_name": meta.get("op_full_name") or obs.get("name"),
+            "start_time": _iso_epoch(obs.get("startTime")),
+            "duration_ms": duration or 0.0,
+            "status": status,
+            "error": obs.get("statusMessage"),
+            "ctx": meta.get("ctx"),
+            "inputs": obs.get("input"),
+            "outputs": obs.get("output"),
+        }
+
+
+def _lf_runs(cfg: Dict[str, str], limit: int = 50) -> List[Dict[str, Any]]:
+    listing = _lf_get(cfg, "/api/public/traces", limit=limit, orderBy="timestamp.DESC")
+    return [
+        {
+            "run": f"lf:{t['id']}",
+            "mtime": _iso_epoch(t.get("timestamp")),
+            "size": None,
+            "source": "langfuse",
+            "name": t.get("name"),
+        }
+        for t in listing.get("data") or []
+        if t.get("id")
+    ]
 
 
 # ── the app ─────────────────────────────────────────────────────────────
@@ -393,6 +500,29 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": "unknown project"}, status_code=404)
         return FileResponse(STATIC / "project.html")
 
+    def _declared_roles(root: Path, graphs: List[Dict[str, Any]]) -> None:
+        """Boundary ops the manifest names outright.
+
+        A project with stream-level teardown writes its own ingress/egress
+        over `current_session()` — the extension point, not a workaround —
+        and no function-identity check can see those. `[studio]`'s
+        `ingress`/`egress` lists name such ops so they still draw as doors:
+
+            [studio]
+            ingress = ["recv"]
+            egress  = ["played"]
+        """
+        table = _studio_table(root)
+        declared = {str(n): role
+                    for role in ("ingress", "egress")
+                    for n in (table.get(role) or [])}
+        if not declared:
+            return
+        for g in graphs:
+            for n in g.get("nodes") or []:
+                if not n.get("serve_role") and n["name"] in declared:
+                    n["serve_role"] = declared[n["name"]]
+
     @app.get("/api/p/{pid}/ir")
     def project_ir(pid: str) -> JSONResponse:
         watcher = _watcher(pid)
@@ -408,12 +538,14 @@ def build_studio_app(recents: Optional[Recents] = None):
                 "stamp": result.stamp,
             })
         ir = result.ir
+        placed = [_placed(g) for g in ir.get("graphs") or []]
+        _declared_roles(watcher.root, placed)
         return JSONResponse({
             "name": ir.get("project"),
             "description": ir.get("description", ""),
             "root": str(watcher.root),
             "stamp": result.stamp,
-            "graphs": [_placed(g) for g in ir.get("graphs") or []],
+            "graphs": placed,
             "serves": ir.get("serves") or [],
             "resources": ir.get("resources") or {},
             "traces_configured": _traces_root(watcher.root) is not None,
@@ -478,30 +610,52 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.get("/api/p/{pid}/traces")
     def traces(pid: str) -> JSONResponse:
+        """Runs from every configured trace source, one list.
+
+        The studio reads what a consumer recorded — nothing else. A
+        `[studio] traces` dir lists LocalConsumer runs; a
+        `[studio.langfuse]` table lists the traces LangfuseConsumer
+        shipped. A Langfuse outage degrades to a note, never a 500 —
+        the local list must not die with someone else's server.
+        """
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
         root = _traces_root(watcher.root)
-        if root is None:
+        lf = _langfuse_cfg(watcher.root)
+        if root is None and lf is None:
             return JSONResponse({"configured": False, "runs": []})
-        if not root.is_dir():
-            return JSONResponse({"configured": True, "missing": str(root), "runs": []})
-        runs: List[Dict[str, Any]] = []
-        for entry in root.iterdir():
-            nodes = entry / "nodes.jsonl"
-            if not nodes.is_file():
-                continue
-            stat = nodes.stat()
-            runs.append({
-                "run": entry.name,
-                "mtime": stat.st_mtime,
-                "size": stat.st_size,
-            })
-        runs.sort(key=lambda r: -r["mtime"])
-        return JSONResponse({"configured": True, "root": str(root), "runs": runs[:200]})
 
-    @app.get("/api/p/{pid}/trace/{run}")
-    def trace(pid: str, run: str) -> JSONResponse:
+        payload: Dict[str, Any] = {"configured": True}
+        runs: List[Dict[str, Any]] = []
+        if root is not None:
+            if not root.is_dir():
+                payload["missing"] = str(root)
+            else:
+                payload["root"] = str(root)
+                for entry in root.iterdir():
+                    nodes = entry / "nodes.jsonl"
+                    if not nodes.is_file():
+                        continue
+                    stat = nodes.stat()
+                    runs.append({
+                        "run": entry.name,
+                        "mtime": stat.st_mtime,
+                        "size": stat.st_size,
+                        "source": "local",
+                    })
+        if lf is not None:
+            payload["langfuse"] = lf["host"]
+            try:
+                runs.extend(_lf_runs(lf))
+            except Exception as exc:  # noqa: BLE001 — someone else's server
+                payload["langfuse_error"] = str(exc)
+        runs.sort(key=lambda r: -(r["mtime"] or 0))
+        payload["runs"] = runs[:200]
+        return JSONResponse(payload)
+
+    def _local_run_dir(pid: str, run: str):
+        """Resolve a local run's directory, or a JSONResponse explaining why not."""
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
@@ -514,25 +668,55 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": "no such run"}, status_code=404)
         if not (run_dir / "nodes.jsonl").is_file():
             return JSONResponse({"error": "no such run"}, status_code=404)
-        return JSONResponse(_summarise_run(run_dir))
+        return run_dir
+
+    def _lf_for(pid: str, run: str):
+        """Langfuse config + trace id for an `lf:` run, or an error response."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        cfg = _langfuse_cfg(watcher.root)
+        if cfg is None:
+            return JSONResponse({"error": "no [studio.langfuse] configured"}, status_code=404)
+        return cfg, run[3:]
+
+    @app.get("/api/p/{pid}/trace/{run}")
+    def trace(pid: str, run: str) -> JSONResponse:
+        if run.startswith("lf:"):
+            got = _lf_for(pid, run)
+            if isinstance(got, JSONResponse):
+                return got
+            cfg, trace_id = got
+            try:
+                return JSONResponse(_summarise_run(_lf_records(cfg, trace_id), run))
+            except Exception as exc:  # noqa: BLE001 — someone else's server
+                return JSONResponse({"error": f"langfuse: {exc}"}, status_code=502)
+        run_dir = _local_run_dir(pid, run)
+        if isinstance(run_dir, JSONResponse):
+            return run_dir
+        return JSONResponse(_summarise_run(_local_records(run_dir), run_dir.name))
 
     @app.get("/api/p/{pid}/trace/{run}/op/{op_name}")
     def trace_op(pid: str, run: str, op_name: str, limit: int = 50) -> JSONResponse:
         """One op's executions in one run — the drill-down under the
         aggregate, with the recorded inputs and outputs. Same run-name
         containment rule as the summary endpoint above."""
-        watcher = _watcher(pid)
-        if watcher is None:
-            return JSONResponse({"error": "unknown project"}, status_code=404)
-        root = _traces_root(watcher.root)
-        if root is None:
-            return JSONResponse({"error": "no [studio] traces configured"}, status_code=404)
-        run_dir = (root / run).resolve()
-        if root.resolve() not in run_dir.parents:
-            return JSONResponse({"error": "no such run"}, status_code=404)
-        if not (run_dir / "nodes.jsonl").is_file():
-            return JSONResponse({"error": "no such run"}, status_code=404)
-        return JSONResponse(_op_executions(run_dir, op_name, limit=max(1, min(limit, 200))))
+        limit = max(1, min(limit, 200))
+        if run.startswith("lf:"):
+            got = _lf_for(pid, run)
+            if isinstance(got, JSONResponse):
+                return got
+            cfg, trace_id = got
+            try:
+                return JSONResponse(
+                    _op_executions(_lf_records(cfg, trace_id), run, op_name, limit=limit))
+            except Exception as exc:  # noqa: BLE001 — someone else's server
+                return JSONResponse({"error": f"langfuse: {exc}"}, status_code=502)
+        run_dir = _local_run_dir(pid, run)
+        if isinstance(run_dir, JSONResponse):
+            return run_dir
+        return JSONResponse(
+            _op_executions(_local_records(run_dir), run_dir.name, op_name, limit=limit))
 
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
     return app

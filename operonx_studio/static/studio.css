@@ -160,6 +160,16 @@ header.bar select {
 .node.serve-node::before { background: var(--k-serve); }
 .node.errorlit { border-color: var(--err); }
 
+/* ingress/egress — the serve boundary, drawn as doors in the serve
+   family, visually apart from compute ops */
+.node.gate {
+  background: #241a10; border: 1.5px dashed #6b4d24; border-radius: 18px;
+  min-height: 52px;
+}
+.node.gate::before { background: var(--k-serve); }
+.node.gate .nname { color: #fbbf7a; }
+.node.gate .nkind { color: #8a6a45; }
+
 /* an opened GraphOp — a container whose members are real nodes on the
    canvas; the box itself is just the boundary and a title strip */
 .node.container {
