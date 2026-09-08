@@ -304,3 +304,55 @@ class TestServedPageIsEditable:
         (root / f"{mod}.py").write_text("boom ((((\n", encoding="utf-8")
         watcher = ProjectWatcher(root=root)
         assert "__OPERONX_EDITABLE__" not in page_for(watcher, watcher.extract())
+
+
+class TestIRCache:
+    """Extraction costs seconds; a restart must not repay it."""
+
+    def test_a_new_watcher_reuses_the_cached_extraction(self, project):
+        root, _mod = project
+        first = ProjectWatcher(root=root)
+        result = first.refresh()
+        assert result.ok
+
+        # a studio restart: a brand-new watcher over the same project
+        second = ProjectWatcher(root=root)
+        assert second.last.ok, "cached IR should be preloaded"
+        assert second.last.ir == result.ir
+        assert second.changed() is False, "cache carries the fingerprint too"
+
+    def test_an_edited_project_invalidates_the_cache(self, project):
+        root, mod = project
+        ProjectWatcher(root=root).refresh()
+        path = root / f"{mod}.py"
+        path.write_text(path.read_text() + "\n# touched\n", encoding="utf-8")
+        import os
+        os.utime(path, (path.stat().st_atime, path.stat().st_mtime + 5))
+
+        fresh = ProjectWatcher(root=root)
+        assert fresh.last.stamp == 0.0, "stale cache must not be served"
+
+    def test_swr_serves_stale_immediately_then_updates(self, project):
+        """The canvas appears in milliseconds; the repaint follows."""
+        import time as _t
+
+        root, mod = project
+        watcher = ProjectWatcher(root=root)
+        old = watcher.refresh()
+        assert old.ok
+
+        path = root / f"{mod}.py"
+        path.write_text(path.read_text().replace('"hi"', '"yo"'), encoding="utf-8")
+        import os
+        os.utime(path, (path.stat().st_atime, path.stat().st_mtime + 5))
+
+        t0 = _t.perf_counter()
+        stale = watcher.refresh_swr()
+        assert (_t.perf_counter() - t0) < 0.5, "SWR must not block on extraction"
+        assert stale.stamp == old.stamp, "the stale picture is the old picture"
+
+        for _ in range(200):
+            if not watcher._extracting:
+                break
+            _t.sleep(0.1)
+        assert watcher.last.stamp > old.stamp, "background extraction landed"

@@ -77,13 +77,68 @@ class ExtractResult:
         return self.ir is not None
 
 
+def _ir_cache_dir() -> Path:
+    """Overridable so tests never write into the real home directory."""
+    import os
+
+    return Path(os.environ.get("OPERONX_IR_CACHE",
+                               str(Path.home() / ".operonx" / "ircache")))
+
+
 @dataclass
 class ProjectWatcher:
-    """Tracks a project's files and re-extracts when any of them changes."""
+    """Tracks a project's files and re-extracts when any of them changes.
+
+    Extraction costs seconds — it imports the whole project under its own
+    interpreter (the callbot: 3.8s) — so the last good result is persisted
+    to ``~/.operonx/ircache`` keyed on the file fingerprint. A restarted
+    studio serves yesterday's picture instantly when nothing changed, and
+    ``refresh_swr`` serves the stale picture immediately while a fresh
+    extraction runs in the background; the stamp poll delivers the update.
+    """
 
     root: Path
     _fingerprint: Tuple = field(default=(), init=False)
     _last: ExtractResult = field(default_factory=ExtractResult, init=False)
+    _extracting: bool = field(default=False, init=False)
+
+    def __post_init__(self) -> None:
+        import threading
+
+        self._lock = threading.Lock()
+        self._load_cache()
+
+    # ── the disk cache ──────────────────────────────────────────────
+
+    def _cache_file(self) -> Path:
+        import hashlib
+
+        digest = hashlib.sha1(str(self.root.resolve()).encode()).hexdigest()[:12]
+        return _ir_cache_dir() / f"{digest}.json"
+
+    def _load_cache(self) -> None:
+        try:
+            raw = json.loads(self._cache_file().read_text(encoding="utf-8"))
+            cached_fp = tuple(tuple(entry) for entry in raw["fingerprint"])
+        except Exception:  # noqa: BLE001 — absent or corrupt: cold start
+            return
+        if cached_fp != self.fingerprint():
+            return  # the project moved on while the studio was away
+        self._fingerprint = cached_fp
+        self._last = ExtractResult(ir=raw.get("ir"), error=raw.get("error"),
+                                   stamp=float(raw.get("stamp") or 0.0))
+
+    def _save_cache(self) -> None:
+        try:
+            _ir_cache_dir().mkdir(parents=True, exist_ok=True)
+            self._cache_file().write_text(json.dumps({
+                "fingerprint": [list(entry) for entry in self._fingerprint],
+                "ir": self._last.ir,
+                "error": self._last.error,
+                "stamp": self._last.stamp,
+            }), encoding="utf-8")
+        except OSError:
+            pass  # a cache that cannot be written is just a cold start later
 
     def watched_files(self) -> Set[Path]:
         """Every file whose change should re-extract.
@@ -195,12 +250,55 @@ class ProjectWatcher:
             self._last = ExtractResult(ir=json.loads(proc.stdout), stamp=stamp)
         except json.JSONDecodeError as exc:
             self._last = ExtractResult(error=f"extractor returned invalid JSON: {exc}", stamp=stamp)
+        self._save_cache()
         return self._last
 
     def refresh(self, force: bool = False) -> ExtractResult:
         if force or self.changed() or self._last.stamp == 0.0:
             return self.extract()
         return self._last
+
+    def refresh_swr(self) -> ExtractResult:
+        """Stale-while-revalidate: the last good picture NOW, the fresh one
+        via the stamp poll.
+
+        Blocks only when there is nothing at all to show. Otherwise a
+        change kicks one background extraction and the caller gets the
+        previous result immediately — the canvas appears in milliseconds
+        and repaints itself seconds later, which beats staring at nothing
+        for the duration of a project import.
+        """
+        if self._last.stamp == 0.0:
+            # Nothing to show yet — the cold path stays blocking. If a
+            # prewarm already started the work, wait for it instead of
+            # running the same extraction twice.
+            if self._extracting:
+                for _ in range(300):
+                    if not self._extracting:
+                        break
+                    time.sleep(0.1)
+                return self._last
+            self.changed()
+            return self.extract()
+        if self.changed():
+            self._kick_background_extract()
+        return self._last
+
+    def _kick_background_extract(self) -> None:
+        import threading
+
+        with self._lock:
+            if self._extracting:
+                return
+            self._extracting = True
+
+        def run() -> None:
+            try:
+                self.extract()
+            finally:
+                self._extracting = False
+
+        threading.Thread(target=run, name=f"extract:{self.root.name}", daemon=True).start()
 
     @property
     def last(self) -> ExtractResult:

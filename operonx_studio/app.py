@@ -447,6 +447,34 @@ def build_studio_app(recents: Optional[Recents] = None):
         watchers[pid] = ProjectWatcher(root=ref.root)
         return watchers[pid]
 
+    def _prewarm() -> None:
+        """Extract every recent project before anyone asks.
+
+        One at a time — seventeen simultaneous interpreter imports would
+        be a load spike, and the point is warmth, not a race. Projects
+        whose disk-cached IR still matches their files cost nothing here.
+        """
+        import threading
+        import time as _time
+
+        def run() -> None:
+            for ref in recents.ordered():
+                try:
+                    if not ref.exists:
+                        continue
+                    watcher = watchers.setdefault(ref.id, ProjectWatcher(root=ref.root))
+                    if watcher.last.stamp != 0.0 and not watcher.changed():
+                        continue
+                    watcher._kick_background_extract()
+                    while watcher._extracting:
+                        _time.sleep(0.2)
+                except Exception:  # noqa: BLE001 — warmth is best-effort
+                    continue
+
+        threading.Thread(target=run, name="prewarm", daemon=True).start()
+
+    _prewarm()
+
     # ── home ────────────────────────────────────────────────────────────
 
     @app.get("/")
@@ -565,7 +593,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
-        result = watcher.refresh()
+        result = watcher.refresh_swr()
         ref = recents.get(pid)
         if not result.ok:
             return JSONResponse({
@@ -593,7 +621,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
-        result = watcher.refresh()
+        result = watcher.refresh_swr()
         return JSONResponse({"stamp": result.stamp, "ok": result.ok})
 
     @app.post("/api/p/{pid}/edit")
