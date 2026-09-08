@@ -12,6 +12,8 @@
 const PID = location.pathname.split("/").pop();
 const NODE_W = 210, NODE_H = 64;
 const HEADER = 34;              // a container's title strip
+const MOTION_OK = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const SVGNS = "http://www.w3.org/2000/svg";
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const el = (tag, cls, text) => {
@@ -189,12 +191,40 @@ function consumeOf(edge, a, b) {
 }
 
 function edgeGlyph(svg, x, y, text, cls) {
-  const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  const t = document.createElementNS(SVGNS, "text");
   t.setAttribute("x", x); t.setAttribute("y", y);
   t.setAttribute("text-anchor", "middle");
   if (cls) t.setAttribute("class", cls);
   t.textContent = text;
   svg.append(t);
+}
+
+/* An axon ends in a synaptic bouton at its target — which also gives
+ * every edge the direction the old plain strokes never showed. */
+function bouton(svg, x, y, cls) {
+  const c = document.createElementNS(SVGNS, "circle");
+  c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", 3.5);
+  c.setAttribute("class", "bouton" + (cls ? ` ${cls}` : ""));
+  svg.append(c);
+}
+
+/* The action potential: one glowing dot travelling the axon. Skipped
+ * when the user asks for reduced motion, or on very dense graphs. */
+function impulse(svg, path, animate) {
+  if (!animate) return;
+  const c = document.createElementNS(SVGNS, "circle");
+  c.setAttribute("r", 2.4);
+  c.setAttribute("class", "impulse");
+  const move = document.createElementNS(SVGNS, "animateMotion");
+  const dur = 2.8 + Math.random() * 1.8;
+  move.setAttribute("dur", `${dur.toFixed(2)}s`);
+  move.setAttribute("begin", `${(-Math.random() * dur).toFixed(2)}s`);
+  move.setAttribute("repeatCount", "indefinite");
+  const ref = document.createElementNS(SVGNS, "mpath");
+  ref.setAttribute("href", `#${path.id}`);
+  move.append(ref);
+  c.append(move);
+  svg.append(c);
 }
 
 function serveNodesFor(graph) {
@@ -241,22 +271,30 @@ function render() {
     .map(name => flat.nodes.find(it => it.depth === 0 && it.node.name === name))
     .filter(Boolean);
 
+  // Impulses are joy on a working graph and sludge on a huge one.
+  const animate = MOTION_OK && flat.edges.length <= 120;
+  let axonN = 0;
+
   for (const s of serves) {
     for (const t of entryItems) {
-      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      const p = document.createElementNS(SVGNS, "path");
       p.setAttribute("d", bezier(s.x + 190, s.y + NODE_H / 2, t.x, portY(t)));
       p.setAttribute("class", "serve");
       svg.append(p);
+      bouton(svg, t.x, portY(t), "b-serve");
     }
   }
 
   // graph edges (every open level draws its own)
   for (const {e, a, b} of flat.edges) {
-    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const p = document.createElementNS(SVGNS, "path");
+    p.id = `ax${axonN++}`;
     let cls = e.soft ? "soft" : "";
+    let end = [b.x, portY(b)], endCls = "";
     if (e.back) {
       p.setAttribute("d", returnPath(a, b));
       cls += " back";
+      end = [b.x + b.w / 2, b.y + b.h]; endCls = "b-back";
       const dip = Math.max(a.y + a.h, b.y + b.h) + 58 + Math.abs(a.x - b.x) * 0.06;
       edgeGlyph(svg, (a.x + b.x + b.w) / 2, dip, "↺ loop", "back-label");
     } else if (b.x < a.x - 1) {
@@ -286,6 +324,8 @@ function render() {
                    || state.rendered.get(state.sel)?.node.id === e.dst)) cls += " hot";
     p.setAttribute("class", cls.trim());
     svg.append(p);
+    bouton(svg, end[0], end[1], endCls);
+    impulse(svg, p, animate);
   }
 
   // serve cards
@@ -336,6 +376,9 @@ function containerCard(it) {
   if (it.key === state.sel) card.classList.add("selected");
 
   const head = el("div", "chead");
+  const promoter = el("span", "promoter", "↱");
+  promoter.title = "An operon: one promoter, the genes inside transcribed together.";
+  head.append(promoter);
   head.append(el("span", "nname", n.name));
   head.append(el("span", "nkind", `${n.kind} · ${n.subgraph_ops} ops`));
   const close = el("button", "collapse", "▾ collapse");

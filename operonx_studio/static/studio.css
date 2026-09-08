@@ -197,18 +197,30 @@ header.bar select {
 #edges text.back-label { fill: var(--warn); }
 #edges text.routelabel { fill: var(--k-branch); font-size: 10.5px; }
 
-/* nodes */
+/* nodes — drawn as neurons: the card is the SOMA (radial cytoplasm,
+   soft membrane glow), the kind glyph sits in a round NUCLEUS, and the
+   ports are synaptic boutons. A bipolar neuron — one dendrite in, one
+   axon out — is exactly what an op is. */
 .node {
   position: absolute; width: 210px; min-height: 52px;
-  background: linear-gradient(180deg, #fffefa, #fdfaef);
+  background: radial-gradient(120% 160% at 30% 20%, #fffefb 0%, #fdf8e8 55%, #f9f0d2 100%);
   border: 1px solid var(--line);
-  border-radius: 14px; padding: 9px 12px 8px 17px; cursor: pointer;
+  border-radius: 26px; padding: 9px 14px 8px 19px; cursor: pointer;
   user-select: none;
-  box-shadow: var(--sh-1);
+  box-shadow: var(--sh-1), 0 0 18px rgba(214, 168, 40, .10);
   transition: transform var(--tr), box-shadow var(--tr), border-color var(--tr), opacity var(--tr);
 }
-.node:hover { transform: translateY(-2px); box-shadow: var(--sh-2); border-color: #d4b565; }
-.node .nicon { color: var(--kind, var(--k-func)); margin-right: 7px; font-size: 12px; }
+.node:hover { transform: translateY(-2px); border-color: #d4b565;
+  box-shadow: var(--sh-2), 0 0 26px rgba(214, 168, 40, .22); }
+.node .nicon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 19px; height: 19px; border-radius: 50%; margin-right: 7px;
+  font-size: 10.5px; color: #fff; vertical-align: -4px;
+  background: radial-gradient(circle at 32% 28%,
+    color-mix(in srgb, var(--kind, var(--k-func)) 55%, #fff),
+    var(--kind, var(--k-func)) 70%);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--kind, var(--k-func)) 45%, transparent);
+}
 .node.dimmed { opacity: .18; }
 .node.heated { border-color: color-mix(in srgb, var(--warn) calc(var(--heat, 0) * 100%), var(--line)); }
 #find {
@@ -251,11 +263,28 @@ body.resizing { user-select: none; cursor: col-resize; }
   background: rgba(23, 143, 102, .06); }
 .badge.run { color: var(--text); background: var(--panel);
   box-shadow: 0 1px 2px rgba(122, 92, 18, .12); }
-.node .port { position: absolute; width: 10px; height: 10px; border-radius: 50%;
-  background: var(--panel); border: 2px solid #cdb26a; top: 50%; margin-top: -5px;
-  transition: border-color var(--tr), transform var(--tr); }
-.node:hover .port { border-color: var(--accent); }
-.port.in { left: -6px; } .port.out { right: -6px; }
+.node .port { position: absolute; width: 12px; height: 12px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffe9a8, #dfae2e 75%);
+  border: 1.5px solid #c1922a; top: 50%; margin-top: -6px;
+  box-shadow: 0 0 6px rgba(214, 168, 40, .45);
+  transition: box-shadow var(--tr), transform var(--tr); }
+.node:hover .port, .node.selected .port {
+  box-shadow: 0 0 10px rgba(214, 168, 40, .8); transform: scale(1.15); }
+.port.in { left: -7px; } .port.out { right: -7px; }
+.node.selected { animation: bioluminesce 2.6s ease-in-out infinite; }
+@keyframes bioluminesce {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(201, 148, 15, .20), var(--sh-2); }
+  50% { box-shadow: 0 0 0 3px rgba(201, 148, 15, .32), 0 0 34px rgba(214, 168, 40, .4), var(--sh-2); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .node.selected { animation: none; }
+}
+/* axon terminals and travelling impulses */
+#edges circle.bouton { fill: #cf9a13; stroke: #f5e9bd; stroke-width: 1.5; }
+#edges circle.bouton.b-back { fill: var(--warn); }
+#edges circle.bouton.b-serve { fill: var(--k-serve); }
+#edges circle.impulse { fill: #ffd96a; stroke: rgba(201, 148, 15, .5);
+  stroke-width: 3; opacity: .9; }
 .node.serve-node { background: linear-gradient(180deg, #fdf6dd, #fbf0cb);
   border-color: #dcc172; width: 190px; }
 .node.serve-node::before { background: var(--k-serve); }
@@ -290,6 +319,8 @@ body.resizing { user-select: none; cursor: col-resize; }
   background: rgba(255, 253, 246, .55); border-radius: 14px 14px 0 0;
 }
 .node.container .chead .nname { font-weight: 650; font-size: 13px; }
+/* the operon nod: one promoter, the genes inside transcribed together */
+.node.container .chead .promoter { color: var(--accent); font-weight: 800; font-size: 13px; }
 .node.container .chead .nkind { color: var(--muted); font-size: 11px; }
 .node.container .collapse {
   margin-left: auto; border: none; background: none; color: var(--muted);
