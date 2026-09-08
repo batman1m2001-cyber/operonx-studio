@@ -550,23 +550,58 @@ function valuesSection(n, execP) {
   sec.append(el("div", "stitle", `Latest values · ${state.run.run}`));
   const box = el("div", null, "…");
   sec.append(box);
+
+  const addRow = (dir, key, val) => {
+    const row = el("div", `valrow ${dir === "in" ? "vin" : ""}`);
+    row.append(el("div", "vname mono", dir === "out" ? `${key} →` : `→ ${key}`));
+    row.append(Values.render(val, {open: dir === "out"}));
+    box.append(row);
+  };
+
   execP.then(data => {
     box.textContent = "";
+    if (!data.executions.length) {
+      box.append(el("div", "note", "no records for this op in this run"));
+      return;
+    }
+
+    if (n.graph) {
+      // A GraphOp never executes under its own name — its ports' values
+      // live in its MEMBERS' records. The last member record that
+      // carried each declared port name is the value that crossed the
+      // container's boundary.
+      const boundary = (names, dir) => {
+        const found = {};
+        for (const ex of data.executions) {
+          const src = dir === "out" ? ex.outputs : ex.inputs;
+          if (!src || typeof src !== "object") continue;
+          for (const k of names) if (k in src) found[k] = src[k];
+        }
+        return found;
+      };
+      const outs = boundary(n.outputs || [], "out");
+      const ins = boundary((n.inputs || []).map(i => i.name), "in");
+      for (const k of n.outputs || []) {
+        if (k in outs) addRow("out", k, outs[k]);
+        else addRow("out", k, "(not recorded in this run)");
+      }
+      for (const inp of n.inputs || []) {
+        if (inp.name in ins) addRow("in", inp.name, ins[inp.name]);
+      }
+      if (!box.childNodes.length) box.append(el("div", "note", "no declared ports"));
+      return;
+    }
+
+    // a plain op: the latest record's values, outputs first — "what did
+    // this op produce" is why the node was clicked
     const last = data.executions[data.executions.length - 1];
-    if (!last) { box.append(el("div", "note", "no records for this op in this run")); return; }
-    // outputs first: "what did this op produce" is why the node was clicked
     const groups = [["out", last.outputs, n.outputs || []],
                     ["in", last.inputs, null]];
     for (const [dir, values, priority] of groups) {
       const entries = Object.entries(values || {});
       if (priority) entries.sort((a, b) =>
         (priority.indexOf(a[0]) + 1 || 99) - (priority.indexOf(b[0]) + 1 || 99));
-      for (const [key, val] of entries) {
-        const row = el("div", `valrow ${dir === "in" ? "vin" : ""}`);
-        row.append(el("div", "vname mono", dir === "out" ? `${key} →` : `→ ${key}`));
-        row.append(Values.render(val, {open: dir === "out"}));
-        box.append(row);
-      }
+      for (const [key, val] of entries) addRow(dir, key, val);
     }
     if (!box.childNodes.length) box.append(el("div", "note", "record carried no values"));
   }).catch(e => { box.textContent = e.message; });

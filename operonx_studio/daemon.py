@@ -203,12 +203,13 @@ def _error_page(root: Path, message: str, stamp: float) -> str:
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <title>operonx studio · extraction failed</title>
 <style>
-body {{ font:14px/1.6 ui-sans-serif,system-ui,sans-serif; margin:0; background:#12151a; color:#e6e9ee; }}
+body {{ font:14px/1.6 ui-sans-serif,system-ui,sans-serif; margin:0;
+  background:linear-gradient(140deg,#faf2d2,#eed88f); color:#3d3626; }}
 main {{ max-width:860px; margin:56px auto; padding:0 24px; }}
-h1 {{ font-size:17px; margin:0 0 6px; }}
-p {{ color:#98a2b3; margin:0 0 18px; }}
-pre {{ background:#181c23; border:1px solid #272d37; border-radius:9px; padding:16px;
-  overflow:auto; font-size:12px; color:#e08163; white-space:pre-wrap; }}
+h1 {{ font-size:17px; margin:0 0 6px; color:#a1770a; }}
+p {{ color:#9a8a68; margin:0 0 18px; }}
+pre {{ background:#fffdf6; border:1px solid #e7dbb4; border-radius:9px; padding:16px;
+  overflow:auto; font-size:12px; color:#cf3f36; white-space:pre-wrap; }}
 </style></head><body><main>
 <h1>Could not build {_html.escape(root.name)}</h1>
 <p>The page reloads automatically once the project builds again.</p>
