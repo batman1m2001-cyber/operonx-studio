@@ -216,13 +216,50 @@ header.bar select {
   box-shadow: var(--sh-2), 0 0 26px rgba(214, 168, 40, .22); }
 .node .nicon {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 19px; height: 19px; border-radius: 50%; margin-right: 7px;
-  font-size: 10.5px; color: #fff; vertical-align: -4px;
+  width: 22px; height: 22px; border-radius: 50%; margin-right: 8px;
+  font-size: 11px; color: #fff; vertical-align: -5px;
   background: radial-gradient(circle at 32% 28%,
-    color-mix(in srgb, var(--kind, var(--k-func)) 55%, #fff),
-    var(--kind, var(--k-func)) 70%);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--kind, var(--k-func)) 45%, transparent);
+    color-mix(in srgb, var(--kind, var(--k-func)) 50%, #fff),
+    var(--kind, var(--k-func)) 72%);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--kind, var(--k-func)) 55%, transparent),
+              inset 0 -2px 4px rgba(0, 0, 0, .15);
 }
+
+/* the CELL: an op drawn as a brain cell — irregular membrane in the
+   kind's own hue, cytoplasm gradient, a soft nucleus halo behind the
+   content. Two membrane variants keep a row from looking stamped. */
+.node.cell {
+  border: 2px solid color-mix(in srgb, var(--kind, var(--k-func)) 45%, #e2cf98);
+  background:
+    radial-gradient(90% 130% at 32% 25%, #fffef9 0%, #fdf6df 55%,
+      color-mix(in srgb, var(--kind, var(--k-func)) 7%, #f8ecc4) 100%);
+  border-radius: 46% 54% 48% 52% / 62% 48% 58% 42%;
+  min-height: 58px; padding: 11px 16px 9px 24px;
+  box-shadow: 0 3px 12px rgba(160, 122, 24, .16),
+              0 0 0 5px color-mix(in srgb, var(--kind, var(--k-func)) 7%, transparent),
+              inset 0 0 16px rgba(255, 255, 255, .55);
+}
+.node.cell.alt { border-radius: 54% 46% 56% 44% / 46% 60% 42% 58%; }
+.node.cell:hover {
+  border-color: color-mix(in srgb, var(--kind, var(--k-func)) 65%, #e2cf98);
+  box-shadow: 0 6px 18px rgba(160, 122, 24, .22),
+              0 0 0 6px color-mix(in srgb, var(--kind, var(--k-func)) 12%, transparent),
+              inset 0 0 16px rgba(255, 255, 255, .55);
+}
+.node.cell.selected {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--kind, var(--k-func)) 30%, transparent),
+              0 6px 20px rgba(160, 122, 24, .25),
+              inset 0 0 16px rgba(255, 255, 255, .55);
+}
+.node.cell::before {
+  /* the nucleus halo, not a strip */
+  left: 8px; top: 50%; bottom: auto; width: 40px; height: 40px;
+  transform: translateY(-50%); border-radius: 50%;
+  background: radial-gradient(circle,
+    color-mix(in srgb, var(--kind, var(--k-func)) 20%, transparent), transparent 70%);
+}
+.node.cell .badges { margin-left: 30px; margin-top: 3px; }
+.node.cell .nname { margin-left: 0; }
 .node.dimmed { opacity: .18; }
 .node.heated { border-color: color-mix(in srgb, var(--warn) calc(var(--heat, 0) * 100%), var(--line)); }
 #find {
@@ -274,22 +311,28 @@ body.resizing { user-select: none; cursor: col-resize; }
   box-shadow: 0 0 10px rgba(214, 168, 40, .8); transform: scale(1.15); }
 .port.in { left: -7px; } .port.out { right: -7px; }
 /* neuron anatomy on the wire — all of it static:
-   bouton  = the axon's terminal knob at its target
-   myelin  = round-capped dash overlay; segments are the sheath, the
-             gaps the nodes of Ranvier, the thin core shows through
-   dendrite = the tuft on a soma's input side; an arriving bouton
-             meeting it is the textbook synapse */
-#edges circle.bouton { fill: #cf9a13; stroke: #f5e9bd; stroke-width: 1.5; }
+   bouton   = the axon's terminal knob at its target
+   eglow/ecore/espark = an edge as a beam of energy: soft glow, bright
+              core, spark particles frozen mid-flight whose smaller
+              trailing dots point the direction of flow
+   dendrite = the tree on a cell's input side, in the cell's own hue;
+              an arriving bouton meeting it is the synapse */
+#edges circle.bouton { fill: #e9ae1d; stroke: #fff6d8; stroke-width: 1.5; }
 #edges circle.bouton.b-back { fill: var(--warn); }
 #edges circle.bouton.b-serve { fill: var(--k-serve); }
-#edges path.myelin {
-  stroke: #e0c98c; stroke-width: 6.5;
-  stroke-dasharray: 15 7; stroke-linecap: round;
-  opacity: .8; pointer-events: none;
+#edges path.eglow {
+  stroke: rgba(228, 166, 26, .28); stroke-width: 8;
+  stroke-linecap: round; pointer-events: none;
 }
-#edges path.myelin.back { stroke: #dbb287; }
-#edges path.myelin.hot { stroke: color-mix(in srgb, var(--accent) 55%, #e0c98c); opacity: .95; }
-#edges path.dendrite { stroke: #c0aa72; stroke-width: 1.4; opacity: .9; }
+#edges path.ecore { stroke: #e9a91c; stroke-width: 2.2; pointer-events: none; }
+#edges path.eglow.back { stroke: rgba(179, 102, 26, .25); }
+#edges path.ecore.back { stroke: var(--warn); }
+#edges path.eglow.hot { stroke: rgba(201, 148, 15, .5); stroke-width: 10; }
+#edges path.ecore.hot { stroke: #9a7208; stroke-width: 2.6; }
+#edges circle.espark { fill: #ffcb3d; stroke: #fff6d8; stroke-width: 1.2; }
+#edges circle.espark.tailspark { opacity: .45; stroke: none; }
+#edges circle.espark.back { fill: #d98a3a; }
+#edges path.dendrite { stroke-width: 1.6; opacity: .75; fill: none; }
 .node.serve-node { background: linear-gradient(180deg, #fdf6dd, #fbf0cb);
   border-color: #dcc172; width: 190px; }
 .node.serve-node::before { background: var(--k-serve); }

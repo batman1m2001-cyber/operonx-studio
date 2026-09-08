@@ -207,31 +207,56 @@ function bouton(svg, x, y, cls) {
   svg.append(c);
 }
 
-/* The myelin sheath: the single most recognisable mark of a textbook
- * axon. A thick round-capped dash overlay on the same curve — the
- * segments are the sheath, the gaps the nodes of Ranvier, and the thin
- * core line shows through them. Static, structural, unmistakable. */
-function myelin(svg, d, cls) {
-  const m = document.createElementNS(SVGNS, "path");
-  m.setAttribute("d", d);
-  m.setAttribute("class", ("myelin " + cls).trim());
-  svg.append(m);
-  return m;
+/* An edge is a beam of energy: a wide soft glow, a bright core, and
+ * spark particles frozen mid-flight — each with a smaller trailing dot
+ * behind it, so the comet shape says which way the energy flows without
+ * a frame of animation. */
+function energyEdge(svg, d, cls) {
+  const glow = document.createElementNS(SVGNS, "path");
+  glow.setAttribute("d", d);
+  glow.setAttribute("class", ("eglow " + cls).trim());
+  svg.append(glow);
+  const core = document.createElementNS(SVGNS, "path");
+  core.setAttribute("d", d);
+  core.setAttribute("class", ("ecore " + cls).trim());
+  svg.append(core);
+  return core;
 }
 
-/* The dendrite tuft on a neuron's input side. Where an axon's bouton
- * meets it, the drawing IS the textbook synapse. */
+function energySparks(svg, path, cls) {
+  let len;
+  try { len = path.getTotalLength(); } catch { return; }
+  if (!len || len < 60) return;
+  const count = Math.max(2, Math.min(5, Math.round(len / 130)));
+  for (let i = 0; i < count; i++) {
+    const at = ((i + 0.5) / count) * len;
+    const pt = path.getPointAtLength(at);
+    const tail = path.getPointAtLength(Math.max(0, at - 7));
+    const t = document.createElementNS(SVGNS, "circle");
+    t.setAttribute("cx", tail.x); t.setAttribute("cy", tail.y); t.setAttribute("r", 1.6);
+    t.setAttribute("class", ("espark tailspark " + cls).trim());
+    svg.append(t);
+    const c = document.createElementNS(SVGNS, "circle");
+    c.setAttribute("cx", pt.x); c.setAttribute("cy", pt.y); c.setAttribute("r", 2.8);
+    c.setAttribute("class", ("espark " + cls).trim());
+    svg.append(c);
+  }
+}
+
+/* The dendrite tree on a cell's input side — bigger than a glyph, in
+ * the cell's own hue. An arriving bouton meeting it is the synapse. */
 function dendrites(svg, it) {
-  const x = it.x - 1, cy = portY(it);
+  const x = it.x + 2, cy = portY(it);
   const d = document.createElementNS(SVGNS, "path");
   d.setAttribute("d",
-    `M ${x} ${cy} C ${x - 7} ${cy - 2}, ${x - 8} ${cy - 7}, ${x - 13} ${cy - 10}`
-    + ` M ${x - 10} ${cy - 6} L ${x - 15} ${cy - 5}`
-    + ` M ${x} ${cy} L ${x - 15} ${cy}`
-    + ` M ${x - 11} ${cy} L ${x - 15} ${cy - 3.5} M ${x - 11} ${cy} L ${x - 15} ${cy + 3.5}`
-    + ` M ${x} ${cy} C ${x - 7} ${cy + 2}, ${x - 8} ${cy + 7}, ${x - 13} ${cy + 10}`
-    + ` M ${x - 10} ${cy + 6} L ${x - 15} ${cy + 5}`);
+    `M ${x} ${cy} C ${x - 9} ${cy - 3}, ${x - 11} ${cy - 9}, ${x - 17} ${cy - 13}`
+    + ` M ${x - 11} ${cy - 8} C ${x - 15} ${cy - 8}, ${x - 18} ${cy - 6}, ${x - 21} ${cy - 6}`
+    + ` M ${x} ${cy} L ${x - 19} ${cy}`
+    + ` M ${x - 12} ${cy} L ${x - 18} ${cy - 4.5} M ${x - 12} ${cy} L ${x - 18} ${cy + 4.5}`
+    + ` M ${x} ${cy} C ${x - 9} ${cy + 3}, ${x - 11} ${cy + 9}, ${x - 17} ${cy + 13}`
+    + ` M ${x - 11} ${cy + 8} C ${x - 15} ${cy + 8}, ${x - 18} ${cy + 6}, ${x - 21} ${cy + 6}`);
   d.setAttribute("class", "dendrite");
+  d.style.stroke = kindColor(it.node);
   svg.append(d);
 }
 
@@ -336,12 +361,14 @@ function render() {
     }
     if (state.sel && (state.rendered.get(state.sel)?.node.id === e.src
                    || state.rendered.get(state.sel)?.node.id === e.dst)) cls += " hot";
-    p.setAttribute("class", cls.trim());
-    svg.append(p);
-    // sheath over core: beads with the thin axon showing in the gaps —
-    // the nodes of Ranvier
     if (sheath !== null) {
-      myelin(svg, p.getAttribute("d"), cls.includes("hot") ? `${sheath} hot` : sheath);
+      // a hard edge is pure energy: glow + bright core + frozen sparks
+      const eCls = (sheath + (cls.includes("hot") ? " hot" : "")).trim();
+      const core = energyEdge(svg, p.getAttribute("d"), eCls);
+      energySparks(svg, core, eCls);
+    } else {
+      p.setAttribute("class", cls.trim());
+      svg.append(p);
     }
     bouton(svg, end[0], end[1], endCls);
   }
@@ -430,6 +457,9 @@ function opCard(it) {
     card.append(el("div", "nkind",
       n.serve_role === "ingress" ? "ingress · client → run" : "egress · run → client"));
   } else {
+    // a brain cell, with two membrane variants so a row of cells reads
+    // organic instead of stamped
+    card.classList.add("cell", n.name.length % 2 ? "alt" : "base");
     const line = el("div", "nname");
     line.append(el("span", "nicon", kindIcon(n)));
     line.append(n.name);
