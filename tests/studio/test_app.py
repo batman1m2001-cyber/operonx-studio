@@ -492,6 +492,43 @@ def semantics_project(tmp_path: Path) -> Path:
     return root
 
 
+def test_branch_routes_reach_the_canvas(client, semantics_project):
+    """A branch's whole meaning is which condition routes where. The op
+    stores its cases with human descriptions; a canvas drawing identical
+    unlabeled arrows out of a router hides the program's logic."""
+    pid = _open(client, semantics_project)
+    data = client.get(f"/api/p/{pid}/ir").json()
+    graph = next(g for g in data["graphs"] if g["name"] == "agent")
+    router = next(n for n in graph["nodes"] if n.get("routes"))
+    conds = {r["condition"]: r["target"] for r in router["routes"]}
+    assert "x >= 3" in conds
+    assert conds.get("else") == "again", conds
+
+
+def test_trace_listing_carries_activity_summaries(client, project, tmp_path):
+    """A run row that says only name/date/KB tells the user nothing about
+    what happened. The listing aggregates each local run once, cached on
+    the file's mtime."""
+    traces = tmp_path / "traces"
+    run = traces / "call-009"
+    run.mkdir(parents=True)
+    records = [
+        {"op_name": "a", "duration_ms": 5.0, "status": "ok",
+         "start_time": 100.0, "end_time": 100.005},
+        {"op_name": "b", "duration_ms": 7.0, "status": "error", "error": "x",
+         "start_time": 100.01, "end_time": 102.5},
+    ]
+    (run / "nodes.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in records), encoding="utf-8")
+    (project / "operonx.toml").write_text(
+        (project / "operonx.toml").read_text()
+        + f'\n[studio]\ntraces = "{traces}"\n', encoding="utf-8")
+    pid = _open(client, project)
+    (row,) = client.get(f"/api/p/{pid}/traces").json()["runs"]
+    assert row["ops"] == 2 and row["records"] == 2 and row["errors"] == 1
+    assert row["wall_s"] == 2.5
+
+
 def test_generators_and_consume_modes_reach_the_canvas(client, semantics_project):
     """A generator dispatches per yield; parallel and collect change the
     run's shape. A canvas that hides any of them draws a different system

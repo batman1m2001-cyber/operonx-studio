@@ -177,7 +177,7 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                 **{k: nodes_by_id.get(n.id, {}).get(k) for k in
                    ("bound", "start", "end", "outputs", "inputs", "source",
                     "loop", "is_gen", "transient", "serve_role", "code",
-                    "resource")},
+                    "resource", "routes")},
                 "subgraph_ops": len((nodes_by_id.get(n.id, {}).get("graph") or {}).get("nodes") or []) or None,
                 "graph": _subgraph(n.id),
             }
@@ -257,6 +257,8 @@ def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]
     """
     per_op: Dict[str, Dict[str, Any]] = {}
     count = 0
+    t_first: Optional[float] = None
+    t_last: Optional[float] = None
     for rec in records:
         if count >= limit:
             break
@@ -269,10 +271,18 @@ def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]
         duration = float(rec.get("duration_ms") or 0.0)
         agg["total_ms"] += duration
         agg["max_ms"] = max(agg["max_ms"], duration)
+        start, end = rec.get("start_time"), rec.get("end_time")
+        if isinstance(start, (int, float)):
+            t_first = start if t_first is None else min(t_first, start)
+        if isinstance(end, (int, float)):
+            t_last = end if t_last is None else max(t_last, end)
         if rec.get("status") not in (None, "ok"):
             agg["errors"] += 1
             agg["last_error"] = rec.get("error") or rec.get("status")
+    wall_s = (t_last - t_first) if (t_first is not None and t_last is not None) else None
     return {"run": run_name, "records": count, "ops": per_op,
+            "wall_s": round(wall_s, 2) if wall_s is not None else None,
+            "errors": sum(a["errors"] for a in per_op.values()),
             "truncated": count >= limit}
 
 
@@ -415,7 +425,7 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     def _page(name: str) -> HTMLResponse:
         text = (STATIC / name).read_text(encoding="utf-8")
-        for asset in ("studio.css", "studio.js", "home.css", "home.js"):
+        for asset in ("studio.css", "studio.js", "values.js", "home.css", "home.js"):
             text = text.replace(f"/static/{asset}", f"/static/{asset}?v={asset_v}")
         return HTMLResponse(text, headers={"Cache-Control": "no-cache"})
 
@@ -635,8 +645,22 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     # ── traces ──────────────────────────────────────────────────────────
 
+    # Per-run activity summaries for the listing, cached in memory on the
+    # nodes.jsonl mtime. Never written to disk — traces are read-only here.
+    summary_cache: Dict[str, Any] = {}
+
+    def _activity(entry: Path, nodes_mtime: float) -> Dict[str, Any]:
+        cached = summary_cache.get(str(entry))
+        if cached and cached[0] == nodes_mtime:
+            return cached[1]
+        s = _summarise_run(_local_records(entry), entry.name)
+        brief = {"ops": len(s["ops"]), "records": s["records"],
+                 "errors": s["errors"], "wall_s": s["wall_s"]}
+        summary_cache[str(entry)] = (nodes_mtime, brief)
+        return brief
+
     @app.get("/api/p/{pid}/traces")
-    def traces(pid: str) -> JSONResponse:
+    def traces(pid: str, local_only: int = 0) -> JSONResponse:
         """Runs from every configured trace source, one list.
 
         The studio reads what a consumer recorded — nothing else. A
@@ -644,6 +668,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         `[studio.langfuse]` table lists the traces LangfuseConsumer
         shipped. A Langfuse outage degrades to a note, never a 500 —
         the local list must not die with someone else's server.
+        ``local_only`` exists for the follow-latest poll, which must not
+        hammer a remote API every few seconds.
         """
         watcher = _watcher(pid)
         if watcher is None:
@@ -674,8 +700,9 @@ def build_studio_app(recents: Optional[Recents] = None):
                         "mtime": stat.st_mtime,
                         "size": stat.st_size,
                         "source": "local",
+                        **_activity(entry, stat.st_mtime),
                     })
-        if lf is not None:
+        if lf is not None and not local_only:
             payload["langfuse"] = lf["host"]
             try:
                 runs.extend(_lf_runs(lf))

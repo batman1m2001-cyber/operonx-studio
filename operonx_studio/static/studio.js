@@ -10,7 +10,7 @@
 "use strict";
 
 const PID = location.pathname.split("/").pop();
-const NODE_W = 210, NODE_H = 76;
+const NODE_W = 210, NODE_H = 64;
 const HEADER = 34;              // a container's title strip
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -30,8 +30,20 @@ const state = {
   extent: null,      // {minX, minY, maxX, maxY} of the last render
   view: {x: 60, y: 60, scale: 1},
   run: null,         // {run, ops: {name: {runs, errors, total_ms, max_ms}}}
+  heatMax: 0,        // slowest avg ms in the painted run — the heat scale
+  follow: false,     // repaint whenever a newer run appears
   stamp: 0,
 };
+
+function store(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ }
+}
+function recall(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : JSON.parse(raw);
+  } catch { return fallback; }
+}
 
 async function api(path, body) {
   const res = await fetch(path, body === undefined ? {} : {
@@ -52,6 +64,18 @@ function kindColor(node) {
   if (k.includes("Branch")) return "var(--k-branch)";
   if (node.bound === "io") return "var(--k-io)";
   return "var(--k-func)";
+}
+
+function kindIcon(node) {
+  const k = node.kind || "";
+  if (k.includes("LLM")) return "✦";
+  if (k.includes("Branch")) return "⑃";
+  if (k.includes("Graph")) return "▣";
+  if (k.includes("Embedding") || k.includes("Rerank") || k.includes("Search") || k.includes("Fetch")) return "⛁";
+  if (k.includes("Emit")) return "📣";
+  if (k.includes("Interrupt")) return "✋";
+  if (node.is_gen) return "⚡";
+  return "ƒ";
 }
 
 /* ── placement: expansion opens a GraphOp in place ────────────────── */
@@ -250,6 +274,13 @@ function render() {
                   consume.mode === "collect" ? "⧉ collect"
                   : `∥ parallel${consume.max ? "≤" + consume.max : ""}`);
       }
+      // a branch edge is meaningless without its condition — label lane
+      // sits below the glyph lane so the two never collide
+      if (a.node.routes && e.type === "condition") {
+        const labels = a.node.routes
+          .filter(r => r.target === b.node.name).map(r => r.condition);
+        if (labels.length) edgeGlyph(svg, mx, my + 26, labels.join(" | "), "routelabel");
+      }
     }
     if (state.sel && (state.rendered.get(state.sel)?.node.id === e.src
                    || state.rendered.get(state.sel)?.node.id === e.dst)) cls += " hot";
@@ -296,6 +327,7 @@ function toggleExpand(key) {
 function containerCard(it) {
   const n = it.node;
   const card = el("div", "node container");
+  card.dataset.name = n.name;
   card.style.left = `${it.x}px`;
   card.style.top = `${it.y}px`;
   card.style.width = `${it.w}px`;
@@ -321,6 +353,7 @@ function containerCard(it) {
 function opCard(it) {
   const n = it.node;
   const card = el("div", "node");
+  card.dataset.name = n.name;
   card.style.left = `${it.x}px`;
   card.style.top = `${it.y}px`;
   card.style.setProperty("--kind", kindColor(n));
@@ -336,47 +369,45 @@ function opCard(it) {
     card.append(el("div", "nkind",
       n.serve_role === "ingress" ? "ingress · client → run" : "egress · run → client"));
   } else {
-    card.append(el("div", "nname", n.name));
-    card.append(el("div", "nkind", n.kind + (n.bound ? ` · ${n.bound}` : "")));
+    const line = el("div", "nname");
+    line.append(el("span", "nicon", kindIcon(n)));
+    line.append(n.name);
+    card.append(line);
+    // the kind/bound line was card noise at fit-zoom; it lives in the
+    // tooltip and the inspector now
+    card.title = n.kind + (n.bound ? ` · ${n.bound}` : "") + (n.is_gen ? " · generator" : "");
   }
+
+  // At most TWO badges: one semantic marker, plus the run chip. Density
+  // is respect — everything else is one click away in the inspector.
   const badges = el("div", "badges");
-  if (n.start && !n.serve_role) badges.append(el("span", "badge", "entry"));
-  if (n.end && !n.serve_role) badges.append(el("span", "badge", "exit"));
-  if (n.is_gen) {
-    const b = el("span", "badge gen", "⚡ stream");
-    b.title = "Generator: invoked once, yields many — every consumer dispatches per yield, not per run.";
-    badges.append(b);
-  }
-  if (n.transient) {
-    const b = el("span", "badge", "transient");
-    b.title = "Outputs are delivered and then evicted; a long stream retains nothing.";
-    badges.append(b);
-  }
-  if (n.loop) {
-    const cap = n.loop.max_iterations;
-    const b = el("span", "badge loop", `↺ while${cap ? " ≤" + cap : ""}`);
-    b.title = "Member of a rewritten cycle: the compiler runs this as a synthetic loop; the return edge below is what the author wrote.";
-    badges.append(b);
-  }
   if (n.graph) {
-    const b = el("button", "badge sub expand", `▣ ${n.subgraph_ops} ops ▸`);
+    const b = el("button", "badge sub expand", `▣ ${n.subgraph_ops} ▸`);
     b.title = "A nested @graph — click to open it in place.";
     b.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
     badges.append(b);
-  } else if (n.subgraph_ops) {
-    const b = el("span", "badge sub", `▣ ${n.subgraph_ops} ops`);
-    b.title = "A nested @graph. Collapsed here; its ops run inside this node.";
+  } else if (n.loop) {
+    const b = el("span", "badge loop", "↺ loop");
+    b.title = "Member of a rewritten cycle; the return edge below is what the author wrote.";
+    badges.append(b);
+  } else if (n.is_gen) {
+    const b = el("span", "badge gen", "⚡");
+    b.title = "Generator: consumers dispatch per yield, not per run.";
     badges.append(b);
   }
 
   const runinfo = state.run && state.run.ops[n.name];
   if (runinfo) {
     const avg = runinfo.runs ? (runinfo.total_ms / runinfo.runs) : 0;
-    badges.append(el("span", "badge run",
-      `${runinfo.runs}× · ${avg < 10 ? avg.toFixed(1) : Math.round(avg)} ms`));
-    if (runinfo.errors) {
-      badges.append(el("span", "badge err", `${runinfo.errors} err`));
-      card.classList.add("errorlit");
+    const chip = el("span", "badge run",
+      `${runinfo.runs}× ${avg < 10 ? avg.toFixed(1) : Math.round(avg)}ms`
+      + (runinfo.errors ? ` · ${runinfo.errors}✗` : ""));
+    if (runinfo.errors) { chip.classList.add("err"); card.classList.add("errorlit"); }
+    badges.append(chip);
+    // heat: the slow op should be findable without reading a number
+    if (!runinfo.errors && state.heatMax > 0) {
+      card.style.setProperty("--heat", Math.min(1, avg / state.heatMax).toFixed(2));
+      card.classList.add("heated");
     }
   }
   card.append(badges);
@@ -443,9 +474,11 @@ function select(key) {
   const n = it.node;
   panel.classList.add("open");
   panel.textContent = "";
+  panel.scrollTop = 0;
 
-  // ── identity ──────────────────────────────────────────────────────
-  panel.append(el("h3", null, n.name));
+  // ── identity: sticky while the body scrolls ───────────────────────
+  const head = el("div", "phead");
+  head.append(el("h3", null, n.name));
   const chips = el("div", "chips");
   const kindChip = el("span", "chip kindchip", n.kind);
   kindChip.style.setProperty("--kind", kindColor(n));
@@ -470,95 +503,170 @@ function select(key) {
     c.title = `Member of the authored cycle '${n.loop.group}', rewritten by the compiler into a synthetic loop.`;
     chips.append(c);
   }
-  panel.append(chips);
+  head.append(chips);
+  panel.append(head);
 
+  if (n.kind === "FuncOp" || n.code) panel.append(signatureLine(n));
   if (n.serve_role) {
     panel.append(el("div", "rolenote",
       n.serve_role === "ingress"
         ? "⇥ Serve boundary — the client's data enters the run here. No business logic inside."
         : "⇥ Serve boundary — the run's answers leave for the client here. No business logic inside."));
   }
-  if (n.graph) {
-    panel.append(el("div", "rolenote",
-      `▣ Nested graph · ${n.subgraph_ops} ops. ` +
-      (state.expanded.has(it.key) ? "Open on the canvas." : "Double-click the node to open it in place.")));
-  }
 
-  const slots = {in: {}, out: {}};
+  // One fetch per selection; every section that cares about the painted
+  // run shares it.
+  const execP = state.run
+    ? api(`/api/p/${PID}/trace/${encodeURIComponent(state.run.run)}/op/${encodeURIComponent(n.name)}`)
+    : null;
 
-  // ── with a run painted: values first, history second ──────────────
-  if (state.run) {
-    panel.append(valuesSection(n, slots));
-    panel.append(executionsSection(n, slots));
-  }
-
-  // ── what the op is made of ────────────────────────────────────────
-  if (n.code) panel.append(codeSection(n));
-  const llm = llmSection(n);
+  if (execP) panel.append(valuesSection(n, execP));
+  const llm = llmSection(n, execP);
   if (llm) panel.append(llm);
-
+  if (n.routes) panel.append(routeSection(it, execP));
+  if (execP) panel.append(executionsSection(n, execP));
+  if (n.code) panel.append(codeSection(n));
+  if (n.graph) panel.append(membersSection(it));
   // Wiring, params and source: the main event without a run, one click
   // away with one — the values above already answer the first question.
   panel.append(wiringSection(it, !state.run));
 }
 
-function valuesSection(n, slots) {
+function signatureLine(n) {
+  const params = (n.inputs || []).map(inp => {
+    const b = inp.binding || {};
+    if (b.kind === "literal" && ["string", "number", "boolean"].includes(typeof b.value)) {
+      const lit = JSON.stringify(b.value);
+      return inp.name + "=" + (lit.length > 14 ? lit.slice(0, 12) + "…" : lit);
+    }
+    return inp.name;
+  });
+  const outs = (n.outputs || []).join(", ");
+  return el("div", "sigline mono", `(${params.join(", ")}) → ${outs || "∅"}`);
+}
+
+function valuesSection(n, execP) {
   const sec = el("section");
   sec.append(el("div", "stitle", `Latest values · ${state.run.run}`));
-  const rows = el("div");
-  // outputs first: "what did this op produce" is the question a painted
-  // run gets clicked for
-  for (const o of n.outputs || []) {
-    const row = el("div", "valrow");
-    row.append(el("div", "vname mono", `${o} →`));
-    slots.out[o] = el("div", "vslot", "…");
-    row.append(slots.out[o]);
-    rows.append(row);
-  }
-  for (const inp of n.inputs || []) {
-    const row = el("div", "valrow vin");
-    row.append(el("div", "vname mono", `→ ${inp.name}`));
-    slots.in[inp.name] = el("div", "vslot", "…");
-    row.append(slots.in[inp.name]);
-    rows.append(row);
-  }
-  if (!rows.childNodes.length) rows.append(el("div", "note", "no declared ports"));
-  sec.append(rows);
+  const box = el("div", null, "…");
+  sec.append(box);
+  execP.then(data => {
+    box.textContent = "";
+    const last = data.executions[data.executions.length - 1];
+    if (!last) { box.append(el("div", "note", "no records for this op in this run")); return; }
+    // outputs first: "what did this op produce" is why the node was clicked
+    const groups = [["out", last.outputs, n.outputs || []],
+                    ["in", last.inputs, null]];
+    for (const [dir, values, priority] of groups) {
+      const entries = Object.entries(values || {});
+      if (priority) entries.sort((a, b) =>
+        (priority.indexOf(a[0]) + 1 || 99) - (priority.indexOf(b[0]) + 1 || 99));
+      for (const [key, val] of entries) {
+        const row = el("div", `valrow ${dir === "in" ? "vin" : ""}`);
+        row.append(el("div", "vname mono", dir === "out" ? `${key} →` : `→ ${key}`));
+        row.append(Values.render(val, {open: dir === "out"}));
+        box.append(row);
+      }
+    }
+    if (!box.childNodes.length) box.append(el("div", "note", "record carried no values"));
+  }).catch(e => { box.textContent = e.message; });
   return sec;
 }
 
-function codeSection(n) {
-  const sec = el("details", "foldbox");
-  const sum = el("summary");
-  sum.append(el("span", "stitle", "Code"));
-  const loc = (n.source || {}).defined_at;
-  if (loc && loc.file) sum.append(el("span", "srcline mono", ` ${loc.file}:${loc.line}`));
-  sec.append(sum);
-  sec.append(el("pre", "codeblock mono", n.code));
+/* A branch's whole meaning: which condition routes where. With a run
+ * painted, the routes that actually fired get their counts. */
+function routeSection(it, execP) {
+  const n = it.node;
+  const sec = el("section");
+  sec.append(el("div", "stitle", "Routes"));
+  const rows = new Map();
+  for (const r of n.routes) {
+    const row = el("div", "routerow");
+    row.append(el("span", `routecond mono${r.condition === "else" ? " relse" : ""}`, r.condition));
+    row.append(el("span", "routearrow", "→"));
+    const tgt = el("button", "routetarget mono", r.target);
+    tgt.onclick = () => {
+      for (const [k, item] of state.rendered) {
+        if (item.node.name === r.target && item.depth === it.depth) { select(k); return; }
+      }
+    };
+    row.append(tgt);
+    rows.set(r.target, row);
+    sec.append(row);
+  }
+  if (execP) execP.then(data => {
+    const fired = {};
+    for (const ex of data.executions) {
+      const t = (ex.outputs || {}).target;
+      if (t) fired[t] = (fired[t] || 0) + 1;
+    }
+    for (const [target, count] of Object.entries(fired)) {
+      const row = rows.get(target);
+      if (row) {
+        row.classList.add("fired");
+        row.append(el("span", "chip cfired", `${count}×`));
+      }
+    }
+  }).catch(() => {});
   return sec;
 }
 
-function llmSection(n) {
+/* LLMOp: the traced conversation when there is one — role-labelled
+ * bubbles with the response emphasized — else the authored templates. */
+function llmSection(n, execP) {
   if (!(n.kind || "").includes("LLM")) return null;
   const byName = {};
   for (const inp of n.inputs || []) byName[inp.name] = inp.binding || {};
   const sec = el("section");
-  sec.append(el("div", "stitle", "Prompt"));
+  sec.append(el("div", "stitle", "Conversation"));
+  const box = el("div");
+  sec.append(box);
 
-  const prompt = byName.prompt;
-  if (prompt && prompt.kind === "literal" && prompt.value && typeof prompt.value === "object") {
-    for (const part of ["system", "user"]) {
-      if (prompt.value[part] === undefined) continue;
-      sec.append(el("div", "plabel", part));
-      sec.append(el("pre", "promptblock mono", String(prompt.value[part])));
+  const templates = () => {
+    const prompt = byName.prompt;
+    if (prompt && prompt.kind === "literal" && prompt.value && typeof prompt.value === "object") {
+      for (const part of ["system", "user"]) {
+        if (prompt.value[part] === undefined) continue;
+        box.append(el("div", "plabel", part + " (template)"));
+        box.append(el("pre", "promptblock mono", String(prompt.value[part])));
+      }
+    } else if (byName.messages) {
+      const b = byName.messages;
+      box.append(el("div", "srcline",
+        b.kind === "ref" ? `messages ← ${(b.from || "").split(".").pop()}.${b.output} (conversation is data, never templated)`
+                         : "messages: bound at run time"));
+    } else {
+      box.append(el("div", "note", "no prompt literal — see wiring below"));
     }
-  } else if (byName.messages) {
-    const b = byName.messages;
-    sec.append(el("div", "srcline",
-      b.kind === "ref" ? `messages ← ${(b.from || "").split(".").pop()}.${b.output} (conversation is data, never templated)`
-                       : "messages: bound at run time"));
+  };
+
+  const bubbles = (msgs, response) => {
+    for (const m of msgs.slice(-8)) {
+      const b = el("div", `bubble b-${m.role || "user"}`);
+      b.append(el("div", "plabel", m.role || "?"));
+      b.append(el("div", "btext", typeof m.content === "string" ? m.content : JSON.stringify(m.content)));
+      box.append(b);
+    }
+    if (msgs.length > 8) box.append(el("div", "srcline", `…${msgs.length - 8} earlier messages`));
+    if (response !== undefined && response !== null) {
+      const b = el("div", "bubble b-assistant b-resp");
+      b.append(el("div", "plabel", "response"));
+      b.append(el("div", "btext", String(response)));
+      box.append(b);
+    }
+  };
+
+  if (execP) {
+    execP.then(data => {
+      const last = data.executions[data.executions.length - 1];
+      const msgs = last && last.inputs && last.inputs.messages;
+      const content = last && last.outputs && last.outputs.content;
+      if (Array.isArray(msgs) && msgs.length) bubbles(msgs, content);
+      else if (content !== undefined && content !== null) { templates(); bubbles([], content); }
+      else templates();
+    }).catch(templates);
   } else {
-    sec.append(el("div", "note", "no prompt literal — see wiring below"));
+    templates();
   }
 
   const params = el("div", "chips");
@@ -570,6 +678,96 @@ function llmSection(n) {
       params.append(el("span", "chip", `${name}=${JSON.stringify(v)}`));
   }
   if (params.childNodes.length) sec.append(params);
+  return sec;
+}
+
+/* GraphOp: the members, right here — click one to open the container
+ * and select it. With a run painted, each member's cost. */
+function membersSection(it) {
+  const n = it.node;
+  const sec = el("section");
+  sec.append(el("div", "stitle", `Inside · ${n.subgraph_ops} ops`));
+  for (const m of (n.graph.nodes || [])) {
+    const row = el("button", "memberrow");
+    row.append(el("span", "memicon", kindIcon(m)));
+    row.append(el("span", "mono", m.name));
+    row.append(el("span", "memkind", m.kind));
+    const runinfo = state.run && state.run.ops[m.name];
+    if (runinfo) {
+      const avg = runinfo.runs ? runinfo.total_ms / runinfo.runs : 0;
+      const chip = el("span", "chip", `${runinfo.runs}× ${avg < 10 ? avg.toFixed(1) : Math.round(avg)}ms`);
+      if (runinfo.errors) chip.classList.add("cbad");
+      row.append(chip);
+    }
+    row.onclick = () => {
+      if (!state.expanded.has(it.key)) { state.expanded.add(it.key); render(); }
+      select(it.key + "/" + m.id);
+    };
+    sec.append(row);
+  }
+  return sec;
+}
+
+/* ── code, tinted offline ─────────────────────────────────────────── */
+
+const PY_KW = new Set(("def return if else elif for while in not and or async await yield "
+  + "import from as class try except finally with pass raise lambda None True False "
+  + "is global del assert break continue match case").split(" "));
+const PY_TOKEN = /("""|'''|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|#.*$|@\w+|\b[A-Za-z_]\w*\b)/g;
+
+function tintLine(line, st) {
+  const frag = document.createDocumentFragment();
+  if (st.instr) {   // inside a triple-quoted string
+    const end = line.indexOf(st.instr);
+    if (end === -1) { frag.append(span("cs", line)); return frag; }
+    frag.append(span("cs", line.slice(0, end + 3)));
+    st.instr = null;
+    frag.append(...tintLine(line.slice(end + 3), st).childNodes);
+    return frag;
+  }
+  let idx = 0, m;
+  PY_TOKEN.lastIndex = 0;
+  while ((m = PY_TOKEN.exec(line)) !== null) {
+    if (m.index > idx) frag.append(line.slice(idx, m.index));
+    const t = m[0];
+    if (t === '"""' || t === "'''") {
+      const rest = line.slice(m.index + 3);
+      const end = rest.indexOf(t);
+      if (end === -1) { st.instr = t; frag.append(span("cs", line.slice(m.index))); return frag; }
+      frag.append(span("cs", t + rest.slice(0, end + 3)));
+      idx = m.index + 3 + end + 3;
+      PY_TOKEN.lastIndex = idx;
+      continue;
+    }
+    if (t.startsWith("#")) frag.append(span("cc", t));
+    else if (t.startsWith("@")) frag.append(span("cd", t));
+    else if (t.startsWith('"') || t.startsWith("'")) frag.append(span("cs", t));
+    else if (PY_KW.has(t)) frag.append(span("ck", t));
+    else frag.append(t);
+    idx = PY_TOKEN.lastIndex;
+  }
+  if (idx < line.length) frag.append(line.slice(idx));
+  return frag;
+}
+
+function span(cls, text) { const s = el("span", cls, text); return s; }
+
+function codeSection(n) {
+  const sec = el("details", "foldbox");
+  const sum = el("summary");
+  sum.append(el("span", "stitle", "Code"));
+  const loc = (n.source || {}).defined_at;
+  if (loc && loc.file) sum.append(el("span", "srcline mono", ` ${loc.file}:${loc.line}`));
+  sec.append(sum);
+  const pre = el("pre", "codeblock mono");
+  const st = {instr: null};
+  n.code.replace(/\s+$/, "").split("\n").forEach((line, i) => {
+    const row = el("div", "cline");
+    row.append(el("span", "lno", String((loc && loc.line || 1) + i)));
+    row.append(tintLine(line, st));
+    pre.append(row);
+  });
+  sec.append(pre);
   return sec;
 }
 
@@ -595,17 +793,11 @@ function wiringSection(it, open) {
   return box;
 }
 
-function valueBlock(v) {
-  const text = typeof v === "string" ? v : JSON.stringify(v, null, 2);
-  return el("pre", "execjson mono", text === undefined ? "null" : text);
-}
-
-/* The drill-down under the aggregate: each recorded execution of this op
- * in the painted run, with the inputs and outputs the trace consumer
- * wrote. Fetched lazily — the section renders first, records arrive into
- * it — so selecting a node stays instant on runs with thousands of
- * records. */
-function executionsSection(n, slots) {
+/* The drill-down under the aggregate: one dense line per recorded
+ * execution — rank, member, duration with an inline bar, status — and
+ * ONE detail area below the table (not fifty accordions). The latest
+ * record is pre-selected. */
+function executionsSection(n, execP) {
   const sec = el("section");
   sec.append(el("div", "stitle", "Executions"));
   const runinfo = state.run.ops[n.name];
@@ -617,53 +809,49 @@ function executionsSection(n, slots) {
     if (runinfo.errors) stats.classList.add("bad");
     sec.append(stats);
   }
-  const box = el("div", "execbox", "loading…");
+  const box = el("div", "execbox", "…");
   sec.append(box);
-  api(`/api/p/${PID}/trace/${encodeURIComponent(state.run.run)}/op/${encodeURIComponent(n.name)}`)
-    .then(data => {
-      box.textContent = "";
-      if (!data.executions.length) {
-        box.append(el("div", "note", "no records for this op in this run"));
-        return;
-      }
+  execP.then(data => {
+    box.textContent = "";
+    if (!data.executions.length) {
+      box.append(el("div", "note", "no records for this op in this run"));
+      return;
+    }
+    if (data.total > data.showing) {
+      box.append(el("div", "srcline", `${data.total} recorded · last ${data.showing} below`));
+    }
+    const maxMs = Math.max(1, ...data.executions.map(ex => ex.duration_ms || 0));
+    const table = el("div", "exectable");
+    const detail = el("div", "execdetail");
+    let active = null;
 
-      // The latest execution's values land inline under each input and
-      // output name above — the wiring says where a value comes from,
-      // this says what it actually was.
-      const last = data.executions[data.executions.length - 1];
-      for (const [dir, values] of [["in", last.inputs], ["out", last.outputs]]) {
-        for (const [key, val] of Object.entries(values || {})) {
-          const slot = slots && slots[dir][key];
-          if (slot) { slot.textContent = ""; slot.append(valueBlock(val)); }
-        }
-      }
+    const show = (ex, row) => {
+      if (active) active.classList.remove("active");
+      active = row; row.classList.add("active");
+      detail.textContent = "";
+      if (ex.error) detail.append(el("div", "srcline bad", String(ex.error)));
+      detail.append(el("div", "plabel", "outputs"));
+      detail.append(Values.render(ex.outputs ?? null, {open: true, priority: n.outputs || []}));
+      detail.append(el("div", "plabel", "inputs"));
+      detail.append(Values.render(ex.inputs ?? null, {}));
+    };
 
-      if (data.total > data.showing) {
-        box.append(el("div", "srcline",
-          `${data.total} recorded — showing the last ${data.showing}`));
-      }
-      data.executions.forEach((ex, i) => {
-        const d = el("details", "execrow");
-        const sum = el("summary");
-        const idx = data.total - data.showing + i + 1;
-        sum.append(el("span", "mono", `#${idx}`));
-        // a container's records belong to its members — say which one ran
-        if (ex.op && ex.op !== n.name) sum.append(el("span", "mono dim", ` ${ex.op}`));
-        sum.append(el("span", null,
-          ` ${(ex.duration_ms ?? 0).toFixed(1)} ms`));
-        sum.append(el("span", ex.status === "ok" ? "ok" : "bad", ` ${ex.status ?? "?"}`));
-        d.append(sum);
-        if (i === data.executions.length - 1) d.open = true;
-        if (ex.error) d.append(el("div", "srcline bad", String(ex.error)));
-        // outputs first — "what came out" is the question, inputs the context
-        for (const [label, val] of [["outputs", ex.outputs], ["inputs", ex.inputs]]) {
-          d.append(el("div", "stitle", label));
-          d.append(el("pre", "execjson mono", JSON.stringify(val ?? null, null, 2)));
-        }
-        box.append(d);
-      });
-    })
-    .catch(e => { box.textContent = e.message; });
+    data.executions.forEach((ex, i) => {
+      const idx = data.total - data.showing + i + 1;
+      const row = el("button", "exline" + (ex.status === "ok" ? "" : " bad"));
+      row.append(el("span", "exn mono", `#${idx}`));
+      row.append(el("span", "exop mono", ex.op && ex.op !== n.name ? ex.op : ""));
+      const bar = el("span", "exbar");
+      bar.style.setProperty("--w", `${Math.max(2, 100 * (ex.duration_ms || 0) / maxMs)}%`);
+      row.append(bar);
+      row.append(el("span", "exms mono", `${(ex.duration_ms ?? 0).toFixed(1)}ms`));
+      row.append(el("span", "exst", ex.status === "ok" ? "✓" : (ex.status ?? "?")));
+      row.onclick = () => show(ex, row);
+      table.append(row);
+    });
+    box.append(table, detail);
+    show(data.executions[data.executions.length - 1], table.lastChild);
+  }).catch(e => { box.textContent = e.message; });
   return sec;
 }
 
@@ -789,6 +977,15 @@ async function showTraces() {
   if (data.langfuse_error) {
     box.append(el("div", "note", `Langfuse (${data.langfuse}) unreachable: ${data.langfuse_error}`));
   }
+  // follow-latest: repaint whenever a newer local run lands
+  const followBar = el("label", "followpin");
+  const pin = el("input");
+  pin.type = "checkbox";
+  pin.checked = state.follow;
+  pin.onchange = () => { state.follow = pin.checked; store("follow", state.follow); };
+  followBar.append(pin, " auto-paint the newest run as it arrives");
+  box.append(followBar);
+
   if (!data.runs.length) {
     box.append(el("div", "note", `No runs recorded yet${data.root ? " in " + data.root : ""}`));
     return;
@@ -796,13 +993,21 @@ async function showTraces() {
   const table = el("table");
   const thead = el("thead");
   const hr = el("tr");
-  for (const h of ["run", "recorded", "source", ""]) hr.append(el("th", null, h));
+  for (const h of ["run", "recorded", "activity", "source", ""]) hr.append(el("th", null, h));
   thead.append(hr); table.append(thead);
   const tbody = el("tbody");
   for (const r of data.runs) {
     const tr = el("tr", "run-row");
     tr.append(el("td", "mono", r.name || r.run));
     tr.append(el("td", null, r.mtime ? new Date(r.mtime * 1000).toLocaleString() : ""));
+    const act = el("td");
+    if (r.records !== undefined) {
+      act.append(el("span", "chip", `${r.ops} ops`));
+      act.append(el("span", "chip", `${r.records} rec`));
+      if (r.wall_s != null) act.append(el("span", "chip", `${r.wall_s.toFixed(1)}s`));
+      if (r.errors) act.append(el("span", "chip cbad", `${r.errors} err`));
+    }
+    tr.append(act);
     tr.append(el("td", null,
       r.source === "langfuse" ? "langfuse" : `local · ${(r.size / 1024).toFixed(1)} KB`));
     tr.append(el("td", null, "view on canvas →"));
@@ -816,6 +1021,9 @@ async function showTraces() {
 async function paintRun(run) {
   const data = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`);
   state.run = data;
+  // heat scale: the run's slowest average paints the hottest border
+  state.heatMax = Math.max(0, ...Object.values(data.ops || {})
+    .map(o => o.runs ? o.total_ms / o.runs : 0));
   $("#run-name").textContent = data.run + (data.truncated ? " (truncated)" : "");
   $("#runbanner").classList.add("show");
   switchTab("flow");
@@ -824,6 +1032,7 @@ async function paintRun(run) {
 
 $("#run-clear").onclick = () => {
   state.run = null;
+  state.heatMax = 0;
   $("#runbanner").classList.remove("show");
   render();
 };
@@ -897,7 +1106,11 @@ $("#btn-zoom-pct").onclick = () => {
   window.addEventListener("mouseup", () => { drag = null; stage.classList.remove("panning"); });
 
   window.addEventListener("keydown", (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "k") {
+      ev.preventDefault(); openFind(); return;
+    }
     if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA") return;
+    if (ev.key === "/") { ev.preventDefault(); openFind(); return; }
     if (ev.key === " ") { spaceHeld = true; stage.classList.add("panmode"); ev.preventDefault(); return; }
     const c = stageCenter();
     if (ev.key === "+" || ev.key === "=") zoomAt(c.x, c.y, 1.25);
@@ -910,10 +1123,84 @@ $("#btn-zoom-pct").onclick = () => {
   });
 
   stage.addEventListener("click", (ev) => {
-    if (ev.target.closest(".node")) return;
+    if (ev.target.closest(".node") || ev.target.closest("#find")) return;
     state.sel = null;
     $("#inspector").classList.remove("open");
     render();
+  });
+})();
+
+/* ── find a node by name ──────────────────────────────────────────── */
+
+function openFind() {
+  const box = $("#find"), input = $("#find-input");
+  box.hidden = false;
+  input.value = "";
+  input.focus();
+}
+
+function closeFind() {
+  $("#find").hidden = true;
+  for (const c of document.querySelectorAll("#nodes .node.dimmed")) c.classList.remove("dimmed");
+}
+
+function centerOn(item) {
+  const stage = $("#stage").getBoundingClientRect();
+  const s = state.view.scale;
+  state.view.x = stage.width / 2 - (item.x + item.w / 2) * s;
+  state.view.y = stage.height / 2 - (item.y + item.h / 2) * s;
+  applyView();
+}
+
+(() => {
+  const input = $("#find-input");
+  input.addEventListener("input", () => {
+    const q = input.value.trim().toLowerCase();
+    for (const c of document.querySelectorAll("#nodes .node")) {
+      const name = (c.dataset.name || "").toLowerCase();
+      c.classList.toggle("dimmed", !!q && !name.includes(q));
+    }
+  });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { closeFind(); return; }
+    if (ev.key !== "Enter") return;
+    const q = input.value.trim().toLowerCase();
+    if (!q) return;
+    // shallowest match wins — the top-level op, not a container's twin
+    let best = null;
+    for (const [, item] of state.rendered) {
+      if (!item.node.name.toLowerCase().includes(q)) continue;
+      if (!best || item.depth < best.depth) best = item;
+    }
+    if (best) { closeFind(); select(best.key); centerOn(state.rendered.get(best.key)); }
+  });
+})();
+
+/* ── resizable inspector ──────────────────────────────────────────── */
+
+(() => {
+  const bar = $("#dragbar"), panel = $("#inspector");
+  const saved = recall("panelW", null);
+  if (saved) panel.style.width = `${saved}px`;
+  let dragging = false;
+  bar.addEventListener("pointerdown", (ev) => {
+    dragging = true;
+    bar.setPointerCapture(ev.pointerId);
+    document.body.classList.add("resizing");
+  });
+  bar.addEventListener("pointermove", (ev) => {
+    if (!dragging) return;
+    const width = Math.min(720, Math.max(280, window.innerWidth - ev.clientX));
+    panel.style.width = `${width}px`;
+  });
+  bar.addEventListener("pointerup", () => {
+    dragging = false;
+    document.body.classList.remove("resizing");
+    store("panelW", parseInt(panel.style.width, 10) || 360);
+  });
+  bar.addEventListener("dblclick", () => {
+    panel.style.width = "360px";
+    store("panelW", 360);
   });
 })();
 
@@ -958,12 +1245,22 @@ async function load(first) {
   if (first) fit();
 }
 
+let pollN = 0;
 async function poll() {
+  pollN += 1;
   try {
     const {stamp} = await api(`/api/p/${PID}/stamp`);
     if (stamp !== state.stamp) await load(false);
+    // follow-latest, throttled — a directory scan every 6s, never the
+    // remote Langfuse API
+    if (state.follow && pollN % 4 === 0) {
+      const t = await api(`/api/p/${PID}/traces?local_only=1`);
+      const newest = (t.runs || []).find(r => r.source === "local");
+      if (newest && (!state.run || state.run.run !== newest.run)) await paintRun(newest.run);
+    }
   } catch { /* daemon briefly away; the next poll answers */ }
   setTimeout(poll, 1500);
 }
 
+state.follow = recall("follow", false);
 load(true).then(() => setTimeout(poll, 1500));

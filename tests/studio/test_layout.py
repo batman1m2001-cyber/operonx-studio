@@ -140,7 +140,7 @@ class TestWrapping:
     def test_a_tall_graph_does_not_wrap(self):
         """Wide fan-out is not strip-shaped; wrapping it would only hurt."""
         names = [f"L{i}" for i in range(10)]
-        fans = [f"f{i}" for i in range(8)]
+        fans = [f"f{i}" for i in range(12)]
         edges = list(zip(names, names[1:])) + [(names[0], f) for f in fans]
         out = layout_graph(ir(names + fans, edges, entries=[names[0]]))
         # a single band: one distinct column per layer, all rows anchored

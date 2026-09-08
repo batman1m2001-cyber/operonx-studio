@@ -315,6 +315,29 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
                 node["code"] = source
         except (OSError, TypeError):
             pass
+    # A branch's whole meaning is WHICH condition routes WHERE, and the
+    # op stores exactly that: `cases` as (ref, target) pairs with their
+    # human descriptions ("score >= 90"), plus the else target. Without
+    # this a canvas draws identical unlabeled arrows out of every router.
+    cases = _slot(op, "cases")
+    if cases is not None:
+        descriptions = list(_slot(op, "_case_descriptions") or [])
+        routes = []
+        for i, case in enumerate(list(cases)):
+            try:
+                _ref, target = case
+            except (TypeError, ValueError):
+                continue
+            routes.append({
+                "condition": descriptions[i] if i < len(descriptions) else "?",
+                "target": getattr(target, "name", None) or str(target),
+            })
+        default = _slot(op, "default")
+        if default is not None:
+            routes.append({"condition": "else",
+                           "target": getattr(default, "name", None) or str(default)})
+        if routes:
+            node["routes"] = routes
     if _slot(op, "_ops"):
         node["graph"] = _subgraph(op, root, anchors, module)
     return node

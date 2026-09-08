@@ -29,7 +29,7 @@ from typing import Dict, List, Sequence, Set, Tuple
 __all__ = ["Node", "Edge", "Layout", "layout_graph", "NODE_W", "NODE_H"]
 
 NODE_W = 210
-NODE_H = 76
+NODE_H = 64
 H_GAP = 96
 V_GAP = 34
 MARGIN = 48
