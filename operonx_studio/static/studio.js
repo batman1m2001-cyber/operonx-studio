@@ -855,7 +855,47 @@ function executionsSection(n, execP) {
     if (data.total > data.showing) {
       box.append(el("div", "srcline", `${data.total} recorded · last ${data.showing} below`));
     }
-    const maxMs = Math.max(1, ...data.executions.map(ex => ex.duration_ms || 0));
+
+    // A GraphOp's records belong to its members, but one PASS through
+    // the container is one execution of the container — and members of
+    // the same pass share their dispatch ctx. Group by it, so the list
+    // reads as invocations of THIS node, with the member breakdown and
+    // the boundary values inside each.
+    let rows;
+    if (n.graph) {
+      const groups = new Map();
+      data.executions.forEach((ex, i) => {
+        const key = ex.ctx ? JSON.stringify(ex.ctx) : `solo-${i}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(ex);
+      });
+      const inNames = (n.inputs || []).map(i => i.name);
+      rows = [...groups.values()].map(members => {
+        const bad = members.find(m => m.status !== "ok");
+        const boundary = (names, dir) => {
+          const found = {};
+          for (const m of members) {
+            const src = dir === "out" ? m.outputs : m.inputs;
+            if (!src || typeof src !== "object") continue;
+            for (const k of names) if (k in src) found[k] = src[k];
+          }
+          return found;
+        };
+        return {
+          op: n.name,
+          duration_ms: members.reduce((s, m) => s + (m.duration_ms || 0), 0),
+          status: bad ? bad.status : "ok",
+          error: bad ? bad.error : null,
+          outputs: boundary(n.outputs || [], "out"),
+          inputs: boundary(inNames, "in"),
+          members,
+        };
+      });
+    } else {
+      rows = data.executions;
+    }
+
+    const maxMs = Math.max(1, ...rows.map(ex => ex.duration_ms || 0));
     const table = el("div", "exectable");
     const detail = el("div", "execdetail");
     let active = null;
@@ -869,13 +909,23 @@ function executionsSection(n, execP) {
       detail.append(Values.render(ex.outputs ?? null, {open: true, priority: n.outputs || []}));
       detail.append(el("div", "plabel", "inputs"));
       detail.append(Values.render(ex.inputs ?? null, {}));
+      if (ex.members) {
+        detail.append(el("div", "plabel", "members"));
+        for (const m of ex.members) {
+          const line = el("div", "srcline mono" + (m.status === "ok" ? "" : " bad"),
+            `${m.op}  ${(m.duration_ms ?? 0).toFixed(1)}ms  ${m.status ?? "?"}`);
+          detail.append(line);
+        }
+      }
     };
 
-    data.executions.forEach((ex, i) => {
-      const idx = data.total - data.showing + i + 1;
+    rows.forEach((ex, i) => {
+      const idx = n.graph ? i + 1 : data.total - data.showing + i + 1;
       const row = el("button", "exline" + (ex.status === "ok" ? "" : " bad"));
       row.append(el("span", "exn mono", `#${idx}`));
-      row.append(el("span", "exop mono", ex.op && ex.op !== n.name ? ex.op : ""));
+      row.append(el("span", "exop mono",
+        ex.members ? `${ex.members.length} ops`
+                   : (ex.op && ex.op !== n.name ? ex.op : "")));
       const bar = el("span", "exbar");
       bar.style.setProperty("--w", `${Math.max(2, 100 * (ex.duration_ms || 0) / maxMs)}%`);
       row.append(bar);
@@ -885,7 +935,7 @@ function executionsSection(n, execP) {
       table.append(row);
     });
     box.append(table, detail);
-    show(data.executions[data.executions.length - 1], table.lastChild);
+    show(rows[rows.length - 1], table.lastChild);
   }).catch(e => { box.textContent = e.message; });
   return sec;
 }

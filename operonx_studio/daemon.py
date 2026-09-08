@@ -86,12 +86,23 @@ class ProjectWatcher:
     _last: ExtractResult = field(default_factory=ExtractResult, init=False)
 
     def watched_files(self) -> Set[Path]:
+        """Every file whose change should re-extract.
+
+        Walks with SKIP_DIRS *pruned*, not filtered after the fact —
+        ``rglob`` still descends into ``.venv`` and ``.git`` before the
+        filter drops their entries, which on a real project is tens of
+        thousands of stat calls on EVERY stamp poll. Measured on the
+        callbot: 240ms per poll unpruned, ~2ms pruned.
+        """
+        import os
+
         found: Set[Path] = set()
-        for path in self.root.rglob("*"):
-            if any(part in SKIP_DIRS for part in path.parts):
-                continue
-            if path.is_file() and (path.suffix in WATCH_SUFFIXES or path.name in WATCH_NAMES):
-                found.add(path)
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            for fname in filenames:
+                path = Path(dirpath) / fname
+                if path.suffix in WATCH_SUFFIXES or path.name in WATCH_NAMES:
+                    found.add(path)
         return found
 
     def fingerprint(self) -> Tuple:
