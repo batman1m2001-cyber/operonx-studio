@@ -12,7 +12,6 @@
 const PID = location.pathname.split("/").pop();
 const NODE_W = 210, NODE_H = 64;
 const HEADER = 34;              // a container's title strip
-const MOTION_OK = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const SVGNS = "http://www.w3.org/2000/svg";
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -208,23 +207,32 @@ function bouton(svg, x, y, cls) {
   svg.append(c);
 }
 
-/* The action potential: one glowing dot travelling the axon. Skipped
- * when the user asks for reduced motion, or on very dense graphs. */
-function impulse(svg, path, animate) {
-  if (!animate) return;
-  const c = document.createElementNS(SVGNS, "circle");
-  c.setAttribute("r", 2.4);
-  c.setAttribute("class", "impulse");
-  const move = document.createElementNS(SVGNS, "animateMotion");
-  const dur = 2.8 + Math.random() * 1.8;
-  move.setAttribute("dur", `${dur.toFixed(2)}s`);
-  move.setAttribute("begin", `${(-Math.random() * dur).toFixed(2)}s`);
-  move.setAttribute("repeatCount", "indefinite");
-  const ref = document.createElementNS(SVGNS, "mpath");
-  ref.setAttribute("href", `#${path.id}`);
-  move.append(ref);
-  c.append(move);
-  svg.append(c);
+/* The myelin sheath: the single most recognisable mark of a textbook
+ * axon. A thick round-capped dash overlay on the same curve — the
+ * segments are the sheath, the gaps the nodes of Ranvier, and the thin
+ * core line shows through them. Static, structural, unmistakable. */
+function myelin(svg, d, cls) {
+  const m = document.createElementNS(SVGNS, "path");
+  m.setAttribute("d", d);
+  m.setAttribute("class", ("myelin " + cls).trim());
+  svg.append(m);
+  return m;
+}
+
+/* The dendrite tuft on a neuron's input side. Where an axon's bouton
+ * meets it, the drawing IS the textbook synapse. */
+function dendrites(svg, it) {
+  const x = it.x - 1, cy = portY(it);
+  const d = document.createElementNS(SVGNS, "path");
+  d.setAttribute("d",
+    `M ${x} ${cy} C ${x - 7} ${cy - 2}, ${x - 8} ${cy - 7}, ${x - 13} ${cy - 10}`
+    + ` M ${x - 10} ${cy - 6} L ${x - 15} ${cy - 5}`
+    + ` M ${x} ${cy} L ${x - 15} ${cy}`
+    + ` M ${x - 11} ${cy} L ${x - 15} ${cy - 3.5} M ${x - 11} ${cy} L ${x - 15} ${cy + 3.5}`
+    + ` M ${x} ${cy} C ${x - 7} ${cy + 2}, ${x - 8} ${cy + 7}, ${x - 13} ${cy + 10}`
+    + ` M ${x - 10} ${cy + 6} L ${x - 15} ${cy + 5}`);
+  d.setAttribute("class", "dendrite");
+  svg.append(d);
 }
 
 function serveNodesFor(graph) {
@@ -271,10 +279,6 @@ function render() {
     .map(name => flat.nodes.find(it => it.depth === 0 && it.node.name === name))
     .filter(Boolean);
 
-  // Impulses are joy on a working graph and sludge on a huge one.
-  const animate = MOTION_OK && flat.edges.length <= 120;
-  let axonN = 0;
-
   for (const s of serves) {
     for (const t of entryItems) {
       const p = document.createElementNS(SVGNS, "path");
@@ -285,15 +289,22 @@ function render() {
     }
   }
 
+  // every op is a neuron: the dendrite tuft on its input side, drawn
+  // before the axons so arriving boutons land on top of it — a synapse
+  for (const it of flat.nodes) {
+    if (!it.inner && !it.node.serve_role) dendrites(svg, it);
+  }
+
   // graph edges (every open level draws its own)
   for (const {e, a, b} of flat.edges) {
     const p = document.createElementNS(SVGNS, "path");
-    p.id = `ax${axonN++}`;
     let cls = e.soft ? "soft" : "";
     let end = [b.x, portY(b)], endCls = "";
+    let sheath = null;   // myelin class, when this edge wears one
     if (e.back) {
       p.setAttribute("d", returnPath(a, b));
       cls += " back";
+      if (!e.soft) sheath = "back";
       end = [b.x + b.w / 2, b.y + b.h]; endCls = "b-back";
       const dip = Math.max(a.y + a.h, b.y + b.h) + 58 + Math.abs(a.x - b.x) * 0.06;
       edgeGlyph(svg, (a.x + b.x + b.w) / 2, dip, "↺ loop", "back-label");
@@ -302,6 +313,9 @@ function render() {
       cls += " wrap";
     } else {
       p.setAttribute("d", bezier(a.x + a.w, portY(a), b.x, portY(b)));
+      // hard forward edges wear the myelin sheath; soft edges stay thin
+      // and dashed — their tentativeness is semantics, not styling
+      if (!e.soft) sheath = "";
       const mx = (a.x + a.w + b.x) / 2, my = (portY(a) + portY(b)) / 2 - 6;
       // A generator's edge is not one item; a consumer's mode is not
       // sequential. Both change what the run does, so both are on the wire.
@@ -324,8 +338,12 @@ function render() {
                    || state.rendered.get(state.sel)?.node.id === e.dst)) cls += " hot";
     p.setAttribute("class", cls.trim());
     svg.append(p);
+    // sheath over core: beads with the thin axon showing in the gaps —
+    // the nodes of Ranvier
+    if (sheath !== null) {
+      myelin(svg, p.getAttribute("d"), cls.includes("hot") ? `${sheath} hot` : sheath);
+    }
     bouton(svg, end[0], end[1], endCls);
-    impulse(svg, p, animate);
   }
 
   // serve cards
