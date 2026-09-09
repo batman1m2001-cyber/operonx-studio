@@ -313,33 +313,31 @@ body.resizing { user-select: none; cursor: col-resize; }
   box-shadow: 0 0 10px rgba(214, 168, 40, .8); transform: scale(1.15); }
 .port.in { left: -7px; } .port.out { right: -7px; }
 /* neuron anatomy on the wire — all of it static:
-   bouton   = the axon's terminal knob at its target
-   eglow/ecore/espark = an edge as a beam of energy: soft glow, bright
-              core, spark particles frozen mid-flight whose smaller
-              trailing dots point the direction of flow
-   dendrite = the tree on a cell's input side, in the cell's own hue;
-              an arriving bouton meeting it is the synapse */
+   bouton = the axon's terminal knob at its target
+   eglow/ecore/eray/espark = a beam of energy: a soft halo, a saturated
+   core, a WHITE laser filament with real contrast, and spark particles
+   whose smaller trailing dots point the direction of flow */
 #edges circle.bouton { fill: #e9ae1d; stroke: #fff6d8; stroke-width: 1.5; }
 #edges circle.bouton.b-back { fill: var(--warn); }
 #edges circle.bouton.b-serve { fill: var(--k-serve); }
 #edges path.eglow {
-  stroke: rgba(228, 166, 26, .28); stroke-width: 8;
+  stroke: rgba(230, 160, 20, .16); stroke-width: 12;
   stroke-linecap: round; pointer-events: none;
 }
-#edges path.ecore { stroke: #e9a91c; stroke-width: 2.2; pointer-events: none; }
+#edges path.ecore { stroke: #dd9509; stroke-width: 4; stroke-linecap: round;
+  pointer-events: none; }
 #edges path.eray {
-  stroke: #fffae8; stroke-width: .9; stroke-linecap: round;
-  opacity: .95; pointer-events: none;
+  stroke: #ffffff; stroke-width: 1.6; stroke-linecap: round;
+  pointer-events: none;
 }
-#edges path.eglow.back { stroke: rgba(179, 102, 26, .25); }
-#edges path.ecore.back { stroke: var(--warn); }
-#edges path.eray.hot { stroke-width: 1.3; }
-#edges path.eglow.hot { stroke: rgba(201, 148, 15, .5); stroke-width: 10; }
-#edges path.ecore.hot { stroke: #9a7208; stroke-width: 2.6; }
-#edges circle.espark { fill: #ffcb3d; stroke: #fff6d8; stroke-width: 1.2; }
-#edges circle.espark.tailspark { opacity: .45; stroke: none; }
-#edges circle.espark.back { fill: #d98a3a; }
-#edges path.dendrite { stroke-width: 1.6; opacity: .75; fill: none; }
+#edges path.eglow.back { stroke: rgba(179, 102, 26, .16); }
+#edges path.ecore.back { stroke: #b3661a; }
+#edges path.eglow.hot { stroke: rgba(201, 148, 15, .3); }
+#edges path.ecore.hot { stroke: #9a7208; stroke-width: 5; }
+#edges path.eray.hot { stroke-width: 2; }
+#edges circle.espark { fill: #fff; stroke: #e9a91c; stroke-width: 1.6; }
+#edges circle.espark.tailspark { fill: #ffd96a; opacity: .6; stroke: none; }
+#edges circle.espark.back { stroke: #b3661a; }
 .node.serve-node { background: linear-gradient(180deg, #fdf6dd, #fbf0cb);
   border-color: #dcc172; width: 190px; }
 .node.serve-node::before { background: var(--k-serve); }

@@ -248,22 +248,6 @@ function energySparks(svg, path, cls) {
   }
 }
 
-/* The dendrite tree on a cell's input side — bigger than a glyph, in
- * the cell's own hue. An arriving bouton meeting it is the synapse. */
-function dendrites(svg, it) {
-  const x = it.x + 2, cy = portY(it);
-  const d = document.createElementNS(SVGNS, "path");
-  d.setAttribute("d",
-    `M ${x} ${cy} C ${x - 9} ${cy - 3}, ${x - 11} ${cy - 9}, ${x - 17} ${cy - 13}`
-    + ` M ${x - 11} ${cy - 8} C ${x - 15} ${cy - 8}, ${x - 18} ${cy - 6}, ${x - 21} ${cy - 6}`
-    + ` M ${x} ${cy} L ${x - 19} ${cy}`
-    + ` M ${x - 12} ${cy} L ${x - 18} ${cy - 4.5} M ${x - 12} ${cy} L ${x - 18} ${cy + 4.5}`
-    + ` M ${x} ${cy} C ${x - 9} ${cy + 3}, ${x - 11} ${cy + 9}, ${x - 17} ${cy + 13}`
-    + ` M ${x - 11} ${cy + 8} C ${x - 15} ${cy + 8}, ${x - 18} ${cy + 6}, ${x - 21} ${cy + 6}`);
-  d.setAttribute("class", "dendrite");
-  d.style.stroke = kindColor(it.node);
-  svg.append(d);
-}
 
 function serveNodesFor(graph) {
   // A [[serve]] naming this graph is its front door; drawing it is the
@@ -317,12 +301,6 @@ function render() {
       svg.append(p);
       bouton(svg, t.x, portY(t), "b-serve");
     }
-  }
-
-  // every op is a neuron: the dendrite tuft on its input side, drawn
-  // before the axons so arriving boutons land on top of it — a synapse
-  for (const it of flat.nodes) {
-    if (!it.inner && !it.node.serve_role) dendrites(svg, it);
   }
 
   // graph edges (every open level draws its own)
