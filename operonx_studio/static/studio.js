@@ -152,6 +152,84 @@ function bezier(x1, y1, x2, y2) {
   return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
 }
 
+/* ── obstacle avoidance ───────────────────────────────────────────────
+ * An edge through the middle of an unrelated node is a lie about the
+ * graph. Every forward edge is collision-tested against the node boxes;
+ * a dirty one reroutes through the clear horizontal channel between
+ * rows, or failing that, bows around the obstacle. */
+
+function _cubic(p0, p1, p2, p3, t) {
+  const u = 1 - t;
+  return [
+    u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0],
+    u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1],
+  ];
+}
+
+function _hits(points, rects) {
+  for (const [x, y] of points) {
+    for (const r of rects) {
+      if (x > r.l && x < r.r && y > r.t && y < r.b) return true;
+    }
+  }
+  return false;
+}
+
+function _sampleCubic(x1, y1, cx1, cy1, cx2, cy2, x2, y2) {
+  const pts = [];
+  for (let t = 0.06; t < 0.95; t += 0.06) {
+    pts.push(_cubic([x1, y1], [cx1, cy1], [cx2, cy2], [x2, y2], t));
+  }
+  return pts;
+}
+
+function routeAvoiding(a, b, obstacles) {
+  const x1 = a.x + a.w, y1 = portY(a), x2 = b.x, y2 = portY(b);
+  const dx = Math.max(40, Math.abs(x2 - x1) / 2);
+  const rects = [];
+  for (const o of obstacles) {
+    if (o === a || o === b) continue;
+    rects.push({l: o.x - 6, r: o.x + o.w + 6, t: o.y - 6, b: o.y + o.h + 6});
+  }
+  const straight = _sampleCubic(x1, y1, x1 + dx, y1, x2 - dx, y2, x2, y2);
+  if (!_hits(straight, rects)) return bezier(x1, y1, x2, y2);
+
+  // channel candidates: the horizontal gaps between node rows, nearest
+  // to the edge's own midline first
+  if (x2 - x1 > 280) {
+    const tops = [...new Set(obstacles.map(o => Math.round(o.y)))].sort((m, n) => m - n);
+    const mids = [];
+    for (let i = 0; i + 1 < tops.length; i++) {
+      const below = Math.min(...obstacles.filter(o => Math.round(o.y) === tops[i + 1]).map(o => o.y));
+      const above = Math.max(...obstacles.filter(o => Math.round(o.y) === tops[i]).map(o => o.y + o.h));
+      if (below - above > 22) mids.push((above + below) / 2);
+    }
+    mids.sort((m, n) => Math.abs(m - (y1 + y2) / 2) - Math.abs(n - (y1 + y2) / 2));
+    for (const ch of mids) {
+      const corridor = [{l: x1 + 90, r: x2 - 90, t: ch - 7, b: ch + 7}];
+      let blocked = false;
+      for (const r of rects) {
+        if (r.r > corridor[0].l && r.l < corridor[0].r && r.b > corridor[0].t && r.t < corridor[0].b) {
+          blocked = true; break;
+        }
+      }
+      if (blocked) continue;
+      return `M ${x1} ${y1} C ${x1 + 70} ${y1}, ${x1 + 70} ${ch}, ${x1 + 130} ${ch}`
+        + ` L ${x2 - 130} ${ch}`
+        + ` C ${x2 - 70} ${ch}, ${x2 - 70} ${y2}, ${x2} ${y2}`;
+    }
+  }
+
+  // bow above or below the obstruction
+  for (const off of [-(NODE_H + 46), NODE_H + 46, -2 * (NODE_H + 46), 2 * (NODE_H + 46)]) {
+    const pts = _sampleCubic(x1, y1, x1 + dx, y1 + off, x2 - dx, y2 + off, x2, y2);
+    if (!_hits(pts, rects)) {
+      return `M ${x1} ${y1} C ${x1 + dx} ${y1 + off}, ${x2 - dx} ${y2 + off}, ${x2} ${y2}`;
+    }
+  }
+  return bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
+}
+
 function returnPath(a, b) {
   // A loop's return edge: out of the source's underside, bowing beneath
   // everything it passes over, back into the target's underside. Drawn
@@ -325,6 +403,7 @@ function render() {
       return [pt.x, pt.y + dy];
     } catch { return null; }
   };
+  const obstacles = flat.nodes.filter(it => !it.inner);
 
   // graph edges (every open level draws its own)
   for (const {e, a, b} of byPair.values()) {
@@ -342,10 +421,10 @@ function render() {
       p.setAttribute("d", wrapPath(a, b));
       cls += " wrap";
     } else {
-      p.setAttribute("d", bezier(a.x + a.w, portY(a), b.x, portY(b)));
-      // an if/else route gets its own beam: branch amber with the
-      // condition riding it; the ELSE fallback dashed and laserless,
-      // visibly dormant until chosen
+      p.setAttribute("d", routeAvoiding(a, b, obstacles));
+      // an if/else route gets its own beam: branch amber, the ELSE
+      // fallback dashed and laserless — the condition text stays OFF
+      // the wire (hover the edge, or open the router's route table)
       if (a.node.routes && e.type === "condition") {
         condLabels = a.node.routes
           .filter(r => r.target === b.node.name).map(r => r.condition);
@@ -386,8 +465,10 @@ function render() {
           : `∥ parallel${consume.max ? "≤" + consume.max : ""}`, "");
       }
       if (condLabels.length) {
-        const at = along(drawn, isElse ? 0.5 : 0.3, -9);
-        if (at) addGlyph(at[0], at[1], condLabels.join(" | "), "routelabel");
+        // n8n-style: the wire stays clean; the condition is one hover away
+        const tip = document.createElementNS(SVGNS, "title");
+        tip.textContent = condLabels.join(" | ");
+        drawn.append(tip);
       }
     }
   }

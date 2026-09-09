@@ -325,7 +325,7 @@ body.resizing { user-select: none; cursor: col-resize; }
   stroke-linecap: round; pointer-events: none;
 }
 #edges path.ecore { stroke: #dd9509; stroke-width: 4; stroke-linecap: round;
-  pointer-events: none; }
+  pointer-events: stroke; }
 #edges path.eray {
   stroke: #ffffff; stroke-width: 1.6; stroke-linecap: round;
   pointer-events: none;
