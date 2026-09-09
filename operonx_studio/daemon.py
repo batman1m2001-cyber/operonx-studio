@@ -77,12 +77,6 @@ class ExtractResult:
         return self.ir is not None
 
 
-def _ir_cache_dir() -> Path:
-    """Overridable so tests never write into the real home directory."""
-    import os
-
-    return Path(os.environ.get("OPERONX_IR_CACHE",
-                               str(Path.home() / ".operonx" / "ircache")))
 
 
 @dataclass
@@ -98,6 +92,7 @@ class ProjectWatcher:
     """
 
     root: Path
+    cache: Any = None      # a studio cache; defaults to the process-wide one
     _fingerprint: Tuple = field(default=(), init=False)
     _last: ExtractResult = field(default_factory=ExtractResult, init=False)
     _extracting: bool = field(default=False, init=False)
@@ -105,22 +100,28 @@ class ProjectWatcher:
     def __post_init__(self) -> None:
         import threading
 
+        from operonx_studio.cache import studio_cache
+
+        if self.cache is None:
+            self.cache = studio_cache()
         self._lock = threading.Lock()
         self._load_cache()
 
-    # ── the disk cache ──────────────────────────────────────────────
+    # ── the IR cache: memory → redis (when configured) → disk ───────
 
-    def _cache_file(self) -> Path:
+    def _cache_key(self) -> str:
         import hashlib
 
         digest = hashlib.sha1(str(self.root.resolve()).encode()).hexdigest()[:12]
-        return _ir_cache_dir() / f"{digest}.json"
+        return f"ir:{digest}"
 
     def _load_cache(self) -> None:
+        raw = self.cache.get_json(self._cache_key())
+        if not raw:
+            return
         try:
-            raw = json.loads(self._cache_file().read_text(encoding="utf-8"))
             cached_fp = tuple(tuple(entry) for entry in raw["fingerprint"])
-        except Exception:  # noqa: BLE001 — absent or corrupt: cold start
+        except (KeyError, TypeError):
             return
         if cached_fp != self.fingerprint():
             return  # the project moved on while the studio was away
@@ -129,16 +130,12 @@ class ProjectWatcher:
                                    stamp=float(raw.get("stamp") or 0.0))
 
     def _save_cache(self) -> None:
-        try:
-            _ir_cache_dir().mkdir(parents=True, exist_ok=True)
-            self._cache_file().write_text(json.dumps({
-                "fingerprint": [list(entry) for entry in self._fingerprint],
-                "ir": self._last.ir,
-                "error": self._last.error,
-                "stamp": self._last.stamp,
-            }), encoding="utf-8")
-        except OSError:
-            pass  # a cache that cannot be written is just a cold start later
+        self.cache.set_json(self._cache_key(), {
+            "fingerprint": [list(entry) for entry in self._fingerprint],
+            "ir": self._last.ir,
+            "error": self._last.error,
+            "stamp": self._last.stamp,
+        })
 
     def watched_files(self) -> Set[Path]:
         """Every file whose change should re-extract.

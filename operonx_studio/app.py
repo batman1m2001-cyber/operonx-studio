@@ -350,8 +350,17 @@ def _lf_records(cfg: Dict[str, str], trace_id: str):
     `LangfuseConsumer._span_create` wrote what we need back verbatim:
     span name = op_name, metadata carries op_full_name / status /
     duration_ms, statusMessage the error, input/output the payloads.
+    A finished trace never changes, so the fetched detail rides the
+    studio cache — clicking around a Langfuse run costs one remote call,
+    not one per node.
     """
-    detail = _lf_get(cfg, f"/api/public/traces/{trace_id}")
+    from operonx_studio.cache import studio_cache
+
+    key = f"lf:trace:{cfg['host']}:{trace_id}"
+    detail = studio_cache().get_json(key)
+    if detail is None:
+        detail = _lf_get(cfg, f"/api/public/traces/{trace_id}")
+        studio_cache().set_json(key, detail, ttl=600)
     for obs in detail.get("observations") or []:
         meta = obs.get("metadata") or {}
         duration = meta.get("duration_ms")
@@ -673,17 +682,26 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     # ── traces ──────────────────────────────────────────────────────────
 
-    # Per-run activity summaries for the listing, cached in memory on the
-    # nodes.jsonl mtime. Never written to disk — traces are read-only here.
+    # Per-run activity summaries for the listing: memory first, then the
+    # shared studio cache (redis/disk), keyed on the nodes.jsonl mtime so
+    # a changed run recomputes and an unchanged one costs nothing —
+    # anywhere, across restarts. The trace dir itself stays read-only.
+    from operonx_studio.cache import studio_cache
+
+    cache = studio_cache()
     summary_cache: Dict[str, Any] = {}
 
     def _activity(entry: Path, nodes_mtime: float) -> Dict[str, Any]:
         cached = summary_cache.get(str(entry))
         if cached and cached[0] == nodes_mtime:
             return cached[1]
-        s = _summarise_run(_local_records(entry), entry.name)
-        brief = {"ops": len(s["ops"]), "records": s["records"],
-                 "errors": s["errors"], "wall_s": s["wall_s"]}
+        key = f"tracesum:{entry}:{nodes_mtime}"
+        brief = cache.get_json(key)
+        if brief is None:
+            s = _summarise_run(_local_records(entry), entry.name)
+            brief = {"ops": len(s["ops"]), "records": s["records"],
+                     "errors": s["errors"], "wall_s": s["wall_s"]}
+            cache.set_json(key, brief, ttl=14 * 86400)
         summary_cache[str(entry)] = (nodes_mtime, brief)
         return brief
 

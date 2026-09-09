@@ -32,6 +32,9 @@ dev = [
     "httpx>=0.24",
     "ruff>=0.1",
 ]
+redis = [
+    "redis>=4.5",
+]
 
 [project.scripts]
 operonx-studio = "operonx_studio.cli:main"
