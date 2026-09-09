@@ -88,11 +88,28 @@
   panel.append(head, log, bar);
 
   const scrolled = () => { log.scrollTop = log.scrollHeight; };
+
+  /* Chips show WHAT the agent touched, not the raw invocation — a long
+   * `uv run python -c ...` one-liner as 11px nowrap text reads as
+   * noise. Paths shrink to their last segments, commands to their first
+   * words; the full text lives in the tooltip. */
+  const shortHint = (hint) => {
+    if (!hint) return "";
+    if (hint.startsWith("/") || hint.startsWith("~")) {
+      const seg = hint.split("/").filter(Boolean);
+      return seg.length > 2 ? "…/" + seg.slice(-2).join("/") : hint;
+    }
+    return hint.length > 44 ? hint.slice(0, 44) + "…" : hint;
+  };
+
   const bubble = (item) => {
     if (item.w === "tool") {
       const chip = el("div", "chat-tool");
       chip.append(el("b", "", "⚙ " + (item.name || "tool")));
-      if (item.hint) chip.append(el("span", "", " · " + item.hint));
+      if (item.hint) {
+        chip.append(el("span", "", shortHint(item.hint)));
+        chip.title = item.hint;
+      }
       log.append(chip);
       return chip;
     }
@@ -139,17 +156,40 @@
     scrolled();
 
     let botItem = null, botEl = null, finished = false, misses = 0;
+
+    /* Deltas arrive in poll-round-trip batches (1-2s of text at once
+     * over the tunnel); a typewriter drain reveals them at reading
+     * pace instead of popping whole paragraphs in. It hurries when it
+     * falls behind and is flushed whenever ordering matters. */
+    let queue = "", drainTimer = null;
+    const grow = (text) => {
+      if (!botEl) {
+        botItem = { w: "bot", text: "" };
+        botEl = bubble(botItem);
+      }
+      botItem.text += text;
+      renderMd(botEl, botItem.text);
+      scrolled();
+    };
+    const drain = () => {
+      if (!queue) { drainTimer = null; return; }
+      const step = Math.max(3, Math.ceil(queue.length / 25));
+      grow(queue.slice(0, step));
+      queue = queue.slice(step);
+      drainTimer = setTimeout(drain, 24);
+    };
+    const flush = () => {
+      if (drainTimer) { clearTimeout(drainTimer); drainTimer = null; }
+      if (queue) { grow(queue); queue = ""; }
+    };
+
     const feed = (event) => {
       if (event.t === "delta") {
-        if (!botEl) {
-          botItem = { w: "bot", text: "" };
-          botEl = bubble(botItem);
-        }
-        botItem.text += event.text;
-        renderMd(botEl, botItem.text);
-        scrolled();
+        queue += event.text;
+        if (!drainTimer) drain();
       } else if (event.t === "tool") {
         // a tool call ends the current text block; the next delta opens a new one
+        flush();
         if (botItem) { remember(botItem); botItem = null; botEl = null; }
         const item = { w: "tool", name: event.name, hint: event.hint };
         bubble(item); remember(item); scrolled();
@@ -157,6 +197,7 @@
         store.set(K_SESSION, event.session);
       } else if (event.t === "done") {
         finished = true;
+        flush();
         if (event.session) store.set(K_SESSION, event.session);
         if (event.error) {
           const item = { w: "err", text: event.error };
@@ -164,6 +205,7 @@
         }
       } else if (event.t === "error") {
         finished = true;
+        flush();
         const item = { w: "err", text: event.text || "assistant error" };
         bubble(item); remember(item);
       }
@@ -202,9 +244,10 @@
         if (!finished && !batch.alive && !batch.events.length) {
           feed({ t: "error", text: "turn ended unexpectedly" });
         }
-        if (!finished && !batch.events.length) await sleep(400);
+        if (!finished && !batch.events.length) await sleep(200);
       }
     } finally {
+      flush();
       if (botItem) remember(botItem);
       store.drop(K_TURN);
       thinking.remove();
