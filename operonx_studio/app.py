@@ -884,6 +884,71 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse(
             _op_executions(_local_records(run_dir), run_dir.name, op_name, limit=limit))
 
+    # ── the assistant ───────────────────────────────────────────────────
+    # The ✦ panel is a real Claude Code session on this machine (chat.py
+    # spawns the CLI headless). The studio's contribution is context: the
+    # packaged operonx knowledge doc plus the briefing built here — who
+    # the project is, its graphs and op kinds, where the traces live, and
+    # a fresh IR dump the agent can read instead of re-deriving structure.
+
+    def _chat_briefing(pid: str) -> tuple[Optional[Path], str]:
+        watcher, ref = _watcher(pid), recents.get(pid)
+        if watcher is None or ref is None:
+            return None, ""
+        lines = [f"# Project briefing: {ref.name}",
+                 f"Root (your working directory): {watcher.root}"]
+        traces = _traces_root(watcher.root)
+        if traces is not None:
+            lines.append(f"Traces directory: {traces}")
+        result = watcher.refresh_swr()
+        if result.ok and result.ir:
+            import tempfile
+
+            dump = Path(tempfile.gettempdir()) / "operonx-studio" / f"{pid}-ir.json"
+            try:
+                dump.parent.mkdir(parents=True, exist_ok=True)
+                dump.write_text(json.dumps(result.ir), encoding="utf-8")
+                lines.append(f"Extracted IR dump (JSON, may lag edits): {dump}")
+            except OSError:
+                pass
+            for g in result.ir.get("graphs") or []:
+                ops = ", ".join(
+                    f"{n.get('name')}({n.get('kind')})"
+                    for n in (g.get("nodes") or [])[:40])
+                lines.append(f"Graph `{g.get('name')}`: {ops}")
+        elif result.error:
+            lines.append(f"NOTE: extraction currently fails: {result.error}")
+        return watcher.root, "\n".join(lines)
+
+    @app.post("/api/p/{pid}/chat")
+    async def project_chat(pid: str, body: Dict[str, Any]) -> Any:
+        from . import chat as _chat
+
+        cwd, context = _chat_briefing(pid)
+        if cwd is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        message = str(body.get("message") or "").strip()
+        if not message:
+            return JSONResponse({"error": "empty message"}, status_code=400)
+        return _chat.chat_sse(message, cwd=cwd, context=context,
+                              session=str(body.get("session") or "") or None)
+
+    @app.post("/api/chat")
+    async def home_chat(body: Dict[str, Any]) -> Any:
+        """The assistant on the home page — no project selected, so the
+        briefing is the roster: every project the studio knows about."""
+        from . import chat as _chat
+
+        message = str(body.get("message") or "").strip()
+        if not message:
+            return JSONResponse({"error": "empty message"}, status_code=400)
+        roster = "\n".join(f"- {r.name}: {r.root}" for r in recents.ordered()
+                           if r.exists)
+        context = ("# Studio briefing\nNo project is open. Projects this "
+                   "studio knows:\n" + (roster or "(none yet)"))
+        return _chat.chat_sse(message, cwd=Path.home(), context=context,
+                              session=str(body.get("session") or "") or None)
+
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
     return app
 
