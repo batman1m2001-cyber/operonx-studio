@@ -653,6 +653,67 @@ body.resizing { user-select: none; cursor: col-resize; }
   max-height: 240px; overflow: auto;
 }
 
+/* ── sign-in, in the brand's own dress ────────────────────────────── */
+.loginwrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.logincard {
+  width: 400px; background: var(--panel); border-top: 5px solid var(--accent);
+  border-radius: var(--r-lg); padding: 40px 44px 32px; text-align: center;
+  box-shadow: var(--sh-3);
+}
+.loginmark {
+  font-size: 40px; font-weight: 800; letter-spacing: -.03em;
+  background: linear-gradient(120deg, #d9a41c, #8a6408 75%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.loginsub { font-size: 18px; font-weight: 700; color: var(--accent-deep);
+  letter-spacing: .3em; text-transform: uppercase; margin-bottom: 14px; }
+.loginhint { color: var(--muted); font-size: 13.5px; margin-bottom: 22px; }
+.logincard .field { text-align: left; margin-top: 14px; }
+.loginbtn { width: 100%; margin-top: 22px; padding: 10px; font-size: 15px; }
+.loginerr { color: var(--err); font-size: 13px; margin-top: 12px; min-height: 18px; }
+
+/* ── the assistant's seat: floating ✦ + chat panel, every page ────── */
+.chat-fab {
+  position: fixed; right: 22px; bottom: 22px; z-index: 60;
+  width: 52px; height: 52px; border-radius: 50%; border: none;
+  background: var(--gold-grad); color: #fff; font-size: 21px;
+  box-shadow: 0 4px 16px rgba(150, 110, 15, .45),
+              inset 0 1px 0 rgba(255, 255, 255, .35);
+  cursor: pointer; transition: transform var(--tr), box-shadow var(--tr);
+}
+.chat-fab:hover { transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 8px 24px rgba(150, 110, 15, .55); }
+.chat-fab.hidden { display: none; }
+.chat-panel {
+  position: fixed; right: 22px; bottom: 22px; z-index: 60;
+  width: 340px; height: 440px; display: none; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line-soft);
+  border-top: 4px solid var(--accent); border-radius: var(--r-lg);
+  box-shadow: var(--sh-3); overflow: hidden;
+}
+.chat-panel.open { display: flex; }
+.chat-head { display: flex; align-items: center; padding: 10px 14px;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.chat-title { font-weight: 700; color: var(--accent-deep); }
+.chat-close { margin-left: auto; border: none; background: none;
+  color: var(--muted); cursor: pointer; box-shadow: none; }
+.chat-close:hover { color: var(--text); box-shadow: none; }
+.chat-log { flex: 1; overflow-y: auto; padding: 12px; display: flex;
+  flex-direction: column; gap: 8px; }
+.chat-msg { max-width: 85%; padding: 8px 12px; border-radius: var(--r-md);
+  font-size: 13px; line-height: 1.45; }
+.chat-msg.from-bot { background: var(--panel-2); border-left: 3px solid var(--accent);
+  align-self: flex-start; }
+.chat-msg.from-me { background: rgba(47, 111, 208, .08);
+  border-right: 3px solid var(--k-func); align-self: flex-end; }
+.chat-bar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+.chat-input { flex: 1; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px;
+  font: inherit; }
+.chat-input:focus { outline: none; border-color: var(--accent); }
+.chat-send { border: none; border-radius: 50%; width: 38px; height: 38px;
+  background: var(--gold-grad); color: #fff; cursor: pointer; box-shadow: none; }
+
 /* run overlay banner */
 #runbanner {
   display: none; align-items: center; gap: 10px;

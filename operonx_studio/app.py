@@ -434,7 +434,8 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     def _page(name: str) -> HTMLResponse:
         text = (STATIC / name).read_text(encoding="utf-8")
-        for asset in ("studio.css", "studio.js", "values.js", "home.css", "home.js"):
+        for asset in ("studio.css", "studio.js", "values.js", "chat.js",
+                      "home.css", "home.js"):
             text = text.replace(f"/static/{asset}", f"/static/{asset}?v={asset_v}")
         return HTMLResponse(text, headers={"Cache-Control": "no-cache"})
 
@@ -445,6 +446,67 @@ def build_studio_app(recents: Optional[Recents] = None):
             response.headers["Cache-Control"] = (
                 "public, max-age=31536000, immutable"
                 if "v" in request.query_params else "no-cache")
+        return response
+
+    # ── authentication ──────────────────────────────────────────────
+    # The studio rides a public tunnel; an open door there is an open
+    # door to the filesystem browser and the param editor. Simple by
+    # design: one user/pass (root/123 unless configured), a signed
+    # session cookie that survives restarts, and an off switch.
+    #
+    #   OPERONX_STUDIO_USER=...   (default "root")
+    #   OPERONX_STUDIO_PASS=...   (default "123")
+    #   OPERONX_STUDIO_AUTH=off   (no auth at all — trusted networks)
+    auth: Optional[Dict[str, str]] = None
+    if os.environ.get("OPERONX_STUDIO_AUTH", "").lower() not in ("off", "0", "false"):
+        import hmac as _hmac
+
+        _user = os.environ.get("OPERONX_STUDIO_USER", "root")
+        _pass = os.environ.get("OPERONX_STUDIO_PASS", "123")
+        _key = hashlib.sha256(f"oxstudio:{_user}:{_pass}".encode()).digest()
+        auth = {"user": _user, "pass": _pass,
+                "token": _hmac.new(_key, b"session-v1", hashlib.sha256).hexdigest()}
+
+    @app.middleware("http")
+    async def _guard(request, call_next):
+        if auth is not None:
+            path = request.url.path
+            is_open = (path == "/login" or path == "/api/login"
+                       or path.startswith("/static"))
+            if not is_open and request.cookies.get("oxsession") != auth["token"]:
+                if path.startswith("/api/"):
+                    return JSONResponse({"error": "authentication required"},
+                                        status_code=401)
+                from fastapi.responses import RedirectResponse
+
+                return RedirectResponse("/login", status_code=302)
+        return await call_next(request)
+
+    @app.get("/login")
+    def login_page() -> HTMLResponse:
+        return _page("login.html")
+
+    @app.post("/api/login")
+    def login(body: Dict[str, Any]) -> JSONResponse:
+        if auth is None:
+            return JSONResponse({"ok": True})
+        import hmac as _hmac
+
+        good = (_hmac.compare_digest(str(body.get("username") or ""), auth["user"])
+                and _hmac.compare_digest(str(body.get("password") or ""), auth["pass"]))
+        if not good:
+            return JSONResponse({"error": "wrong username or password"}, status_code=401)
+        response = JSONResponse({"ok": True})
+        response.set_cookie("oxsession", auth["token"], httponly=True,
+                            samesite="lax", max_age=30 * 86400)
+        return response
+
+    @app.get("/logout")
+    def logout():
+        from fastapi.responses import RedirectResponse
+
+        response = RedirectResponse("/login", status_code=302)
+        response.delete_cookie("oxsession")
         return response
 
     def _watcher(pid: str) -> Optional[ProjectWatcher]:

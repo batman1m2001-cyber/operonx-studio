@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sign in — operonx studio</title>
+<link rel="stylesheet" href="/static/studio.css">
+</head>
+<body>
+<div class="loginwrap">
+  <div class="logincard">
+    <div class="loginmark">operonx</div>
+    <div class="loginsub">studio</div>
+    <div class="loginhint">Sign in to see your flows</div>
+    <form id="login-form">
+      <div class="field">
+        <label for="login-user">Username</label>
+        <input type="text" id="login-user" autocomplete="username" autofocus>
+      </div>
+      <div class="field">
+        <label for="login-pass">Password</label>
+        <input type="password" id="login-pass" autocomplete="current-password">
+      </div>
+      <button class="primary loginbtn" type="submit">Sign in</button>
+      <div class="loginerr" id="login-err"></div>
+    </form>
+  </div>
+</div>
+<script>
+document.getElementById("login-form").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const err = document.getElementById("login-err");
+  err.textContent = "";
+  const res = await fetch("/api/login", {
+    method: "POST",
+    headers: {"content-type": "application/json"},
+    body: JSON.stringify({
+      username: document.getElementById("login-user").value,
+      password: document.getElementById("login-pass").value,
+    }),
+  });
+  if (res.ok) { location.href = "/"; return; }
+  const data = await res.json().catch(() => ({}));
+  err.textContent = data.error || "sign-in failed";
+};
+</script>
+</body>
+</html>
