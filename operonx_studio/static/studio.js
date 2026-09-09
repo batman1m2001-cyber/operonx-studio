@@ -231,8 +231,8 @@ function energyEdge(svg, d, cls) {
 function energySparks(svg, path, cls) {
   let len;
   try { len = path.getTotalLength(); } catch { return; }
-  if (!len || len < 60) return;
-  const count = Math.max(2, Math.min(5, Math.round(len / 130)));
+  if (!len || len < 130) return;
+  const count = Math.max(1, Math.min(3, Math.round(len / 240)));
   for (let i = 0; i < count; i++) {
     const at = ((i + 0.5) / count) * len;
     const pt = path.getPointAtLength(at);
@@ -299,72 +299,99 @@ function render() {
       p.setAttribute("d", bezier(s.x + 190, s.y + NODE_H / 2, t.x, portY(t)));
       p.setAttribute("class", "serve");
       svg.append(p);
-      bouton(svg, t.x, portY(t), "b-serve");
     }
   }
 
+  // One beam per pair: the IR often carries a data edge AND an order
+  // edge between the same two nodes, and drawing both stacked parallel
+  // strands was half the visual noise. Keep the most meaningful one.
+  const meaning = (fe) => (fe.e.soft ? 0 : 2) + (fe.e.type === "condition" ? 1 : 0)
+    + (fe.e.back ? 1 : 0);
+  const byPair = new Map();
+  for (const fe of flat.edges) {
+    const key = `${fe.a.key}→${fe.b.key}`;
+    const prev = byPair.get(key);
+    if (!prev || meaning(fe) > meaning(prev)) byPair.set(key, fe);
+  }
+
+  // Glyphs and labels buffer here and draw AFTER every path, so no
+  // later beam ever paints over a word.
+  const glyphJobs = [];
+  const addGlyph = (x, y, text, cls) => glyphJobs.push([x, y, text, cls]);
+  const along = (path, fraction, dy) => {
+    try {
+      const len = path.getTotalLength();
+      const pt = path.getPointAtLength(len * fraction);
+      return [pt.x, pt.y + dy];
+    } catch { return null; }
+  };
+
   // graph edges (every open level draws its own)
-  for (const {e, a, b} of flat.edges) {
+  for (const {e, a, b} of byPair.values()) {
     const p = document.createElementNS(SVGNS, "path");
     let cls = e.soft ? "soft" : "";
-    let end = [b.x, portY(b)], endCls = "";
-    let sheath = null;   // myelin class, when this edge wears one
+    let sheath = null;
+    let condLabels = [], isElse = false;
     if (e.back) {
       p.setAttribute("d", returnPath(a, b));
       cls += " back";
       if (!e.soft) sheath = "back";
-      end = [b.x + b.w / 2, b.y + b.h]; endCls = "b-back";
       const dip = Math.max(a.y + a.h, b.y + b.h) + 58 + Math.abs(a.x - b.x) * 0.06;
-      edgeGlyph(svg, (a.x + b.x + b.w) / 2, dip, "↺ loop", "back-label");
+      addGlyph((a.x + b.x + b.w) / 2, dip, "↺ loop", "back-label");
     } else if (b.x < a.x - 1) {
       p.setAttribute("d", wrapPath(a, b));
       cls += " wrap";
     } else {
       p.setAttribute("d", bezier(a.x + a.w, portY(a), b.x, portY(b)));
-      const mx = (a.x + a.w + b.x) / 2, my = (portY(a) + portY(b)) / 2 - 6;
-      // a branch edge is meaningless without its condition — and it gets
-      // its own beam: branch amber, with the ELSE fallback dashed,
-      // laserless and sparkless, visibly dormant until chosen
-      let condLabels = [];
+      // an if/else route gets its own beam: branch amber with the
+      // condition riding it; the ELSE fallback dashed and laserless,
+      // visibly dormant until chosen
       if (a.node.routes && e.type === "condition") {
         condLabels = a.node.routes
           .filter(r => r.target === b.node.name).map(r => r.condition);
+        isElse = condLabels.length > 0 && condLabels.every(c => c === "else");
       }
-      if (!e.soft) {
-        if (condLabels.length) {
-          sheath = condLabels.every(c => c === "else") ? "cond relse" : "cond";
-        } else {
-          sheath = "";
-        }
-      }
-      // A generator's edge is not one item; a consumer's mode is not
-      // sequential. Both change what the run does, so both are on the wire.
-      if (a.node.is_gen) { cls += " stream"; edgeGlyph(svg, mx, my, "≋"); }
-      const consume = consumeOf(e, a, b);
-      if (consume) {
-        edgeGlyph(svg, mx, my + (a.node.is_gen ? 14 : 0),
-                  consume.mode === "collect" ? "⧉ collect"
-                  : `∥ parallel${consume.max ? "≤" + consume.max : ""}`);
-      }
-      // label lane sits below the glyph lane so the two never collide
-      if (condLabels.length) {
-        edgeGlyph(svg, mx, my + 26, condLabels.join(" | "), "routelabel");
-      }
+      if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
     if (state.sel && (state.rendered.get(state.sel)?.node.id === e.src
                    || state.rendered.get(state.sel)?.node.id === e.dst)) cls += " hot";
+
+    let drawn = p;
     if (sheath !== null) {
-      // a hard edge is pure energy: glow + bright core + frozen sparks
       const eCls = (sheath + (cls.includes("hot") ? " hot" : "")).trim();
-      const core = energyEdge(svg, p.getAttribute("d"), eCls);
+      drawn = energyEdge(svg, p.getAttribute("d"), eCls);
       // a dormant else-fallback carries no sparks — nothing flows there yet
-      if (!eCls.includes("relse")) energySparks(svg, core, eCls);
+      if (!eCls.includes("relse")) energySparks(svg, drawn, eCls);
     } else {
       p.setAttribute("class", cls.trim());
       svg.append(p);
     }
-    bouton(svg, end[0], end[1], endCls);
+    // the node's own port bead is the terminal; an extra circle on top of
+    // it was clutter. Only a loop's underside, which has no port, gets one.
+    if (e.back) bouton(svg, b.x + b.w / 2, b.y + b.h, "b-back");
+
+    if (!e.back && !cls.includes("wrap")) {
+      // labels anchor to the drawn path itself, not a guessed midpoint —
+      // an else-curve dives, and its label dives with it
+      if (a.node.is_gen) {
+        const at = along(drawn, 0.5, -7);
+        if (at) addGlyph(at[0], at[1], "≋", "");
+        cls += " stream";
+      }
+      const consume = consumeOf(e, a, b);
+      if (consume) {
+        const at = along(drawn, 0.55, -7);
+        if (at) addGlyph(at[0], at[1],
+          consume.mode === "collect" ? "⧉ collect"
+          : `∥ parallel${consume.max ? "≤" + consume.max : ""}`, "");
+      }
+      if (condLabels.length) {
+        const at = along(drawn, isElse ? 0.5 : 0.3, -9);
+        if (at) addGlyph(at[0], at[1], condLabels.join(" | "), "routelabel");
+      }
+    }
   }
+  for (const [x, y, text, cls] of glyphJobs) edgeGlyph(svg, x, y, text, cls);
 
   // serve cards
   for (const s of serves) {

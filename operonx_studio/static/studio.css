@@ -394,8 +394,10 @@ body.resizing { user-select: none; cursor: col-resize; }
 .badge.expand { cursor: pointer; }
 .badge.expand:hover { background: var(--k-graph); color: #fff; border-color: var(--k-graph); }
 
-/* wrap seam — where a long chain breaks to the next band, like a newline */
-#edges path.wrap { stroke: #cdb26a; stroke-dasharray: 10 5; opacity: .9; }
+/* wrap seam — where a long chain breaks to the next band, like a
+   newline. A layout artifact, not uncertainty: thin, faint, SOLID —
+   dashes are reserved for edges that may not fire. */
+#edges path.wrap { stroke: #d0b878; stroke-width: 1.5; opacity: .55; }
 
 /* pan/zoom controls */
 .zoomctl {
