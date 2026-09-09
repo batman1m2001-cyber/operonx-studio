@@ -183,37 +183,47 @@ function _sampleCubic(x1, y1, cx1, cy1, cx2, cy2, x2, y2) {
   return pts;
 }
 
+function _rects(obstacles, a, b) {
+  const out = [];
+  for (const o of obstacles) {
+    if (o === a || o === b) continue;
+    out.push({l: o.x - 6, r: o.x + o.w + 6, t: o.y - 6, b: o.y + o.h + 6});
+  }
+  return out;
+}
+
+function _rowGapMids(obstacles) {
+  const tops = [...new Set(obstacles.map(o => Math.round(o.y)))].sort((m, n) => m - n);
+  const mids = [];
+  for (let i = 0; i + 1 < tops.length; i++) {
+    const below = Math.min(...obstacles.filter(o => Math.round(o.y) === tops[i + 1]).map(o => o.y));
+    const above = Math.max(...obstacles.filter(o => Math.round(o.y) === tops[i]).map(o => o.y + o.h));
+    if (below - above > 22) mids.push((above + below) / 2);
+  }
+  return mids;
+}
+
+function _corridorClear(rects, l, r, ch) {
+  for (const o of rects) {
+    if (o.r > l && o.l < r && o.b > ch - 7 && o.t < ch + 7) return false;
+  }
+  return true;
+}
+
 function routeAvoiding(a, b, obstacles) {
   const x1 = a.x + a.w, y1 = portY(a), x2 = b.x, y2 = portY(b);
   const dx = Math.max(40, Math.abs(x2 - x1) / 2);
-  const rects = [];
-  for (const o of obstacles) {
-    if (o === a || o === b) continue;
-    rects.push({l: o.x - 6, r: o.x + o.w + 6, t: o.y - 6, b: o.y + o.h + 6});
-  }
+  const rects = _rects(obstacles, a, b);
   const straight = _sampleCubic(x1, y1, x1 + dx, y1, x2 - dx, y2, x2, y2);
   if (!_hits(straight, rects)) return bezier(x1, y1, x2, y2);
 
   // channel candidates: the horizontal gaps between node rows, nearest
   // to the edge's own midline first
   if (x2 - x1 > 280) {
-    const tops = [...new Set(obstacles.map(o => Math.round(o.y)))].sort((m, n) => m - n);
-    const mids = [];
-    for (let i = 0; i + 1 < tops.length; i++) {
-      const below = Math.min(...obstacles.filter(o => Math.round(o.y) === tops[i + 1]).map(o => o.y));
-      const above = Math.max(...obstacles.filter(o => Math.round(o.y) === tops[i]).map(o => o.y + o.h));
-      if (below - above > 22) mids.push((above + below) / 2);
-    }
-    mids.sort((m, n) => Math.abs(m - (y1 + y2) / 2) - Math.abs(n - (y1 + y2) / 2));
+    const mids = _rowGapMids(obstacles)
+      .sort((m, n) => Math.abs(m - (y1 + y2) / 2) - Math.abs(n - (y1 + y2) / 2));
     for (const ch of mids) {
-      const corridor = [{l: x1 + 90, r: x2 - 90, t: ch - 7, b: ch + 7}];
-      let blocked = false;
-      for (const r of rects) {
-        if (r.r > corridor[0].l && r.l < corridor[0].r && r.b > corridor[0].t && r.t < corridor[0].b) {
-          blocked = true; break;
-        }
-      }
-      if (blocked) continue;
+      if (!_corridorClear(rects, x1 + 90, x2 - 90, ch)) continue;
       return `M ${x1} ${y1} C ${x1 + 70} ${y1}, ${x1 + 70} ${ch}, ${x1 + 130} ${ch}`
         + ` L ${x2 - 130} ${ch}`
         + ` C ${x2 - 70} ${ch}, ${x2 - 70} ${y2}, ${x2} ${y2}`;
@@ -230,6 +240,27 @@ function routeAvoiding(a, b, obstacles) {
   return bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
 }
 
+/* The carriage return, obstacle-aware: down the right margin, left
+ * along a channel that is actually CLEAR (searched, not assumed), into
+ * the target. A fixed offset above the target row used to slice through
+ * every row above it. */
+function wrapAvoiding(a, b, obstacles) {
+  const x1 = a.x + a.w, y1 = portY(a);
+  const x2 = b.x, y2 = portY(b);
+  const rects = _rects(obstacles, a, b);
+  const mids = _rowGapMids(obstacles)
+    .filter(m => m > y1 + 20)
+    .sort((m, n) => Math.abs(m - (b.y - 30)) - Math.abs(n - (b.y - 30)));
+  let ch = b.y - 44;   // legacy fallback
+  for (const cand of mids) {
+    if (_corridorClear(rects, x2 - 30, x1 + 10, cand)) { ch = cand; break; }
+  }
+  return `M ${x1} ${y1}`
+    + ` C ${x1 + 70} ${y1}, ${x1 + 70} ${ch}, ${x1 - 10} ${ch}`
+    + ` L ${x2 - 30} ${ch}`
+    + ` C ${x2 - 70} ${ch}, ${x2 - 60} ${y2}, ${x2} ${y2}`;
+}
+
 function returnPath(a, b) {
   // A loop's return edge: out of the source's underside, bowing beneath
   // everything it passes over, back into the target's underside. Drawn
@@ -240,20 +271,6 @@ function returnPath(a, b) {
   const x2 = b.x + b.w / 2, y2 = b.y + b.h;
   const dip = Math.max(y1, y2) + 60 + Math.abs(x1 - x2) * 0.08;
   return `M ${x1} ${y1} C ${x1} ${dip}, ${x2} ${dip}, ${x2} ${y2}`;
-}
-
-function wrapPath(a, b) {
-  // The seam where a long chain wraps to the next band: out of the
-  // source's right side, down through the band gap, left along the
-  // channel, into the target from its left — a carriage return, not a
-  // backwards sweep across the whole picture.
-  const x1 = a.x + a.w, y1 = portY(a);
-  const x2 = b.x, y2 = portY(b);
-  const ch = b.y - 44;            // the channel above the target's band
-  return `M ${x1} ${y1}`
-    + ` C ${x1 + 70} ${y1}, ${x1 + 70} ${ch}, ${x1 - 10} ${ch}`
-    + ` L ${x2 - 30} ${ch}`
-    + ` C ${x2 - 70} ${ch}, ${x2 - 60} ${y2}, ${x2} ${y2}`;
 }
 
 function consumeOf(edge, a, b) {
@@ -410,26 +427,28 @@ function render() {
     const p = document.createElementNS(SVGNS, "path");
     let cls = e.soft ? "soft" : "";
     let sheath = null;
+    // an if/else route gets its own beam: branch amber, the ELSE
+    // fallback dashed and laserless — the condition text stays OFF the
+    // wire (hover the edge, or open the router's route table). This
+    // holds whatever ROUTE the edge takes: a condition edge that wraps
+    // to the next band is still a condition edge.
     let condLabels = [], isElse = false;
+    if (a.node.routes && e.type === "condition") {
+      condLabels = a.node.routes
+        .filter(r => r.target === b.node.name).map(r => r.condition);
+      isElse = condLabels.length > 0 && condLabels.every(c => c === "else");
+    }
     if (e.back) {
       p.setAttribute("d", returnPath(a, b));
       cls += " back";
       if (!e.soft) sheath = "back";
       const dip = Math.max(a.y + a.h, b.y + b.h) + 58 + Math.abs(a.x - b.x) * 0.06;
       addGlyph((a.x + b.x + b.w) / 2, dip, "↺ loop", "back-label");
-    } else if (b.x < a.x - 1) {
-      p.setAttribute("d", wrapPath(a, b));
-      cls += " wrap";
     } else {
-      p.setAttribute("d", routeAvoiding(a, b, obstacles));
-      // an if/else route gets its own beam: branch amber, the ELSE
-      // fallback dashed and laserless — the condition text stays OFF
-      // the wire (hover the edge, or open the router's route table)
-      if (a.node.routes && e.type === "condition") {
-        condLabels = a.node.routes
-          .filter(r => r.target === b.node.name).map(r => r.condition);
-        isElse = condLabels.length > 0 && condLabels.every(c => c === "else");
-      }
+      const wraps = b.x < a.x - 1;
+      p.setAttribute("d", wraps ? wrapAvoiding(a, b, obstacles)
+                                : routeAvoiding(a, b, obstacles));
+      if (wraps) cls += " wrap";
       if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
     if (state.sel && (state.rendered.get(state.sel)?.node.id === e.src
@@ -449,9 +468,8 @@ function render() {
     // it was clutter. Only a loop's underside, which has no port, gets one.
     if (e.back) bouton(svg, b.x + b.w / 2, b.y + b.h, "b-back");
 
-    if (!e.back && !cls.includes("wrap")) {
-      // labels anchor to the drawn path itself, not a guessed midpoint —
-      // an else-curve dives, and its label dives with it
+    if (!e.back) {
+      // glyphs anchor to the drawn path itself, wherever it routed
       if (a.node.is_gen) {
         const at = along(drawn, 0.5, -7);
         if (at) addGlyph(at[0], at[1], "≋", "");
