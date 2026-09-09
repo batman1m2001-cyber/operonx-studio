@@ -1,10 +1,11 @@
 /* operonx studio — the assistant, wired.
  *
- * The floating ✦ now fronts a real Claude Code session running on the
- * studio host. The server relays SSE events (chat.py); this side keeps
- * the transcript and the resume id in localStorage per project, renders
- * streamed markdown, and shows tool activity as it happens. Stop = abort
- * the fetch; the server kills the agent when the stream closes.
+ * The floating ✦ fronts a real Claude Code session on the studio host.
+ * Delivery is turn-based polling — the free tunnel kills any response
+ * after ~10s, so POST starts the turn and short GET polls drain its
+ * events by cursor. The agent outlives the connection: a reload or a
+ * tunnel hiccup mid-task just resumes polling (the turn id and cursor
+ * live in localStorage, like the transcript and resume session id).
  */
 
 (function () {
@@ -23,6 +24,7 @@
   const endpoint = pid ? `/api/p/${pid}/chat` : "/api/chat";
   const K_LOG = `oxchat:${scope}:log`;
   const K_SESSION = `oxchat:${scope}:session`;
+  const K_TURN = `oxchat:${scope}:turn`;
 
   const store = {
     get(key, fallback) {
@@ -116,7 +118,7 @@
   const remember = (item) => { history.push(item); store.set(K_LOG, history); };
 
   /* ── the wire ── */
-  let streaming = null;   // AbortController while a turn is in flight
+  let running = null;   // {id, stop} while a turn is in flight
 
   const setBusy = (busy) => {
     send.textContent = busy ? "■" : "➤";
@@ -124,92 +126,116 @@
     input.disabled = busy;
   };
 
-  const turn = async (text) => {
-    const controller = new AbortController();
-    streaming = controller;
-    setBusy(true);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  /* Drain one turn's events by cursor until it finishes. Poll failures
+   * are retried — a tunnel hiccup must not orphan a running agent. */
+  const follow = async (turnId, cursor) => {
+    const state = { id: turnId, stop: false };
+    running = state;
+    setBusy(true);
     const thinking = el("div", "chat-think", "…");
     log.append(thinking);
     scrolled();
 
-    let botItem = null, botEl = null, buffer = "";
+    let botItem = null, botEl = null, finished = false, misses = 0;
     const feed = (event) => {
       if (event.t === "delta") {
         if (!botEl) {
           botItem = { w: "bot", text: "" };
           botEl = bubble(botItem);
         }
-        buffer += event.text;
-        botItem.text = buffer;
-        renderMd(botEl, buffer);
+        botItem.text += event.text;
+        renderMd(botEl, botItem.text);
         scrolled();
       } else if (event.t === "tool") {
         // a tool call ends the current text block; the next delta opens a new one
-        if (botItem) { remember(botItem); botItem = null; botEl = null; buffer = ""; }
+        if (botItem) { remember(botItem); botItem = null; botEl = null; }
         const item = { w: "tool", name: event.name, hint: event.hint };
         bubble(item); remember(item); scrolled();
       } else if (event.t === "start" && event.session) {
         store.set(K_SESSION, event.session);
       } else if (event.t === "done") {
+        finished = true;
         if (event.session) store.set(K_SESSION, event.session);
         if (event.error) {
           const item = { w: "err", text: event.error };
           bubble(item); remember(item);
         }
       } else if (event.t === "error") {
+        finished = true;
         const item = { w: "err", text: event.text || "assistant error" };
         bubble(item); remember(item);
       }
     };
 
     try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text,
-                               session: store.get(K_SESSION, null) }),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        throw new Error(detail.error || `HTTP ${res.status}`);
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let pending = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        pending += decoder.decode(value, { stream: true });
-        const lines = pending.split("\n\n");
-        pending = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try { feed(JSON.parse(line.slice(6))); } catch {}
+      while (!finished) {
+        if (state.stop) {
+          await fetch(`/api/chat/turn/${turnId}/stop`, { method: "POST" })
+            .catch(() => {});
+          state.stop = false;   // the kill surfaces as this turn's error event
         }
-      }
-    } catch (err) {
-      if (err.name === "AbortError") {
-        const item = { w: "err", text: "stopped" };
-        bubble(item); remember(item);
-      } else {
-        const item = { w: "err", text: String(err.message || err) };
-        bubble(item); remember(item);
+        let batch;
+        try {
+          const res = await fetch(`/api/chat/turn/${turnId}?cursor=${cursor}`);
+          if (res.status === 404) {
+            feed({ t: "error", text: "turn lost (studio restarted?)" });
+            break;
+          }
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          batch = await res.json();
+          misses = 0;
+        } catch {
+          if (++misses > 20) {
+            feed({ t: "error", text: "connection lost — the task may still "
+                                     + "be running; reload to reattach" });
+            break;
+          }
+          await sleep(1500);
+          continue;
+        }
+        for (const event of batch.events) feed(event);
+        cursor = batch.cursor;
+        store.set(K_TURN, { id: turnId, cursor });
+        if (batch.events.length) scrolled();
+        if (!finished && !batch.alive && !batch.events.length) {
+          feed({ t: "error", text: "turn ended unexpectedly" });
+        }
+        if (!finished && !batch.events.length) await sleep(400);
       }
     } finally {
       if (botItem) remember(botItem);
+      store.drop(K_TURN);
       thinking.remove();
-      streaming = null;
+      running = null;
       setBusy(false);
       scrolled();
       input.focus();
     }
   };
 
+  const turn = async (text) => {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text,
+                               session: store.get(K_SESSION, null) }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      store.set(K_TURN, { id: body.turn, cursor: 0 });
+      await follow(body.turn, 0);
+    } catch (err) {
+      const item = { w: "err", text: String(err.message || err) };
+      bubble(item); remember(item); scrolled();
+    }
+  };
+
   bar.onsubmit = (ev) => {
     ev.preventDefault();
-    if (streaming) { streaming.abort(); return; }   // ■ pressed
+    if (running) { running.stop = true; return; }   // ■ pressed
     const text = input.value.trim();
     if (!text) return;
     input.value = "";
@@ -219,12 +245,16 @@
   };
 
   fresh.onclick = () => {
-    if (streaming) streaming.abort();
-    store.drop(K_LOG); store.drop(K_SESSION);
+    if (running) running.stop = true;
+    store.drop(K_LOG); store.drop(K_SESSION); store.drop(K_TURN);
     history.length = 0;
     log.textContent = "";
     bubble({ w: "bot", text: "Fresh start — what shall we do?" });
   };
+
+  // A turn that survived a reload: pick up where the cursor left off.
+  const pending = store.get(K_TURN, null);
+  if (pending && pending.id) follow(pending.id, pending.cursor || 0);
 
   const toggle = (open) => {
     panel.classList.toggle("open", open);

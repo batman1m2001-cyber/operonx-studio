@@ -90,8 +90,13 @@ def project(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def client(tmp_path: Path) -> TestClient:
-    return TestClient(build_studio_app(Recents(state_file=tmp_path / "studio.json")))
+def client(tmp_path: Path):
+    # Context-manager mode keeps one event loop alive across requests —
+    # a turn is a background task that must outlive the POST that
+    # started it, exactly as in production.
+    app = build_studio_app(Recents(state_file=tmp_path / "studio.json"))
+    with TestClient(app) as c:
+        yield c
 
 
 def _open(client: TestClient, root: Path) -> str:
@@ -100,11 +105,20 @@ def _open(client: TestClient, root: Path) -> str:
     return res.json()["id"]
 
 
-def _events(response) -> list:
+def _events(client: TestClient, response) -> list:
+    """Start-then-poll, the way the panel consumes a turn."""
     assert response.status_code == 200, response.text
-    return [json.loads(line[6:])
-            for line in response.text.split("\n\n")
-            if line.startswith("data: ")]
+    turn = response.json()["turn"]
+    events, cursor = [], 0
+    for _ in range(50):
+        got = client.get(f"/api/chat/turn/{turn}?cursor={cursor}")
+        assert got.status_code == 200, got.text
+        batch = got.json()
+        events.extend(batch["events"])
+        cursor = batch["cursor"]
+        if not batch["alive"]:
+            break
+    return events
 
 
 def _invocation(report: Path) -> dict:
@@ -113,7 +127,8 @@ def _invocation(report: Path) -> dict:
 
 def test_chat_streams_deltas_tools_and_done(client, project, fake_claude):
     pid = _open(client, project)
-    events = _events(client.post(f"/api/p/{pid}/chat", json={"message": "hi"}))
+    events = _events(client, client.post(f"/api/p/{pid}/chat",
+                                         json={"message": "hi"}))
     kinds = [e["t"] for e in events]
     assert kinds == ["start", "delta", "delta", "tool", "done"]
     assert events[0]["session"] == "fake-1"
@@ -124,7 +139,7 @@ def test_chat_streams_deltas_tools_and_done(client, project, fake_claude):
 
 def test_agent_runs_in_the_project_with_its_briefing(client, project, fake_claude):
     pid = _open(client, project)
-    client.post(f"/api/p/{pid}/chat", json={"message": "hi"})
+    _events(client, client.post(f"/api/p/{pid}/chat", json={"message": "hi"}))
     invocation = _invocation(fake_claude)
     assert invocation["cwd"] == str(project.resolve())
     argv = invocation["argv"]
@@ -138,8 +153,8 @@ def test_agent_runs_in_the_project_with_its_briefing(client, project, fake_claud
 
 def test_resume_carries_the_session_id(client, project, fake_claude):
     pid = _open(client, project)
-    client.post(f"/api/p/{pid}/chat",
-                json={"message": "again", "session": "prev-42"})
+    _events(client, client.post(f"/api/p/{pid}/chat",
+                                json={"message": "again", "session": "prev-42"}))
     argv = _invocation(fake_claude)["argv"]
     assert argv[argv.index("--resume") + 1] == "prev-42"
 
@@ -148,7 +163,7 @@ def test_mode_read_denies_everything_but_looking(client, project, fake_claude,
                                                  monkeypatch):
     monkeypatch.setenv("OPERONX_STUDIO_CHAT_MODE", "read")
     pid = _open(client, project)
-    client.post(f"/api/p/{pid}/chat", json={"message": "hi"})
+    _events(client, client.post(f"/api/p/{pid}/chat", json={"message": "hi"}))
     argv = _invocation(fake_claude)["argv"]
     assert "Read" in argv and "Bash" not in argv and "Edit" not in argv
     assert "--permission-mode" not in argv
@@ -156,7 +171,7 @@ def test_mode_read_denies_everything_but_looking(client, project, fake_claude,
 
 def test_mode_full_is_the_default_and_grants_bash(client, project, fake_claude):
     pid = _open(client, project)
-    client.post(f"/api/p/{pid}/chat", json={"message": "hi"})
+    _events(client, client.post(f"/api/p/{pid}/chat", json={"message": "hi"}))
     argv = _invocation(fake_claude)["argv"]
     assert argv[argv.index("--permission-mode") + 1] == "acceptEdits"
     assert "Bash" in argv
@@ -164,7 +179,8 @@ def test_mode_full_is_the_default_and_grants_bash(client, project, fake_claude):
 
 def test_home_chat_knows_the_roster(client, project, fake_claude):
     _open(client, project)
-    events = _events(client.post("/api/chat", json={"message": "what's here?"}))
+    events = _events(client,
+                     client.post("/api/chat", json={"message": "what's here?"}))
     assert [e["t"] for e in events][0] == "start"
     prompt_argv = _invocation(fake_claude)["argv"]
     prompt = prompt_argv[prompt_argv.index("--append-system-prompt") + 1]
@@ -175,8 +191,37 @@ def test_missing_binary_is_an_error_event_not_a_crash(client, project,
                                                       monkeypatch):
     monkeypatch.setenv("OPERONX_STUDIO_CLAUDE_BIN", "/nowhere/claude")
     pid = _open(client, project)
-    events = _events(client.post(f"/api/p/{pid}/chat", json={"message": "hi"}))
+    events = _events(client, client.post(f"/api/p/{pid}/chat",
+                                         json={"message": "hi"}))
     assert events[0]["t"] == "error" and "claude" in events[0]["text"].lower()
+
+
+def test_unknown_turn_polls_and_stops_404(client):
+    assert client.get("/api/chat/turn/nope").status_code == 404
+    assert client.post("/api/chat/turn/nope/stop").status_code == 404
+
+
+def test_reload_replays_a_finished_turn_from_any_cursor(client, project,
+                                                        fake_claude):
+    """The browser may come back after a reload and re-poll: the buffer
+    must still be there, from cursor 0 or midway."""
+    pid = _open(client, project)
+    turn = client.post(f"/api/p/{pid}/chat",
+                       json={"message": "hi"}).json()["turn"]
+    all_events = _events_for(client, turn, cursor=0)
+    again = client.get(f"/api/chat/turn/{turn}?cursor=2").json()
+    assert again["events"] == all_events[2:] and again["alive"] is False
+
+
+def _events_for(client: TestClient, turn: str, cursor: int) -> list:
+    events = []
+    for _ in range(50):
+        batch = client.get(f"/api/chat/turn/{turn}?cursor={cursor}").json()
+        events.extend(batch["events"])
+        cursor = batch["cursor"]
+        if not batch["alive"]:
+            break
+    return events
 
 
 def test_empty_message_and_unknown_project_are_rejected(client, project,

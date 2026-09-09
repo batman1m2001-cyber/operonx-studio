@@ -930,8 +930,9 @@ def build_studio_app(recents: Optional[Recents] = None):
         message = str(body.get("message") or "").strip()
         if not message:
             return JSONResponse({"error": "empty message"}, status_code=400)
-        return _chat.chat_sse(message, cwd=cwd, context=context,
-                              session=str(body.get("session") or "") or None)
+        turn = _chat.start_turn(message, cwd=cwd, context=context,
+                                session=str(body.get("session") or "") or None)
+        return JSONResponse({"turn": turn})
 
     @app.post("/api/chat")
     async def home_chat(body: Dict[str, Any]) -> Any:
@@ -946,8 +947,26 @@ def build_studio_app(recents: Optional[Recents] = None):
                            if r.exists)
         context = ("# Studio briefing\nNo project is open. Projects this "
                    "studio knows:\n" + (roster or "(none yet)"))
-        return _chat.chat_sse(message, cwd=Path.home(), context=context,
-                              session=str(body.get("session") or "") or None)
+        turn = _chat.start_turn(message, cwd=Path.home(), context=context,
+                                session=str(body.get("session") or "") or None)
+        return JSONResponse({"turn": turn})
+
+    @app.get("/api/chat/turn/{turn_id}")
+    async def chat_turn_events(turn_id: str, cursor: int = 0) -> JSONResponse:
+        from . import chat as _chat
+
+        got = await _chat.poll_turn(turn_id, max(0, cursor))
+        if got is None:
+            return JSONResponse({"error": "unknown turn"}, status_code=404)
+        return JSONResponse(got)
+
+    @app.post("/api/chat/turn/{turn_id}/stop")
+    async def chat_turn_stop(turn_id: str) -> JSONResponse:
+        from . import chat as _chat
+
+        if not _chat.stop_turn(turn_id):
+            return JSONResponse({"error": "unknown turn"}, status_code=404)
+        return JSONResponse({"ok": True})
 
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
     return app
