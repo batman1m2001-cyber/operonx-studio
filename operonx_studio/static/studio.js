@@ -210,6 +210,43 @@ function _corridorClear(rects, l, r, ch) {
   return true;
 }
 
+/* Lane bookkeeping, reset per render: crossing edges are legible,
+ * COINCIDENT edges are mud. Every claimed horizontal channel and
+ * vertical drop lane is recorded, and the next edge that wants the same
+ * corridor gets the nearest free offset instead of stacking on top. */
+let _lanes = {h: [], v: []};
+
+function _hFree(y, l, r) {
+  return !_lanes.h.some(o => Math.abs(o.y - y) < 11 && o.r > l && o.l < r);
+}
+
+function _vFree(x, t, b) {
+  return !_lanes.v.some(o => Math.abs(o.x - x) < 11 && o.b > t && o.t < b);
+}
+
+function _pickChannel(rects, base, l, r) {
+  for (const off of [0, 13, -13, 26, -26, 39, -39]) {
+    const y = base + off;
+    if (_corridorClear(rects, l, r, y) && _hFree(y, l, r)) {
+      _lanes.h.push({y, l, r});
+      return y;
+    }
+  }
+  return null;
+}
+
+function _pickDrop(rects, base, top, bottom) {
+  for (const off of [0, 14, 28, 42, 56]) {
+    const x = base + off;
+    const blocked = rects.some(o => o.l < x + 7 && o.r > x - 7 && o.b > top && o.t < bottom);
+    if (!blocked && _vFree(x, top, bottom)) {
+      _lanes.v.push({x, t: top, b: bottom});
+      return x;
+    }
+  }
+  return base;
+}
+
 function routeAvoiding(a, b, obstacles) {
   const x1 = a.x + a.w, y1 = portY(a), x2 = b.x, y2 = portY(b);
   const dx = Math.max(40, Math.abs(x2 - x1) / 2);
@@ -218,12 +255,13 @@ function routeAvoiding(a, b, obstacles) {
   if (!_hits(straight, rects)) return bezier(x1, y1, x2, y2);
 
   // channel candidates: the horizontal gaps between node rows, nearest
-  // to the edge's own midline first
+  // to the edge's own midline first — each edge claims a FREE lane
   if (x2 - x1 > 280) {
     const mids = _rowGapMids(obstacles)
       .sort((m, n) => Math.abs(m - (y1 + y2) / 2) - Math.abs(n - (y1 + y2) / 2));
-    for (const ch of mids) {
-      if (!_corridorClear(rects, x1 + 90, x2 - 90, ch)) continue;
+    for (const mid of mids) {
+      const ch = _pickChannel(rects, mid, x1 + 90, x2 - 90);
+      if (ch === null) continue;
       return `M ${x1} ${y1} C ${x1 + 70} ${y1}, ${x1 + 70} ${ch}, ${x1 + 130} ${ch}`
         + ` L ${x2 - 130} ${ch}`
         + ` C ${x2 - 70} ${ch}, ${x2 - 70} ${y2}, ${x2} ${y2}`;
@@ -251,12 +289,15 @@ function wrapAvoiding(a, b, obstacles) {
   const mids = _rowGapMids(obstacles)
     .filter(m => m > y1 + 20)
     .sort((m, n) => Math.abs(m - (b.y - 30)) - Math.abs(n - (b.y - 30)));
-  let ch = b.y - 44;   // legacy fallback
+  let ch = null;
   for (const cand of mids) {
-    if (_corridorClear(rects, x2 - 30, x1 + 10, cand)) { ch = cand; break; }
+    ch = _pickChannel(rects, cand, x2 - 30, x1 + 10);
+    if (ch !== null) break;
   }
+  if (ch === null) ch = b.y - 44;   // legacy fallback
+  const drop = _pickDrop(rects, x1 + 70, Math.min(y1, ch), Math.max(y1, ch));
   return `M ${x1} ${y1}`
-    + ` C ${x1 + 70} ${y1}, ${x1 + 70} ${ch}, ${x1 - 10} ${ch}`
+    + ` C ${drop} ${y1}, ${drop} ${ch}, ${x1 - 10} ${ch}`
     + ` L ${x2 - 30} ${ch}`
     + ` C ${x2 - 70} ${ch}, ${x2 - 60} ${y2}, ${x2} ${y2}`;
 }
@@ -368,6 +409,7 @@ function render() {
   nodesBox.textContent = "";
   svg.textContent = "";
   state.rendered.clear();
+  _lanes = {h: [], v: []};
 
   const model = placeGraph(g, "", 0);
   const flat = flattenModel(model, 0, 0, {nodes: [], edges: []});
