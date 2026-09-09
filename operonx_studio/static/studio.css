@@ -338,6 +338,17 @@ body.resizing { user-select: none; cursor: col-resize; }
 #edges circle.espark { fill: #fff; stroke: #e9a91c; stroke-width: 1.6; }
 #edges circle.espark.tailspark { fill: #ffd96a; opacity: .6; stroke: none; }
 #edges circle.espark.back { stroke: #b3661a; }
+/* if/else routes: the beam in branch amber; the ELSE fallback dashed,
+   laserless — a path that exists but is not flowing */
+#edges path.eglow.cond { stroke: rgba(179, 102, 26, .13); }
+#edges path.ecore.cond { stroke: #b3661a; }
+#edges path.eray.cond { stroke-width: 1.2; opacity: .85; }
+#edges path.ecore.cond.relse { stroke-dasharray: 9 7; opacity: .75; }
+#edges path.eglow.cond.relse { opacity: .5; }
+#edges path.eray.cond.relse { display: none; }
+#edges circle.espark.cond { stroke: #b3661a; }
+/* soft merge edges: the same family, a quieter voice — never gray */
+#edges path.soft { stroke: #c9a052; opacity: .75; }
 .node.serve-node { background: linear-gradient(180deg, #fdf6dd, #fbf0cb);
   border-color: #dcc172; width: 190px; }
 .node.serve-node::before { background: var(--k-serve); }

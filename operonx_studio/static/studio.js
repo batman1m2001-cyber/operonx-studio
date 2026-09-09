@@ -321,10 +321,22 @@ function render() {
       cls += " wrap";
     } else {
       p.setAttribute("d", bezier(a.x + a.w, portY(a), b.x, portY(b)));
-      // hard forward edges wear the myelin sheath; soft edges stay thin
-      // and dashed — their tentativeness is semantics, not styling
-      if (!e.soft) sheath = "";
       const mx = (a.x + a.w + b.x) / 2, my = (portY(a) + portY(b)) / 2 - 6;
+      // a branch edge is meaningless without its condition — and it gets
+      // its own beam: branch amber, with the ELSE fallback dashed,
+      // laserless and sparkless, visibly dormant until chosen
+      let condLabels = [];
+      if (a.node.routes && e.type === "condition") {
+        condLabels = a.node.routes
+          .filter(r => r.target === b.node.name).map(r => r.condition);
+      }
+      if (!e.soft) {
+        if (condLabels.length) {
+          sheath = condLabels.every(c => c === "else") ? "cond relse" : "cond";
+        } else {
+          sheath = "";
+        }
+      }
       // A generator's edge is not one item; a consumer's mode is not
       // sequential. Both change what the run does, so both are on the wire.
       if (a.node.is_gen) { cls += " stream"; edgeGlyph(svg, mx, my, "≋"); }
@@ -334,12 +346,9 @@ function render() {
                   consume.mode === "collect" ? "⧉ collect"
                   : `∥ parallel${consume.max ? "≤" + consume.max : ""}`);
       }
-      // a branch edge is meaningless without its condition — label lane
-      // sits below the glyph lane so the two never collide
-      if (a.node.routes && e.type === "condition") {
-        const labels = a.node.routes
-          .filter(r => r.target === b.node.name).map(r => r.condition);
-        if (labels.length) edgeGlyph(svg, mx, my + 26, labels.join(" | "), "routelabel");
+      // label lane sits below the glyph lane so the two never collide
+      if (condLabels.length) {
+        edgeGlyph(svg, mx, my + 26, condLabels.join(" | "), "routelabel");
       }
     }
     if (state.sel && (state.rendered.get(state.sel)?.node.id === e.src
@@ -348,7 +357,8 @@ function render() {
       // a hard edge is pure energy: glow + bright core + frozen sparks
       const eCls = (sheath + (cls.includes("hot") ? " hot" : "")).trim();
       const core = energyEdge(svg, p.getAttribute("d"), eCls);
-      energySparks(svg, core, eCls);
+      // a dormant else-fallback carries no sparks — nothing flows there yet
+      if (!eCls.includes("relse")) energySparks(svg, core, eCls);
     } else {
       p.setAttribute("class", cls.trim());
       svg.append(p);
