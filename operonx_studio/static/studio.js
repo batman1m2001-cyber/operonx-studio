@@ -220,6 +220,11 @@ function energyEdge(svg, d, cls) {
   core.setAttribute("d", d);
   core.setAttribute("class", ("ecore " + cls).trim());
   svg.append(core);
+  // the laser filament: a white-hot hairline down the beam's center
+  const ray = document.createElementNS(SVGNS, "path");
+  ray.setAttribute("d", d);
+  ray.setAttribute("class", ("eray " + cls).trim());
+  svg.append(ray);
   return core;
 }
 
