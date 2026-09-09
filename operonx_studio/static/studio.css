@@ -704,6 +704,9 @@ body.resizing { user-select: none; cursor: col-resize; }
 .chat-new:hover { color: var(--accent-deep); box-shadow: none; }
 .chat-log { flex: 1; overflow-y: auto; padding: 12px; display: flex;
   flex-direction: column; gap: 8px; }
+/* rows must never absorb overflow — flex children default to shrink:1,
+   which squashes every bubble flat once the log fills; scroll instead */
+.chat-log > * { flex: none; }
 .chat-msg { max-width: 85%; padding: 8px 12px; border-radius: var(--r-md);
   font-size: 13px; line-height: 1.45; }
 .chat-msg.from-bot { background: var(--panel-2); border-left: 3px solid var(--accent);
