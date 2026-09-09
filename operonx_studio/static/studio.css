@@ -18,12 +18,16 @@
   --ok: #218a4c;
   --warn: #b3661a;
   --err: #cf3f36;
-  /* node kind colors — one hue per family, dark enough to read on cream */
+  /* node kind colors — one hue per family, dark enough to read on cream.
+     The kind→visual mapping itself lives in studio.js (OP_VISUALS). */
   --k-func: #2f6fd0;
   --k-llm: #8b46c9;
   --k-graph: #178f66;
   --k-branch: #b3661a;
   --k-io: #cf4b8f;
+  --k-audio: #cf4b8f;
+  --k-res: #0e8b84;
+  --k-default: #8a7d5c;
   --k-serve: #c9940f;
   /* the system */
   --r-sm: 8px;

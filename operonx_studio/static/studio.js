@@ -58,26 +58,49 @@ async function api(path, body) {
 
 /* ── kind → color family ──────────────────────────────────────────── */
 
-function kindColor(node) {
-  const k = node.kind || "";
-  if (k.includes("LLM")) return "var(--k-llm)";
-  if (k.includes("Graph")) return "var(--k-graph)";
-  if (k.includes("Branch")) return "var(--k-branch)";
-  if (node.bound === "io") return "var(--k-io)";
-  return "var(--k-func)";
+/* ── the op visual registry ───────────────────────────────────────────
+ * ONE place that says how a kind looks. The kind — and only the kind —
+ * decides the visual: two FuncOps must never wear different colors
+ * because of an orthogonal property (bound, gen, …); those live in
+ * badges and chips. Resolution: exact kind name, then family pattern,
+ * then the default — so an op the studio has never seen still renders
+ * coherently instead of guessing per-property. Extend by adding a row.
+ */
+const OP_VISUALS = {
+  "FuncOp":            {icon: "ƒ", color: "var(--k-func)"},
+  "GraphOp":           {icon: "▣", color: "var(--k-graph)"},
+  "BranchOp":          {icon: "⑃", color: "var(--k-branch)"},
+  "LLMOp":             {icon: "✦", color: "var(--k-llm)"},
+  "EmbeddingOp":       {icon: "⛁", color: "var(--k-res)"},
+  "RerankOp":          {icon: "⛁", color: "var(--k-res)"},
+  "VectorSearchOp":    {icon: "⛁", color: "var(--k-res)"},
+  "DocFetchOp":        {icon: "⛁", color: "var(--k-res)"},
+  "EmitOp":            {icon: "⌁", color: "var(--k-io)"},
+  "InterruptOp":       {icon: "✋", color: "var(--k-branch)"},
+  "STTOp":             {icon: "◉", color: "var(--k-audio)"},
+  "TTSOp":             {icon: "♪", color: "var(--k-audio)"},
+  "DenoiseClassifier": {icon: "≈", color: "var(--k-audio)"},
+};
+const OP_FAMILIES = [
+  [/LLM|Chat|Completion/,                    {icon: "✦", color: "var(--k-llm)"}],
+  [/Graph/,                                  {icon: "▣", color: "var(--k-graph)"}],
+  [/Branch|Rout|Switch/,                     {icon: "⑃", color: "var(--k-branch)"}],
+  [/Embed|Rerank|Search|Fetch|Retriev|Store/, {icon: "⛁", color: "var(--k-res)"}],
+  [/STT|TTS|Audio|Denoise|VAD|Speech|Voice/, {icon: "◉", color: "var(--k-audio)"}],
+];
+const OP_DEFAULT = {icon: "◈", color: "var(--k-default)"};
+
+function visualOf(kind) {
+  kind = kind || "";
+  if (OP_VISUALS[kind]) return OP_VISUALS[kind];
+  for (const [pattern, visual] of OP_FAMILIES) {
+    if (pattern.test(kind)) return visual;
+  }
+  return OP_DEFAULT;
 }
 
-function kindIcon(node) {
-  const k = node.kind || "";
-  if (k.includes("LLM")) return "✦";
-  if (k.includes("Branch")) return "⑃";
-  if (k.includes("Graph")) return "▣";
-  if (k.includes("Embedding") || k.includes("Rerank") || k.includes("Search") || k.includes("Fetch")) return "⛁";
-  if (k.includes("Emit")) return "📣";
-  if (k.includes("Interrupt")) return "✋";
-  if (node.is_gen) return "⚡";
-  return "ƒ";
-}
+function kindColor(node) { return visualOf(node.kind).color; }
+function kindIcon(node) { return visualOf(node.kind).icon; }
 
 /* ── placement: expansion opens a GraphOp in place ────────────────── */
 
