@@ -225,18 +225,22 @@ function _vFree(x, t, b) {
 }
 
 function _pickChannel(rects, base, l, r) {
-  for (const off of [0, 13, -13, 26, -26, 39, -39]) {
-    const y = base + off;
-    if (_corridorClear(rects, l, r, y) && _hFree(y, l, r)) {
-      _lanes.h.push({y, l, r});
-      return y;
+  // widen with the layout: band gaps grow with edge pressure, so the
+  // search reaches further before giving up
+  for (let step = 0; step <= 10; step++) {
+    for (const off of step ? [step * 13, -step * 13] : [0]) {
+      const y = base + off;
+      if (_corridorClear(rects, l, r, y) && _hFree(y, l, r)) {
+        _lanes.h.push({y, l, r});
+        return y;
+      }
     }
   }
   return null;
 }
 
 function _pickDrop(rects, base, top, bottom) {
-  for (const off of [0, 14, 28, 42, 56]) {
+  for (const off of [0, 14, 28, 42, 56, 70, 84, 98, 112]) {
     const x = base + off;
     const blocked = rects.some(o => o.l < x + 7 && o.r > x - 7 && o.b > top && o.t < bottom);
     if (!blocked && _vFree(x, top, bottom)) {

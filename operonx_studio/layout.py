@@ -300,17 +300,39 @@ def layout_graph(graph: Dict) -> Layout:
 
     sorted_depths = sorted(layers)
     bands = _band_split(sorted_depths, {d: len(layers[d]) for d in sorted_depths})
+
+    # A band gap must hold every edge routed through it, and the number
+    # of those grows with the graph. Count the edges crossing each band
+    # boundary and widen that gap so the renderer's lane search always
+    # has room — a fixed gap re-stacks the returns the moment the flow
+    # outgrows it.
+    band_of_depth = {d: bi for bi, band in enumerate(bands) for d in band}
+    depth_of_id = {i: depth_of[i] for i in ids}
+    cuts = [0] * max(1, len(bands))
+    for e in edges:
+        if e.origin == "back_edge":
+            continue
+        src_band = band_of_depth.get(depth_of_id.get(e.src))
+        dst_band = band_of_depth.get(depth_of_id.get(e.dst))
+        if src_band is None or dst_band is None or src_band == dst_band:
+            continue
+        lo, hi = sorted((src_band, dst_band))
+        for k in range(lo, hi):
+            cuts[k] += 1
+
     depth_x: Dict[int, float] = {}
     depth_y: Dict[int, float] = {}
     y_cursor = float(MARGIN)
-    for band in bands:
+    last_gap = BAND_GAP
+    for bi, band in enumerate(bands):
         if not band:
             continue
         for column, depth in enumerate(band):
             depth_x[depth] = MARGIN + column * (NODE_W + H_GAP)
             depth_y[depth] = y_cursor
         band_rows = max(len(layers[d]) for d in band)
-        y_cursor += band_rows * (NODE_H + V_GAP) + BAND_GAP
+        last_gap = BAND_GAP + (max(0, cuts[bi] - 3) * 14 if bi < len(cuts) else 0)
+        y_cursor += band_rows * (NODE_H + V_GAP) + last_gap
 
     nodes: List[Node] = []
     ir_by_id = {n["id"]: n for n in ir_nodes}
@@ -339,5 +361,5 @@ def layout_graph(graph: Dict) -> Layout:
 
     columns = max((len(band) for band in bands), default=1) if nodes else 1
     width = MARGIN * 2 + columns * (NODE_W + H_GAP)
-    height = (y_cursor - BAND_GAP if nodes else 0) + MARGIN
+    height = (y_cursor - last_gap if nodes else 0) + MARGIN
     return Layout(nodes=nodes, edges=edges, width=width, height=height)

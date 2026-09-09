@@ -132,6 +132,20 @@ class TestWrapping:
                 assert cur.y > prev.y, "a fold must move down, never up"
                 assert cur.x == min(n.x for n in out.nodes), "a fold restarts at the left margin"
 
+    def test_band_gaps_grow_with_edge_pressure(self):
+        """The gap between bands must hold every edge routed through it.
+        A graph with many band-crossing edges gets wider gaps, so the
+        renderer's lane search never runs out of room as the flow grows."""
+        names = [f"op{i:02d}" for i in range(30)]
+        chain = list(zip(names, names[1:]))
+        plain = layout_graph(ir(names, chain, entries=[names[0]]))
+        # eight long skip edges from early ops to late ops, all crossing
+        # the band boundaries
+        skips = [(names[i], names[25 + i % 4]) for i in range(8)]
+        busy = layout_graph(ir(names, chain + skips, entries=[names[0]]))
+        assert busy.height > plain.height, (
+            "band gaps must widen when more edges cross them")
+
     def test_a_short_chain_does_not_wrap(self):
         names = ["a", "b", "c", "d", "e"]
         out = layout_graph(ir(names, list(zip(names, names[1:])), entries=["a"]))
