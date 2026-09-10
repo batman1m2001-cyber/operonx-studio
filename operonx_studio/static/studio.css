@@ -41,6 +41,10 @@
 }
 
 * { box-sizing: border-box; }
+/* the hidden attribute must always win — an author display rule on a
+   [hidden] element (the switcher's flex, the find box) silently
+   defeats the UA default and leaves empty boxes on screen */
+[hidden] { display: none !important; }
 html, body {
   margin: 0; height: 100%;
   background: linear-gradient(150deg, #fbf3d6 0%, #f5e6ac 55%, #edd68a 100%) fixed;
