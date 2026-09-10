@@ -274,9 +274,16 @@ function _sampleCubic(x1, y1, cx1, cy1, cx2, cy2, x2, y2) {
 }
 
 function _rects(obstacles, a, b) {
+  // An opened container is solid ground to every edge that has no
+  // business inside it — through-traffic must route around the box.
+  // Only an edge whose endpoint lives INSIDE (a member, or the START/
+  // END pill an external edge was rerouted to) may cross the membrane.
+  const inside = (o, it) => it && it.x >= o.x - 1 && it.y >= o.y - 1
+    && it.x + it.w <= o.x + o.w + 1 && it.y + it.h <= o.y + o.h + 1;
   const out = [];
   for (const o of obstacles) {
     if (o === a || o === b) continue;
+    if (o.inner && (inside(o, a) || inside(o, b))) continue;
     out.push({l: o.x - 6, r: o.x + o.w + 6, t: o.y - 6, b: o.y + o.h + 6});
   }
   return out;
@@ -581,7 +588,7 @@ function render() {
       return [pt.x + 12, pt.y + dy + 3];
     } catch { return null; }
   };
-  const obstacles = flat.nodes.filter(it => !it.inner);
+  const obstacles = flat.nodes;   // containers included — _rects decides per edge
 
   // graph edges (every open level draws its own)
   for (const {e, a, b} of byPair.values()) {
