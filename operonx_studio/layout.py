@@ -1,4 +1,4 @@
-"""Layered DAG layout for a Project IR graph.
+"""Layered DAG layout for a Project IR graph — top-down.
 
 Layout lives in Python rather than the browser for three reasons: it is
 deterministic (the same IR always draws the same picture, so a screenshot
@@ -12,7 +12,15 @@ at operonx's graph sizes:
    forward and an edge never spans backwards.
 2. **Order** within each layer by repeated barycentre sweeps, which is what
    actually removes crossings.
-3. **Place** on a fixed grid.
+3. **Place** on a fixed grid: a layer is a ROW, and time flows down.
+
+Vertical is sequence, horizontal is simultaneity: branch targets and
+parallel fan-outs share a row, which is what they mean. Rows are centred,
+so a mostly-sequential flow reads as a spine down the middle with
+branches fanning symmetrically — a flowchart. This orientation is also
+why there is no band-wrapping machinery here any more: a long sequential
+chain stacks into a tall, naturally-scrollable column instead of a strip
+the width of a football pitch.
 
 Back-edges are excluded from layering — a cycle has already been rewritten
 into a hidden loop by the time we see it, and the surviving record lives in
@@ -22,7 +30,6 @@ layer that contradicts the loop boundary it belongs to.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Sequence, Set, Tuple
 
@@ -30,20 +37,11 @@ __all__ = ["Node", "Edge", "Layout", "layout_graph", "NODE_W", "NODE_H"]
 
 NODE_W = 210
 NODE_H = 64
-H_GAP = 96
-V_GAP = 34
+H_GAP = 56      # between siblings in a row — things that happen together
+V_GAP = 78      # between rows — one step of sequence
 MARGIN = 48
-BAND_GAP = 110
 
 _SWEEPS = 6
-
-# A pipeline of thirty ops laid out strictly left-to-right is a strip the
-# height of one node and the width of a football pitch: fit-to-view zooms
-# until every label is illegible. Past this width-to-height ratio the
-# layer sequence wraps into bands, like text wraps into lines.
-_WRAP_ASPECT = 3.2
-_TARGET_ASPECT = 2.0
-_MIN_WRAP_LAYERS = 8
 
 
 @dataclass
@@ -182,66 +180,6 @@ def _order_layers(
             layers[depth].sort(key=barycentre)
 
 
-def _band_split(depths: Sequence[int], rows_at: Dict[int, int]) -> List[List[int]]:
-    """Group consecutive layers into bands so a long chain wraps.
-
-    Reading direction never reverses — every band runs left-to-right and
-    the seam edge routes down to the next band, the way a line of text
-    breaks. A graph that is not strip-shaped comes back as a single band
-    and lays out exactly as before.
-    """
-    depths = list(depths)
-    count = len(depths)
-    if count < _MIN_WRAP_LAYERS or not rows_at:
-        return [depths]
-    unit_w, unit_h = NODE_W + H_GAP, NODE_H + V_GAP
-    full_w = count * unit_w
-    full_h = max(rows_at.values()) * unit_h
-    if full_w <= _WRAP_ASPECT * full_h:
-        return [depths]
-
-    best, best_score = [depths], None
-    for per in range(4, count):
-        bands = [depths[i:i + per] for i in range(0, count, per)]
-        width = per * unit_w
-        height = (sum(max(rows_at[d] for d in band) * unit_h for band in bands)
-                  + (len(bands) - 1) * BAND_GAP)
-        score = abs(math.log((width / height) / _TARGET_ASPECT))
-        if best_score is None or score < best_score:
-            best, best_score = bands, score
-    return best
-
-
-def _band_split(depths: Sequence[int], rows_at: Dict[int, int]) -> List[List[int]]:
-    """Group consecutive layers into bands so a long chain wraps.
-
-    Reading direction never reverses — every band runs left-to-right and
-    the seam edge routes down to the next band, the way a line of text
-    breaks. A graph that is not strip-shaped comes back as a single band
-    and lays out exactly as before.
-    """
-    depths = list(depths)
-    count = len(depths)
-    if count < _MIN_WRAP_LAYERS or not rows_at:
-        return [depths]
-    unit_w, unit_h = NODE_W + H_GAP, NODE_H + V_GAP
-    full_w = count * unit_w
-    full_h = max(rows_at.values()) * unit_h
-    if full_w <= _WRAP_ASPECT * full_h:
-        return [depths]
-
-    best, best_score = [depths], None
-    for per in range(4, count):
-        bands = [depths[i:i + per] for i in range(0, count, per)]
-        width = per * unit_w
-        height = (sum(max(rows_at[d] for d in band) * unit_h for band in bands)
-                  + (len(bands) - 1) * BAND_GAP)
-        score = abs(math.log((width / height) / _TARGET_ASPECT))
-        if best_score is None or score < best_score:
-            best, best_score = bands, score
-    return best
-
-
 def layout_graph(graph: Dict) -> Layout:
     """Place one IR graph's nodes and edges on a grid."""
     ir_nodes = graph.get("nodes") or []
@@ -299,45 +237,42 @@ def layout_graph(graph: Dict) -> Layout:
     _order_layers(layers, forward, backward)
 
     sorted_depths = sorted(layers)
-    bands = _band_split(sorted_depths, {d: len(layers[d]) for d in sorted_depths})
+    widest = max((len(layers[d]) for d in sorted_depths), default=1)
 
-    # A band gap must hold every edge routed through it, and the number
-    # of those grows with the graph. Count the edges crossing each band
-    # boundary and widen that gap so the renderer's lane search always
-    # has room — a fixed gap re-stacks the returns the moment the flow
-    # outgrows it.
-    band_of_depth = {d: bi for bi, band in enumerate(bands) for d in band}
+    # A row gap must hold every long edge routed across it, and their
+    # number grows with the graph. Count the edges passing OVER each row
+    # boundary (span > 1 layer) and deepen that gap so the renderer's
+    # lane search always has room to jog sideways.
     depth_of_id = {i: depth_of[i] for i in ids}
-    cuts = [0] * max(1, len(bands))
+    cuts: Dict[int, int] = {d: 0 for d in sorted_depths}
     for e in edges:
         if e.origin == "back_edge":
             continue
-        src_band = band_of_depth.get(depth_of_id.get(e.src))
-        dst_band = band_of_depth.get(depth_of_id.get(e.dst))
-        if src_band is None or dst_band is None or src_band == dst_band:
+        lo_hi = (depth_of_id.get(e.src), depth_of_id.get(e.dst))
+        if None in lo_hi:
             continue
-        lo, hi = sorted((src_band, dst_band))
-        for k in range(lo, hi):
-            cuts[k] += 1
+        lo, hi = sorted(lo_hi)
+        if hi - lo <= 1:
+            continue
+        for d in range(lo, hi):
+            cuts[d] = cuts.get(d, 0) + 1
 
-    depth_x: Dict[int, float] = {}
     depth_y: Dict[int, float] = {}
     y_cursor = float(MARGIN)
-    last_gap = BAND_GAP
-    for bi, band in enumerate(bands):
-        if not band:
-            continue
-        for column, depth in enumerate(band):
-            depth_x[depth] = MARGIN + column * (NODE_W + H_GAP)
-            depth_y[depth] = y_cursor
-        band_rows = max(len(layers[d]) for d in band)
-        last_gap = BAND_GAP + (max(0, cuts[bi] - 3) * 14 if bi < len(cuts) else 0)
-        y_cursor += band_rows * (NODE_H + V_GAP) + last_gap
+    for depth in sorted_depths:
+        depth_y[depth] = y_cursor
+        y_cursor += NODE_H + V_GAP + max(0, cuts.get(depth, 0) - 2) * 12
 
     nodes: List[Node] = []
     ir_by_id = {n["id"]: n for n in ir_nodes}
+    row_span = widest * (NODE_W + H_GAP) - H_GAP
     for depth in sorted_depths:
-        for order, node_id in enumerate(layers[depth]):
+        row = layers[depth]
+        # centred rows: a sequential spine runs down the middle, branch
+        # targets and parallel fan-outs spread symmetrically beside it
+        row_w = len(row) * (NODE_W + H_GAP) - H_GAP
+        left = MARGIN + (row_span - row_w) / 2
+        for order, node_id in enumerate(row):
             raw = ir_by_id[node_id]
             nodes.append(
                 Node(
@@ -346,8 +281,8 @@ def layout_graph(graph: Dict) -> Layout:
                     kind=raw.get("kind", "Op"),
                     layer=depth,
                     order=order,
-                    x=depth_x[depth],
-                    y=depth_y[depth] + order * (NODE_H + V_GAP),
+                    x=left + order * (NODE_W + H_GAP),
+                    y=depth_y[depth],
                     meta=raw,
                 )
             )
@@ -359,7 +294,6 @@ def layout_graph(graph: Dict) -> Layout:
         e.back = (e.origin == "back_edge"
                   or depth_by_id.get(e.dst, 0) <= depth_by_id.get(e.src, 0))
 
-    columns = max((len(band) for band in bands), default=1) if nodes else 1
-    width = MARGIN * 2 + columns * (NODE_W + H_GAP)
-    height = (y_cursor - last_gap if nodes else 0) + MARGIN
+    width = MARGIN * 2 + row_span
+    height = (y_cursor - V_GAP if nodes else 0) + MARGIN
     return Layout(nodes=nodes, edges=edges, width=width, height=height)

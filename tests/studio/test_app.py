@@ -636,9 +636,9 @@ def test_a_synthetic_loop_is_opened_back_up_for_display(client, semantics_projec
     assert backs == [("again", "t")], (
         f"the AUTHORED return edge must be the back edge, got {backs}")
 
-    # and the members are laid out forward: t strictly left of again
+    # and the members are laid out forward: top-down, t strictly above
     by_name = {n["name"]: n for n in graph["nodes"]}
-    assert by_name["t"]["x"] < by_name["again"]["x"], (
+    assert by_name["t"]["y"] < by_name["again"]["y"], (
         "layout let the DFS pick the back edge instead of the author")
 
 

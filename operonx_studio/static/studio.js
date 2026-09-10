@@ -149,28 +149,26 @@ function kindIcon(node) { return visualOf(node.kind).icon; }
 const B_W = 34, B_H = 34, B_GAP = 40;
 
 function withBoundaries(model, key, depth) {
-  for (const it of model.items) it.x += B_W + B_GAP;
-  const contentRight = (model.w - 48) + B_W + B_GAP;
-  // START sits with the first row, END with the last — the terminals
-  // read as where the flow enters and where it finally leaves
-  const ys = model.items.map(it => it.y);
-  const topY = Math.min(...ys) + (NODE_H - B_H) / 2;
-  const botY = Math.max(...ys) + (NODE_H - B_H) / 2;
+  // top-down: START above the first row, END below the last — current
+  // enters at the top terminal and leaves at the bottom one
+  for (const it of model.items) it.y += B_H + B_GAP;
+  const contentBottom = (model.h - 48) + B_H + B_GAP;
+  const midX = Math.max(6, (model.w - 48) / 2 - B_W / 2);
   const pill = (which, x, y) => ({
     key: `${key}/__${which}`,
     node: {id: `__${which}__`, name: which.toUpperCase(),
            kind: "__boundary__", boundary: which},
     depth, inner: null, x, y, w: B_W, h: B_H,
   });
-  const start = pill("start", 10, topY);
-  const end = pill("end", contentRight + B_GAP, botY);
+  const start = pill("start", midX, 10);
+  const end = pill("end", midX, contentBottom + B_GAP);
   const edges = [...model.edges];
   for (const it of model.items) {
     if (it.node.start) edges.push({src: "__start__", dst: it.node.id, boundary: true});
     if (it.node.end) edges.push({src: it.node.id, dst: "__end__", boundary: true});
   }
   model.items.push(start, end);
-  return {items: model.items, edges, w: end.x + B_W + 16, h: model.h};
+  return {items: model.items, edges, w: model.w, h: end.y + B_H + 26};
 }
 
 function placeGraph(g, prefix, depth) {
@@ -235,13 +233,13 @@ function flattenModel(model, ox, oy, out) {
   return out;
 }
 
-/* ── edge geometry ────────────────────────────────────────────────── */
+/* ── edge geometry (top-down: out of the bottom, into the top) ───── */
 
-const portY = (it) => it.y + Math.min(it.h, NODE_H) / 2;
+const portCX = (it) => it.x + it.w / 2;
 
 function bezier(x1, y1, x2, y2) {
-  const dx = Math.max(40, Math.abs(x2 - x1) / 2);
-  return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+  const dy = Math.max(40, Math.abs(y2 - y1) / 2);
+  return `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`;
 }
 
 /* ── obstacle avoidance ───────────────────────────────────────────────
@@ -284,130 +282,78 @@ function _rects(obstacles, a, b) {
   return out;
 }
 
-function _rowGapMids(obstacles) {
-  const tops = [...new Set(obstacles.map(o => Math.round(o.y)))].sort((m, n) => m - n);
-  const mids = [];
-  for (let i = 0; i + 1 < tops.length; i++) {
-    const below = Math.min(...obstacles.filter(o => Math.round(o.y) === tops[i + 1]).map(o => o.y));
-    const above = Math.max(...obstacles.filter(o => Math.round(o.y) === tops[i]).map(o => o.y + o.h));
-    if (below - above > 22) mids.push((above + below) / 2);
-  }
-  return mids;
-}
-
-function _corridorClear(rects, l, r, ch) {
-  for (const o of rects) {
-    if (o.r > l && o.l < r && o.b > ch - 7 && o.t < ch + 7) return false;
-  }
-  return true;
-}
-
 /* Lane bookkeeping, reset per render: crossing edges are legible,
- * COINCIDENT edges are mud. Every claimed horizontal channel and
- * vertical drop lane is recorded, and the next edge that wants the same
- * corridor gets the nearest free offset instead of stacking on top. */
-let _lanes = {h: [], v: []};
-
-function _hFree(y, l, r) {
-  return !_lanes.h.some(o => Math.abs(o.y - y) < 11 && o.r > l && o.l < r);
-}
+ * COINCIDENT edges are mud. Every claimed vertical lane is recorded,
+ * and the next edge that wants the same corridor gets the nearest free
+ * offset instead of stacking on top. */
+let _lanes = {v: []};
 
 function _vFree(x, t, b) {
   return !_lanes.v.some(o => Math.abs(o.x - x) < 11 && o.b > t && o.t < b);
 }
 
-function _pickChannel(rects, base, l, r) {
-  // widen with the layout: band gaps grow with edge pressure, so the
-  // search reaches further before giving up
-  for (let step = 0; step <= 10; step++) {
-    for (const off of step ? [step * 13, -step * 13] : [0]) {
-      const y = base + off;
-      if (_corridorClear(rects, l, r, y) && _hFree(y, l, r)) {
-        _lanes.h.push({y, l, r});
-        return y;
+/* A clear vertical lane through the y-band, nearest the preferred x.
+ * Candidates come from the actual obstacle silhouette (their left and
+ * right flanks), because centred rows have no global column grid. */
+function _clearLaneX(rects, top, bottom, prefer) {
+  const band = rects.filter(o => o.b > top && o.t < bottom);
+  const cands = [prefer];
+  for (const o of band) cands.push(o.l - 16, o.r + 16);
+  cands.sort((m, n) => Math.abs(m - prefer) - Math.abs(n - prefer));
+  for (const cand of cands) {
+    for (let step = 0; step <= 6; step++) {
+      for (const off of step ? [step * 13, -step * 13] : [0]) {
+        const x = cand + off;
+        const blocked = band.some(o => o.l < x + 8 && o.r > x - 8);
+        if (!blocked && _vFree(x, top, bottom)) {
+          _lanes.v.push({x, t: top, b: bottom});
+          return x;
+        }
       }
     }
   }
   return null;
 }
 
-function _pickDrop(rects, base, top, bottom) {
-  for (const off of [0, 14, 28, 42, 56, 70, 84, 98, 112]) {
-    const x = base + off;
-    const blocked = rects.some(o => o.l < x + 7 && o.r > x - 7 && o.b > top && o.t < bottom);
-    if (!blocked && _vFree(x, top, bottom)) {
-      _lanes.v.push({x, t: top, b: bottom});
-      return x;
-    }
-  }
-  return base;
-}
-
 function routeAvoiding(a, b, obstacles) {
-  const x1 = a.x + a.w, y1 = portY(a), x2 = b.x, y2 = portY(b);
-  const dx = Math.max(40, Math.abs(x2 - x1) / 2);
+  const x1 = portCX(a), y1 = a.y + a.h, x2 = portCX(b), y2 = b.y;
+  const dy = Math.max(40, Math.abs(y2 - y1) / 2);
   const rects = _rects(obstacles, a, b);
-  const straight = _sampleCubic(x1, y1, x1 + dx, y1, x2 - dx, y2, x2, y2);
+  const straight = _sampleCubic(x1, y1, x1, y1 + dy, x2, y2 - dy, x2, y2);
   if (!_hits(straight, rects)) return bezier(x1, y1, x2, y2);
 
-  // channel candidates: the horizontal gaps between node rows, nearest
-  // to the edge's own midline first — each edge claims a FREE lane
-  if (x2 - x1 > 280) {
-    const mids = _rowGapMids(obstacles)
-      .sort((m, n) => Math.abs(m - (y1 + y2) / 2) - Math.abs(n - (y1 + y2) / 2));
-    for (const mid of mids) {
-      const ch = _pickChannel(rects, mid, x1 + 90, x2 - 90);
-      if (ch === null) continue;
-      return `M ${x1} ${y1} C ${x1 + 70} ${y1}, ${x1 + 70} ${ch}, ${x1 + 130} ${ch}`
-        + ` L ${x2 - 130} ${ch}`
-        + ` C ${x2 - 70} ${ch}, ${x2 - 70} ${y2}, ${x2} ${y2}`;
+  // a long edge takes a clear vertical lane down the side of whatever
+  // stands in its way — each edge claims a FREE lane
+  if (y2 - y1 > 220) {
+    const lane = _clearLaneX(rects, y1 + 50, y2 - 50, (x1 + x2) / 2);
+    if (lane !== null) {
+      return `M ${x1} ${y1} C ${x1} ${y1 + 46}, ${lane} ${y1 + 46}, ${lane} ${y1 + 100}`
+        + ` L ${lane} ${y2 - 100}`
+        + ` C ${lane} ${y2 - 46}, ${x2} ${y2 - 46}, ${x2} ${y2}`;
     }
   }
 
-  // bow above or below the obstruction
-  for (const off of [-(NODE_H + 46), NODE_H + 46, -2 * (NODE_H + 46), 2 * (NODE_H + 46)]) {
-    const pts = _sampleCubic(x1, y1, x1 + dx, y1 + off, x2 - dx, y2 + off, x2, y2);
+  // bow left or right of the obstruction
+  const stepX = NODE_W / 2 + 64;
+  for (const off of [-stepX, stepX, -2 * stepX, 2 * stepX]) {
+    const pts = _sampleCubic(x1, y1, x1 + off, y1 + dy, x2 + off, y2 - dy, x2, y2);
     if (!_hits(pts, rects)) {
-      return `M ${x1} ${y1} C ${x1 + dx} ${y1 + off}, ${x2 - dx} ${y2 + off}, ${x2} ${y2}`;
+      return `M ${x1} ${y1} C ${x1 + off} ${y1 + dy}, ${x2 + off} ${y2 - dy}, ${x2} ${y2}`;
     }
   }
   return bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
 }
 
-/* The carriage return, obstacle-aware: down the right margin, left
- * along a channel that is actually CLEAR (searched, not assumed), into
- * the target. A fixed offset above the target row used to slice through
- * every row above it. */
-function wrapAvoiding(a, b, obstacles) {
-  const x1 = a.x + a.w, y1 = portY(a);
-  const x2 = b.x, y2 = portY(b);
-  const rects = _rects(obstacles, a, b);
-  const mids = _rowGapMids(obstacles)
-    .filter(m => m > y1 + 20)
-    .sort((m, n) => Math.abs(m - (b.y - 30)) - Math.abs(n - (b.y - 30)));
-  let ch = null;
-  for (const cand of mids) {
-    ch = _pickChannel(rects, cand, x2 - 30, x1 + 10);
-    if (ch !== null) break;
-  }
-  if (ch === null) ch = b.y - 44;   // legacy fallback
-  const drop = _pickDrop(rects, x1 + 70, Math.min(y1, ch), Math.max(y1, ch));
-  return `M ${x1} ${y1}`
-    + ` C ${drop} ${y1}, ${drop} ${ch}, ${x1 - 10} ${ch}`
-    + ` L ${x2 - 30} ${ch}`
-    + ` C ${x2 - 70} ${ch}, ${x2 - 60} ${y2}, ${x2} ${y2}`;
-}
-
 function returnPath(a, b) {
-  // A loop's return edge: out of the source's underside, bowing beneath
-  // everything it passes over, back into the target's underside. Drawn
+  // A loop's return edge: out of the source's right flank, bowing up
+  // the right margin, back into the target's right flank. Drawn
   // differently from a forward edge on purpose — this is the arrow that
   // makes an agent while-loop look like what the author wrote instead of
   // one opaque compiler box.
-  const x1 = a.x + a.w / 2, y1 = a.y + a.h;
-  const x2 = b.x + b.w / 2, y2 = b.y + b.h;
-  const dip = Math.max(y1, y2) + 60 + Math.abs(x1 - x2) * 0.08;
-  return `M ${x1} ${y1} C ${x1} ${dip}, ${x2} ${dip}, ${x2} ${y2}`;
+  const x1 = a.x + a.w, y1 = a.y + a.h / 2;
+  const x2 = b.x + b.w, y2 = b.y + b.h / 2;
+  const bulge = Math.max(x1, x2) + 56 + Math.abs(y1 - y2) * 0.08;
+  return `M ${x1} ${y1} C ${bulge} ${y1}, ${bulge} ${y2}, ${x2} ${y2}`;
 }
 
 function consumeOf(edge, a, b) {
@@ -504,8 +450,8 @@ function serveNodesFor(graph) {
     .map((s, i) => ({
       id: `__serve_${i}`,
       serve: s,
-      x: -NODE_W - 110,
-      y: 40 + i * (NODE_H + 30),
+      x: 40 + i * (NODE_W + 50),
+      y: -NODE_H - 110,
     }));
 }
 
@@ -520,7 +466,7 @@ function render() {
   state.rendered.clear();
   state.cardEls.clear();
   state.edgeEls = [];
-  _lanes = {h: [], v: []};
+  _lanes = {v: []};
 
   const model = placeGraph(g, "", 0);
   const flat = flattenModel(model, 0, 0, {nodes: [], edges: []});
@@ -530,30 +476,30 @@ function render() {
   // client → ingress → flow → egress → client.
   const gatesIn = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "ingress");
   const gatesOut = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "egress");
-  for (const x of gatesIn) x.x -= 80;
+  for (const x of gatesIn) x.y -= 70;
   for (const x of gatesOut) {
-    // in a wrapped layout the egress is not always rightmost — only
-    // step out of the band when the lane is actually clear
+    // the egress is not always on the last row — only step down out of
+    // the flow when the lane below is actually clear
     const clash = flat.nodes.some(o => o !== x && !o.inner
-      && Math.abs(o.y - x.y) < NODE_H
-      && o.x > x.x && o.x < x.x + x.w + 110);
-    if (!clash) x.x += 80;
+      && o.x < x.x + x.w && o.x + o.w > x.x
+      && o.y > x.y && o.y < x.y + x.h + 100);
+    if (!clash) x.y += 70;
   }
 
   const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
   const maxY = Math.max(model.h, ...flat.nodes.map(n => n.y + n.h));
-  // with a declared ingress the transport card is gone — don't reserve
-  // its empty left margin, just room for the client → stub
-  const minX = gatesIn.length
-    ? Math.min(...gatesIn.map(x => x.x)) - 110
-    : -NODE_W - 110;
-  state.extent = {minX, minY: 0, maxX, maxY: maxY + 120};
+  // headroom above: the transport card, or just the client ⇣ stub;
+  // width includes the right margin where loop returns bulge
+  const minY = gatesIn.length
+    ? Math.min(...gatesIn.map(x => x.y)) - 110
+    : -NODE_H - 140;
+  state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: maxY + 130};
 
-  const span = 400 + maxX, tall = 300 + maxY;
-  svg.setAttribute("width", span + 400);
-  svg.setAttribute("height", tall);
-  svg.style.left = "-400px";
-  svg.setAttribute("viewBox", `-400 0 ${span + 400} ${tall}`);
+  svg.setAttribute("width", maxX + 620);
+  svg.setAttribute("height", maxY + 640);
+  svg.style.left = "-200px";
+  svg.style.top = "-320px";
+  svg.setAttribute("viewBox", `-200 -320 ${maxX + 620} ${maxY + 640}`);
 
   // Door frames paint first, everything sits on top. A frame hugs ITS
   // gate only — a full-height band through a wrapped layout would slice
@@ -581,7 +527,7 @@ function render() {
     for (const s of serves) {
       for (const t of entryItems) {
         const p = document.createElementNS(SVGNS, "path");
-        p.setAttribute("d", bezier(s.x + 190, s.y + NODE_H / 2, t.x, portY(t)));
+        p.setAttribute("d", bezier(s.x + 95, s.y + NODE_H, portCX(t), t.y));
         p.setAttribute("class", "serve");
         svg.append(p);
       }
@@ -589,26 +535,26 @@ function render() {
     state._serves = serves;
   } else {
     // the ingress IS the transport: one door, wearing the transport's
-    // name — no second card, no wire fan. The client's data walks in
+    // name — no second card, no wire fan. The client's data drops in
     // through a stub arrow, and the reply leaves egress through one.
     state._serves = [];
     for (const gi of gatesIn) {
-      const x2 = gi.x, y = portY(gi);
+      const cx = portCX(gi), y2 = gi.y;
       const p = document.createElementNS(SVGNS, "path");
-      p.setAttribute("d", `M ${x2 - 76} ${y} C ${x2 - 44} ${y}, ${x2 - 34} ${y}, ${x2} ${y}`);
+      p.setAttribute("d", `M ${cx} ${y2 - 74} L ${cx} ${y2}`);
       p.setAttribute("class", "serve");
       svg.append(p);
-      edgeGlyph(svg, x2 - 40, y - 8, "client →", "servelabel");
+      edgeGlyph(svg, cx + 44, y2 - 44, "client ⇣", "servelabel");
     }
   }
   for (const gOut of gatesOut) {
-    const x1 = gOut.x + gOut.w, y = portY(gOut);
+    const cx = portCX(gOut), y1 = gOut.y + gOut.h;
     const p = document.createElementNS(SVGNS, "path");
-    p.setAttribute("d", `M ${x1} ${y} C ${x1 + 34} ${y}, ${x1 + 44} ${y}, ${x1 + 76} ${y}`);
+    p.setAttribute("d", `M ${cx} ${y1} L ${cx} ${y1 + 70}`);
     p.setAttribute("class", "serve");
     svg.append(p);
-    bouton(svg, x1 + 80, y, "b-serve");
-    edgeGlyph(svg, x1 + 40, y - 8, "→ client", "servelabel");
+    bouton(svg, cx, y1 + 74, "b-serve");
+    edgeGlyph(svg, cx + 44, y1 + 44, "⇣ client", "servelabel");
   }
 
   // One beam per pair: the IR often carries a data edge AND an order
@@ -628,10 +574,11 @@ function render() {
   const glyphJobs = [];
   const addGlyph = (x, y, text, cls, tip) => glyphJobs.push([x, y, text, cls, tip]);
   const along = (path, fraction, dy) => {
+    // labels sit BESIDE a mostly-vertical wire, not on it
     try {
       const len = path.getTotalLength();
       const pt = path.getPointAtLength(len * fraction);
-      return [pt.x, pt.y + dy];
+      return [pt.x + 12, pt.y + dy + 3];
     } catch { return null; }
   };
   const obstacles = flat.nodes.filter(it => !it.inner);
@@ -642,7 +589,7 @@ function render() {
     // exits → END. Structural, quiet — not an energy beam.
     if (e.boundary) {
       const bp = document.createElementNS(SVGNS, "path");
-      bp.setAttribute("d", bezier(a.x + a.w, portY(a), b.x, portY(b)));
+      bp.setAttribute("d", bezier(portCX(a), a.y + a.h, portCX(b), b.y));
       bp.setAttribute("class", "bedge");
       svg.append(bp);
       state.edgeEls.push({a: a.key, b: b.key, els: [bp]});
@@ -669,13 +616,11 @@ function render() {
       p.setAttribute("d", returnPath(A, B));
       cls += " back";
       if (!e.soft) sheath = "back";
-      const dip = Math.max(A.y + A.h, B.y + B.h) + 58 + Math.abs(A.x - B.x) * 0.06;
-      addGlyph((A.x + B.x + B.w) / 2, dip, "↺ loop", "back-label");
+      const bulge = Math.max(A.x + A.w, B.x + B.w) + 56
+        + Math.abs((A.y + A.h / 2) - (B.y + B.h / 2)) * 0.08;
+      addGlyph(bulge + 4, (A.y + A.h / 2 + B.y + B.h / 2) / 2, "↺ loop", "back-label");
     } else {
-      const wraps = B.x < A.x - 1;
-      p.setAttribute("d", wraps ? wrapAvoiding(A, B, obstacles)
-                                : routeAvoiding(A, B, obstacles));
-      if (wraps) cls += " wrap";
+      p.setAttribute("d", routeAvoiding(A, B, obstacles));
       if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
     let drawn = p;
@@ -693,8 +638,8 @@ function render() {
     // click never needs to redraw the whole canvas
     state.edgeEls.push({a: a.key, b: b.key, els: made});
     // the node's own port bead is the terminal; an extra circle on top of
-    // it was clutter. Only a loop's underside, which has no port, gets one.
-    if (e.back) bouton(svg, B.x + B.w / 2, B.y + B.h, "b-back");
+    // it was clutter. Only a loop's flank, which has no port, gets one.
+    if (e.back) bouton(svg, B.x + B.w, B.y + B.h / 2, "b-back");
 
     if (!e.back) {
       // glyphs anchor to the drawn path itself, wherever it routed
@@ -1857,7 +1802,7 @@ function buildLegend() {
   box.append(el("div", "ltitle lkeys", "Keys"));
   box.append(el("div", "lrow lkeysrow",
     "/ or Ctrl+K find · space+drag or middle-drag pan · ctrl+scroll zoom · "
-    + "0 fit · 1 = 100% · ← → walk the wires · Esc close"));
+    + "0 fit · 1 = 100% · ↑ ↓ walk the wires · Esc close"));
 }
 
 $("#btn-legend").onclick = () => {
@@ -1959,9 +1904,10 @@ $("#btn-zoom-pct").onclick = () => {
     }
     if (ev.key === "/") { ev.preventDefault(); openFind(); return; }
     if (ev.key === " ") { spaceHeld = true; stage.classList.add("panmode"); ev.preventDefault(); return; }
-    // walk the wires: → follows an outgoing edge, ← an incoming one
-    if ((ev.key === "ArrowRight" || ev.key === "ArrowLeft") && state.sel) {
-      const fwd = ev.key === "ArrowRight";
+    // walk the wires: ↓/→ follows an outgoing edge, ↑/← an incoming one
+    if ((ev.key === "ArrowRight" || ev.key === "ArrowLeft"
+         || ev.key === "ArrowDown" || ev.key === "ArrowUp") && state.sel) {
+      const fwd = ev.key === "ArrowRight" || ev.key === "ArrowDown";
       const hop = state.edgeEls.find(g => (fwd ? g.a : g.b) === state.sel);
       if (hop) {
         const next = fwd ? hop.b : hop.a;

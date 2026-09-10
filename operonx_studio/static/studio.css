@@ -310,12 +310,14 @@ body.resizing { user-select: none; cursor: col-resize; }
   box-shadow: 0 1px 2px rgba(122, 92, 18, .12); }
 .node .port { position: absolute; width: 12px; height: 12px; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #ffe9a8, #dfae2e 75%);
-  border: 1.5px solid #c1922a; top: 50%; margin-top: -6px;
+  border: 1.5px solid #c1922a;
   box-shadow: 0 0 6px rgba(214, 168, 40, .45);
   transition: box-shadow var(--tr), transform var(--tr); }
 .node:hover .port, .node.selected .port {
   box-shadow: 0 0 10px rgba(214, 168, 40, .8); transform: scale(1.15); }
-.port.in { left: -7px; } .port.out { right: -7px; }
+/* top-down: data enters through the crown, leaves through the base */
+.port.in { top: -7px; left: 50%; margin-left: -6px; }
+.port.out { bottom: -7px; left: 50%; margin-left: -6px; }
 /* neuron anatomy on the wire — all of it static:
    bouton = the axon's terminal knob at its target
    eglow/ecore/eray/espark = a beam of energy: a soft halo, a saturated
