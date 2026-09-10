@@ -266,8 +266,13 @@ function _hits(points, rects) {
 }
 
 function _sampleCubic(x1, y1, cx1, cy1, cx2, cy2, x2, y2) {
+  // sample by LENGTH, not by a fixed count — fifteen points on a
+  // 900px edge leaves 60px blind spots, wide enough to miss a node
+  const span = Math.abs(x2 - x1) + Math.abs(y2 - y1);
+  const steps = Math.min(140, Math.max(14, Math.round(span / 20)));
   const pts = [];
-  for (let t = 0.06; t < 0.95; t += 0.06) {
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
     pts.push(_cubic([x1, y1], [cx1, cy1], [cx2, cy2], [x2, y2], t));
   }
   return pts;
@@ -326,12 +331,23 @@ function routeAvoiding(a, b, obstacles) {
   const x1 = portCX(a), y1 = a.y + a.h, x2 = portCX(b), y2 = b.y;
   const dy = Math.max(40, Math.abs(y2 - y1) / 2);
   const rects = _rects(obstacles, a, b);
+  const long = y2 - y1 > 200;
+  const vertical = Math.abs(x1 - x2) < 18;
+
+  // A straight shot is only kept when it hits nothing AND, for a long
+  // near-vertical run, when no other edge already owns that corridor —
+  // two skips accepted "straight" used to lie exactly on each other.
   const straight = _sampleCubic(x1, y1, x1, y1 + dy, x2, y2 - dy, x2, y2);
-  if (!_hits(straight, rects)) return bezier(x1, y1, x2, y2);
+  if (!_hits(straight, rects)) {
+    if (!(long && vertical) || _vFree(x1, y1 + 20, y2 - 20)) {
+      if (long && vertical) _lanes.v.push({x: x1, t: y1 + 20, b: y2 - 20});
+      return bezier(x1, y1, x2, y2);
+    }
+  }
 
   // a long edge takes a clear vertical lane down the side of whatever
   // stands in its way — each edge claims a FREE lane
-  if (y2 - y1 > 220) {
+  if (long) {
     const lane = _clearLaneX(rects, y1 + 50, y2 - 50, (x1 + x2) / 2);
     if (lane !== null) {
       return `M ${x1} ${y1} C ${x1} ${y1 + 46}, ${lane} ${y1 + 46}, ${lane} ${y1 + 100}`
