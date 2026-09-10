@@ -263,16 +263,63 @@ def layout_graph(graph: Dict) -> Layout:
         depth_y[depth] = y_cursor
         y_cursor += NODE_H + V_GAP + max(0, cuts.get(depth, 0) - 2) * 12
 
-    nodes: List[Node] = []
-    ir_by_id = {n["id"]: n for n in ir_nodes}
-    row_span = widest * (NODE_W + H_GAP) - H_GAP
+    # ── coordinate assignment: children hang under their parents ────
+    # Centred slots are only the seed. Rows then align every node to
+    # the mean x of its neighbours — a top-down pass under parents, a
+    # bottom-up pass toward children, and a settling pass — with
+    # overlaps resolved by order-preserving cluster merging that keeps
+    # each cluster centred on its members' desires. A chain hangs plumb
+    # under its feeder instead of snapping to the global centre; only
+    # true siblings spread sideways.
+    slot = float(NODE_W + H_GAP)
+    row_span = widest * slot - H_GAP
+    xs: Dict[str, float] = {}
     for depth in sorted_depths:
         row = layers[depth]
-        # centred rows: a sequential spine runs down the middle, branch
-        # targets and parallel fan-outs spread symmetrically beside it
-        row_w = len(row) * (NODE_W + H_GAP) - H_GAP
-        left = MARGIN + (row_span - row_w) / 2
+        left = MARGIN + (row_span - (len(row) * slot - H_GAP)) / 2
         for order, node_id in enumerate(row):
+            xs[node_id] = left + order * slot
+
+    def _spread(desired: List[float]) -> List[float]:
+        clusters: List[List[float]] = []   # [sum_of_desires, count]
+        for d in desired:
+            clusters.append([d, 1.0])
+            while len(clusters) > 1:
+                a, b = clusters[-2], clusters[-1]
+                if b[0] / b[1] - a[0] / a[1] >= (a[1] + b[1]) * slot / 2:
+                    break
+                a[0] += b[0]
+                a[1] += b[1]
+                clusters.pop()
+        out: List[float] = []
+        for s, n in clusters:
+            centre = s / n
+            out.extend(centre + (i - (n - 1) / 2) * slot for i in range(int(n)))
+        return out
+
+    def _align(pass_depths: Sequence[int], neigh: Dict[str, List[str]]) -> None:
+        for depth in pass_depths:
+            row = layers[depth]
+            desired = []
+            for node_id in row:
+                links = [xs[p] for p in neigh.get(node_id, []) if p in xs]
+                desired.append(sum(links) / len(links) if links else xs[node_id])
+            for node_id, x in zip(row, _spread(desired)):
+                xs[node_id] = x
+
+    _align(sorted_depths, backward)
+    _align(list(reversed(sorted_depths)), forward)
+    _align(sorted_depths, backward)
+
+    if xs:
+        shift = MARGIN - min(xs.values())
+        for node_id in xs:
+            xs[node_id] += shift
+
+    nodes: List[Node] = []
+    ir_by_id = {n["id"]: n for n in ir_nodes}
+    for depth in sorted_depths:
+        for order, node_id in enumerate(layers[depth]):
             raw = ir_by_id[node_id]
             nodes.append(
                 Node(
@@ -281,7 +328,7 @@ def layout_graph(graph: Dict) -> Layout:
                     kind=raw.get("kind", "Op"),
                     layer=depth,
                     order=order,
-                    x=left + order * (NODE_W + H_GAP),
+                    x=xs[node_id],
                     y=depth_y[depth],
                     meta=raw,
                 )
@@ -294,6 +341,6 @@ def layout_graph(graph: Dict) -> Layout:
         e.back = (e.origin == "back_edge"
                   or depth_by_id.get(e.dst, 0) <= depth_by_id.get(e.src, 0))
 
-    width = MARGIN * 2 + row_span
+    width = (max(xs.values()) + NODE_W if xs else row_span + MARGIN) + MARGIN
     height = (y_cursor - V_GAP if nodes else 0) + MARGIN
     return Layout(nodes=nodes, edges=edges, width=width, height=height)

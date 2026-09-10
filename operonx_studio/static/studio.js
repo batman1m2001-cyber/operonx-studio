@@ -345,26 +345,30 @@ function routeAvoiding(a, b, obstacles) {
     }
   }
 
-  // a long edge takes a clear vertical lane down the side of whatever
-  // stands in its way — each edge claims a FREE lane
-  if (long) {
+  // Two escapes: a smooth bow, or a jogged vertical side-lane. A short
+  // hop looks best bowed; a long haul looks best in a straight lane —
+  // try in that order, fall back to the other.
+  const bow = () => {
+    const stepX = NODE_W / 2 + 64;
+    for (const off of [-stepX, stepX, -2 * stepX, 2 * stepX]) {
+      const pts = _sampleCubic(x1, y1, x1 + off, y1 + dy, x2 + off, y2 - dy, x2, y2);
+      if (!_hits(pts, rects)) {
+        return `M ${x1} ${y1} C ${x1 + off} ${y1 + dy}, ${x2 + off} ${y2 - dy}, ${x2} ${y2}`;
+      }
+    }
+    return null;
+  };
+  const laneRoute = () => {
+    if (!long) return null;
     const lane = _clearLaneX(rects, y1 + 50, y2 - 50, (x1 + x2) / 2);
-    if (lane !== null) {
-      return `M ${x1} ${y1} C ${x1} ${y1 + 46}, ${lane} ${y1 + 46}, ${lane} ${y1 + 100}`
-        + ` L ${lane} ${y2 - 100}`
-        + ` C ${lane} ${y2 - 46}, ${x2} ${y2 - 46}, ${x2} ${y2}`;
-    }
-  }
-
-  // bow left or right of the obstruction
-  const stepX = NODE_W / 2 + 64;
-  for (const off of [-stepX, stepX, -2 * stepX, 2 * stepX]) {
-    const pts = _sampleCubic(x1, y1, x1 + off, y1 + dy, x2 + off, y2 - dy, x2, y2);
-    if (!_hits(pts, rects)) {
-      return `M ${x1} ${y1} C ${x1 + off} ${y1 + dy}, ${x2 + off} ${y2 - dy}, ${x2} ${y2}`;
-    }
-  }
-  return bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
+    if (lane === null) return null;
+    return `M ${x1} ${y1} C ${x1} ${y1 + 46}, ${lane} ${y1 + 46}, ${lane} ${y1 + 100}`
+      + ` L ${lane} ${y2 - 100}`
+      + ` C ${lane} ${y2 - 46}, ${x2} ${y2 - 46}, ${x2} ${y2}`;
+  };
+  const shortHop = y2 - y1 < 480;
+  return (shortHop ? (bow() ?? laneRoute()) : (laneRoute() ?? bow()))
+    ?? bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
 }
 
 function returnPath(a, b) {
@@ -516,7 +520,7 @@ function render() {
   const minY = gatesIn.length
     ? Math.min(...gatesIn.map(x => x.y)) - 110
     : -NODE_H - 140;
-  state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: maxY + 130};
+  state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: maxY + 175};
 
   svg.setAttribute("width", maxX + 620);
   svg.setAttribute("height", maxY + 640);
@@ -578,6 +582,50 @@ function render() {
     svg.append(p);
     bouton(svg, cx, y1 + 74, "b-serve");
     edgeGlyph(svg, cx + 44, y1 + 44, "⇣ client", "servelabel");
+  }
+
+  // The main graph has terminals too — the flow, like every opened
+  // GraphOp, begins at a START contact and ends at an END one. Quiet
+  // ties reach every entry (this is what dispatches beat/lag-style
+  // monitors: the session starting, not the client) and gather the
+  // exits. Doors keep their client stubs; their tie lands off-centre
+  // so the two arrows don't overlap.
+  if (flat.nodes.length) {
+    const at = (name) => flat.nodes.find(it => it.depth === 0 && it.node.name === name);
+    const entryTies = (g.entries || []).map(at).filter(Boolean);
+    const exitTies = (g.exits || []).map(at).filter(Boolean);
+    const over = (items) => items.reduce((s, it) => s + portCX(it), 0)
+      / items.length - B_W / 2;
+    const tie = (x1, y1, x2, y2) => {
+      const p = document.createElementNS(SVGNS, "path");
+      p.setAttribute("d", bezier(x1, y1, x2, y2));
+      p.setAttribute("class", "bedge");
+      svg.append(p);
+    };
+    if (entryTies.length) {
+      const topY = Math.min(...entryTies.map(it => it.y)) - 96;
+      const startIt = {key: "__main/__start", depth: 0, inner: null,
+                       x: over(entryTies), y: topY, w: B_W, h: B_H,
+                       node: {id: "__start__", name: "START",
+                              kind: "__boundary__", boundary: "start"}};
+      nodesBox.append(boundaryCard(startIt));
+      for (const t of entryTies) {
+        const off = t.node.serve_role ? t.w * 0.22 : t.w / 2;
+        tie(startIt.x + B_W / 2, startIt.y + B_H, t.x + off, t.y);
+      }
+    }
+    if (exitTies.length) {
+      const endY = Math.max(...exitTies.map(it => it.y + it.h)) + 96;
+      const endIt = {key: "__main/__end", depth: 0, inner: null,
+                     x: over(exitTies), y: endY, w: B_W, h: B_H,
+                     node: {id: "__end__", name: "END",
+                            kind: "__boundary__", boundary: "end"}};
+      nodesBox.append(boundaryCard(endIt));
+      for (const t of exitTies) {
+        const off = t.node.serve_role ? t.w * 0.78 : t.w / 2;
+        tie(t.x + off, t.y + t.h, endIt.x + B_W / 2, endIt.y);
+      }
+    }
   }
 
   // One beam per pair: the IR often carries a data edge AND an order
@@ -838,14 +886,6 @@ function opCard(it) {
   // At most TWO badges: one semantic marker, plus the run chip. Density
   // is respect — everything else is one click away in the inspector.
   const badges = el("div", "badges");
-  if (!n.serve_role && it.depth === 0 && state._hasIngress
-      && (state.graph.entries || []).includes(n.name)) {
-    // an entry that isn't the door: dispatched when the session starts,
-    // no client wire involved — a chip says so without the spaghetti
-    const b = el("span", "badge start", "⏻ start");
-    b.title = "Dispatched when the session starts — not fed by the client.";
-    badges.append(b);
-  }
   if (n.graph) {
     const b = el("button", "badge sub expand", `▣ ${n.subgraph_ops} ▸`);
     b.title = "A nested @graph — click to open it in place.";
@@ -1817,9 +1857,8 @@ function buildLegend() {
   row(el("span", "lglyph", "⚡"), "generator: one call, many yields — consumers run per yield");
   row(el("span", "lglyph", "≋ ∥ ⧉"), "streaming edge · parallel fan-out · collect-into-list");
   row(el("span", "lglyph", "▣"), "a nested graph — click its badge (or double-click) to open it in place");
-  row(el("span", "lglyph", "▶"), "START / END terminals inside an opened graph are its own ports — outside edges plug into them");
+  row(el("span", "lglyph", "▶"), "START / END terminals are a graph's own ports — the main flow and every opened GraphOp have them; the dotted ties from START are session-start dispatch");
   row(el("span", "lglyph", "⇥"), "framed doors are the serve boundary: the ingress wears the transport's name, the reply leaves egress toward the client");
-  row(el("span", "lglyph", "⏻"), "'start' chip: dispatched when the session begins — not fed by the client");
   row(el("span", "lheat"), "with a run painted: warmer border = slower average, red = errored");
 
   box.append(el("div", "ltitle lkeys", "Keys"));
