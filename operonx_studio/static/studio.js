@@ -134,6 +134,17 @@ function visualOf(kind) {
 function kindColor(node) { return visualOf(node.kind).color; }
 function kindIcon(node) { return visualOf(node.kind).icon; }
 
+/* With a run painted, an op either executed or it didn't — and the
+ * ones that didn't fade back, so the picture becomes the path taken.
+ * A GraphOp ran if any member did; structure (terminals) never fades. */
+function ranInRun(n) {
+  if (!state.run) return true;
+  if (n.kind === "__boundary__") return true;
+  if (state.run.ops[n.name]) return true;
+  if (n.graph) return (n.graph.nodes || []).some(ranInRun);
+  return false;
+}
+
 /* ── placement: expansion opens a GraphOp in place ────────────────── */
 
 /* The server lays every graph on a grid, nested graphs included. A
@@ -696,15 +707,17 @@ function render() {
     }
     let drawn = p;
     const made = [];
+    const faded = state.run && (!ranInRun(a.node) || !ranInRun(b.node));
     if (sheath !== null) {
       drawn = energyEdge(svg, p.getAttribute("d"), sheath.trim(), made);
-      // a dormant else-fallback carries no sparks — nothing flows there yet
-      if (!sheath.includes("relse")) energySparks(svg, drawn, sheath.trim());
+      // no sparks on an else-fallback, nor into an op that never ran
+      if (!sheath.includes("relse") && !faded) energySparks(svg, drawn, sheath.trim());
     } else {
       p.setAttribute("class", cls.trim());
       svg.append(p);
       made.push(p);
     }
+    if (faded) for (const el2 of made) el2.classList.add("dorm");
     // selection highlights and ←/→ walking work off this ledger, so a
     // click never needs to redraw the whole canvas
     state.edgeEls.push({a: a.key, b: b.key, els: made});
@@ -809,6 +822,8 @@ function containerCard(it) {
   card.style.setProperty("--kind", kindColor(n));
   if (it.key === state.sel) card.classList.add("selected");
 
+  if (state.run && !ranInRun(n)) card.classList.add("dormant");
+
   const head = el("div", "chead");
   const promoter = el("span", "promoter", "↱");
   promoter.title = "An operon: one promoter, the genes inside transcribed together.";
@@ -901,6 +916,7 @@ function opCard(it) {
     badges.append(b);
   }
 
+  if (state.run && !ranInRun(n)) card.classList.add("dormant");
   const runinfo = state.run && state.run.ops[n.name];
   if (runinfo) {
     const avg = runinfo.runs ? (runinfo.total_ms / runinfo.runs) : 0;
@@ -1024,6 +1040,10 @@ function select(key) {
   head.append(chips);
   panel.append(head);
 
+  if (state.run && !ranInRun(n)) {
+    panel.append(el("div", "rolenote dormnote",
+      `— did not execute in ${state.run.run}. The values below are its wiring, not a recording.`));
+  }
   if (n.kind === "FuncOp" || n.code) panel.append(signatureLine(n));
   if (n.serve_role) {
     panel.append(el("div", "rolenote",
@@ -1859,7 +1879,7 @@ function buildLegend() {
   row(el("span", "lglyph", "▣"), "a nested graph — click its badge (or double-click) to open it in place");
   row(el("span", "lglyph", "▶"), "START / END terminals are a graph's own ports — the main flow and every opened GraphOp have them; the dotted ties from START are session-start dispatch");
   row(el("span", "lglyph", "⇥"), "framed doors are the serve boundary: the ingress wears the transport's name, the reply leaves egress toward the client");
-  row(el("span", "lheat"), "with a run painted: warmer border = slower average, red = errored");
+  row(el("span", "lheat"), "with a run painted: warmer border = slower average, red = errored, faded = did not run");
 
   box.append(el("div", "ltitle lkeys", "Keys"));
   box.append(el("div", "lrow lkeysrow",

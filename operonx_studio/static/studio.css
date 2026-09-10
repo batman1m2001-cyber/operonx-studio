@@ -941,3 +941,10 @@ header.bar .pname:hover { text-decoration: underline; }
   paint-order: stroke; stroke: #fdf3d0; stroke-width: 3px;
 }
 .bouton.b-serve { fill: var(--k-serve); }
+
+/* a painted run fades what did not execute — the picture becomes the
+   path actually taken; hover briefly wakes a card for reading */
+.node.dormant { opacity: .35; filter: saturate(.35); }
+.node.dormant:hover { opacity: .85; filter: none; }
+#edges .dorm { opacity: .15 !important; }
+.dormnote { color: var(--muted); }
