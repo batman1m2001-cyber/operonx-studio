@@ -146,20 +146,24 @@ function kindIcon(node) { return visualOf(node.kind).icon; }
  * ARE the GraphOp's boundary — inner entries hang off START, inner
  * exits feed END, and external edges plug into the pills instead of
  * the container's rim. */
-const B_W = 62, B_H = 26, B_GAP = 44;
+const B_W = 34, B_H = 34, B_GAP = 40;
 
 function withBoundaries(model, key, depth) {
   for (const it of model.items) it.x += B_W + B_GAP;
   const contentRight = (model.w - 48) + B_W + B_GAP;
-  const midY = Math.max(6, (model.h - 48) / 2 - B_H / 2);
-  const pill = (which, x) => ({
+  // START sits with the first row, END with the last — the terminals
+  // read as where the flow enters and where it finally leaves
+  const ys = model.items.map(it => it.y);
+  const topY = Math.min(...ys) + (NODE_H - B_H) / 2;
+  const botY = Math.max(...ys) + (NODE_H - B_H) / 2;
+  const pill = (which, x, y) => ({
     key: `${key}/__${which}`,
     node: {id: `__${which}__`, name: which.toUpperCase(),
            kind: "__boundary__", boundary: which},
-    depth, inner: null, x, y: midY, w: B_W, h: B_H,
+    depth, inner: null, x, y, w: B_W, h: B_H,
   });
-  const start = pill("start", 8);
-  const end = pill("end", contentRight + B_GAP);
+  const start = pill("start", 10, topY);
+  const end = pill("end", contentRight + B_GAP, botY);
   const edges = [...model.edges];
   for (const it of model.items) {
     if (it.node.start) edges.push({src: "__start__", dst: it.node.id, boundary: true});
@@ -483,6 +487,13 @@ function energySparks(svg, path, cls) {
 }
 
 
+function serveFor(graph) {
+  // the transport serving this graph, if any — the thing an ingress
+  // door wears as its name
+  return (state.ir.serves || [])
+    .find(s => s.graph === graph.name && s.kind !== "asgi") || null;
+}
+
 function serveNodesFor(graph) {
   // A [[serve]] naming this graph is its front door; drawing it is the
   // whole reason the manifest block exists — no pipeline begins from
@@ -531,7 +542,12 @@ function render() {
 
   const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
   const maxY = Math.max(model.h, ...flat.nodes.map(n => n.y + n.h));
-  state.extent = {minX: -NODE_W - 110, minY: 0, maxX, maxY: maxY + 120};
+  // with a declared ingress the transport card is gone — don't reserve
+  // its empty left margin, just room for the client → stub
+  const minX = gatesIn.length
+    ? Math.min(...gatesIn.map(x => x.x)) - 110
+    : -NODE_W - 110;
+  state.extent = {minX, minY: 0, maxX, maxY: maxY + 120};
 
   const span = 400 + maxX, tall = 300 + maxY;
   svg.setAttribute("width", span + 400);
@@ -539,41 +555,52 @@ function render() {
   svg.style.left = "-400px";
   svg.setAttribute("viewBox", `-400 0 ${span + 400} ${tall}`);
 
-  // the boundary bands paint first — everything else sits on top of them
-  const zone = (items, label) => {
-    if (!items.length) return;
-    const l = Math.min(...items.map(x => x.x)) - 20;
-    const r = Math.max(...items.map(x => x.x + x.w)) + 20;
+  // Door frames paint first, everything sits on top. A frame hugs ITS
+  // gate only — a full-height band through a wrapped layout would slice
+  // rows that have nothing to do with the boundary.
+  const doorFrame = (it, label) => {
     const rect = document.createElementNS(SVGNS, "rect");
-    rect.setAttribute("x", l); rect.setAttribute("y", 6);
-    rect.setAttribute("width", r - l); rect.setAttribute("height", maxY + 86);
+    rect.setAttribute("x", it.x - 12); rect.setAttribute("y", it.y - 26);
+    rect.setAttribute("width", it.w + 24); rect.setAttribute("height", it.h + 38);
     rect.setAttribute("rx", 16);
     rect.setAttribute("class", "zoneband");
     svg.append(rect);
-    edgeGlyph(svg, (l + r) / 2, 22, label, "zonelabel");
+    edgeGlyph(svg, it.x + it.w / 2, it.y - 12, label, "zonelabel");
   };
-  zone(gatesIn, "⇥ INGRESS · client sends");
-  zone(gatesOut, "EGRESS ⇥ · client receives");
+  for (const gi of gatesIn) doorFrame(gi, "⇥ INGRESS");
+  for (const go of gatesOut) doorFrame(go, "EGRESS ⇥");
+  state._hasIngress = gatesIn.length > 0;
 
-  // serve entry nodes
-  const serves = serveNodesFor(g);
-  const entryItems = (g.entries || [])
-    .map(name => flat.nodes.find(it => it.depth === 0 && it.node.name === name))
-    .filter(Boolean);
-
-  for (const s of serves) {
-    for (const t of entryItems) {
+  if (!state._hasIngress) {
+    // no declared door — the transport card is the only face the
+    // client boundary has, so keep it and its fan to the entries
+    const serves = serveNodesFor(g);
+    const entryItems = (g.entries || [])
+      .map(name => flat.nodes.find(it => it.depth === 0 && it.node.name === name))
+      .filter(Boolean);
+    for (const s of serves) {
+      for (const t of entryItems) {
+        const p = document.createElementNS(SVGNS, "path");
+        p.setAttribute("d", bezier(s.x + 190, s.y + NODE_H / 2, t.x, portY(t)));
+        p.setAttribute("class", "serve");
+        svg.append(p);
+      }
+    }
+    state._serves = serves;
+  } else {
+    // the ingress IS the transport: one door, wearing the transport's
+    // name — no second card, no wire fan. The client's data walks in
+    // through a stub arrow, and the reply leaves egress through one.
+    state._serves = [];
+    for (const gi of gatesIn) {
+      const x2 = gi.x, y = portY(gi);
       const p = document.createElementNS(SVGNS, "path");
-      p.setAttribute("d", bezier(s.x + 190, s.y + NODE_H / 2, t.x, portY(t)));
+      p.setAttribute("d", `M ${x2 - 76} ${y} C ${x2 - 44} ${y}, ${x2 - 34} ${y}, ${x2} ${y}`);
       p.setAttribute("class", "serve");
       svg.append(p);
-      // name the hop: this is the client's data arriving
-      edgeGlyph(svg, (s.x + 190 + t.x) / 2, (s.y + NODE_H / 2 + portY(t)) / 2 - 7,
-                "client →", "servelabel");
+      edgeGlyph(svg, x2 - 40, y - 8, "client →", "servelabel");
     }
   }
-
-  // and the reply leaving: a stub arrow out of every egress door
   for (const gOut of gatesOut) {
     const x1 = gOut.x + gOut.w, y = portY(gOut);
     const p = document.createElementNS(SVGNS, "path");
@@ -699,8 +726,8 @@ function render() {
   }
   for (const [x, y, text, cls, tip] of glyphJobs) edgeGlyph(svg, x, y, text, cls, tip);
 
-  // serve cards
-  for (const s of serves) {
+  // serve cards (only when no declared ingress wears the transport)
+  for (const s of state._serves || []) {
     const card = el("div", "node serve-node");
     card.style.left = `${s.x}px`;
     card.style.top = `${s.y}px`;
@@ -793,7 +820,8 @@ function boundaryCard(it) {
   card.style.top = `${it.y}px`;
   card.style.width = `${it.w}px`;
   card.style.height = `${it.h}px`;
-  card.textContent = n.boundary === "start" ? "▶ START" : "END ▶";
+  card.append(el("span", "bglyph", n.boundary === "start" ? "▶" : "■"));
+  card.append(el("span", "blabel", n.name));
   card.title = n.boundary === "start"
     ? "The GraphOp's own input boundary — edges from outside arrive here."
     : "The GraphOp's own output boundary — results leave for the outside here.";
@@ -819,8 +847,13 @@ function opCard(it) {
     card.classList.add("gate", `gate-${n.serve_role}`);
     card.append(el("div", "nname",
       n.serve_role === "ingress" ? `⇥ ${n.name}` : `${n.name} ⇥`));
-    card.append(el("div", "nkind",
-      n.serve_role === "ingress" ? "ingress · client → run" : "egress · run → client"));
+    // the ingress IS the transport — it wears the endpoint's name
+    const t = n.serve_role === "ingress" && serveFor(state.graph);
+    card.append(el("div", "nkind mono",
+      t ? `${t.kind}${t.path ? " " + t.path : ""} → run`
+        : n.serve_role === "ingress" ? "ingress · client → run"
+                                     : "egress · run → client"));
+    if (t && t.description) card.title = t.description;
   } else {
     // a brain cell, with two membrane variants so a row of cells reads
     // organic instead of stamped
@@ -837,6 +870,14 @@ function opCard(it) {
   // At most TWO badges: one semantic marker, plus the run chip. Density
   // is respect — everything else is one click away in the inspector.
   const badges = el("div", "badges");
+  if (!n.serve_role && it.depth === 0 && state._hasIngress
+      && (state.graph.entries || []).includes(n.name)) {
+    // an entry that isn't the door: dispatched when the session starts,
+    // no client wire involved — a chip says so without the spaghetti
+    const b = el("span", "badge start", "⏻ start");
+    b.title = "Dispatched when the session starts — not fed by the client.";
+    badges.append(b);
+  }
   if (n.graph) {
     const b = el("button", "badge sub expand", `▣ ${n.subgraph_ops} ▸`);
     b.title = "A nested @graph — click to open it in place.";
@@ -981,6 +1022,13 @@ function select(key) {
       n.serve_role === "ingress"
         ? "⇥ Serve boundary — the client's data enters the run here. No business logic inside."
         : "⇥ Serve boundary — the run's answers leave for the client here. No business logic inside."));
+    const t = n.serve_role === "ingress" && serveFor(state.graph);
+    if (t) {
+      const line = el("div", "srcline mono",
+        `⟶ transport: ${t.kind}${t.path ? " " + t.path : ""}`);
+      if (t.description) line.title = t.description;
+      panel.append(line);
+    }
   }
 
   // One fetch per selection; every section that cares about the painted
@@ -1801,8 +1849,9 @@ function buildLegend() {
   row(el("span", "lglyph", "⚡"), "generator: one call, many yields — consumers run per yield");
   row(el("span", "lglyph", "≋ ∥ ⧉"), "streaming edge · parallel fan-out · collect-into-list");
   row(el("span", "lglyph", "▣"), "a nested graph — click its badge (or double-click) to open it in place");
-  row(el("span", "lglyph", "▶"), "START / END pills inside an opened graph are its own ports — outside edges plug into them");
-  row(el("span", "lglyph", "⇥"), "the tinted bands are the serve boundary: ingress brings the client's data in, egress sends the reply back");
+  row(el("span", "lglyph", "▶"), "START / END terminals inside an opened graph are its own ports — outside edges plug into them");
+  row(el("span", "lglyph", "⇥"), "framed doors are the serve boundary: the ingress wears the transport's name, the reply leaves egress toward the client");
+  row(el("span", "lglyph", "⏻"), "'start' chip: dispatched when the session begins — not fed by the client");
   row(el("span", "lheat"), "with a run painted: warmer border = slower average, red = errored");
 
   box.append(el("div", "ltitle lkeys", "Keys"));
