@@ -141,13 +141,41 @@ function kindIcon(node) { return visualOf(node.kind).icon; }
  * every column to its right and row below shifts by the growth, so the
  * grid stays a grid and nothing overlaps. Recursion makes a container
  * inside a container work for free. */
+/* An opened GraphOp shows its own ports as nodes: a START pill where
+ * the outside's edges arrive, an END pill they leave from. The pills
+ * ARE the GraphOp's boundary — inner entries hang off START, inner
+ * exits feed END, and external edges plug into the pills instead of
+ * the container's rim. */
+const B_W = 62, B_H = 26, B_GAP = 44;
+
+function withBoundaries(model, key, depth) {
+  for (const it of model.items) it.x += B_W + B_GAP;
+  const contentRight = (model.w - 48) + B_W + B_GAP;
+  const midY = Math.max(6, (model.h - 48) / 2 - B_H / 2);
+  const pill = (which, x) => ({
+    key: `${key}/__${which}`,
+    node: {id: `__${which}__`, name: which.toUpperCase(),
+           kind: "__boundary__", boundary: which},
+    depth, inner: null, x, y: midY, w: B_W, h: B_H,
+  });
+  const start = pill("start", 8);
+  const end = pill("end", contentRight + B_GAP);
+  const edges = [...model.edges];
+  for (const it of model.items) {
+    if (it.node.start) edges.push({src: "__start__", dst: it.node.id, boundary: true});
+    if (it.node.end) edges.push({src: it.node.id, dst: "__end__", boundary: true});
+  }
+  model.items.push(start, end);
+  return {items: model.items, edges, w: end.x + B_W + 16, h: model.h};
+}
+
 function placeGraph(g, prefix, depth) {
   const size = new Map();
   for (const n of g.nodes) {
     const key = prefix + n.id;
     let inner = null, w = NODE_W, h = NODE_H;
     if (n.graph && state.expanded.has(key)) {
-      inner = placeGraph(n.graph, key + "/", depth + 1);
+      inner = withBoundaries(placeGraph(n.graph, key + "/", depth + 1), key, depth + 1);
       w = Math.max(NODE_W + 40, inner.w);
       h = inner.h + HEADER;
     }
@@ -189,7 +217,12 @@ function flattenModel(model, ox, oy, out) {
     abs.set(it.node.id, a);
     out.nodes.push(a);
     state.rendered.set(a.key, a);
-    if (it.inner) flattenModel(it.inner, a.x, a.y + HEADER, out);
+    if (it.inner) {
+      flattenModel(it.inner, a.x, a.y + HEADER, out);
+      // the pills stand for the container: outside edges plug into them
+      a.bIn = state.rendered.get(it.key + "/__start") || null;
+      a.bOut = state.rendered.get(it.key + "/__end") || null;
+    }
   }
   for (const e of model.edges) {
     const a = abs.get(e.src), b = abs.get(e.dst);
@@ -481,6 +514,21 @@ function render() {
   const model = placeGraph(g, "", 0);
   const flat = flattenModel(model, 0, 0, {nodes: [], edges: []});
 
+  // The serve boundary stands apart from the flow: ingress pulled left,
+  // egress pushed right, each in its own tinted band — the picture reads
+  // client → ingress → flow → egress → client.
+  const gatesIn = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "ingress");
+  const gatesOut = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "egress");
+  for (const x of gatesIn) x.x -= 80;
+  for (const x of gatesOut) {
+    // in a wrapped layout the egress is not always rightmost — only
+    // step out of the band when the lane is actually clear
+    const clash = flat.nodes.some(o => o !== x && !o.inner
+      && Math.abs(o.y - x.y) < NODE_H
+      && o.x > x.x && o.x < x.x + x.w + 110);
+    if (!clash) x.x += 80;
+  }
+
   const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
   const maxY = Math.max(model.h, ...flat.nodes.map(n => n.y + n.h));
   state.extent = {minX: -NODE_W - 110, minY: 0, maxX, maxY: maxY + 120};
@@ -490,6 +538,22 @@ function render() {
   svg.setAttribute("height", tall);
   svg.style.left = "-400px";
   svg.setAttribute("viewBox", `-400 0 ${span + 400} ${tall}`);
+
+  // the boundary bands paint first — everything else sits on top of them
+  const zone = (items, label) => {
+    if (!items.length) return;
+    const l = Math.min(...items.map(x => x.x)) - 20;
+    const r = Math.max(...items.map(x => x.x + x.w)) + 20;
+    const rect = document.createElementNS(SVGNS, "rect");
+    rect.setAttribute("x", l); rect.setAttribute("y", 6);
+    rect.setAttribute("width", r - l); rect.setAttribute("height", maxY + 86);
+    rect.setAttribute("rx", 16);
+    rect.setAttribute("class", "zoneband");
+    svg.append(rect);
+    edgeGlyph(svg, (l + r) / 2, 22, label, "zonelabel");
+  };
+  zone(gatesIn, "⇥ INGRESS · client sends");
+  zone(gatesOut, "EGRESS ⇥ · client receives");
 
   // serve entry nodes
   const serves = serveNodesFor(g);
@@ -503,7 +567,21 @@ function render() {
       p.setAttribute("d", bezier(s.x + 190, s.y + NODE_H / 2, t.x, portY(t)));
       p.setAttribute("class", "serve");
       svg.append(p);
+      // name the hop: this is the client's data arriving
+      edgeGlyph(svg, (s.x + 190 + t.x) / 2, (s.y + NODE_H / 2 + portY(t)) / 2 - 7,
+                "client →", "servelabel");
     }
+  }
+
+  // and the reply leaving: a stub arrow out of every egress door
+  for (const gOut of gatesOut) {
+    const x1 = gOut.x + gOut.w, y = portY(gOut);
+    const p = document.createElementNS(SVGNS, "path");
+    p.setAttribute("d", `M ${x1} ${y} C ${x1 + 34} ${y}, ${x1 + 44} ${y}, ${x1 + 76} ${y}`);
+    p.setAttribute("class", "serve");
+    svg.append(p);
+    bouton(svg, x1 + 80, y, "b-serve");
+    edgeGlyph(svg, x1 + 40, y - 8, "→ client", "servelabel");
   }
 
   // One beam per pair: the IR often carries a data edge AND an order
@@ -533,6 +611,19 @@ function render() {
 
   // graph edges (every open level draws its own)
   for (const {e, a, b} of byPair.values()) {
+    // a boundary tie inside an opened container: START → entries,
+    // exits → END. Structural, quiet — not an energy beam.
+    if (e.boundary) {
+      const bp = document.createElementNS(SVGNS, "path");
+      bp.setAttribute("d", bezier(a.x + a.w, portY(a), b.x, portY(b)));
+      bp.setAttribute("class", "bedge");
+      svg.append(bp);
+      state.edgeEls.push({a: a.key, b: b.key, els: [bp]});
+      continue;
+    }
+    // an expanded container's pills stand in for its rim: edges from
+    // outside land on START, leave from END
+    const A = a.bOut || a, B = b.bIn || b;
     const p = document.createElementNS(SVGNS, "path");
     let cls = e.soft ? "soft" : "";
     let sheath = null;
@@ -548,15 +639,15 @@ function render() {
       isElse = condLabels.length > 0 && condLabels.every(c => c === "else");
     }
     if (e.back) {
-      p.setAttribute("d", returnPath(a, b));
+      p.setAttribute("d", returnPath(A, B));
       cls += " back";
       if (!e.soft) sheath = "back";
-      const dip = Math.max(a.y + a.h, b.y + b.h) + 58 + Math.abs(a.x - b.x) * 0.06;
-      addGlyph((a.x + b.x + b.w) / 2, dip, "↺ loop", "back-label");
+      const dip = Math.max(A.y + A.h, B.y + B.h) + 58 + Math.abs(A.x - B.x) * 0.06;
+      addGlyph((A.x + B.x + B.w) / 2, dip, "↺ loop", "back-label");
     } else {
-      const wraps = b.x < a.x - 1;
-      p.setAttribute("d", wraps ? wrapAvoiding(a, b, obstacles)
-                                : routeAvoiding(a, b, obstacles));
+      const wraps = B.x < A.x - 1;
+      p.setAttribute("d", wraps ? wrapAvoiding(A, B, obstacles)
+                                : routeAvoiding(A, B, obstacles));
       if (wraps) cls += " wrap";
       if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
@@ -576,7 +667,7 @@ function render() {
     state.edgeEls.push({a: a.key, b: b.key, els: made});
     // the node's own port bead is the terminal; an extra circle on top of
     // it was clutter. Only a loop's underside, which has no port, gets one.
-    if (e.back) bouton(svg, b.x + b.w / 2, b.y + b.h, "b-back");
+    if (e.back) bouton(svg, B.x + B.w / 2, B.y + B.h, "b-back");
 
     if (!e.back) {
       // glyphs anchor to the drawn path itself, wherever it routed
@@ -688,13 +779,32 @@ function containerCard(it) {
   head.onclick = (ev) => { ev.stopPropagation(); select(it.key); };
   card.append(head);
 
-  card.append(el("span", "port in"));
-  card.append(el("span", "port out"));
+  // no rim ports: the START/END pills inside are the container's ports now
+  return card;
+}
+
+/* The pills that ARE an opened GraphOp's boundary. Clicking one selects
+ * the container — they represent the GraphOp itself. */
+function boundaryCard(it) {
+  const n = it.node;
+  const card = el("div", `node bnode b-${n.boundary}`);
+  card.dataset.name = n.name;
+  card.style.left = `${it.x}px`;
+  card.style.top = `${it.y}px`;
+  card.style.width = `${it.w}px`;
+  card.style.height = `${it.h}px`;
+  card.textContent = n.boundary === "start" ? "▶ START" : "END ▶";
+  card.title = n.boundary === "start"
+    ? "The GraphOp's own input boundary — edges from outside arrive here."
+    : "The GraphOp's own output boundary — results leave for the outside here.";
+  const parentKey = it.key.split("/").slice(0, -1).join("/");
+  card.onclick = (ev) => { ev.stopPropagation(); select(parentKey); };
   return card;
 }
 
 function opCard(it) {
   const n = it.node;
+  if (n.kind === "__boundary__") return boundaryCard(it);
   const card = el("div", "node");
   card.dataset.name = n.name;
   card.style.left = `${it.x}px`;
@@ -1691,6 +1801,8 @@ function buildLegend() {
   row(el("span", "lglyph", "⚡"), "generator: one call, many yields — consumers run per yield");
   row(el("span", "lglyph", "≋ ∥ ⧉"), "streaming edge · parallel fan-out · collect-into-list");
   row(el("span", "lglyph", "▣"), "a nested graph — click its badge (or double-click) to open it in place");
+  row(el("span", "lglyph", "▶"), "START / END pills inside an opened graph are its own ports — outside edges plug into them");
+  row(el("span", "lglyph", "⇥"), "the tinted bands are the serve boundary: ingress brings the client's data in, egress sends the reply back");
   row(el("span", "lheat"), "with a run painted: warmer border = slower average, red = errored");
 
   box.append(el("div", "ltitle lkeys", "Keys"));

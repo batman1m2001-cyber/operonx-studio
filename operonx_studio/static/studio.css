@@ -887,3 +887,37 @@ header.bar .pname:hover { text-decoration: underline; }
 .hdot.bad { background: var(--err); }
 .card .sig { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
 .card.dead { opacity: .65; }
+
+/* ── boundary pills & serve zones ─────────────────────────────────── */
+
+/* START/END inside an opened GraphOp: its ports, standing as nodes */
+.node.bnode {
+  min-height: 0; padding: 3px 0; text-align: center;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+  color: var(--accent-deep);
+  background: linear-gradient(180deg, #fdf6dd, #f7ecc4);
+  border: 1.5px dashed #cfa93f; border-radius: 999px;
+  box-shadow: none; display: flex; align-items: center; justify-content: center;
+}
+.node.bnode:hover { transform: none; box-shadow: var(--sh-1); }
+
+/* the quiet ties from START to entries and exits to END */
+#edges path.bedge {
+  fill: none; stroke: #cfa93f; stroke-width: 1.3px; opacity: .55;
+  stroke-dasharray: 3 4;
+}
+#edges path.bedge.hot { opacity: .95; }
+
+/* the client's ground: tinted bands behind ingress and egress */
+#edges rect.zoneband {
+  fill: rgba(201, 148, 15, .055);
+  stroke: rgba(178, 132, 20, .3); stroke-dasharray: 5 6; stroke-width: 1;
+}
+#edges text.zonelabel {
+  fill: #a1770a; font-size: 10px; font-weight: 700; letter-spacing: .12em;
+}
+#edges text.servelabel {
+  fill: #b28414; font-size: 10px; font-style: italic;
+  paint-order: stroke; stroke: #fdf3d0; stroke-width: 3px;
+}
+.bouton.b-serve { fill: var(--k-serve); }
