@@ -242,3 +242,18 @@ def test_chat_sits_behind_the_login_wall(tmp_path, project, fake_claude,
                            json={"message": "hi"}).status_code == 401
     assert signed_out.post("/api/chat",
                            json={"message": "hi"}).status_code == 401
+
+
+def test_the_view_rides_along_with_the_message(client, project, fake_claude):
+    """'why is this slow?' must not need the op name typed — what the
+    user is looking at goes into the system prompt."""
+    pid = _open(client, project)
+    _events(client, client.post(f"/api/p/{pid}/chat", json={
+        "message": "why is this slow?",
+        "view": {"node": "shout", "kind": "FuncOp",
+                 "run": "call-42", "tab": "flow"},
+    }))
+    argv = _invocation(fake_claude)["argv"]
+    prompt = argv[argv.index("--append-system-prompt") + 1]
+    assert "looking at right now" in prompt
+    assert "`shout` (FuncOp)" in prompt and "`call-42`" in prompt

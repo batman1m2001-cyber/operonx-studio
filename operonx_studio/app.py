@@ -435,7 +435,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     def _page(name: str) -> HTMLResponse:
         text = (STATIC / name).read_text(encoding="utf-8")
         for asset in ("studio.css", "studio.js", "values.js", "chat.js",
-                      "home.css", "home.js"):
+                      "home.js"):
             text = text.replace(f"/static/{asset}", f"/static/{asset}?v={asset_v}")
         return HTMLResponse(text, headers={"Cache-Control": "no-cache"})
 
@@ -555,6 +555,46 @@ def build_studio_app(recents: Optional[Recents] = None):
     @app.get("/api/projects")
     def projects() -> JSONResponse:
         return JSONResponse({"projects": [r.as_dict() for r in recents.ordered()]})
+
+    @app.get("/api/projects/health")
+    def projects_health() -> JSONResponse:
+        """Per-card signal for the home page: is the project extractable,
+        how big is it, has it run lately. Reads only what is already
+        warm (prewarmed watchers, cached IR, a directory listing) — this
+        must never make the home page wait on seventeen extractions."""
+        out: Dict[str, Any] = {}
+        for ref in recents.ordered():
+            if not ref.exists:
+                continue
+            info: Dict[str, Any] = {}
+            watcher = watchers.get(ref.id)
+            if watcher is None:
+                watcher = watchers[ref.id] = ProjectWatcher(root=ref.root)
+            last = watcher.last
+            if last.stamp:
+                info["ok"] = last.ok
+                if last.ok and last.ir:
+                    graphs = last.ir.get("graphs") or []
+                    info["graphs"] = len(graphs)
+                    info["ops"] = sum(len(g.get("nodes") or []) for g in graphs)
+                elif last.error:
+                    info["error"] = str(last.error).strip().splitlines()[-1][:200]
+            troot = _traces_root(ref.root)
+            if troot is not None and troot.is_dir():
+                newest, count = 0.0, 0
+                try:
+                    for entry in troot.iterdir():
+                        if entry.is_symlink() or not (entry / "nodes.jsonl").is_file():
+                            continue
+                        count += 1
+                        newest = max(newest, (entry / "nodes.jsonl").stat().st_mtime)
+                except OSError:
+                    pass
+                if count:
+                    info["runs"] = count
+                    info["newest"] = newest
+            out[ref.id] = info
+        return JSONResponse({"health": out})
 
     @app.post("/api/open")
     def open_project(body: Dict[str, Any]) -> JSONResponse:
@@ -862,6 +902,64 @@ def build_studio_app(recents: Optional[Recents] = None):
             return run_dir
         return JSONResponse(_summarise_run(_local_records(run_dir), run_dir.name))
 
+    @app.post("/api/p/{pid}/trace/{run}/delete")
+    def trace_delete(pid: str, run: str) -> JSONResponse:
+        """Remove one recorded local run. Langfuse rows live on someone
+        else's server — the studio never reaches into those."""
+        if run.startswith("lf:"):
+            return JSONResponse({"error": "langfuse traces are read-only here"},
+                                status_code=400)
+        run_dir = _local_run_dir(pid, run)
+        if isinstance(run_dir, JSONResponse):
+            return run_dir
+        import shutil
+
+        shutil.rmtree(run_dir)
+        summary_cache.pop(str(run_dir), None)
+        return JSONResponse({"ok": True})
+
+    @app.get("/api/p/{pid}/trace/{run}/timeline")
+    def trace_timeline(pid: str, run: str) -> JSONResponse:
+        """The run as a waterfall: every recorded execution with its
+        start offset and duration, ordered by when it began. The values
+        drill-down stays with the per-op endpoint; this answers WHEN."""
+        if run.startswith("lf:"):
+            got = _lf_for(pid, run)
+            if isinstance(got, JSONResponse):
+                return got
+            cfg, trace_id = got
+            try:
+                records = list(_lf_records(cfg, trace_id))
+            except Exception as exc:  # noqa: BLE001 — someone else's server
+                return JSONResponse({"error": f"langfuse: {exc}"}, status_code=502)
+        else:
+            run_dir = _local_run_dir(pid, run)
+            if isinstance(run_dir, JSONResponse):
+                return run_dir
+            records = list(_local_records(run_dir))
+
+        spans: List[Dict[str, Any]] = []
+        t0 = None
+        for rec in records:
+            start = rec.get("start_time")
+            if start is None:
+                continue
+            start = float(start)
+            t0 = start if t0 is None else min(t0, start)
+            spans.append({
+                "op": rec.get("op_name") or rec.get("op_full_name") or "?",
+                "start": start,
+                "dur_ms": float(rec.get("duration_ms") or 0.0),
+                "status": rec.get("status") or "ok",
+                "error": rec.get("error"),
+            })
+        spans.sort(key=lambda s: s["start"])
+        for s in spans:
+            s["start"] = round(s.pop("start") - (t0 or 0.0), 4)
+        total = len(spans)
+        return JSONResponse({"run": run, "total": total,
+                             "spans": spans[:3000]})
+
     @app.get("/api/p/{pid}/trace/{run}/op/{op_name}")
     def trace_op(pid: str, run: str, op_name: str, limit: int = 50) -> JSONResponse:
         """One op's executions in one run — the drill-down under the
@@ -930,6 +1028,21 @@ def build_studio_app(recents: Optional[Recents] = None):
         message = str(body.get("message") or "").strip()
         if not message:
             return JSONResponse({"error": "empty message"}, status_code=400)
+        # What the user is LOOKING at rides along with every message, so
+        # "why is this slow?" needs no op name typed — the studio knows.
+        view = body.get("view") or {}
+        if isinstance(view, dict):
+            lines = []
+            if view.get("node"):
+                lines.append(f"- selected op: `{str(view['node'])[:120]}`"
+                             + (f" ({str(view.get('kind'))[:40]})" if view.get("kind") else ""))
+            if view.get("run"):
+                lines.append(f"- run painted on the canvas: `{str(view['run'])[:120]}`")
+            if view.get("tab"):
+                lines.append(f"- open tab: {str(view['tab'])[:20]}")
+            if lines:
+                context += ("\n\n## What the user is looking at right now\n"
+                            + "\n".join(lines))
         turn = _chat.start_turn(message, cwd=cwd, context=context,
                                 session=str(body.get("session") or "") or None)
         return JSONResponse({"turn": turn})

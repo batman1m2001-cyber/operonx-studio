@@ -11,7 +11,8 @@
   <header class="bar">
     <a class="crumb" href="/">studio</a>
     <span class="crumb">/</span>
-    <span class="pname" id="pname">…</span>
+    <button class="pname" id="pname" title="switch project">…</button>
+    <div id="switcher" hidden></div>
     <select id="graph-pick" title="graph"></select>
     <nav class="tabs">
       <button data-tab="flow" class="active">Flow</button>
@@ -23,12 +24,17 @@
       <button id="btn-zoom-pct" title="reset to 100%">100%</button>
       <button id="btn-zoom-in">+</button>
       <button id="btn-fit" title="fit graph to view (0)">Fit</button>
+      <button id="btn-expand" title="open / close every nested graph">⊞</button>
+      <button id="btn-find" title="find a node (/ or Ctrl+K)">🔍</button>
+      <button id="btn-legend" title="what am I looking at?">?</button>
     </div>
     <span class="live" id="live"><span class="dot"></span><span id="live-text">live</span></span>
   </header>
 
   <div id="runbanner">
-    <span>Run <b id="run-name"></b> painted on the canvas — durations and errors per op.</span>
+    <span>Run <b id="run-name"></b></span>
+    <span id="run-stats"></span>
+    <button id="run-err" hidden>error →</button>
     <button id="run-clear">Clear</button>
   </div>
 
@@ -41,6 +47,7 @@
       <div id="find" hidden>
         <input id="find-input" placeholder="find node… (Enter selects, Esc closes)" autocomplete="off">
       </div>
+      <div id="legend" hidden></div>
     </div>
     <div id="dragbar" title="drag to resize · double-click to reset"></div>
     <aside id="inspector"></aside>

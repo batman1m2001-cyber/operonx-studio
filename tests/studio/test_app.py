@@ -640,3 +640,56 @@ def test_a_synthetic_loop_is_opened_back_up_for_display(client, semantics_projec
     by_name = {n["name"]: n for n in graph["nodes"]}
     assert by_name["t"]["x"] < by_name["again"]["x"], (
         "layout let the DFS pick the back edge instead of the author")
+
+
+def _traced(project: Path, tmp_path: Path, run: str, records: list) -> None:
+    traces = tmp_path / "traces"
+    d = traces / run
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "nodes.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in records), encoding="utf-8")
+    manifest = (project / "operonx.toml").read_text()
+    if "[studio]" not in manifest:
+        (project / "operonx.toml").write_text(
+            manifest + f'\n[studio]\ntraces = "{traces}"\n', encoding="utf-8")
+
+
+def test_delete_removes_a_run_and_only_inside_the_root(client, project, tmp_path):
+    _traced(project, tmp_path, "call-a", [{"op_name": "a", "duration_ms": 1.0}])
+    pid = _open(client, project)
+    assert [r["run"] for r in client.get(f"/api/p/{pid}/traces").json()["runs"]] == ["call-a"]
+
+    # traversal out of the traces root must be refused, not resolved
+    evil = client.post(f"/api/p/{pid}/trace/..%2F..%2Fsomething/delete")
+    assert evil.status_code == 404
+
+    assert client.post(f"/api/p/{pid}/trace/call-a/delete").json() == {"ok": True}
+    assert client.get(f"/api/p/{pid}/traces").json()["runs"] == []
+    assert not (tmp_path / "traces" / "call-a").exists()
+
+
+def test_timeline_orders_spans_from_run_start(client, project, tmp_path):
+    _traced(project, tmp_path, "call-t", [
+        {"op_name": "b", "start_time": 105.0, "duration_ms": 50.0, "status": "ok"},
+        {"op_name": "a", "start_time": 100.0, "duration_ms": 20.0, "status": "ok"},
+        {"op_name": "a", "start_time": 100.5, "duration_ms": 30.0,
+         "status": "error", "error": "kaboom"},
+    ])
+    pid = _open(client, project)
+    data = client.get(f"/api/p/{pid}/trace/call-t/timeline").json()
+    assert data["total"] == 3
+    spans = data["spans"]
+    assert [s["op"] for s in spans] == ["a", "a", "b"]
+    assert spans[0]["start"] == 0.0 and spans[2]["start"] == 5.0
+    assert spans[1]["error"] == "kaboom"
+
+
+def test_projects_health_reports_shape_and_traces(client, project, tmp_path):
+    _traced(project, tmp_path, "call-h", [{"op_name": "a", "duration_ms": 1.0}])
+    pid = _open(client, project)
+    client.get(f"/api/p/{pid}/ir")   # ensure extraction has happened
+    health = client.get("/api/projects/health").json()["health"]
+    info = health[pid]
+    assert info["ok"] is True
+    assert info["graphs"] == 1 and info["ops"] >= 1
+    assert info["runs"] == 1 and info["newest"] > 0

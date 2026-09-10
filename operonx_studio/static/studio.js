@@ -34,7 +34,39 @@ const state = {
   heatMax: 0,        // slowest avg ms in the painted run — the heat scale
   follow: false,     // repaint whenever a newer run appears
   stamp: 0,
+  tab: "flow",
+  cardEls: new Map(), // render key -> card element (selection without re-render)
+  edgeEls: [],        // [{a, b, els}] every drawn edge's paths, for hot/arrow nav
+  errIdx: 0,          // cycling cursor for the "error →" jump
 };
+
+/* What the user is looking at, for anyone who asks — the assistant
+ * sends it along with every chat message. */
+function pushView() {
+  const it = state.sel ? state.rendered.get(state.sel) : null;
+  window.__oxview = {
+    node: it ? it.node.name : null,
+    kind: it ? it.node.kind : null,
+    run: state.run ? state.run.run : null,
+    tab: state.tab,
+  };
+}
+
+/* One shared voice for action feedback: applied, painted, copied. */
+let _toastTimer = null;
+function toast(text, bad) {
+  let t = $("#toast");
+  if (!t) {
+    t = el("div", null, "");
+    t.id = "toast";
+    document.body.append(t);
+  }
+  t.textContent = text;
+  t.classList.toggle("bad", !!bad);
+  t.classList.add("show");
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove("show"), 2400);
+}
 
 function store(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ }
@@ -352,12 +384,17 @@ function consumeOf(edge, a, b) {
   return null;
 }
 
-function edgeGlyph(svg, x, y, text, cls) {
+function edgeGlyph(svg, x, y, text, cls, tip) {
   const t = document.createElementNS(SVGNS, "text");
   t.setAttribute("x", x); t.setAttribute("y", y);
   t.setAttribute("text-anchor", "middle");
   if (cls) t.setAttribute("class", cls);
   t.textContent = text;
+  if (tip) {
+    const title = document.createElementNS(SVGNS, "title");
+    title.textContent = tip;
+    t.append(title);
+  }
   svg.append(t);
 }
 
@@ -374,7 +411,7 @@ function bouton(svg, x, y, cls) {
  * spark particles frozen mid-flight — each with a smaller trailing dot
  * behind it, so the comet shape says which way the energy flows without
  * a frame of animation. */
-function energyEdge(svg, d, cls) {
+function energyEdge(svg, d, cls, made) {
   const glow = document.createElementNS(SVGNS, "path");
   glow.setAttribute("d", d);
   glow.setAttribute("class", ("eglow " + cls).trim());
@@ -388,6 +425,7 @@ function energyEdge(svg, d, cls) {
   ray.setAttribute("d", d);
   ray.setAttribute("class", ("eray " + cls).trim());
   svg.append(ray);
+  if (made) made.push(glow, core, ray);
   return core;
 }
 
@@ -436,6 +474,8 @@ function render() {
   nodesBox.textContent = "";
   svg.textContent = "";
   state.rendered.clear();
+  state.cardEls.clear();
+  state.edgeEls = [];
   _lanes = {h: [], v: []};
 
   const model = placeGraph(g, "", 0);
@@ -481,7 +521,7 @@ function render() {
   // Glyphs and labels buffer here and draw AFTER every path, so no
   // later beam ever paints over a word.
   const glyphJobs = [];
-  const addGlyph = (x, y, text, cls) => glyphJobs.push([x, y, text, cls]);
+  const addGlyph = (x, y, text, cls, tip) => glyphJobs.push([x, y, text, cls, tip]);
   const along = (path, fraction, dy) => {
     try {
       const len = path.getTotalLength();
@@ -520,19 +560,20 @@ function render() {
       if (wraps) cls += " wrap";
       if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
-    if (state.sel && (state.rendered.get(state.sel)?.node.id === e.src
-                   || state.rendered.get(state.sel)?.node.id === e.dst)) cls += " hot";
-
     let drawn = p;
+    const made = [];
     if (sheath !== null) {
-      const eCls = (sheath + (cls.includes("hot") ? " hot" : "")).trim();
-      drawn = energyEdge(svg, p.getAttribute("d"), eCls);
+      drawn = energyEdge(svg, p.getAttribute("d"), sheath.trim(), made);
       // a dormant else-fallback carries no sparks — nothing flows there yet
-      if (!eCls.includes("relse")) energySparks(svg, drawn, eCls);
+      if (!sheath.includes("relse")) energySparks(svg, drawn, sheath.trim());
     } else {
       p.setAttribute("class", cls.trim());
       svg.append(p);
+      made.push(p);
     }
+    // selection highlights and ←/→ walking work off this ledger, so a
+    // click never needs to redraw the whole canvas
+    state.edgeEls.push({a: a.key, b: b.key, els: made});
     // the node's own port bead is the terminal; an extra circle on top of
     // it was clutter. Only a loop's underside, which has no port, gets one.
     if (e.back) bouton(svg, b.x + b.w / 2, b.y + b.h, "b-back");
@@ -552,14 +593,20 @@ function render() {
           : `∥ parallel${consume.max ? "≤" + consume.max : ""}`, "");
       }
       if (condLabels.length) {
-        // n8n-style: the wire stays clean; the condition is one hover away
+        // n8n-style: the wire stays clean; the condition is one hover
+        // away — on the beam itself AND on a small ? pill, because a
+        // 4px path is a cruel hover target
         const tip = document.createElementNS(SVGNS, "title");
         tip.textContent = condLabels.join(" | ");
         drawn.append(tip);
+        const at = along(drawn, 0.45, 4);
+        if (at) addGlyph(at[0], at[1], "?",
+                         "condglyph" + (isElse ? " relse" : ""),
+                         condLabels.join(" | "));
       }
     }
   }
-  for (const [x, y, text, cls] of glyphJobs) edgeGlyph(svg, x, y, text, cls);
+  for (const [x, y, text, cls, tip] of glyphJobs) edgeGlyph(svg, x, y, text, cls, tip);
 
   // serve cards
   for (const s of serves) {
@@ -580,10 +627,30 @@ function render() {
   // op cards — flatten order draws a container before its members, so
   // members paint on top of their box without any z-index bookkeeping
   for (const it of flat.nodes) {
-    nodesBox.append(it.inner ? containerCard(it) : opCard(it));
+    const card = it.inner ? containerCard(it) : opCard(it);
+    state.cardEls.set(it.key, card);
+    nodesBox.append(card);
   }
 
+  refreshSelection();
   applyView();
+}
+
+/* Selection is a class toggle, not a redraw — clicking around a big
+ * flow must not blink the whole canvas. */
+function refreshSelection() {
+  for (const [k, c] of state.cardEls) c.classList.toggle("selected", k === state.sel);
+  for (const g of state.edgeEls) {
+    const hot = !!state.sel && (g.a === state.sel || g.b === state.sel);
+    for (const e of g.els) e.classList.toggle("hot", hot);
+  }
+}
+
+function deselect() {
+  state.sel = null;
+  $("#inspector").classList.remove("open");
+  refreshSelection();
+  pushView();
 }
 
 function toggleExpand(key) {
@@ -745,7 +812,8 @@ function fit() {
  * they are one click away but never in the way. */
 function select(key) {
   state.sel = (state.sel === key) ? null : key;
-  render();
+  refreshSelection();
+  pushView();
   const panel = $("#inspector");
   if (!state.sel) { panel.classList.remove("open"); return; }
   const it = state.rendered.get(state.sel);
@@ -757,6 +825,18 @@ function select(key) {
 
   // ── identity: sticky while the body scrolls ───────────────────────
   const head = el("div", "phead");
+  const close = el("button", "pclose", "✕");
+  close.title = "close (Esc)";
+  close.onclick = deselect;
+  head.append(close);
+  // a nested member keeps its address visible: container › … › me
+  const parts = state.sel.split("/");
+  if (parts.length > 1) {
+    const trail = parts.slice(0, -1)
+      .map((_, i) => state.rendered.get(parts.slice(0, i + 1).join("/"))?.node.name || "?")
+      .join(" › ");
+    head.append(el("div", "crumbpath mono", trail + " ›"));
+  }
   head.append(el("h3", null, n.name));
   const chips = el("div", "chips");
   const kindChip = el("span", "chip kindchip", n.kind);
@@ -1162,6 +1242,7 @@ function executionsSection(n, execP) {
         };
         return {
           op: n.name,
+          start_time: members[0] && members[0].start_time,
           duration_ms: members.reduce((s, m) => s + (m.duration_ms || 0), 0),
           status: bad ? bad.status : "ok",
           error: bad ? bad.error : null,
@@ -1178,6 +1259,23 @@ function executionsSection(n, execP) {
     const table = el("div", "exectable");
     const detail = el("div", "execdetail");
     let active = null;
+
+    // when anything failed, one checkbox cuts the list to the failures
+    if (rows.some(ex => ex.status !== "ok")) {
+      const bar = el("label", "followpin");
+      const cb = el("input");
+      cb.type = "checkbox";
+      cb.onchange = () => table.classList.toggle("erronly", cb.checked);
+      bar.append(cb, " errors only");
+      box.append(bar);
+    }
+
+    const clock = (t) => {
+      if (t == null) return "";
+      const d = new Date(t * 1000);
+      return d.toLocaleTimeString([], {hour12: false})
+        + "." + String(d.getMilliseconds()).padStart(3, "0").slice(0, 1);
+    };
 
     const show = (ex, row) => {
       if (active) active.classList.remove("active");
@@ -1202,6 +1300,7 @@ function executionsSection(n, execP) {
       const idx = n.graph ? i + 1 : data.total - data.showing + i + 1;
       const row = el("button", "exline" + (ex.status === "ok" ? "" : " bad"));
       row.append(el("span", "exn mono", `#${idx}`));
+      row.append(el("span", "extime mono", clock(ex.start_time)));
       row.append(el("span", "exop mono",
         ex.members ? `${ex.members.length} ops`
                    : (ex.op && ex.op !== n.name ? ex.op : "")));
@@ -1289,6 +1388,7 @@ function inputRow(it, inp) {
               op_name: node.name, param: inp.name, value, dry_run: false,
             });
             status.textContent = "applied ✓ — reloading";
+            toast(`${node.name}.${inp.name} rewritten in source`);
             // the watcher sees the mtime; the poll below re-renders
           } catch (e) { status.textContent = e.message; }
         };
@@ -1342,13 +1442,18 @@ async function showTraces() {
     box.append(el("div", "note", `Langfuse (${data.langfuse}) unreachable: ${data.langfuse_error}`));
   }
   // follow-latest: repaint whenever a newer local run lands
+  const topbar = el("div", "tracebar");
   const followBar = el("label", "followpin");
   const pin = el("input");
   pin.type = "checkbox";
   pin.checked = state.follow;
   pin.onchange = () => { state.follow = pin.checked; store("follow", state.follow); };
   followBar.append(pin, " auto-paint the newest run as it arrives");
-  box.append(followBar);
+  topbar.append(followBar);
+  const refresh = el("button", null, "⟳ refresh");
+  refresh.onclick = showTraces;
+  topbar.append(refresh);
+  box.append(topbar);
 
   if (!data.runs.length) {
     box.append(el("div", "note", `No runs recorded yet${data.root ? " in " + data.root : ""}`));
@@ -1374,7 +1479,30 @@ async function showTraces() {
     tr.append(act);
     tr.append(el("td", null,
       r.source === "langfuse" ? "langfuse" : `local · ${(r.size / 1024).toFixed(1)} KB`));
-    tr.append(el("td", null, "view on canvas →"));
+    const actions = el("td", "runacts");
+    const paint = el("button", null, "paint");
+    paint.title = "color the canvas with this run's durations and errors";
+    paint.onclick = (ev) => { ev.stopPropagation(); paintRun(r.run); };
+    const tl = el("button", null, "timeline");
+    tl.title = "when did every op run — the run as a waterfall";
+    tl.onclick = (ev) => { ev.stopPropagation(); showTimeline(r.run); };
+    actions.append(paint, tl);
+    if (r.source !== "langfuse") {
+      const rm = el("button", "danger", "✕");
+      rm.title = "delete this recorded run from disk";
+      rm.onclick = async (ev) => {
+        ev.stopPropagation();
+        if (!window.confirm(`Delete run ${r.run} from disk?`)) return;
+        try {
+          await api(`/api/p/${PID}/trace/${encodeURIComponent(r.run)}/delete`, {});
+          toast(`deleted ${r.run}`);
+          if (state.run && state.run.run === r.run) $("#run-clear").onclick();
+          showTraces();
+        } catch (e) { toast(e.message, true); }
+      };
+      actions.append(rm);
+    }
+    tr.append(actions);
     tr.onclick = () => paintRun(r.run);
     tbody.append(tr);
   }
@@ -1382,35 +1510,223 @@ async function showTraces() {
   box.append(table);
 }
 
+/* The run as a waterfall: one lane per op, every recorded execution a
+ * bar at its true offset. WHEN is the half of debugging the aggregate
+ * view cannot answer. */
+async function showTimeline(run) {
+  const box = $("#traces");
+  box.textContent = "";
+  const bar = el("div", "tracebar");
+  const back = el("button", null, "← runs");
+  back.onclick = showTraces;
+  bar.append(back);
+  box.append(bar);
+
+  let data;
+  try { data = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/timeline`); }
+  catch (e) { box.append(el("div", "errbox", e.message)); return; }
+  const spans = data.spans || [];
+  if (!spans.length) { box.append(el("div", "note", "no timed records in this run")); return; }
+
+  const total = Math.max(0.001, ...spans.map(s => s.start + s.dur_ms / 1000));
+  bar.append(el("span", "srcline",
+    `${run} · ${data.total} executions · ${total.toFixed(2)}s`
+    + (data.total > spans.length ? ` · first ${spans.length} shown` : "")));
+
+  const lanes = new Map();          // op -> its bar container, first-seen order
+  const chart = el("div", "tl");
+  for (const s of spans) {
+    let lane = lanes.get(s.op);
+    if (!lane) {
+      const row = el("div", "tlrow");
+      const label = el("button", "tlname mono", s.op);
+      label.title = "select this op on the canvas";
+      label.onclick = () => {
+        const found = [...state.rendered.values()].find(x => x.node.name === s.op)
+          || (expandAll(true), [...state.rendered.values()].find(x => x.node.name === s.op));
+        switchTab("flow");
+        if (found) { select(found.key); centerOn(found); }
+      };
+      lane = el("div", "tltrack");
+      row.append(label, lane);
+      chart.append(row);
+      lanes.set(s.op, lane);
+    }
+    const b = el("div", "tlbar" + (s.status === "ok" ? "" : " bad"));
+    b.style.left = `${(s.start / total) * 100}%`;
+    b.style.width = `${Math.max(0.35, (s.dur_ms / 1000 / total) * 100)}%`;
+    b.title = `${s.op} · +${s.start.toFixed(3)}s · ${s.dur_ms.toFixed(1)}ms · ${s.status}`
+      + (s.error ? `\n${s.error}` : "");
+    lane.append(b);
+  }
+  box.append(chart);
+
+  const axis = el("div", "tlaxis");
+  for (let i = 0; i <= 4; i++)
+    axis.append(el("span", "mono", `${(total * i / 4).toFixed(2)}s`));
+  box.append(axis);
+}
+
 async function paintRun(run) {
   const data = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`);
   state.run = data;
+  state.errIdx = 0;
   // heat scale: the run's slowest average paints the hottest border
   state.heatMax = Math.max(0, ...Object.values(data.ops || {})
     .map(o => o.runs ? o.total_ms / o.runs : 0));
   $("#run-name").textContent = data.run + (data.truncated ? " (truncated)" : "");
+  // the banner answers "how did it go" before any clicking
+  const bits = [`${Object.keys(data.ops || {}).length} ops`,
+                `${data.records ?? "?"} rec`];
+  if (data.wall_s != null) bits.push(`${data.wall_s.toFixed(1)}s`);
+  if (data.errors) bits.push(`${data.errors} err`);
+  $("#run-stats").textContent = bits.join(" · ");
+  $("#run-stats").classList.toggle("bad", !!data.errors);
+  $("#run-err").hidden = !data.errors;
   $("#runbanner").classList.add("show");
   switchTab("flow");
   render();
+  pushView();
 }
+
+/* "error →": center + select the errored ops one by one, opening
+ * containers if the culprit is folded away inside one. */
+$("#run-err").onclick = () => {
+  if (!state.run) return;
+  const names = Object.entries(state.run.ops || {})
+    .filter(([, o]) => o.errors).map(([name]) => name);
+  if (!names.length) return;
+  const name = names[state.errIdx % names.length];
+  state.errIdx += 1;
+  let found = [...state.rendered.values()].find(x => x.node.name === name);
+  if (!found) {          // hidden inside a collapsed GraphOp — open everything
+    expandAll(true);
+    found = [...state.rendered.values()].find(x => x.node.name === name);
+  }
+  if (found) { select(found.key); centerOn(found); }
+  else toast(`'${name}' errored but is not on this canvas`, true);
+};
 
 $("#run-clear").onclick = () => {
   state.run = null;
   state.heatMax = 0;
   $("#runbanner").classList.remove("show");
   render();
+  pushView();
 };
+
+/* every nested graph at once — opening five GraphOps one by one to see
+ * a pipeline is ritual, not choice */
+function expandAll(open) {
+  const all = [];
+  (function walk(g, prefix) {
+    for (const n of g.nodes || []) {
+      if (n.graph) { all.push(prefix + n.id); walk(n.graph, prefix + n.id + "/"); }
+    }
+  })(state.graph, "");
+  state.expanded = open ? new Set(all) : new Set();
+  render();
+  return all.length;
+}
+
+$("#btn-expand").onclick = () => {
+  const anyOpen = state.expanded.size > 0;
+  const count = expandAll(!anyOpen);
+  if (!count) toast("no nested graphs here");
+  $("#btn-expand").textContent = anyOpen || !count ? "⊞" : "⊟";
+};
+
+$("#btn-find").onclick = () => openFind();
 
 /* ── tabs, graph switch, pan/zoom, live reload ────────────────────── */
 
 function switchTab(name) {
+  state.tab = name;
   for (const b of document.querySelectorAll(".tabs button"))
     b.classList.toggle("active", b.dataset.tab === name);
   $("#stage").style.display = name === "flow" ? "" : "none";
   $("#inspector").classList.toggle("open", name === "flow" && !!state.sel);
   $("#traces").hidden = name !== "traces";
   if (name === "traces") showTraces();
+  pushView();
 }
+
+/* ── the legend: the visual language, written down on screen ──────── */
+
+function legendSample(cls, dash) {
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("viewBox", "0 0 64 12");
+  svg.setAttribute("class", "lsample");
+  const d = "M 2 6 L 62 6";
+  if (dash) {
+    const p = document.createElementNS(SVGNS, "path");
+    p.setAttribute("d", d);
+    p.setAttribute("class", cls);
+    svg.append(p);
+  } else {
+    energyEdge(svg, d, cls);
+  }
+  return svg;
+}
+
+function buildLegend() {
+  const box = $("#legend");
+  box.textContent = "";
+  const title = el("div", "ltitle", "Reading the canvas");
+  const close = el("button", "chat-close", "✕");
+  close.onclick = () => { box.hidden = true; };
+  title.append(close);
+  box.append(title);
+
+  const row = (sample, text) => {
+    const r = el("div", "lrow");
+    r.append(sample, el("span", null, text));
+    box.append(r);
+  };
+  row(legendSample(""), "data flows this way — the output feeds the next op");
+  row(legendSample("cond"), "if/else route — hover the ? on the wire for the condition");
+  row(legendSample("ecore cond relse", true), "else — fires only when no condition matched");
+  row(legendSample("soft", true), "soft merge — may not fire at all");
+  row(el("span", "lglyph", "↺"), "a loop returns underneath, back to where the author's cycle begins");
+  row(el("span", "lglyph", "⚡"), "generator: one call, many yields — consumers run per yield");
+  row(el("span", "lglyph", "≋ ∥ ⧉"), "streaming edge · parallel fan-out · collect-into-list");
+  row(el("span", "lglyph", "▣"), "a nested graph — click its badge (or double-click) to open it in place");
+  row(el("span", "lheat"), "with a run painted: warmer border = slower average, red = errored");
+
+  box.append(el("div", "ltitle lkeys", "Keys"));
+  box.append(el("div", "lrow lkeysrow",
+    "/ or Ctrl+K find · space+drag or middle-drag pan · ctrl+scroll zoom · "
+    + "0 fit · 1 = 100% · ← → walk the wires · Esc close"));
+}
+
+$("#btn-legend").onclick = () => {
+  const box = $("#legend");
+  if (box.hidden) buildLegend();
+  box.hidden = !box.hidden;
+};
+
+/* ── quick switcher: change project without the round trip home ───── */
+
+$("#pname").onclick = async () => {
+  const menu = $("#switcher");
+  if (!menu.hidden) { menu.hidden = true; return; }
+  menu.textContent = "";
+  try {
+    const {projects} = await api("/api/projects");
+    for (const p of projects.filter(x => x.exists)) {
+      const item = el("button", "switchrow" + (p.id === PID ? " here" : ""));
+      item.append(el("span", "name", p.name));
+      item.append(el("span", "path mono", p.root));
+      item.onclick = () => { if (p.id !== PID) location.href = `/p/${p.id}`; };
+      menu.append(item);
+    }
+  } catch (e) { menu.append(el("div", "note", e.message)); }
+  menu.hidden = false;
+};
+document.addEventListener("click", (ev) => {
+  if (!ev.target.closest("#switcher") && !ev.target.closest("#pname"))
+    $("#switcher").hidden = true;
+});
 for (const b of document.querySelectorAll(".tabs button"))
   b.onclick = () => switchTab(b.dataset.tab);
 
@@ -1474,8 +1790,27 @@ $("#btn-zoom-pct").onclick = () => {
       ev.preventDefault(); openFind(); return;
     }
     if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA") return;
+    if (ev.key === "Escape") {
+      if (!$("#find").hidden) closeFind();
+      else if (!$("#legend").hidden) $("#legend").hidden = true;
+      else if (state.sel) deselect();
+      return;
+    }
     if (ev.key === "/") { ev.preventDefault(); openFind(); return; }
     if (ev.key === " ") { spaceHeld = true; stage.classList.add("panmode"); ev.preventDefault(); return; }
+    // walk the wires: → follows an outgoing edge, ← an incoming one
+    if ((ev.key === "ArrowRight" || ev.key === "ArrowLeft") && state.sel) {
+      const fwd = ev.key === "ArrowRight";
+      const hop = state.edgeEls.find(g => (fwd ? g.a : g.b) === state.sel);
+      if (hop) {
+        const next = fwd ? hop.b : hop.a;
+        select(next);
+        const item = state.rendered.get(next);
+        if (item) centerOn(item);
+      }
+      ev.preventDefault();
+      return;
+    }
     const c = stageCenter();
     if (ev.key === "+" || ev.key === "=") zoomAt(c.x, c.y, 1.25);
     else if (ev.key === "-" || ev.key === "_") zoomAt(c.x, c.y, 0.8);
@@ -1487,10 +1822,9 @@ $("#btn-zoom-pct").onclick = () => {
   });
 
   stage.addEventListener("click", (ev) => {
-    if (ev.target.closest(".node") || ev.target.closest("#find")) return;
-    state.sel = null;
-    $("#inspector").classList.remove("open");
-    render();
+    if (ev.target.closest(".node") || ev.target.closest("#find")
+        || ev.target.closest("#legend")) return;
+    deselect();
   });
 })();
 
@@ -1575,7 +1909,18 @@ async function load(first) {
   if (data.error) {
     $("#nodes").textContent = "";
     $("#edges").textContent = "";
-    const box = el("div", "errbox", data.error);
+    // the error, not the wall: last line big, traceback folded away
+    const box = el("div", "errbox");
+    const lines = String(data.error).trim().split("\n");
+    box.append(el("div", "errhead", lines[lines.length - 1]));
+    if (lines.length > 1) {
+      const fold = el("details");
+      fold.append(el("summary", null, "full traceback"));
+      fold.append(el("pre", "mono", data.error));
+      box.append(fold);
+    }
+    box.append(el("div", "note",
+      "Fix the file and save — the studio re-extracts and redraws on its own."));
     box.style.position = "absolute";
     box.style.maxWidth = "700px";
     $("#stage").append(box);
@@ -1607,6 +1952,7 @@ async function load(first) {
   if (state.graph) pick.value = state.graph.name;
   render();
   if (first) fit();
+  pushView();
 }
 
 let pollN = 0;

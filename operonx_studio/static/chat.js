@@ -74,10 +74,31 @@
   const panel = el("div", "chat-panel");
   const head = el("div", "chat-head");
   head.append(el("span", "chat-title", "✦ assistant"));
+  const maxi = el("button", "chat-new", "⤢");
+  maxi.title = "expand / shrink";
+  maxi.onclick = () => panel.classList.toggle("max");
   const fresh = el("button", "chat-new", "⟳");
   fresh.title = "new conversation";
   const close = el("button", "chat-close", "✕");
-  head.append(fresh, close);
+  head.append(maxi, fresh, close);
+
+  // the left edge drags: code blocks deserve more than 400px
+  const grip = el("div", "chat-grip");
+  grip.title = "drag to resize";
+  panel.append(grip);
+  const savedW = store.get("oxchat:w", null);
+  if (savedW) panel.style.width = `${savedW}px`;
+  let gripping = false;
+  grip.onpointerdown = (ev) => { gripping = true; grip.setPointerCapture(ev.pointerId); };
+  grip.onpointermove = (ev) => {
+    if (!gripping) return;
+    const w = Math.min(900, Math.max(340, window.innerWidth - ev.clientX - 22));
+    panel.style.width = `${w}px`;
+  };
+  grip.onpointerup = () => {
+    gripping = false;
+    store.set("oxchat:w", parseInt(panel.style.width, 10) || 400);
+  };
   const log = el("div", "chat-log");
   const bar = el("form", "chat-bar");
   const input = el("input", "chat-input");
@@ -113,10 +134,31 @@
       log.append(chip);
       return chip;
     }
+    if (item.w === "meta") {           // cost line: small, honest, out of the way
+      const meta = el("div", "chat-meta", item.text || "");
+      log.append(meta);
+      return meta;
+    }
     const msg = el("div", "chat-msg " +
       (item.w === "me" ? "from-me" : item.w === "err" ? "from-err" : "from-bot"));
-    if (item.w === "bot") renderMd(msg, item.text || "");
-    else msg.textContent = item.text || "";
+    if (item.w === "bot") {
+      // markdown renders into an inner body so streaming re-renders
+      // never wipe the copy button
+      const body = el("div", "chat-body");
+      renderMd(body, item.text || "");
+      msg.append(body);
+      msg._body = body;
+      const copy = el("button", "chat-copy", "⧉");
+      copy.title = "copy this reply";
+      copy.onclick = () => {
+        navigator.clipboard?.writeText(item.text || "").then(
+          () => { copy.textContent = "✓"; setTimeout(() => copy.textContent = "⧉", 1200); },
+          () => {});
+      };
+      msg.append(copy);
+    } else {
+      msg.textContent = item.text || "";
+    }
     log.append(msg);
     return msg;
   };
@@ -141,6 +183,7 @@
     send.textContent = busy ? "■" : "➤";
     send.title = busy ? "stop" : "send";
     input.disabled = busy;
+    fab.classList.toggle("busy", busy);   // panel closed ≠ task forgotten
   };
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -168,7 +211,7 @@
         botEl = bubble(botItem);
       }
       botItem.text += text;
-      renderMd(botEl, botItem.text);
+      renderMd(botEl._body || botEl, botItem.text);
       scrolled();
     };
     const drain = () => {
@@ -201,6 +244,10 @@
         if (event.session) store.set(K_SESSION, event.session);
         if (event.error) {
           const item = { w: "err", text: event.error };
+          bubble(item); remember(item);
+        }
+        if (typeof event.cost === "number") {
+          const item = { w: "meta", text: `$${event.cost.toFixed(2)}` };
           bubble(item); remember(item);
         }
       } else if (event.t === "error") {
@@ -264,7 +311,8 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text,
-                               session: store.get(K_SESSION, null) }),
+                               session: store.get(K_SESSION, null),
+                               view: window.__oxview || null }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);

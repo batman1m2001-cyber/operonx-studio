@@ -13,141 +13,14 @@
   <div class="actions">
     <button class="primary" id="btn-open">Open project…</button>
     <button id="btn-new">New project…</button>
+    <input id="filter" placeholder="filter projects…" autocomplete="off" hidden>
   </div>
   <div class="cardlist" id="projects"></div>
 </div>
 
 <div id="modal-root"></div>
 
-<script>
-const $ = (sel, el=document) => el.querySelector(sel);
-const el = (tag, cls, text) => {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text !== undefined) n.textContent = text;
-  return n;
-};
-
-async function api(path, body) {
-  const res = await fetch(path, body === undefined ? {} : {
-    method: "POST", headers: {"content-type": "application/json"},
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data;
-}
-
-async function loadProjects() {
-  const box = $("#projects");
-  box.textContent = "";
-  const {projects} = await api("/api/projects");
-  if (!projects.length) {
-    box.append(el("div", "empty", "No projects yet — open a folder with an operonx.toml, or create one."));
-    return;
-  }
-  for (const p of projects) {
-    const card = el("div", "card");
-    const left = el("div");
-    left.append(el("div", "name", p.name));
-    left.append(el("div", "path mono", p.root));
-    card.append(left);
-    if (!p.exists) card.append(el("span", "gone", "manifest missing"));
-    card.append(el("div", "spacer"));
-    const forget = el("button", "forget", "✕");
-    forget.title = "Remove from recents";
-    forget.onclick = async (ev) => {
-      ev.stopPropagation();
-      await api("/api/forget", {id: p.id});
-      loadProjects();
-    };
-    card.append(forget);
-    card.onclick = () => { if (p.exists) location.href = `/p/${p.id}`; };
-    box.append(card);
-  }
-}
-
-/* ── folder browser modal, shared by open and new ─────────────────── */
-
-function modal(title, build) {
-  const back = el("div", "modal-back");
-  const box = el("div", "modal");
-  box.append(el("h2", null, title));
-  back.append(box);
-  back.onclick = (ev) => { if (ev.target === back) back.remove(); };
-  build(box, () => back.remove());
-  $("#modal-root").append(back);
-}
-
-function browser(box, onPick) {
-  const pathInput = el("input"); pathInput.type = "text"; pathInput.className = "mono";
-  const list = el("div", "browser");
-  box.append(pathInput, list);
-  async function go(path) {
-    let data;
-    try { data = await api(`/api/fs?path=${encodeURIComponent(path)}`); }
-    catch (e) { list.textContent = ""; list.append(el("div", "row", String(e.message))); return; }
-    pathInput.value = data.path;
-    onPick(data.path);
-    list.textContent = "";
-    if (data.parent) {
-      const up = el("div", "row", "‥ up");
-      up.onclick = () => go(data.parent);
-      list.append(up);
-    }
-    for (const d of data.dirs) {
-      const row = el("div", "row");
-      row.append(el("span", null, d.name));
-      if (d.is_project) row.append(el("span", "tag", "operonx project"));
-      row.onclick = () => go(d.path);
-      list.append(row);
-    }
-  }
-  pathInput.onchange = () => go(pathInput.value);
-  go("~");
-  return {go};
-}
-
-$("#btn-open").onclick = () => modal("Open project", (box, close) => {
-  let current = "~";
-  browser(box, (p) => current = p);
-  const err = el("div", "err");
-  const foot = el("div", "foot");
-  const open = el("button", "primary", "Open this folder");
-  open.onclick = async () => {
-    try {
-      const {id} = await api("/api/open", {path: current});
-      location.href = `/p/${id}`;
-    } catch (e) { err.textContent = e.message; }
-  };
-  foot.append(open);
-  box.append(err, foot);
-});
-
-$("#btn-new").onclick = () => modal("New project", (box, close) => {
-  const nameField = el("div", "field");
-  nameField.append(el("label", null, "Project name"));
-  const name = el("input"); name.type = "text"; name.placeholder = "my_project";
-  nameField.append(name);
-  box.append(nameField);
-  box.append(el("label", "field", "Create inside:"));
-  let current = "~";
-  browser(box, (p) => current = p);
-  const err = el("div", "err");
-  const foot = el("div", "foot");
-  const create = el("button", "primary", "Create");
-  create.onclick = async () => {
-    try {
-      const {id} = await api("/api/new", {path: current, name: name.value});
-      location.href = `/p/${id}`;
-    } catch (e) { err.textContent = e.message; }
-  };
-  foot.append(create);
-  box.append(err, foot);
-});
-
-loadProjects();
-</script>
+<script src="/static/home.js"></script>
 <script src="/static/chat.js"></script>
 </body>
 </html>
