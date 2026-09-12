@@ -286,8 +286,9 @@ header.bar select {
               inset 0 0 16px rgba(255, 255, 255, .55);
 }
 .node.cell.selected {
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--kind, var(--k-func)) 30%, transparent),
-              0 6px 20px rgba(70, 100, 150, .2),
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--accent),
+              0 10px 30px rgba(160, 118, 12, .35),
               inset 0 0 16px rgba(255, 255, 255, .55);
 }
 .node.cell::before {
@@ -313,9 +314,12 @@ header.bar select {
 #dragbar:hover { background: var(--accent); opacity: .5; }
 .main:has(#inspector:not(.off)) #dragbar { display: block; }
 body.resizing { user-select: none; cursor: col-resize; }
+/* the selected card must be findable at a glance from across the
+   canvas: a white gap then a solid gold focus ring, plus a warm glow */
 .node.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(201, 148, 15, .20), var(--sh-2);
+  box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--accent),
+              0 10px 30px rgba(160, 118, 12, .35), var(--sh-2);
 }
 .node::before {
   content: ""; position: absolute; left: 7px; top: 13px; bottom: 13px; width: 4px;
@@ -986,6 +990,7 @@ header.bar .pname:hover { text-decoration: underline; }
   background: rgba(201, 148, 15, .08); }
 .wires text.zonelabel {
   fill: #a1770a; font-size: 10px; font-weight: 700; letter-spacing: .12em;
+  text-anchor: start;
 }
 .wires text.servelabel {
   fill: #b28414; font-size: 10px; font-style: italic;

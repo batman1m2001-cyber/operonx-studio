@@ -666,10 +666,10 @@ function render() {
 
   const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
   const maxY = Math.max(model.h, ...flat.nodes.map(n => n.y + n.h));
-  // headroom above: the transport card, or just the client ⇣ stub;
+  // headroom above: the transport card, or the door frame's label;
   // width includes the right margin where loop returns bulge
   const minY = gatesIn.length
-    ? Math.min(...gatesIn.map(x => x.y)) - 110
+    ? Math.min(...gatesIn.map(x => x.y)) - 70
     : -NODE_H - 140;
   state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: maxY + 175};
 
@@ -691,7 +691,9 @@ function render() {
     rect.setAttribute("rx", 16);
     rect.setAttribute("class", "zoneband");
     svg.append(rect);
-    edgeGlyph(svg, it.x + it.w / 2, it.y - 12, label, "zonelabel");
+    // label sits IN the frame's top-left corner, anchored left, well
+    // off the wire's path — ties and edges enter through the centre
+    edgeGlyph(svg, it.x - 2, it.y - 13, label, "zonelabel");
   };
   for (const gi of gatesIn) doorFrame(gi, "INGRESS");
   for (const go of gatesOut) doorFrame(go, "EGRESS");
@@ -715,32 +717,17 @@ function render() {
     state._serves = serves;
   } else {
     // the ingress IS the transport: one door, wearing the transport's
-    // name — no second card, no wire fan. The client's data drops in
-    // through a stub arrow, and the reply leaves egress through one.
+    // name — no second card, no wire fan, and no orphan stubs: with
+    // their labels gone the dangling dashes explained nothing
     state._serves = [];
-    for (const gi of gatesIn) {
-      const cx = portCX(gi), y2 = gi.y;
-      const p = document.createElementNS(SVGNS, "path");
-      p.setAttribute("d", `M ${cx} ${y2 - 74} L ${cx} ${y2}`);
-      p.setAttribute("class", "serve");
-      svg.append(p);
-    }
-  }
-  for (const gOut of gatesOut) {
-    const cx = portCX(gOut), y1 = gOut.y + gOut.h;
-    const p = document.createElementNS(SVGNS, "path");
-    p.setAttribute("d", `M ${cx} ${y1} L ${cx} ${y1 + 70}`);
-    p.setAttribute("class", "serve");
-    svg.append(p);
-    bouton(svg, cx, y1 + 74, "b-serve");
   }
 
   // The main graph has terminals too — the flow, like every opened
   // GraphOp, begins at a START contact and ends at an END one. Quiet
   // ties reach every entry (this is what dispatches beat/lag-style
   // monitors: the session starting, not the client) and gather the
-  // exits. Doors keep their client stubs; their tie lands off-centre
-  // so the two arrows don't overlap.
+  // exits. With the client stubs gone, ties land dead-centre on every
+  // card, doors included.
   if (flat.nodes.length) {
     const at = (name) => flat.nodes.find(it => it.depth === 0 && it.node.name === name);
     const entryTies = (g.entries || []).map(at).filter(Boolean);
@@ -761,8 +748,7 @@ function render() {
                               kind: "__boundary__", boundary: "start"}};
       nodesBox.append(boundaryCard(startIt));
       for (const t of entryTies) {
-        const off = t.node.serve_role ? t.w * 0.22 : t.w / 2;
-        tie(startIt.x + B_W / 2, startIt.y + B_H, t.x + off, t.y);
+        tie(startIt.x + B_W / 2, startIt.y + B_H, t.x + t.w / 2, t.y);
       }
     }
     if (exitTies.length) {
@@ -773,8 +759,7 @@ function render() {
                             kind: "__boundary__", boundary: "end"}};
       nodesBox.append(boundaryCard(endIt));
       for (const t of exitTies) {
-        const off = t.node.serve_role ? t.w * 0.78 : t.w / 2;
-        tie(t.x + off, t.y + t.h, endIt.x + B_W / 2, endIt.y);
+        tie(t.x + t.w / 2, t.y + t.h, endIt.x + B_W / 2, endIt.y);
       }
     }
   }
