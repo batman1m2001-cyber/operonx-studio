@@ -46,8 +46,11 @@
     <div id="stage">
       <div id="world">
         <div id="plane">
-          <svg id="edges"></svg>
+          <svg id="edges" class="wires"></svg>
           <div id="nodes"></div>
+          <!-- decision wires re-surface here: the stretch that would
+               hide under a branch card paints again above it -->
+          <svg id="edgetop" class="wires"></svg>
         </div>
       </div>
       <div id="find" hidden>

@@ -10,7 +10,7 @@
 "use strict";
 
 const PID = location.pathname.split("/").pop();
-const NODE_W = 210, NODE_H = 64;
+const NODE_W = 240, NODE_H = 64;
 const HEADER = 34;              // a container's title strip
 const SVGNS = "http://www.w3.org/2000/svg";
 
@@ -501,6 +501,7 @@ function render() {
   const svg = $("#edges");
   nodesBox.textContent = "";
   svg.textContent = "";
+  $("#edgetop").textContent = "";
   state.rendered.clear();
   state.cardEls.clear();
   state.edgeEls = [];
@@ -632,11 +633,13 @@ function render() {
     : -NODE_H - 140;
   state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: maxY + 175};
 
-  svg.setAttribute("width", maxX + 620);
-  svg.setAttribute("height", maxY + 640);
-  svg.style.left = "-200px";
-  svg.style.top = "-320px";
-  svg.setAttribute("viewBox", `-200 -320 ${maxX + 620} ${maxY + 640}`);
+  for (const layer of [svg, $("#edgetop")]) {
+    layer.setAttribute("width", maxX + 620);
+    layer.setAttribute("height", maxY + 640);
+    layer.style.left = "-200px";
+    layer.style.top = "-320px";
+    layer.setAttribute("viewBox", `-200 -320 ${maxX + 620} ${maxY + 640}`);
+  }
 
   // Door frames paint first among the wires, everything sits on top. A
   // frame hugs ITS gate only — a full-height band through a wrapped
@@ -838,6 +841,28 @@ function render() {
       p.setAttribute("class", cls.trim());
       svg.append(p);
       made.push(p);
+    }
+    // a decision wire starts INSIDE the card, at its condition row's
+    // dot — but edges paint beneath the cards. Repaint exactly the
+    // over-card stretch above the card, clipped to its rect: identical
+    // paths, so there is no seam and dashed elses stay in phase.
+    if (p.dataset.fromRow === "1") {
+      const top = $("#edgetop");
+      const cid = "rowclip-" + A.key.replace(/[^A-Za-z0-9_-]/g, "_");
+      if (!top.querySelector(`#${cid}`)) {
+        const cp = document.createElementNS(SVGNS, "clipPath");
+        cp.setAttribute("id", cid);
+        const r = document.createElementNS(SVGNS, "rect");
+        r.setAttribute("x", A.x - 4); r.setAttribute("y", A.y - 4);
+        r.setAttribute("width", A.w + 8); r.setAttribute("height", A.h + 8);
+        cp.append(r); top.append(cp);
+      }
+      const g2 = document.createElementNS(SVGNS, "g");
+      g2.setAttribute("clip-path", `url(#${cid})`);
+      const over = made.map(m => m.cloneNode(false));
+      for (const m of over) g2.append(m);
+      top.append(g2);
+      made.push(...over);
     }
     if (faded) for (const el2 of made) el2.classList.add("dorm");
     // selection highlights and ←/→ walking work off this ledger, so a
@@ -1046,11 +1071,17 @@ function boundaryCard(it) {
   return card;
 }
 
-// the op's bound (SYNC / IO / CPU) and the generator flash ride the
-// name line as two quiet buttons, instead of hiding below the fold
+// the op's kind (FUNC / LLM / GRAPH…), bound (SYNC / IO / CPU) and the
+// generator flash ride the name line as quiet buttons, instead of
+// hiding below the fold — the kind wears its family colour so it can
+// never be mistaken for part of the name
 function nameChips(n) {
-  if (!n.bound && !n.is_gen) return null;
   const box = el("span", "nchips");
+  if (n.kind) {
+    const c = el("span", "nchip kind", String(n.kind).replace(/Op$/i, "").toUpperCase());
+    c.title = n.kind;
+    box.append(c);
+  }
   if (n.bound) {
     const c = el("span", "nchip", String(n.bound).toUpperCase());
     c.title = `execution bound: ${n.bound}`;
@@ -1061,7 +1092,7 @@ function nameChips(n) {
     c.title = "Generator: consumers dispatch per yield, not per run.";
     box.append(c);
   }
-  return box;
+  return box.childNodes.length ? box : null;
 }
 
 function opCard(it) {
@@ -1125,7 +1156,6 @@ function opCard(it) {
     // itself (the .detail block shows only at [data-zoom="hi"])
     card.title = n.kind + (n.bound ? ` · ${n.bound}` : "") + (n.is_gen ? " · generator" : "");
     const det = el("div", "detail");
-    det.append(el("div", "dkind", n.kind));
     const brief = (names) => names.length > 3
       ? names.slice(0, 3).join(", ") + ` +${names.length - 3}`
       : names.join(", ");

@@ -199,26 +199,26 @@ header.bar select {
 #stage.panning { cursor: grabbing; }
 #world { position: relative; margin: 0 auto; }
 #plane { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-#edges { position: absolute; overflow: visible; pointer-events: none; }
-#edges path { fill: none; stroke: #b7c8dc; stroke-width: 2; stroke-linecap: round; }
-#edges path.soft { stroke-dasharray: 6 5; }
-#edges path.hot { stroke: var(--wire-deep); stroke-width: 2.5; }
-#edges path.serve { stroke: var(--k-serve); stroke-dasharray: 2 4; }
-#edges path.back { stroke: var(--warn); stroke-dasharray: 7 4; }
-#edges path.stream { stroke-width: 2.5; }
-#edges text {
+.wires { position: absolute; overflow: visible; pointer-events: none; }
+.wires path { fill: none; stroke: #b7c8dc; stroke-width: 2; stroke-linecap: round; }
+.wires path.soft { stroke-dasharray: 6 5; }
+.wires path.hot { stroke: var(--wire-deep); stroke-width: 2.5; }
+.wires path.serve { stroke: var(--k-serve); stroke-dasharray: 2 4; }
+.wires path.back { stroke: var(--warn); stroke-dasharray: 7 4; }
+.wires path.stream { stroke-width: 2.5; }
+.wires text {
   fill: #64748b; font: 11px ui-monospace, monospace;
   paint-order: stroke; stroke: #ffffff; stroke-width: 4px;
 }
-#edges text.back-label { fill: var(--warn); }
-#edges text.routelabel { fill: var(--k-branch); font-size: 10.5px; }
+.wires text.back-label { fill: var(--warn); }
+.wires text.routelabel { fill: var(--k-branch); font-size: 10.5px; }
 
 /* nodes — drawn as neurons: the card is the SOMA (radial cytoplasm,
    soft membrane glow), the kind glyph sits in a round NUCLEUS, and the
    ports are synaptic boutons. A bipolar neuron — one dendrite in, one
    axon out — is exactly what an op is. */
 .node {
-  position: absolute; width: 210px; min-height: 52px;
+  position: absolute; width: 240px; min-height: 52px;
   background: radial-gradient(120% 160% at 30% 20%, #ffffff 0%, #fcfdff 55%, #f2f6fb 100%);
   border: 1.5px solid #d5dde9;
   /* an organic, slightly asymmetric membrane — a cell, not a box */
@@ -315,6 +315,10 @@ body.resizing { user-select: none; cursor: col-resize; }
   background: var(--panel-2); }
 .nchip.gen { padding: 0.5px 3px; }
 .nchip.gen { color: #a35d13; border-color: #e2c087; background: #fbf3e2; }
+/* the kind chip wears its family colour — clearly not part of the name */
+.nchip.kind { color: var(--kind, var(--k-default));
+  border-color: color-mix(in srgb, var(--kind, var(--k-default)) 35%, #fff);
+  background: color-mix(in srgb, var(--kind, var(--k-default)) 7%, #fff); }
 /* specks at far zoom — the silhouette is the message out there */
 #world[data-zoom="lo"] .nchips { display: none; }
 .node .nkind { color: var(--muted); font-size: 11px; margin-top: 2px; }
@@ -348,38 +352,38 @@ body.resizing { user-select: none; cursor: col-resize; }
    eglow/ecore/eray/espark = a beam of energy: a soft halo, a saturated
    core, a WHITE laser filament with real contrast, and spark particles
    whose smaller trailing dots point the direction of flow */
-#edges circle.bouton { fill: var(--wire); stroke: #e8f1fd; stroke-width: 1.5; }
-#edges circle.bouton.b-back { fill: var(--warn); }
-#edges circle.bouton.b-serve { fill: var(--k-serve); }
-#edges path.eglow {
+.wires circle.bouton { fill: var(--wire); stroke: #e8f1fd; stroke-width: 1.5; }
+.wires circle.bouton.b-back { fill: var(--warn); }
+.wires circle.bouton.b-serve { fill: var(--k-serve); }
+.wires path.eglow {
   stroke: var(--wire-glow); stroke-width: 12;
   stroke-linecap: round; pointer-events: none;
 }
-#edges path.ecore { stroke: var(--wire); stroke-width: 4; stroke-linecap: round;
+.wires path.ecore { stroke: var(--wire); stroke-width: 4; stroke-linecap: round;
   pointer-events: stroke; }
-#edges path.eray {
+.wires path.eray {
   stroke: #ffffff; stroke-width: 1.6; stroke-linecap: round;
   pointer-events: none;
 }
-#edges path.eglow.back { stroke: rgba(179, 102, 26, .16); }
-#edges path.ecore.back { stroke: #b3661a; }
-#edges path.eglow.hot { stroke: rgba(65, 114, 159, .3); }
-#edges path.ecore.hot { stroke: var(--wire-deep); stroke-width: 5; }
-#edges path.eray.hot { stroke-width: 2; }
-#edges circle.espark { fill: #fff; stroke: var(--wire); stroke-width: 1.6; }
-#edges circle.espark.tailspark { fill: #bccfe3; opacity: .7; stroke: none; }
-#edges circle.espark.back { stroke: #b3661a; }
+.wires path.eglow.back { stroke: rgba(179, 102, 26, .16); }
+.wires path.ecore.back { stroke: #b3661a; }
+.wires path.eglow.hot { stroke: rgba(65, 114, 159, .3); }
+.wires path.ecore.hot { stroke: var(--wire-deep); stroke-width: 5; }
+.wires path.eray.hot { stroke-width: 2; }
+.wires circle.espark { fill: #fff; stroke: var(--wire); stroke-width: 1.6; }
+.wires circle.espark.tailspark { fill: #bccfe3; opacity: .7; stroke: none; }
+.wires circle.espark.back { stroke: #b3661a; }
 /* if/else routes: the beam in branch amber; the ELSE fallback dashed,
    laserless — a path that exists but is not flowing */
-#edges path.eglow.cond { stroke: rgba(179, 102, 26, .13); }
-#edges path.ecore.cond { stroke: #b3661a; }
-#edges path.eray.cond { stroke-width: 1.2; opacity: .85; }
-#edges path.ecore.cond.relse { stroke-dasharray: 9 7; opacity: .75; }
-#edges path.eglow.cond.relse { opacity: .5; }
-#edges path.eray.cond.relse { display: none; }
-#edges circle.espark.cond { stroke: #b3661a; }
+.wires path.eglow.cond { stroke: rgba(179, 102, 26, .13); }
+.wires path.ecore.cond { stroke: #b3661a; }
+.wires path.eray.cond { stroke-width: 1.2; opacity: .85; }
+.wires path.ecore.cond.relse { stroke-dasharray: 9 7; opacity: .75; }
+.wires path.eglow.cond.relse { opacity: .5; }
+.wires path.eray.cond.relse { display: none; }
+.wires circle.espark.cond { stroke: #b3661a; }
 /* soft merge edges: the same family, a quieter voice — never gray */
-#edges path.soft { stroke: #a3b9d2; opacity: .8; }
+.wires path.soft { stroke: #a3b9d2; opacity: .8; }
 .node.serve-node { background: linear-gradient(180deg, #fdf6dd, #fbf0cb);
   border-color: #dcc172; width: 190px; }
 .node.serve-node::before { background: var(--k-serve); }
@@ -428,7 +432,7 @@ body.resizing { user-select: none; cursor: col-resize; }
 /* wrap seam — where a long chain breaks to the next band, like a
    newline. A layout artifact, not uncertainty: thin, faint, SOLID —
    dashes are reserved for edges that may not fire. */
-#edges path.wrap { stroke: #d0b878; stroke-width: 1.5; opacity: .55; }
+.wires path.wrap { stroke: #d0b878; stroke-width: 1.5; opacity: .55; }
 
 /* pan/zoom controls */
 .zoomctl {
@@ -836,9 +840,9 @@ header.bar .pname:hover { text-decoration: underline; }
 .lkeysrow { color: var(--muted); font-size: 12px; }
 
 /* condition ? pill on the wire */
-#edges text.condglyph { fill: #b25e00; font-size: 11px; font-weight: 700;
+.wires text.condglyph { fill: #b25e00; font-size: 11px; font-weight: 700;
   paint-order: stroke; stroke: #fffaf0; stroke-width: 3px; cursor: help; }
-#edges text.condglyph.relse { fill: #c9a052; }
+.wires text.condglyph.relse { fill: #c9a052; }
 
 /* run banner extras */
 #run-stats { color: var(--muted); font-size: 12.5px; }
@@ -944,11 +948,11 @@ header.bar .pname:hover { text-decoration: underline; }
   letter-spacing: .14em; color: var(--accent-deep); }
 
 /* the quiet ties from START to entries and exits to END */
-#edges path.bedge {
+.wires path.bedge {
   fill: none; stroke: #cfa93f; stroke-width: 1.3px; opacity: .55;
   stroke-dasharray: 3 4;
 }
-#edges path.bedge.hot { opacity: .95; }
+.wires path.bedge.hot { opacity: .95; }
 
 /* the client's doors: a frame hugging each gate, nothing more */
 #edges rect.zoneband {
@@ -957,10 +961,10 @@ header.bar .pname:hover { text-decoration: underline; }
 }
 .badge.start { color: #7c5a06; border-color: rgba(178, 132, 20, .4);
   background: rgba(201, 148, 15, .08); }
-#edges text.zonelabel {
+.wires text.zonelabel {
   fill: #a1770a; font-size: 10px; font-weight: 700; letter-spacing: .12em;
 }
-#edges text.servelabel {
+.wires text.servelabel {
   fill: #b28414; font-size: 10px; font-style: italic;
   paint-order: stroke; stroke: #fdf3d0; stroke-width: 3px;
 }
@@ -1039,7 +1043,7 @@ button.pchip.pref:hover { border-color: #8fafd0; }
    the grown card never pushes its icon into the membrane */
 #world[data-zoom="hi"] .node.cell {
   border-radius: 42px 54px 46px 50px / 34px 40px 36px 42px;
-  padding: 13px 15px 11px 21px;
+  padding: 13px 12px 11px 18px;
 }
 
 /* PARENT-override chips: a real write into the container's variable */
@@ -1059,11 +1063,7 @@ button.pchip.pref:hover { border-color: #8fafd0; }
   flex-direction: column; gap: 3px; }
 .brrow { position: relative; display: flex; align-items: center;
   border: 1px solid #ecdfc8; background: #fff; border-radius: 7px;
-  padding: 2px 16px 2px 8px; min-height: 18px;
-  /* the row plugs into the card wall on its exit side: the box reaches
-     THROUGH the card padding+border so its dot sits on the silhouette,
-     and the wire visibly starts at the condition box itself */
-  margin-right: -14px; }
+  padding: 2px 16px 2px 8px; min-height: 18px; }
 .brcond { font-size: 10.5px; color: #a35d13; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .brrow.relse .brcond { color: var(--muted); font-style: italic; }
@@ -1088,7 +1088,6 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .dmeta { display: flex; gap: 4px; }
 .chip.clatest { color: #a35d13; border-color: #e2c087; background: #fbf3e2; }
 
-/* a row whose target lies left carries its port on the left — and
-   plugs into the LEFT wall instead */
-.brrow.left { padding: 2px 8px 2px 16px; margin-right: 0; margin-left: -14px; }
+/* a row whose target lies left carries its port on the left */
+.brrow.left { padding: 2px 8px 2px 16px; }
 .brrow.left .brport { left: -6px; right: auto; }

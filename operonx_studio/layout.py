@@ -35,7 +35,7 @@ from typing import Dict, List, Sequence, Set, Tuple
 
 __all__ = ["Node", "Edge", "Layout", "layout_graph", "NODE_W", "NODE_H"]
 
-NODE_W = 210
+NODE_W = 240
 NODE_H = 64
 H_GAP = 56      # between siblings in a row — things that happen together
 V_GAP = 78      # between rows — one step of sequence
