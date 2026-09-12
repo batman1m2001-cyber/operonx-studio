@@ -972,9 +972,6 @@ header.bar .pname:hover { text-decoration: underline; }
 
 /* ── PORTS: in, out, and who it links to — chips, not dotted text ── */
 .portrow { display: flex; align-items: center; gap: 9px; padding: 3px 0; }
-.pdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.pdot.in { border: 2px solid #7fa0c4; background: #fff; }
-.pdot.out { background: #7fa0c4; }
 .pname { flex: none; min-width: 96px; font-size: 12px; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; }
 .plinks { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
@@ -992,20 +989,21 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .pchip.peditable:hover { border-color: #7fb59d; }
 .pchip.pmuted { color: var(--muted); background: transparent; font-style: italic; }
 
-/* ── port direction must be unmistakable: shape, not shade ────────── */
-.pgroup { font-size: 9.5px; font-weight: 700; letter-spacing: .12em;
-  margin: 10px 0 4px; color: #5c83ab; }
-.pgroup.pout { color: #34608c; margin-top: 14px; }
-.pdot.in { border-radius: 50%; border: 2px solid #6a9bd4; background: #fff; }
-.pdot.out { border-radius: 2px; border: none; background: #34608c; }
+/* ── port direction is one arrow: ← in, → out — everywhere ───────── */
+.parr { flex: none; width: 18px; text-align: center; font-weight: 700;
+  font-size: 13px; }
+.parr.in { color: #6a9bd4; }
+.parr.out { color: #34608c; }
 
-/* semantic zoom: close up, cards say more */
-.node .detail { display: none; margin-top: 5px; padding-top: 5px;
-  border-top: 1px dashed var(--line); }
+/* semantic zoom: close up, cards say more — text centred with real
+   side insets so it stays inside the cell's curved membrane */
+.node .detail { display: none; margin-top: 5px; padding: 5px 18px 0;
+  border-top: 1px dashed var(--line); text-align: center; }
 #world[data-zoom="hi"] .node .detail { display: block; }
-.detail .dkind { font-size: 10px; color: var(--muted);
-  text-transform: uppercase; letter-spacing: .06em; }
-.detail .dports { font-size: 10px; color: #5c83ab; margin-top: 2px;
+.detail .dkind { font-size: 9.5px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .05em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail .dports { font-size: 9.5px; color: #5c83ab; margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail .dports.dout { color: #34608c; }
 /* far out, badges are noise too */

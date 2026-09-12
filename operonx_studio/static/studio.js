@@ -981,9 +981,9 @@ function opCard(it) {
       ? names.slice(0, 3).join(", ") + ` +${names.length - 3}`
       : names.join(", ");
     const ins = (n.inputs || []).map(i => i.name);
-    if (ins.length) det.append(el("div", "dports mono", "○ " + brief(ins)));
+    if (ins.length) det.append(el("div", "dports mono", "← " + brief(ins)));
     if ((n.outputs || []).length)
-      det.append(el("div", "dports mono dout", "■ " + brief(n.outputs)));
+      det.append(el("div", "dports mono dout", "→ " + brief(n.outputs)));
     if (det.childNodes.length) card.append(det);
   }
 
@@ -1502,10 +1502,13 @@ function portsSection(it) {
     return c;
   };
 
+  // one visual carries the whole meaning: `name ← source` for inputs,
+  // `name → consumer` for outputs — the arrow between name and link
+  // says which way the value flows, no headers, no bullets
   const row = (dir, name, links) => {
     const r = el("div", "portrow");
-    r.append(el("span", `pdot ${dir}`));
     r.append(el("span", "pname mono", name));
+    r.append(el("span", `parr ${dir}`, dir === "in" ? "←" : "→"));
     const box = el("span", "plinks");
     for (const l of links) box.append(l);
     r.append(box);
@@ -1513,7 +1516,6 @@ function portsSection(it) {
     return r;
   };
 
-  if ((n.inputs || []).length) sec.append(el("div", "pgroup pin", "○ IN"));
   for (const inp of n.inputs || []) {
     const b = inp.binding || {};
     const name = inp.name + (inp.required ? " *" : "");
@@ -1562,7 +1564,6 @@ function portsSection(it) {
       }
     }
   }
-  if ((n.outputs || []).length) sec.append(el("div", "pgroup pout", "■ OUT"));
   for (const o of n.outputs || []) {
     const who = [...new Set(consumers[o] || [])];
     row("out", o, who.length
