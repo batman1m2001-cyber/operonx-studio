@@ -539,9 +539,24 @@ function render() {
   svg.style.top = "-320px";
   svg.setAttribute("viewBox", `-200 -320 ${maxX + 620} ${maxY + 640}`);
 
-  // Door frames paint first, everything sits on top. A frame hugs ITS
-  // gate only — a full-height band through a wrapped layout would slice
-  // rows that have nothing to do with the boundary.
+  // Cards go into the DOM FIRST, so every edge, frame and stub below
+  // works from each card's REAL height — the layout's 64px is only a
+  // guess, and a door wearing a transport line runs ~90px tall. The
+  // old order anchored edges into the middle of tall cards.
+  for (const it of flat.nodes) {
+    const card = it.inner ? containerCard(it) : opCard(it);
+    state.cardEls.set(it.key, card);
+    nodesBox.append(card);
+  }
+  for (const it of flat.nodes) {
+    if (it.inner || it.node.kind === "__boundary__") continue;
+    const card = state.cardEls.get(it.key);
+    if (card && card.offsetHeight) it.h = Math.max(it.h, card.offsetHeight);
+  }
+
+  // Door frames paint first among the wires, everything sits on top. A
+  // frame hugs ITS gate only — a full-height band through a wrapped
+  // layout would slice rows that have nothing to do with the boundary.
   const doorFrame = (it, label) => {
     const rect = document.createElementNS(SVGNS, "rect");
     rect.setAttribute("x", it.x - 12); rect.setAttribute("y", it.y - 26);
@@ -755,7 +770,7 @@ function render() {
   }
   for (const [x, y, text, cls, tip] of glyphJobs) edgeGlyph(svg, x, y, text, cls, tip);
 
-  // serve cards (only when no declared ingress wears the transport)
+  // serve transport cards (only when no declared ingress wears it)
   for (const s of state._serves || []) {
     const card = el("div", "node serve-node");
     card.style.left = `${s.x}px`;
@@ -771,13 +786,9 @@ function render() {
     nodesBox.append(card);
   }
 
-  // op cards — flatten order draws a container before its members, so
-  // members paint on top of their box without any z-index bookkeeping
-  for (const it of flat.nodes) {
-    const card = it.inner ? containerCard(it) : opCard(it);
-    state.cardEls.set(it.key, card);
-    nodesBox.append(card);
-  }
+  // (op cards were placed before the wires — see the top of render —
+  // flatten order still draws a container before its members, so
+  // members paint on top of their box without z-index bookkeeping)
 
   refreshSelection();
   applyView();
