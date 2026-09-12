@@ -1045,13 +1045,14 @@ function stageCenter() {
 }
 
 function fit() {
+  // fit the WIDTH: the whole flow across, reading down by scroll — a
+  // both-axes fit shrank every tall flow into confetti
   const ex = state.extent;
   if (!ex) return;
   const stage = $("#stage");
   const r = stage.getBoundingClientRect();
   state.view.scale = Math.min(1.2,
-    (r.width - 70) / Math.max(1, ex.maxX - ex.minX),
-    (r.height - 70) / Math.max(1, ex.maxY - ex.minY));
+    (r.width - 70) / Math.max(1, ex.maxX - ex.minX));
   applyView();
   stage.scrollLeft = 0;
   stage.scrollTop = 0;
