@@ -971,8 +971,20 @@ function opCard(it) {
     line.append(n.name);
     card.append(line);
     // the kind/bound line was card noise at fit-zoom; it lives in the
-    // tooltip and the inspector now
+    // tooltip and the inspector — and, zoomed in close, on the card
+    // itself (the .detail block shows only at [data-zoom="hi"])
     card.title = n.kind + (n.bound ? ` · ${n.bound}` : "") + (n.is_gen ? " · generator" : "");
+    const det = el("div", "detail");
+    det.append(el("div", "dkind",
+      n.kind + (n.bound ? ` · ${n.bound}` : "") + (n.is_gen ? " · generator" : "")));
+    const brief = (names) => names.length > 3
+      ? names.slice(0, 3).join(", ") + ` +${names.length - 3}`
+      : names.join(", ");
+    const ins = (n.inputs || []).map(i => i.name);
+    if (ins.length) det.append(el("div", "dports mono", "○ " + brief(ins)));
+    if ((n.outputs || []).length)
+      det.append(el("div", "dports mono dout", "■ " + brief(n.outputs)));
+    if (det.childNodes.length) card.append(det);
   }
 
   // At most TWO badges: one semantic marker, plus the run chip. Density
@@ -1035,6 +1047,18 @@ function applyView() {
   $("#plane").style.transform =
     `translate(${-ex.minX * s + VIEW_PAD}px, ${-ex.minY * s + VIEW_PAD}px) scale(${s})`;
   $("#btn-zoom-pct").textContent = `${Math.round(s * 100)}%`;
+
+  // semantic zoom: close up, cards carry more (kind, ports); far out
+  // they slim down. A level change reflows card heights, so the canvas
+  // re-renders once to re-anchor every wire to the new bottoms.
+  const level = s >= 0.85 ? "hi" : s <= 0.45 ? "lo" : "mid";
+  if (world.dataset.zoom !== level) {
+    world.dataset.zoom = level;
+    if (state.graph && !state._rezoom) {
+      state._rezoom = true;
+      requestAnimationFrame(() => { state._rezoom = false; render(); });
+    }
+  }
 }
 
 function zoomAt(mx, my, factor) {
@@ -1489,6 +1513,7 @@ function portsSection(it) {
     return r;
   };
 
+  if ((n.inputs || []).length) sec.append(el("div", "pgroup pin", "○ IN"));
   for (const inp of n.inputs || []) {
     const b = inp.binding || {};
     const name = inp.name + (inp.required ? " *" : "");
@@ -1537,6 +1562,7 @@ function portsSection(it) {
       }
     }
   }
+  if ((n.outputs || []).length) sec.append(el("div", "pgroup pout", "■ OUT"));
   for (const o of n.outputs || []) {
     const who = [...new Set(consumers[o] || [])];
     row("out", o, who.length
