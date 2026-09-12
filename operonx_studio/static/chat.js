@@ -86,18 +86,21 @@
   const grip = el("div", "chat-grip");
   grip.title = "drag to resize";
   panel.append(grip);
+  // in dock mode the grip resizes the dock; floating, the panel itself
+  const sized = () => document.getElementById("chatdock") || panel;
   const savedW = store.get("oxchat:w", null);
-  if (savedW) panel.style.width = `${savedW}px`;
+  if (savedW) sized().style.width = `${savedW}px`;
   let gripping = false;
   grip.onpointerdown = (ev) => { gripping = true; grip.setPointerCapture(ev.pointerId); };
   grip.onpointermove = (ev) => {
     if (!gripping) return;
-    const w = Math.min(900, Math.max(340, window.innerWidth - ev.clientX - 22));
-    panel.style.width = `${w}px`;
+    const pad = document.getElementById("chatdock") ? 0 : 22;
+    const w = Math.min(900, Math.max(320, window.innerWidth - ev.clientX - pad));
+    sized().style.width = `${w}px`;
   };
   grip.onpointerup = () => {
     gripping = false;
-    store.set("oxchat:w", parseInt(panel.style.width, 10) || 400);
+    store.set("oxchat:w", parseInt(sized().style.width, 10) || 380);
   };
   const log = el("div", "chat-log");
   const bar = el("form", "chat-bar");
@@ -347,13 +350,36 @@
   const pending = store.get(K_TURN, null);
   if (pending && pending.id) follow(pending.id, pending.cursor || 0);
 
-  const toggle = (open) => {
-    panel.classList.toggle("open", open);
-    fab.classList.toggle("hidden", open);
-    if (open) { input.focus(); scrolled(); }
-  };
-  fab.onclick = () => toggle(true);
-  close.onclick = () => toggle(false);
-
-  document.body.append(fab, panel);
+  // On the project page the assistant lives in a docked right panel,
+  // VS Code style; the floating bubble remains the home-page form and
+  // the way back when the dock is toggled off.
+  const dock = document.getElementById("chatdock");
+  if (dock) {
+    maxi.hidden = true;                    // the dock resizes, it doesn't pop out
+    panel.classList.add("docked", "open");
+    dock.append(panel);
+    document.body.append(fab);
+    // studio.js fires its panel event before this script loads — read
+    // the stored preference directly for the initial state
+    const initialOn = store.get("panelRight", true);
+    dock.hidden = !initialOn;
+    fab.classList.toggle("hidden", initialOn);
+    document.addEventListener("oxdock", (ev) => {
+      dock.hidden = !ev.detail.on;
+      fab.classList.toggle("hidden", ev.detail.on);
+      if (ev.detail.on) scrolled();
+    });
+    const flip = () => { const b = document.getElementById("btn-right"); if (b) b.click(); };
+    fab.onclick = flip;
+    close.onclick = flip;
+  } else {
+    const toggle = (open) => {
+      panel.classList.toggle("open", open);
+      fab.classList.toggle("hidden", open);
+      if (open) { input.focus(); scrolled(); }
+    };
+    fab.onclick = () => toggle(true);
+    close.onclick = () => toggle(false);
+    document.body.append(fab, panel);
+  }
 })();

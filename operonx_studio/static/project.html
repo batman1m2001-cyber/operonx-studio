@@ -19,7 +19,7 @@
       <button data-tab="traces">Traces</button>
     </nav>
     <div class="spacer"></div>
-    <div class="zoomctl" title="scroll = pan · ctrl+scroll or pinch = zoom · drag or middle-drag = pan">
+    <div class="zoomctl" title="scroll to pan · ctrl+scroll or pinch = zoom · space+drag or middle-drag = pan">
       <button id="btn-zoom-out">−</button>
       <button id="btn-zoom-pct" title="reset to 100%">100%</button>
       <button id="btn-zoom-in">+</button>
@@ -28,6 +28,8 @@
       <button id="btn-find" title="find a node (/ or Ctrl+K)">🔍</button>
       <button id="btn-legend" title="what am I looking at?">?</button>
     </div>
+    <button id="btn-left" class="paneltoggle" title="info panel">◧</button>
+    <button id="btn-right" class="paneltoggle" title="assistant panel">◨</button>
     <span class="live" id="live"><span class="dot"></span><span id="live-text">live</span></span>
   </header>
 
@@ -39,19 +41,22 @@
   </div>
 
   <div class="main">
+    <aside id="inspector" class="open"></aside>
+    <div id="dragbar" title="drag to resize · double-click to reset"></div>
     <div id="stage">
       <div id="world">
-        <svg id="edges"></svg>
-        <div id="nodes"></div>
+        <div id="plane">
+          <svg id="edges"></svg>
+          <div id="nodes"></div>
+        </div>
       </div>
       <div id="find" hidden>
         <input id="find-input" placeholder="find node… (Enter selects, Esc closes)" autocomplete="off">
       </div>
       <div id="legend" hidden></div>
     </div>
-    <div id="dragbar" title="drag to resize · double-click to reset"></div>
-    <aside id="inspector"></aside>
     <div id="traces" hidden></div>
+    <aside id="chatdock" hidden></aside>
   </div>
 </div>
 <script src="/static/values.js"></script>

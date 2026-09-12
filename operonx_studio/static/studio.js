@@ -29,7 +29,7 @@ const state = {
   expanded: new Set(), // render keys of opened GraphOp containers
   rendered: new Map(), // render key -> placed item {node, x, y, w, h, depth}
   extent: null,      // {minX, minY, maxX, maxY} of the last render
-  view: {x: 60, y: 60, scale: 1},
+  view: {scale: 1},  // pan lives in the stage's own scrollbars
   run: null,         // {run, ops: {name: {runs, errors, total_ms, max_ms}}}
   heatMax: 0,        // slowest avg ms in the painted run — the heat scale
   follow: false,     // repaint whenever a newer run appears
@@ -795,9 +795,75 @@ function refreshSelection() {
 
 function deselect() {
   state.sel = null;
-  $("#inspector").classList.remove("open");
   refreshSelection();
   pushView();
+  renderFlowInfo();
+}
+
+/* Nothing selected: the panel belongs to the flow itself — what this
+ * graph is, its doors, and the painted run if any. */
+function renderFlowInfo() {
+  if (state.sel) return;
+  const panel = $("#inspector");
+  panel.textContent = "";
+  panel.scrollTop = 0;
+  const g = state.graph;
+  if (!g) return;
+
+  const head = el("div", "phead");
+  head.append(el("h3", null, g.name || "flow"));
+  const chips = el("div", "chips");
+  const flowChip = el("span", "chip kindchip", "main flow");
+  flowChip.style.setProperty("--kind", "var(--accent)");
+  chips.append(flowChip);
+  chips.append(el("span", "chip", `${(g.nodes || []).length} ops`));
+  const nested = (g.nodes || []).filter(n => n.graph).length;
+  if (nested) chips.append(el("span", "chip", `▣ ${nested} nested`));
+  chips.append(el("span", "chip", `${(g.edges || []).length} edges`));
+  head.append(chips);
+  panel.append(head);
+
+  if (state.ir && state.ir.description) {
+    panel.append(el("div", "rolenote", state.ir.description));
+  }
+
+  const t = serveFor(g);
+  if (t) {
+    const sec = el("section");
+    sec.append(el("div", "stitle", "Serve"));
+    sec.append(el("div", "srcline mono",
+      `⟶ ${t.kind}${t.path ? " " + t.path : ""} — the client's transport`));
+    if (t.description) sec.append(el("div", "srcline", t.description));
+    panel.append(sec);
+  }
+
+  const doors = el("section");
+  doors.append(el("div", "stitle", "Boundary"));
+  const dIn = el("div", "outrow");
+  for (const name of g.entries || []) dIn.append(el("span", "outchip mono", `⇥ ${name}`));
+  const dOut = el("div", "outrow");
+  for (const name of g.exits || []) dOut.append(el("span", "outchip mono", `${name} ⇥`));
+  if (dIn.childNodes.length) doors.append(el("div", "plabel", "entries"), dIn);
+  if (dOut.childNodes.length) doors.append(el("div", "plabel", "exits"), dOut);
+  panel.append(doors);
+
+  const sec = el("section");
+  if (state.run) {
+    sec.append(el("div", "stitle", `Painted run · ${state.run.run}`));
+    const bits = [`${Object.keys(state.run.ops || {}).length} ops ran`,
+                  `${state.run.records ?? "?"} records`];
+    if (state.run.wall_s != null) bits.push(`${state.run.wall_s.toFixed(1)}s`);
+    if (state.run.errors) bits.push(`${state.run.errors} errors`);
+    sec.append(el("div", "srcline", bits.join(" · ")));
+    sec.append(el("div", "note",
+      "Click any lit op for its recorded inputs and outputs; faded ops did not run."));
+  } else {
+    sec.append(el("div", "stitle", "Traces"));
+    sec.append(el("div", "note",
+      "Paint a run from the Traces tab to light this flow up with real "
+      + "timings, values and errors."));
+  }
+  panel.append(sec);
 }
 
 function toggleExpand(key) {
@@ -939,21 +1005,38 @@ function opCard(it) {
   return card;
 }
 
-/* ── view: pan, zoom, fit ─────────────────────────────────────────── */
+/* ── view: the canvas is a scrollable document ─────────────────────
+ * Pan is the stage's own scrollbars (they appear only when needed);
+ * zoom scales the plane and resizes the scroll area to match. The
+ * default view is 100% at the top of the flow — never a fit that
+ * shrinks a big flow into confetti. */
+
+const VIEW_PAD = 36;
 
 function applyView() {
-  const v = state.view;
-  $("#world").style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.scale})`;
-  $("#btn-zoom-pct").textContent = `${Math.round(v.scale * 100)}%`;
+  const s = state.view.scale, ex = state.extent;
+  if (!ex) return;
+  const w = (ex.maxX - ex.minX) * s + VIEW_PAD * 2;
+  const h = (ex.maxY - ex.minY) * s + VIEW_PAD * 2;
+  const world = $("#world");
+  world.style.width = `${w}px`;
+  world.style.height = `${h}px`;
+  $("#plane").style.transform =
+    `translate(${-ex.minX * s + VIEW_PAD}px, ${-ex.minY * s + VIEW_PAD}px) scale(${s})`;
+  $("#btn-zoom-pct").textContent = `${Math.round(s * 100)}%`;
 }
 
 function zoomAt(mx, my, factor) {
+  const stage = $("#stage");
   const old = state.view.scale;
   const next = Math.min(2.5, Math.max(0.1, old * factor));
-  state.view.x = mx - (mx - state.view.x) * (next / old);
-  state.view.y = my - (my - state.view.y) * (next / old);
+  // keep the point under the cursor under the cursor
+  const cx = (stage.scrollLeft + mx) / old;
+  const cy = (stage.scrollTop + my) / old;
   state.view.scale = next;
   applyView();
+  stage.scrollLeft = cx * next - mx;
+  stage.scrollTop = cy * next - my;
 }
 
 function stageCenter() {
@@ -964,16 +1047,26 @@ function stageCenter() {
 function fit() {
   const ex = state.extent;
   if (!ex) return;
-  const stage = $("#stage").getBoundingClientRect();
-  const scale = Math.min(1.2,
-    (stage.width - 80) / Math.max(1, ex.maxX - ex.minX),
-    (stage.height - 80) / Math.max(1, ex.maxY - ex.minY));
-  state.view = {
-    x: 40 - ex.minX * scale + (stage.width - 80 - (ex.maxX - ex.minX) * scale) / 2,
-    y: 40 - ex.minY * scale + (stage.height - 80 - (ex.maxY - ex.minY) * scale) / 2,
-    scale,
-  };
+  const stage = $("#stage");
+  const r = stage.getBoundingClientRect();
+  state.view.scale = Math.min(1.2,
+    (r.width - 70) / Math.max(1, ex.maxX - ex.minX),
+    (r.height - 70) / Math.max(1, ex.maxY - ex.minY));
   applyView();
+  stage.scrollLeft = 0;
+  stage.scrollTop = 0;
+}
+
+/* the landing view: real size, top of the flow, spine centred */
+function initView() {
+  const ex = state.extent;
+  if (!ex) return;
+  const stage = $("#stage");
+  state.view.scale = 1;
+  applyView();
+  const r = stage.getBoundingClientRect();
+  stage.scrollTop = 0;
+  stage.scrollLeft = Math.max(0, (ex.maxX - ex.minX) / 2 + VIEW_PAD - r.width / 2);
 }
 
 /* ── inspector ────────────────────────────────────────────────────── */
@@ -990,11 +1083,10 @@ function select(key) {
   refreshSelection();
   pushView();
   const panel = $("#inspector");
-  if (!state.sel) { panel.classList.remove("open"); return; }
+  if (!state.sel) { renderFlowInfo(); return; }
   const it = state.rendered.get(state.sel);
-  if (!it) return;
+  if (!it) { state.sel = null; renderFlowInfo(); return; }
   const n = it.node;
-  panel.classList.add("open");
   panel.textContent = "";
   panel.scrollTop = 0;
 
@@ -1773,6 +1865,7 @@ async function paintRun(run) {
   switchTab("flow");
   render();
   pushView();
+  renderFlowInfo();
 }
 
 /* "error →": center + select the errored ops one by one, opening
@@ -1799,6 +1892,7 @@ $("#run-clear").onclick = () => {
   $("#runbanner").classList.remove("show");
   render();
   pushView();
+  renderFlowInfo();
 };
 
 /* every nested graph at once — opening five GraphOps one by one to see
@@ -1831,11 +1925,23 @@ function switchTab(name) {
   for (const b of document.querySelectorAll(".tabs button"))
     b.classList.toggle("active", b.dataset.tab === name);
   $("#stage").style.display = name === "flow" ? "" : "none";
-  $("#inspector").classList.toggle("open", name === "flow" && !!state.sel);
   $("#traces").hidden = name !== "traces";
   if (name === "traces") showTraces();
   pushView();
 }
+
+/* ── side panels: info left, assistant right, both optional ──────── */
+
+function applyPanels() {
+  const leftOn = recall("panelLeft", true);
+  const rightOn = recall("panelRight", true);
+  $("#inspector").classList.toggle("off", !leftOn);
+  $("#btn-left").classList.toggle("active", leftOn);
+  $("#btn-right").classList.toggle("active", rightOn);
+  document.dispatchEvent(new CustomEvent("oxdock", {detail: {on: rightOn}}));
+}
+$("#btn-left").onclick = () => { store("panelLeft", !recall("panelLeft", true)); applyPanels(); };
+$("#btn-right").onclick = () => { store("panelRight", !recall("panelRight", true)); applyPanels(); };
 
 /* ── the legend: the visual language, written down on screen ──────── */
 
@@ -1939,19 +2045,15 @@ $("#btn-zoom-pct").onclick = () => {
   let drag = null;
   let spaceHeld = false;
 
-  // Wheel scrolls the canvas; ctrl+wheel (and a trackpad pinch, which the
-  // browser reports as exactly that) zooms about the cursor. This is the
-  // n8n/Figma convention — a two-finger scroll must never fling the zoom.
+  // The stage scrolls natively (wheel, trackpad, scrollbars); only
+  // ctrl+wheel — and a trackpad pinch, which the browser reports as
+  // exactly that — is intercepted, to zoom about the cursor.
   stage.addEventListener("wheel", (ev) => {
-    ev.preventDefault();
     if (ev.ctrlKey || ev.metaKey) {
+      ev.preventDefault();
       const rect = stage.getBoundingClientRect();
       zoomAt(ev.clientX - rect.left, ev.clientY - rect.top,
              Math.exp(-ev.deltaY * 0.0022));
-    } else {
-      state.view.x -= ev.deltaX;
-      state.view.y -= ev.deltaY;
-      applyView();
     }
   }, {passive: false});
 
@@ -1961,15 +2063,15 @@ $("#btn-zoom-pct").onclick = () => {
     if (overNode && !panButton && ev.button === 0) return;  // node click
     if (ev.button !== 0 && ev.button !== 1) return;
     ev.preventDefault();
-    drag = {x: ev.clientX, y: ev.clientY, vx: state.view.x, vy: state.view.y, moved: false};
+    drag = {x: ev.clientX, y: ev.clientY,
+            sl: stage.scrollLeft, st: stage.scrollTop, moved: false};
     stage.classList.add("panning");
   });
   window.addEventListener("mousemove", (ev) => {
     if (!drag) return;
     drag.moved = drag.moved || Math.abs(ev.clientX - drag.x) + Math.abs(ev.clientY - drag.y) > 3;
-    state.view.x = drag.vx + ev.clientX - drag.x;
-    state.view.y = drag.vy + ev.clientY - drag.y;
-    applyView();
+    stage.scrollLeft = drag.sl - (ev.clientX - drag.x);
+    stage.scrollTop = drag.st - (ev.clientY - drag.y);
   });
   window.addEventListener("mouseup", () => { drag = null; stage.classList.remove("panning"); });
 
@@ -2032,11 +2134,11 @@ function closeFind() {
 }
 
 function centerOn(item) {
-  const stage = $("#stage").getBoundingClientRect();
-  const s = state.view.scale;
-  state.view.x = stage.width / 2 - (item.x + item.w / 2) * s;
-  state.view.y = stage.height / 2 - (item.y + item.h / 2) * s;
-  applyView();
+  const stage = $("#stage");
+  const r = stage.getBoundingClientRect();
+  const s = state.view.scale, ex = state.extent;
+  stage.scrollLeft = (item.x + item.w / 2 - ex.minX) * s + VIEW_PAD - r.width / 2;
+  stage.scrollTop = (item.y + item.h / 2 - ex.minY) * s + VIEW_PAD - r.height / 2;
 }
 
 (() => {
@@ -2066,6 +2168,7 @@ function centerOn(item) {
 /* ── resizable inspector ──────────────────────────────────────────── */
 
 (() => {
+  // the info panel sits on the LEFT now; its handle drags rightward
   const bar = $("#dragbar"), panel = $("#inspector");
   const saved = recall("panelW", null);
   if (saved) panel.style.width = `${saved}px`;
@@ -2077,19 +2180,22 @@ function centerOn(item) {
   });
   bar.addEventListener("pointermove", (ev) => {
     if (!dragging) return;
-    const width = Math.min(720, Math.max(280, window.innerWidth - ev.clientX));
+    const left = $(".main").getBoundingClientRect().left;
+    const width = Math.min(720, Math.max(280, ev.clientX - left));
     panel.style.width = `${width}px`;
   });
   bar.addEventListener("pointerup", () => {
     dragging = false;
     document.body.classList.remove("resizing");
-    store("panelW", parseInt(panel.style.width, 10) || 360);
+    store("panelW", parseInt(panel.style.width, 10) || 340);
   });
   bar.addEventListener("dblclick", () => {
-    panel.style.width = "360px";
-    store("panelW", 360);
+    panel.style.width = "340px";
+    store("panelW", 340);
   });
 })();
+
+applyPanels();
 
 async function load(first) {
   const data = await api(`/api/p/${PID}/ir`);
@@ -2140,8 +2246,9 @@ async function load(first) {
   state.graph = data.graphs.find(g => g.name === current) || data.graphs[0];
   if (state.graph) pick.value = state.graph.name;
   render();
-  if (first) fit();
+  if (first) initView();
   pushView();
+  renderFlowInfo();
 }
 
 let pollN = 0;
