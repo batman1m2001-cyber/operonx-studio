@@ -218,7 +218,7 @@ header.bar select {
    ports are synaptic boutons. A bipolar neuron — one dendrite in, one
    axon out — is exactly what an op is. */
 .node {
-  position: absolute; width: 240px; min-height: 52px;
+  position: absolute; width: 260px; min-height: 52px;
   background: radial-gradient(120% 160% at 30% 20%, #ffffff 0%, #fcfdff 55%, #f2f6fb 100%);
   border: 1.5px solid #d5dde9;
   /* an organic, slightly asymmetric membrane — a cell, not a box */
@@ -230,16 +230,34 @@ header.bar select {
 }
 .node:hover { transform: translateY(-2px); border-color: #b9cbe4;
   box-shadow: var(--sh-2), 0 0 26px rgba(90, 130, 190, .18); }
+/* small inline icon (branch headers, anywhere a band won't fit):
+   light pastel disc, kind-coloured glyph — nothing saturated */
 .node .nicon {
   display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: 50%; margin-right: 8px;
-  font-size: 11px; color: #fff; vertical-align: -5px;
-  background: radial-gradient(circle at 32% 28%,
-    color-mix(in srgb, var(--kind, var(--k-func)) 50%, #fff),
-    var(--kind, var(--k-func)) 72%);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--kind, var(--k-func)) 55%, transparent),
-              inset 0 -2px 4px rgba(0, 0, 0, .15);
+  font-size: 11px; vertical-align: -5px;
+  color: color-mix(in srgb, var(--kind, var(--k-default)) 80%, #445);
+  background: color-mix(in srgb, var(--kind, var(--k-default)) 11%, #fff);
+  border: 1.5px solid color-mix(in srgb, var(--kind, var(--k-default)) 28%, #fff);
 }
+
+/* the ICON BAND: the cell's left quarter, sliced along the membrane —
+   a near-half-oval in the kind's pastel, carrying the kind glyph.
+   Custom project ops fall back to the ◈ default the same way. */
+.node .iconband {
+  position: absolute; left: 2px; top: 2px; bottom: 2px; width: 56px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 19px;
+  color: color-mix(in srgb, var(--kind, var(--k-default)) 74%, #56617a);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--kind, var(--k-default)) 13%, #fff) 0%,
+    color-mix(in srgb, var(--kind, var(--k-default)) 6%, #fff) 100%);
+  border-right: 1.5px dashed color-mix(in srgb, var(--kind, var(--k-default)) 22%, #fff);
+  border-radius: 46% 14% 14% 52% / 60% 30% 30% 44%;
+  pointer-events: none;
+}
+.node.cell.alt .iconband {
+  border-radius: 54% 14% 14% 44% / 44% 30% 30% 58%; }
 
 /* the CELL: an op drawn as a brain cell — irregular membrane in the
    kind's own hue, cytoplasm gradient, a soft nucleus halo behind the
@@ -252,7 +270,7 @@ header.bar select {
     radial-gradient(72% 105% at 50% 44%, #ffffff 0%, #fdfeff 30%, #f3f7fc 62%,
       color-mix(in srgb, var(--kind, var(--k-func)) 10%, #eaf0f8) 100%);
   border-radius: 46% 54% 48% 52% / 62% 48% 58% 42%;
-  min-height: 58px; padding: 11px 16px 9px 24px;
+  min-height: 58px; padding: 11px 14px 9px 68px;
   box-shadow: 0 3px 12px rgba(70, 100, 150, .12),
               0 0 0 5px color-mix(in srgb, var(--kind, var(--k-func)) 7%, transparent),
               inset 0 0 16px rgba(255, 255, 255, .55);
@@ -274,7 +292,7 @@ header.bar select {
      box read as a dirty rectangle shadow behind every icon */
   display: none;
 }
-.node.cell .badges { margin-left: 30px; margin-top: 3px; }
+.node.cell .badges { margin-top: 3px; }
 .node.cell .nname { margin-left: 0; }
 .node.dimmed { opacity: .18; }
 .node.heated { border-color: color-mix(in srgb, var(--warn) calc(var(--heat, 0) * 100%), var(--line)); }
@@ -1043,8 +1061,10 @@ button.pchip.pref:hover { border-color: #8fafd0; }
    the grown card never pushes its icon into the membrane */
 #world[data-zoom="hi"] .node.cell {
   border-radius: 42px 54px 46px 50px / 34px 40px 36px 42px;
-  padding: 13px 12px 11px 18px;
+  padding: 13px 12px 11px 70px;
 }
+#world[data-zoom="hi"] .node.cell .iconband {
+  border-radius: 40px 12px 12px 48px / 32px 20px 20px 40px; }
 
 /* PARENT-override chips: a real write into the container's variable */
 .pchip.ppar { color: #8a5316; border-color: #e2cf9a; background: #fbf5e6;

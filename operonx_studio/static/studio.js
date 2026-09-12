@@ -10,7 +10,7 @@
 "use strict";
 
 const PID = location.pathname.split("/").pop();
-const NODE_W = 240, NODE_H = 64;
+const NODE_W = 260, NODE_H = 64;
 const HEADER = 34;              // a container's title strip
 const SVGNS = "http://www.w3.org/2000/svg";
 
@@ -1145,8 +1145,10 @@ function opCard(it) {
     // a brain cell, with two membrane variants so a row of cells reads
     // organic instead of stamped
     card.classList.add("cell", n.name.length % 2 ? "alt" : "base");
+    // the kind's icon fills the cell's left quarter — a pastel
+    // half-oval slice cut along the membrane, not a badge on the line
+    card.append(el("span", "iconband", kindIcon(n)));
     const line = el("div", "nname nline");
-    line.append(el("span", "nicon", kindIcon(n)));
     line.append(el("span", "ntext", n.name));
     const chips = nameChips(n);
     if (chips) line.append(chips);
