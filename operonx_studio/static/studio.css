@@ -1044,7 +1044,11 @@ button.pchip.pref:hover { border-color: #8fafd0; }
   flex-direction: column; gap: 3px; }
 .brrow { position: relative; display: flex; align-items: center;
   border: 1px solid #ecdfc8; background: #fff; border-radius: 7px;
-  padding: 2px 16px 2px 8px; min-height: 18px; }
+  padding: 2px 16px 2px 8px; min-height: 18px;
+  /* the row plugs into the card wall on its exit side: the box reaches
+     THROUGH the card padding+border so its dot sits on the silhouette,
+     and the wire visibly starts at the condition box itself */
+  margin-right: -14px; }
 .brcond { font-size: 10.5px; color: #a35d13; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .brrow.relse .brcond { color: var(--muted); font-style: italic; }
@@ -1069,6 +1073,7 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .dmeta { display: flex; gap: 4px; }
 .chip.clatest { color: #a35d13; border-color: #e2c087; background: #fbf3e2; }
 
-/* a row whose target lies left carries its port on the left */
-.brrow.left { padding: 2px 8px 2px 16px; }
+/* a row whose target lies left carries its port on the left — and
+   plugs into the LEFT wall instead */
+.brrow.left { padding: 2px 8px 2px 16px; margin-right: 0; margin-left: -14px; }
 .brrow.left .brport { left: -6px; right: auto; }

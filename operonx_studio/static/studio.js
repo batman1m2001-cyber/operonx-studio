@@ -816,8 +816,11 @@ function render() {
         const x2 = portCX(B), y2 = B.y;
         const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5));
         const c2 = Math.max(26, Math.min(72, Math.max(1, y2 - y1) * 0.5));
+        // tangent tilts slightly toward the target, so the wire reads
+        // "leaving this row, heading there" instead of bowing sideways
+        const dip = Math.max(4, Math.min(22, (y2 - y1) * 0.15));
         p.setAttribute("d",
-          `M ${x1} ${y1} C ${x1 + side * c1} ${y1}, ${x2} ${y2 - c2}, ${x2} ${y2}`);
+          `M ${x1} ${y1} C ${x1 + side * c1} ${y1 + dip}, ${x2} ${y2 - c2}, ${x2} ${y2}`);
         p.dataset.fromRow = "1";
       } else {
         p.setAttribute("d", routeAvoiding(A, B, obstacles));
