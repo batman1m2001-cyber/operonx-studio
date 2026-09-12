@@ -1065,3 +1065,7 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .drow.dlatest { border-color: #c9822e; background: #fdf8ef; }
 .dmeta { display: flex; gap: 4px; }
 .chip.clatest { color: #a35d13; border-color: #e2c087; background: #fbf3e2; }
+
+/* a row whose target lies left carries its port on the left */
+.brrow.left { padding: 2px 8px 2px 16px; }
+.brrow.left .brport { left: -6px; right: auto; }

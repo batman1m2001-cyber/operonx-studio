@@ -539,56 +539,83 @@ function render() {
     if (card && card.offsetHeight) it.h = Math.max(it.h, card.offsetHeight);
     if (card && it.node.routes && it.node.routes.length) {
       // each condition row is a wired exit: record where the wire
-      // leaves (first row per target decides)
+      // leaves (first row per target decides), and put the row's port
+      // DOT on the side its target actually lies — the wire departs
+      // exactly at the dot, never from the blind side of the card
       it.condPorts = {};
       for (const rrow of card.querySelectorAll(".brrow")) {
         const t = rrow.dataset.target;
+        const tgt = flat.nodes.find(o => o.depth === it.depth
+          && o.node.name === t && o !== it);
+        const side = tgt && portCX(tgt) < it.x + it.w / 2 ? -1 : 1;
+        rrow.classList.toggle("left", side < 0);
         if (!(t in it.condPorts)) {
-          it.condPorts[t] = rrow.offsetTop + rrow.offsetHeight / 2;
+          it.condPorts[t] = {y: rrow.offsetTop + rrow.offsetHeight / 2, side};
         }
       }
     }
   }
 
-  // Rows part for real heights: semantic zoom grows cards, and a fixed
-  // row pitch would let them collide (the 80%→100% mess). Each top-
-  // level row slides down just enough to clear whatever it actually
-  // overlaps horizontally; containers carry their members with them.
+  // Rows part for real heights: semantic zoom grows cards, and a
+  // fixed pitch would let them collide. Runs INSIDE every opened
+  // container first (deepest first — a grown inner box must be known
+  // before its parent's rows part), stretching the container around
+  // its members and END terminal, then across the top level.
   {
-    const top = flat.nodes.filter(it => it.depth === 0);
-    const rows = new Map();
-    for (const it of top) {
-      const key = Math.round(it.y);
-      if (!rows.has(key)) rows.set(key, []);
-      rows.get(key).push(it);
-    }
-    const placedBoxes = [];
-    for (const y of [...rows.keys()].sort((a, b) => a - b)) {
-      const items = rows.get(y);
-      let minTop = y;
-      for (const it of items) {
-        for (const p of placedBoxes) {
-          if (p.x < it.x + it.w && p.x + p.w > it.x) {
-            minTop = Math.max(minTop, p.bottom + 46);
-          }
+    const shiftTree = (it, delta) => {
+      for (const sub of flat.nodes) {
+        if (sub === it || sub.key.startsWith(it.key + "/")) {
+          sub.y += delta;
+          const c = state.cardEls.get(sub.key);
+          if (c) c.style.top = `${sub.y}px`;
         }
       }
-      const delta = minTop - y;
-      if (delta > 0) {
-        for (const it of items) {
-          for (const sub of flat.nodes) {
-            if (sub === it || sub.key.startsWith(it.key + "/")) {
-              sub.y += delta;
-              const c = state.cardEls.get(sub.key);
-              if (c) c.style.top = `${sub.y}px`;
+    };
+    const partRows = (items) => {
+      const rows = new Map();
+      for (const it of items) {
+        const k = Math.round(it.y);
+        if (!rows.has(k)) rows.set(k, []);
+        rows.get(k).push(it);
+      }
+      const placedBoxes = [];
+      let maxBottom = -Infinity;
+      for (const y of [...rows.keys()].sort((a, b) => a - b)) {
+        const row = rows.get(y);
+        let minTop = y;
+        for (const it of row) {
+          for (const b of placedBoxes) {
+            if (b.x < it.x + it.w && b.x + b.w > it.x) {
+              minTop = Math.max(minTop, b.bottom + 46);
             }
           }
         }
+        const delta = minTop - y;
+        if (delta > 0) for (const it of row) shiftTree(it, delta);
+        for (const it of row) {
+          placedBoxes.push({x: it.x, w: it.w, bottom: it.y + it.h});
+          maxBottom = Math.max(maxBottom, it.y + it.h);
+        }
       }
-      for (const it of items) {
-        placedBoxes.push({x: it.x, w: it.w, bottom: it.y + it.h});
+      return maxBottom;
+    };
+
+    const containers = flat.nodes.filter(it => it.inner)
+      .sort((a, b) => b.depth - a.depth);
+    for (const c of containers) {
+      const kids = flat.nodes.filter(sub =>
+        sub.key.startsWith(c.key + "/")
+        && !sub.key.slice(c.key.length + 1).includes("/"));
+      if (!kids.length) continue;
+      const bottom = partRows(kids);
+      const newH = Math.max(c.h, bottom + 18 - c.y);
+      if (newH !== c.h) {
+        c.h = newH;
+        const cc = state.cardEls.get(c.key);
+        if (cc) cc.style.height = `${c.h}px`;
       }
     }
+    partRows(flat.nodes.filter(it => it.depth === 0));
   }
 
   const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
@@ -774,12 +801,17 @@ function render() {
       const rowPort = condLabels.length && A.condPorts
         ? A.condPorts[b.node.name] : null;
       if (rowPort != null) {
-        const side = portCX(B) >= A.x + A.w / 2 ? 1 : -1;
+        // departs AT the row's dot, horizontal tangent out, vertical
+        // tangent in — control distances scale with the actual gap so
+        // a near neighbour gets a tight elbow, not a balloon
+        const side = rowPort.side;
         const x1 = side > 0 ? A.x + A.w : A.x;
-        const y1 = A.y + rowPort;
+        const y1 = A.y + rowPort.y;
         const x2 = portCX(B), y2 = B.y;
+        const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5));
+        const c2 = Math.max(26, Math.min(72, Math.max(1, y2 - y1) * 0.5));
         p.setAttribute("d",
-          `M ${x1} ${y1} C ${x1 + side * 58} ${y1}, ${x2} ${y2 - 64}, ${x2} ${y2}`);
+          `M ${x1} ${y1} C ${x1 + side * c1} ${y1}, ${x2} ${y2 - c2}, ${x2} ${y2}`);
         p.dataset.fromRow = "1";
       } else {
         p.setAttribute("d", routeAvoiding(A, B, obstacles));
