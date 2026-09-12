@@ -113,7 +113,10 @@ class ProjectWatcher:
         import hashlib
 
         digest = hashlib.sha1(str(self.root.resolve()).encode()).hexdigest()[:12]
-        return f"ir:{digest}"
+        # bump the prefix when the EXTRACTOR changes shape — the cached
+        # entry is validated by project-file fingerprints only, so a new
+        # extractor field would otherwise be masked by warm caches
+        return f"ir2:{digest}"
 
     def _load_cache(self) -> None:
         raw = self.cache.get_json(self._cache_key())

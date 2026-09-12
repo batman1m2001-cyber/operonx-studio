@@ -1026,3 +1026,7 @@ button.pchip.pref:hover { border-color: #8fafd0; }
   border-radius: 42px 54px 46px 50px / 34px 40px 36px 42px;
   padding: 13px 20px 11px 24px;
 }
+
+/* PARENT-override chips: a real write into the container's variable */
+.pchip.ppar { color: #8a5316; border-color: #e2cf9a; background: #fbf5e6;
+  font-weight: 600; }

@@ -693,3 +693,47 @@ def test_projects_health_reports_shape_and_traces(client, project, tmp_path):
     assert info["ok"] is True
     assert info["graphs"] == 1 and info["ops"] >= 1
     assert info["runs"] == 1 and info["newest"] > 0
+
+
+def test_parent_exports_reach_the_ir(client, tmp_path):
+    """`member["x"] >> PARENT["y"]` is a real override — the only kind
+    of output link the viewer may draw — and must survive extraction."""
+    root = tmp_path / "exporter"
+    root.mkdir()
+    (root / "main.py").write_text('''
+from operonx.core import graph, op, START, END, PARENT
+
+@op
+def inner_op(text: str = "hi"):
+    return {"loud": text.upper()}
+
+@graph
+def child():
+    a = inner_op(text=PARENT["text"])
+    a["loud"] >> PARENT["shout"]
+    START >> a >> END
+
+@op
+def use(shout: str = ""):
+    return {"done": True}
+
+@graph
+def flow():
+    c = child(text="hello")
+    u = use(shout=c["shout"])
+    START >> c >> u >> END
+''', encoding="utf-8")
+    (root / "operonx.toml").write_text('''
+[project]
+name = "exporter"
+
+[[graph]]
+name  = "flow"
+entry = "main:flow"
+''', encoding="utf-8")
+    pid = _open(client, root)
+    data = client.get(f"/api/p/{pid}/ir").json()
+    graph = next(g for g in data["graphs"] if g["name"] == "flow")
+    c = next(n for n in graph["nodes"] if n["name"] == "c")
+    exports = c["graph"]["exports"]
+    assert {"from": "a", "output": "loud", "as": "shout"} in exports

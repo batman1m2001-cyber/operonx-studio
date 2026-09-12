@@ -165,6 +165,8 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
         "name": graph.get("name"),
         "entries": graph.get("entries") or [],
         "exits": graph.get("exits") or [],
+        # `member["x"] >> PARENT["y"]` writes — the true output links
+        "exports": graph.get("exports") or [],
         "width": layout.width,
         "height": layout.height,
         "nodes": [

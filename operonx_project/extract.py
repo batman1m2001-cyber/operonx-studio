@@ -383,6 +383,17 @@ def _subgraph(g: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[
         "entries": list(_slot(g, "entries") or []),
         "exits": list(_slot(g, "exits") or []),
     }
+    # The author's `member["x"] >> PARENT["y"]` writes — the only edges
+    # that genuinely OVERRIDE another op's variable. GraphOp keeps them
+    # in _out_vars as {op_name: {src_var: dest_var}}; without this the
+    # viewer cannot tell an export from an ordinary downstream pull.
+    exports = []
+    for op_name, mapping in (_slot(g, "_out_vars") or {}).items():
+        for src_var, dest_var in (mapping or {}).items():
+            exports.append({"from": op_name.split(".")[-1],
+                            "output": src_var, "as": dest_var})
+    if exports:
+        out["exports"] = exports
     if loops:
         out["loops"] = loops
     rewritten = _slot(g, "_rewritten_from")

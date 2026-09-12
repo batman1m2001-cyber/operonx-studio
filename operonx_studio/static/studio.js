@@ -524,21 +524,6 @@ function render() {
     if (!clash) x.y += 70;
   }
 
-  const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
-  const maxY = Math.max(model.h, ...flat.nodes.map(n => n.y + n.h));
-  // headroom above: the transport card, or just the client ⇣ stub;
-  // width includes the right margin where loop returns bulge
-  const minY = gatesIn.length
-    ? Math.min(...gatesIn.map(x => x.y)) - 110
-    : -NODE_H - 140;
-  state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: maxY + 175};
-
-  svg.setAttribute("width", maxX + 620);
-  svg.setAttribute("height", maxY + 640);
-  svg.style.left = "-200px";
-  svg.style.top = "-320px";
-  svg.setAttribute("viewBox", `-200 -320 ${maxX + 620} ${maxY + 640}`);
-
   // Cards go into the DOM FIRST, so every edge, frame and stub below
   // works from each card's REAL height — the layout's 64px is only a
   // guess, and a door wearing a transport line runs ~90px tall. The
@@ -553,6 +538,62 @@ function render() {
     const card = state.cardEls.get(it.key);
     if (card && card.offsetHeight) it.h = Math.max(it.h, card.offsetHeight);
   }
+
+  // Rows part for real heights: semantic zoom grows cards, and a fixed
+  // row pitch would let them collide (the 80%→100% mess). Each top-
+  // level row slides down just enough to clear whatever it actually
+  // overlaps horizontally; containers carry their members with them.
+  {
+    const top = flat.nodes.filter(it => it.depth === 0);
+    const rows = new Map();
+    for (const it of top) {
+      const key = Math.round(it.y);
+      if (!rows.has(key)) rows.set(key, []);
+      rows.get(key).push(it);
+    }
+    const placedBoxes = [];
+    for (const y of [...rows.keys()].sort((a, b) => a - b)) {
+      const items = rows.get(y);
+      let minTop = y;
+      for (const it of items) {
+        for (const p of placedBoxes) {
+          if (p.x < it.x + it.w && p.x + p.w > it.x) {
+            minTop = Math.max(minTop, p.bottom + 46);
+          }
+        }
+      }
+      const delta = minTop - y;
+      if (delta > 0) {
+        for (const it of items) {
+          for (const sub of flat.nodes) {
+            if (sub === it || sub.key.startsWith(it.key + "/")) {
+              sub.y += delta;
+              const c = state.cardEls.get(sub.key);
+              if (c) c.style.top = `${sub.y}px`;
+            }
+          }
+        }
+      }
+      for (const it of items) {
+        placedBoxes.push({x: it.x, w: it.w, bottom: it.y + it.h});
+      }
+    }
+  }
+
+  const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
+  const maxY = Math.max(model.h, ...flat.nodes.map(n => n.y + n.h));
+  // headroom above: the transport card, or just the client ⇣ stub;
+  // width includes the right margin where loop returns bulge
+  const minY = gatesIn.length
+    ? Math.min(...gatesIn.map(x => x.y)) - 110
+    : -NODE_H - 140;
+  state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: maxY + 175};
+
+  svg.setAttribute("width", maxX + 620);
+  svg.setAttribute("height", maxY + 640);
+  svg.style.left = "-200px";
+  svg.style.top = "-320px";
+  svg.setAttribute("viewBox", `-200 -320 ${maxX + 620} ${maxY + 640}`);
 
   // Door frames paint first among the wires, everything sits on top. A
   // frame hugs ITS gate only — a full-height band through a wrapped
@@ -1562,7 +1603,10 @@ function portsSection(it) {
     }
   }
 
-  // outputs: who consumes each one, right here in this graph
+  // outputs: a LINK appears only for a real WRITE — the author's
+  // `member["x"] >> PARENT["y"]`, where this output overrides another
+  // op's variable. A downstream pull is the CONSUMER's own wiring and
+  // shows on the consumer's input side; here it is only a tooltip.
   const consumers = {};
   for (const m of holder.nodes || []) {
     for (const i2 of m.inputs || []) {
@@ -1572,11 +1616,17 @@ function portsSection(it) {
       }
     }
   }
+  const exports = {};
+  for (const e2 of holder.exports || []) {
+    if (e2.from === n.name) (exports[e2.output] = exports[e2.output] || []).push(e2.as);
+  }
   for (const o of n.outputs || []) {
+    const links = (exports[o] || []).map(dest =>
+      chip("ppar", `PARENT.${dest}`,
+        `${n.name}["${o}"] >> PARENT["${dest}"] — overrides the container's '${dest}'`));
+    const r = row("out", o, links);
     const who = [...new Set(consumers[o] || [])];
-    row("out", o, who.length
-      ? who.map(w => chip("pref", w, `${n.name}.${o} → ${w}`, () => jumpTo(w, it.depth)))
-      : [chip("pmuted", n.end ? "graph exit" : "unconsumed here")]);
+    if (who.length) r.title = `pulled downstream by: ${who.join(", ")}`;
   }
   if (inZone.childNodes.length) sec.append(inZone);
   if (outZone.childNodes.length) sec.append(outZone);
