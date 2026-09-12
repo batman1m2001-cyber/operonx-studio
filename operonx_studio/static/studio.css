@@ -270,13 +270,9 @@ header.bar select {
               inset 0 0 16px rgba(255, 255, 255, .55);
 }
 .node.cell::before {
-  /* the nucleus halo, glued to the NUCLEUS — anchored to the icon at
-     the top, not the card's centre, so a grown card (semantic zoom)
-     doesn't leave it floating mid-cell like a smudge */
-  left: 10px; top: 3px; bottom: auto; width: 38px; height: 38px;
-  transform: none; border-radius: 50%;
-  background: radial-gradient(circle,
-    color-mix(in srgb, var(--kind, var(--k-func)) 18%, transparent), transparent 70%);
+  /* no nucleus halo on the white ground — its soft square bounding
+     box read as a dirty rectangle shadow behind every icon */
+  display: none;
 }
 .node.cell .badges { margin-left: 30px; margin-top: 3px; }
 .node.cell .nname { margin-left: 0; }
@@ -518,10 +514,10 @@ body.resizing { user-select: none; cursor: col-resize; }
   letter-spacing: .08em; color: var(--accent-deep); font-weight: 700; }
 .foldbox[open] summary { margin-bottom: 8px; }
 .codeblock {
-  margin: 0; padding: 10px 12px; background: #faf5e3;
-  border-radius: var(--r-sm); font-size: 11.5px; line-height: 1.55;
-  white-space: pre; overflow: auto; max-height: 360px; color: #4a4234;
-  border: 1px solid var(--line-soft);
+  margin: 0; padding: 8px 0; background: #f6f8fa;
+  border-radius: var(--r-sm); font-size: 12px; line-height: 1.45;
+  white-space: pre; overflow: auto; max-height: 380px; color: #1f2328;
+  border: 1px solid #d8dee4; tab-size: 4;
 }
 .plabel {
   font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
@@ -650,12 +646,16 @@ body.resizing { user-select: none; cursor: col-resize; }
 
 /* tinted code */
 .codeblock .cline { display: flex; white-space: pre; }
-.codeblock .lno { flex: none; width: 34px; color: #cbbd93; text-align: right;
+.codeblock .cline:hover { background: #eef1f4; }
+.codeblock .ctext { white-space: pre; flex: 1; padding-right: 12px; }
+.codeblock .lno { flex: none; width: 40px; color: #8c959f; text-align: right;
+  border-right: 1px solid #d8dee4; background: #f6f8fa;
+  position: sticky; left: 0;
   padding-right: 10px; user-select: none; }
-.codeblock .ck { color: #8b46c9; }
-.codeblock .cs { color: #9c6a12; }
-.codeblock .cc { color: #8f9668; font-style: italic; }
-.codeblock .cd { color: #2f6fd0; }
+.codeblock .ck { color: #cf222e; }
+.codeblock .cs { color: #0a3069; }
+.codeblock .cc { color: #57606a; font-style: italic; }
+.codeblock .cd { color: #8250df; }
 
 /* follow pin */
 .followpin { display: flex; gap: 7px; align-items: center; font-size: 12px;
@@ -995,7 +995,7 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .parr { flex: none; width: 18px; text-align: center; font-weight: 700;
   font-size: 13px; }
 .parr.in { color: #6a9bd4; }
-.parr.out { color: #34608c; }
+.parr.out { color: #b3661a; }
 
 /* semantic zoom: close up, cards say more — text centred with real
    side insets so it stays inside the cell's curved membrane */
@@ -1007,7 +1007,7 @@ button.pchip.pref:hover { border-color: #8fafd0; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail .dports { font-size: 9.5px; color: #5c83ab; margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.detail .dports.dout { color: #34608c; }
+.detail .dports.dout { color: #a8642a; }
 /* far out, badges are noise too */
 #world[data-zoom="lo"] .node .badges .badge:not(.run):not(.err) { display: none; }
 
@@ -1015,7 +1015,14 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .pzone { border-radius: var(--r-md); padding: 7px 9px; margin: 6px 0; }
 .pzone.pzin { background: #f6fafd; border: 1px solid #e0ebf5;
   border-left: 3px solid #6a9bd4; }
-.pzone.pzout { background: #eef3f9; border: 1px solid #d6e2ee;
-  border-left: 3px solid #34608c; }
+.pzone.pzout { background: #fbf6ee; border: 1px solid #eee1c8;
+  border-left: 3px solid #b3661a; }
 .pzin .pname { color: #3d6f9e; }
-.pzout .pname { color: #274a6e; }
+.pzout .pname { color: #8a5316; }
+
+/* close up, the cell relaxes: gentler pixel radii and more padding so
+   the grown card never pushes its icon into the membrane */
+#world[data-zoom="hi"] .node.cell {
+  border-radius: 42px 54px 46px 50px / 34px 40px 36px 42px;
+  padding: 13px 20px 11px 24px;
+}

@@ -1458,7 +1458,12 @@ function codeSection(n) {
   n.code.replace(/\s+$/, "").split("\n").forEach((line, i) => {
     const row = el("div", "cline");
     row.append(el("span", "lno", String((loc && loc.line || 1) + i)));
-    row.append(tintLine(line, st));
+    // the tinted tokens live inside ONE pre-whitespace span — as bare
+    // flex children, whitespace-only text nodes (indentation, the gap
+    // in `async def`) are silently discarded by flex layout
+    const text = el("span", "ctext");
+    text.append(tintLine(line, st));
+    row.append(text);
     pre.append(row);
   });
   sec.append(pre);
