@@ -534,6 +534,46 @@ function render() {
     state.cardEls.set(it.key, card);
     nodesBox.append(card);
   }
+  // WIDTH pass first — the root fix for every truncation whack-a-mole:
+  // a card is exactly as wide as its name line (and, on a decision
+  // card, its longest condition) needs, no wider. scrollWidth minus
+  // clientWidth on the one-line elements says how much is missing
+  // (positive) or spare (negative); the card resizes by that amount,
+  // clamped, and KEEPS ITS SLOT CENTER so the layout's spacing holds —
+  // slack between 316px slots absorbs growth up to the cap.
+  for (const it of flat.nodes) {
+    if (it.inner || it.node.kind === "__boundary__") continue;
+    const card = state.cardEls.get(it.key);
+    if (!card || !card.offsetHeight) continue;
+    const els = [...card.querySelectorAll(".ntext, .brcond")];
+    if (!els.length) {
+      // gates: plain name line, plus the transport line below it
+      for (const sel of [".nname", ".nkind"]) {
+        const e = card.querySelector(sel);
+        if (e) els.push(e);
+      }
+    }
+    if (els.length) {
+      // scrollWidth never reads below clientWidth, so a stretched flex
+      // span hides how little it truly needs — pin it to max-content
+      // for one frame to get the intrinsic width
+      const intrinsic = (e) => {
+        const saved = e.style.cssText;
+        e.style.flex = "none"; e.style.width = "max-content";
+        const w = e.offsetWidth;
+        e.style.cssText = saved;
+        return w;
+      };
+      const need = Math.max(...els.map(e => intrinsic(e) - e.clientWidth));
+      const newW = Math.max(180, Math.min(310, Math.ceil(it.w + need + 8)));
+      if (newW !== it.w) {
+        it.x += (it.w - newW) / 2;
+        it.w = newW;
+        card.style.width = `${newW}px`;
+        card.style.left = `${it.x}px`;
+      }
+    }
+  }
   for (const it of flat.nodes) {
     if (it.inner || it.node.kind === "__boundary__") continue;
     const card = state.cardEls.get(it.key);
