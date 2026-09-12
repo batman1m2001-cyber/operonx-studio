@@ -270,11 +270,13 @@ header.bar select {
               inset 0 0 16px rgba(255, 255, 255, .55);
 }
 .node.cell::before {
-  /* the nucleus halo, not a strip */
-  left: 8px; top: 50%; bottom: auto; width: 40px; height: 40px;
-  transform: translateY(-50%); border-radius: 50%;
+  /* the nucleus halo, glued to the NUCLEUS — anchored to the icon at
+     the top, not the card's centre, so a grown card (semantic zoom)
+     doesn't leave it floating mid-cell like a smudge */
+  left: 10px; top: 3px; bottom: auto; width: 38px; height: 38px;
+  transform: none; border-radius: 50%;
   background: radial-gradient(circle,
-    color-mix(in srgb, var(--kind, var(--k-func)) 20%, transparent), transparent 70%);
+    color-mix(in srgb, var(--kind, var(--k-func)) 18%, transparent), transparent 70%);
 }
 .node.cell .badges { margin-left: 30px; margin-top: 3px; }
 .node.cell .nname { margin-left: 0; }
@@ -1008,3 +1010,12 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .detail .dports.dout { color: #34608c; }
 /* far out, badges are noise too */
 #world[data-zoom="lo"] .node .badges .badge:not(.run):not(.err) { display: none; }
+
+/* ── port zones: each direction has its own ground and name colour ── */
+.pzone { border-radius: var(--r-md); padding: 7px 9px; margin: 6px 0; }
+.pzone.pzin { background: #f6fafd; border: 1px solid #e0ebf5;
+  border-left: 3px solid #6a9bd4; }
+.pzone.pzout { background: #eef3f9; border: 1px solid #d6e2ee;
+  border-left: 3px solid #34608c; }
+.pzin .pname { color: #3d6f9e; }
+.pzout .pname { color: #274a6e; }

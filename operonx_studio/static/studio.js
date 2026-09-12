@@ -1503,8 +1503,11 @@ function portsSection(it) {
   };
 
   // one visual carries the whole meaning: `name ← source` for inputs,
-  // `name → consumer` for outputs — the arrow between name and link
-  // says which way the value flows, no headers, no bullets
+  // `name → consumer` for outputs — the arrow says which way the value
+  // flows, and each direction lives in its own tinted zone with its
+  // own name colour. No headers, no bullets.
+  const inZone = el("div", "pzone pzin");
+  const outZone = el("div", "pzone pzout");
   const row = (dir, name, links) => {
     const r = el("div", "portrow");
     r.append(el("span", "pname mono", name));
@@ -1512,7 +1515,7 @@ function portsSection(it) {
     const box = el("span", "plinks");
     for (const l of links) box.append(l);
     r.append(box);
-    sec.append(r);
+    (dir === "in" ? inZone : outZone).append(r);
     return r;
   };
 
@@ -1570,6 +1573,8 @@ function portsSection(it) {
       ? who.map(w => chip("pref", w, `${n.name}.${o} → ${w}`, () => jumpTo(w, it.depth)))
       : [chip("pmuted", n.end ? "graph exit" : "unconsumed here")]);
   }
+  if (inZone.childNodes.length) sec.append(inZone);
+  if (outZone.childNodes.length) sec.append(outZone);
   if (!(n.inputs || []).length && !(n.outputs || []).length) {
     sec.append(el("div", "note", "no declared ports"));
   }
