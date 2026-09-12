@@ -1030,3 +1030,38 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 /* PARENT-override chips: a real write into the container's variable */
 .pchip.ppar { color: #8a5316; border-color: #e2cf9a; background: #fbf5e6;
   font-weight: 600; }
+
+/* ── the router as a decision card: one row per condition ─────────── */
+.node.branch {
+  border-radius: 14px; padding: 9px 12px 8px 14px;
+  border: 2px solid color-mix(in srgb, var(--k-branch) 45%, #dbe4f0);
+  background: linear-gradient(180deg, #fffdfa, #fbf6ee);
+}
+.node.branch .brlist { margin-top: 6px; display: flex;
+  flex-direction: column; gap: 3px; }
+.brrow { position: relative; display: flex; align-items: center;
+  border: 1px solid #ecdfc8; background: #fff; border-radius: 7px;
+  padding: 2px 16px 2px 8px; min-height: 18px; }
+.brcond { font-size: 10.5px; color: #a35d13; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.brrow.relse .brcond { color: var(--muted); font-style: italic; }
+.brrow.relse { border-style: dashed; }
+.brport { position: absolute; right: -6px; top: 50%; margin-top: -5px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #f2d6ae, #c9822e 75%);
+  border: 1.5px solid #a5691f; box-shadow: 0 0 5px rgba(179, 102, 26, .4); }
+.brrow.relse .brport { background: #efe6d6; border-color: #c9b48d;
+  box-shadow: none; }
+
+/* decision table in the inspector */
+.drow { display: flex; align-items: center; gap: 8px; padding: 6px 9px;
+  border: 1px solid var(--line); border-radius: 9px; margin-bottom: 6px;
+  background: #fff; }
+.drow .dcond { flex: 1; font-size: 12px; color: #a35d13; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drow.relse .dcond { color: var(--muted); font-style: italic; }
+.drow.relse { border-style: dashed; }
+.drow.dnever { opacity: .5; }
+.drow.dlatest { border-color: #c9822e; background: #fdf8ef; }
+.dmeta { display: flex; gap: 4px; }
+.chip.clatest { color: #a35d13; border-color: #e2c087; background: #fbf3e2; }

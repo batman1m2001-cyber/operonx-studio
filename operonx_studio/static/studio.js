@@ -537,6 +537,17 @@ function render() {
     if (it.inner || it.node.kind === "__boundary__") continue;
     const card = state.cardEls.get(it.key);
     if (card && card.offsetHeight) it.h = Math.max(it.h, card.offsetHeight);
+    if (card && it.node.routes && it.node.routes.length) {
+      // each condition row is a wired exit: record where the wire
+      // leaves (first row per target decides)
+      it.condPorts = {};
+      for (const rrow of card.querySelectorAll(".brrow")) {
+        const t = rrow.dataset.target;
+        if (!(t in it.condPorts)) {
+          it.condPorts[t] = rrow.offsetTop + rrow.offsetHeight / 2;
+        }
+      }
+    }
   }
 
   // Rows part for real heights: semantic zoom grows cards, and a fixed
@@ -758,7 +769,21 @@ function render() {
         + Math.abs((A.y + A.h / 2) - (B.y + B.h / 2)) * 0.08;
       addGlyph(bulge + 4, (A.y + A.h / 2 + B.y + B.h / 2) / 2, "↺ loop", "back-label");
     } else {
-      p.setAttribute("d", routeAvoiding(A, B, obstacles));
+      // a condition edge leaves ITS OWN ROW on the decision card — the
+      // wire starts beside the condition that fires it
+      const rowPort = condLabels.length && A.condPorts
+        ? A.condPorts[b.node.name] : null;
+      if (rowPort != null) {
+        const side = portCX(B) >= A.x + A.w / 2 ? 1 : -1;
+        const x1 = side > 0 ? A.x + A.w : A.x;
+        const y1 = A.y + rowPort;
+        const x2 = portCX(B), y2 = B.y;
+        p.setAttribute("d",
+          `M ${x1} ${y1} C ${x1 + side * 58} ${y1}, ${x2} ${y2 - 64}, ${x2} ${y2}`);
+        p.dataset.fromRow = "1";
+      } else {
+        p.setAttribute("d", routeAvoiding(A, B, obstacles));
+      }
       if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
     let drawn = p;
@@ -796,16 +821,17 @@ function render() {
           : `∥ parallel${consume.max ? "≤" + consume.max : ""}`, "");
       }
       if (condLabels.length) {
-        // n8n-style: the wire stays clean; the condition is one hover
-        // away — on the beam itself AND on a small ? pill, because a
-        // 4px path is a cruel hover target
         const tip = document.createElementNS(SVGNS, "title");
         tip.textContent = condLabels.join(" | ");
         drawn.append(tip);
-        const at = along(drawn, 0.45, 4);
-        if (at) addGlyph(at[0], at[1], "?",
-                         "condglyph" + (isElse ? " relse" : ""),
-                         condLabels.join(" | "));
+        // the ? pill only when the wire does NOT leave a decision row —
+        // a row already shows its condition in full
+        if (p.dataset.fromRow !== "1") {
+          const at = along(drawn, 0.45, 4);
+          if (at) addGlyph(at[0], at[1], "?",
+                           "condglyph" + (isElse ? " relse" : ""),
+                           condLabels.join(" | "));
+        }
       }
     }
   }
@@ -1003,6 +1029,26 @@ function opCard(it) {
         : n.serve_role === "ingress" ? "ingress · client → run"
                                      : "egress · run → client"));
     if (t && t.description) card.title = t.description;
+  } else if (n.routes && n.routes.length) {
+    // a router is a DECISION CARD: one row per condition, each row
+    // owning its own exit — the wire leaves the row that fires it,
+    // n8n-style, so the choice is readable on the canvas itself
+    card.classList.add("branch");
+    const line = el("div", "nname");
+    line.append(el("span", "nicon", kindIcon(n)));
+    line.append(n.name);
+    card.append(line);
+    card.title = n.kind + (n.bound ? ` · ${n.bound}` : "");
+    const list = el("div", "brlist");
+    for (const r of n.routes) {
+      const rrow = el("div", "brrow" + (r.condition === "else" ? " relse" : ""));
+      rrow.dataset.target = r.target;
+      rrow.append(el("span", "brcond mono", r.condition));
+      rrow.append(el("span", "brport"));
+      rrow.title = `${r.condition} → ${r.target}`;
+      list.append(rrow);
+    }
+    card.append(list);
   } else {
     // a brain cell, with two membrane variants so a row of cells reads
     // organic instead of stamped
@@ -1063,7 +1109,8 @@ function opCard(it) {
   }
   card.append(badges);
   card.append(el("span", "port in"));
-  card.append(el("span", "port out"));
+  // a router's exits are its condition rows — no anonymous base port
+  if (!(n.routes && n.routes.length)) card.append(el("span", "port out"));
   card.onclick = (ev) => { ev.stopPropagation(); select(it.key); };
   if (n.graph) card.ondblclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
   return card;
@@ -1308,38 +1355,47 @@ function valuesSection(n, execP) {
   return sec;
 }
 
-/* A branch's whole meaning: which condition routes where. With a run
- * painted, the routes that actually fired get their counts. */
+/* The decision table: every condition, its target, and — with a run
+ * painted — how often each fired and which fired last. Rows that never
+ * fired dim; the latest choice is marked. */
 function routeSection(it, execP) {
   const n = it.node;
   const sec = el("section");
-  sec.append(el("div", "stitle", "Routes"));
-  const rows = new Map();
+  sec.append(el("div", "stitle", "Decision table"));
+  const byTarget = new Map();
   for (const r of n.routes) {
-    const row = el("div", "routerow");
-    row.append(el("span", `routecond mono${r.condition === "else" ? " relse" : ""}`, r.condition));
-    row.append(el("span", "routearrow", "→"));
-    const tgt = el("button", "routetarget mono", r.target);
-    tgt.onclick = () => {
-      for (const [k, item] of state.rendered) {
-        if (item.node.name === r.target && item.depth === it.depth) { select(k); return; }
-      }
-    };
+    const row = el("div", "drow" + (r.condition === "else" ? " relse" : ""));
+    const cond = el("div", "dcond mono", r.condition);
+    cond.title = r.condition;
+    row.append(cond);
+    row.append(el("span", "parr out", "→"));
+    const tgt = el("button", "pchip pref", r.target);
+    tgt.onclick = () => jumpTo(r.target, it.depth);
     row.append(tgt);
-    rows.set(r.target, row);
+    const meta = el("span", "dmeta");
+    row.append(meta);
+    if (!byTarget.has(r.target)) byTarget.set(r.target, []);
+    byTarget.get(r.target).push({row, meta});
     sec.append(row);
   }
   if (execP) execP.then(data => {
+    if (!data.executions.length) return;
     const fired = {};
     for (const ex of data.executions) {
       const t = (ex.outputs || {}).target;
       if (t) fired[t] = (fired[t] || 0) + 1;
     }
-    for (const [target, count] of Object.entries(fired)) {
-      const row = rows.get(target);
-      if (row) {
-        row.classList.add("fired");
-        row.append(el("span", "chip cfired", `${count}×`));
+    const last = data.executions[data.executions.length - 1];
+    const latest = (last.outputs || {}).target;
+    for (const [target, entries] of byTarget) {
+      const count = fired[target] || 0;
+      for (const {row, meta} of entries) {
+        if (count) meta.append(el("span", "chip cfired", `${count}×`));
+        else row.classList.add("dnever");
+        if (target === latest) {
+          row.classList.add("dlatest");
+          meta.append(el("span", "chip clatest", "latest"));
+        }
       }
     }
   }).catch(() => {});
@@ -2113,7 +2169,7 @@ function buildLegend() {
     box.append(r);
   };
   row(legendSample(""), "data flows this way — the output feeds the next op");
-  row(legendSample("cond"), "if/else route — hover the ? on the wire for the condition");
+  row(legendSample("cond"), "if/else route — the condition sits in its own row on the router card, and the wire leaves that row");
   row(legendSample("ecore cond relse", true), "else — fires only when no condition matched");
   row(legendSample("soft", true), "soft merge — may not fire at all");
   row(el("span", "lglyph", "↺"), "a loop returns underneath, back to where the author's cycle begins");
