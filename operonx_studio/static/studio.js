@@ -1046,6 +1046,24 @@ function boundaryCard(it) {
   return card;
 }
 
+// the op's bound (SYNC / IO / CPU) and the generator flash ride the
+// name line as two quiet buttons, instead of hiding below the fold
+function nameChips(n) {
+  if (!n.bound && !n.is_gen) return null;
+  const box = el("span", "nchips");
+  if (n.bound) {
+    const c = el("span", "nchip", String(n.bound).toUpperCase());
+    c.title = `execution bound: ${n.bound}`;
+    box.append(c);
+  }
+  if (n.is_gen) {
+    const c = el("span", "nchip gen", "⚡");
+    c.title = "Generator: consumers dispatch per yield, not per run.";
+    box.append(c);
+  }
+  return box;
+}
+
 function opCard(it) {
   const n = it.node;
   if (n.kind === "__boundary__") return boundaryCard(it);
@@ -1075,9 +1093,11 @@ function opCard(it) {
     // owning its own exit — the wire leaves the row that fires it,
     // n8n-style, so the choice is readable on the canvas itself
     card.classList.add("branch");
-    const line = el("div", "nname");
+    const line = el("div", "nname nline");
     line.append(el("span", "nicon", kindIcon(n)));
-    line.append(n.name);
+    line.append(el("span", "ntext", n.name));
+    const chips = nameChips(n);
+    if (chips) line.append(chips);
     card.append(line);
     card.title = n.kind + (n.bound ? ` · ${n.bound}` : "");
     const list = el("div", "brlist");
@@ -1094,17 +1114,18 @@ function opCard(it) {
     // a brain cell, with two membrane variants so a row of cells reads
     // organic instead of stamped
     card.classList.add("cell", n.name.length % 2 ? "alt" : "base");
-    const line = el("div", "nname");
+    const line = el("div", "nname nline");
     line.append(el("span", "nicon", kindIcon(n)));
-    line.append(n.name);
+    line.append(el("span", "ntext", n.name));
+    const chips = nameChips(n);
+    if (chips) line.append(chips);
     card.append(line);
-    // the kind/bound line was card noise at fit-zoom; it lives in the
+    // the kind line was card noise at fit-zoom; it lives in the
     // tooltip and the inspector — and, zoomed in close, on the card
     // itself (the .detail block shows only at [data-zoom="hi"])
     card.title = n.kind + (n.bound ? ` · ${n.bound}` : "") + (n.is_gen ? " · generator" : "");
     const det = el("div", "detail");
-    det.append(el("div", "dkind",
-      n.kind + (n.bound ? ` · ${n.bound}` : "") + (n.is_gen ? " · generator" : "")));
+    det.append(el("div", "dkind", n.kind));
     const brief = (names) => names.length > 3
       ? names.slice(0, 3).join(", ") + ` +${names.length - 3}`
       : names.join(", ");
@@ -1126,10 +1147,6 @@ function opCard(it) {
   } else if (n.loop) {
     const b = el("span", "badge loop", "↺ loop");
     b.title = "Member of a rewritten cycle; the return edge below is what the author wrote.";
-    badges.append(b);
-  } else if (n.is_gen) {
-    const b = el("span", "badge gen", "⚡");
-    b.title = "Generator: consumers dispatch per yield, not per run.";
     badges.append(b);
   }
 

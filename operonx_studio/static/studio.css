@@ -302,6 +302,21 @@ body.resizing { user-select: none; cursor: col-resize; }
 }
 .node .nname { font-weight: 650; font-size: 13px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.005em; }
+/* name line with right-hand chips: bound + generator flash */
+.node .nname.nline { display: flex; align-items: center; gap: 5px; }
+/* the flex gap already spaces the icon — its own margin would double up */
+.nname.nline .nicon { margin-right: 0; }
+.nname.nline .ntext { flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; }
+.nchips { display: inline-flex; gap: 3px; flex: none; }
+.nchip { font-size: 8px; font-weight: 600; letter-spacing: 0;
+  padding: 0.5px 4px; border-radius: 999px; line-height: 1.5;
+  color: var(--muted); border: 1px solid var(--line);
+  background: var(--panel-2); }
+.nchip.gen { padding: 0.5px 3px; }
+.nchip.gen { color: #a35d13; border-color: #e2c087; background: #fbf3e2; }
+/* specks at far zoom — the silhouette is the message out there */
+#world[data-zoom="lo"] .nchips { display: none; }
 .node .nkind { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .node .badges { margin-top: 5px; display: flex; gap: 5px; flex-wrap: wrap; }
 .badge {
@@ -1024,7 +1039,7 @@ button.pchip.pref:hover { border-color: #8fafd0; }
    the grown card never pushes its icon into the membrane */
 #world[data-zoom="hi"] .node.cell {
   border-radius: 42px 54px 46px 50px / 34px 40px 36px 42px;
-  padding: 13px 20px 11px 24px;
+  padding: 13px 15px 11px 21px;
 }
 
 /* PARENT-override chips: a real write into the container's variable */
