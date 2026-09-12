@@ -502,24 +502,80 @@ def _parse_resources(text: str) -> Tuple[List[str], str]:
     return [], text
 
 
-def extract_resources(manifest: Manifest) -> Dict[str, Any]:
-    """Declared resource keys and the env contract they imply.
+_SECRET_FIELD = re.compile(r"key|token|secret|password|credential", re.IGNORECASE)
 
-    Values are never read into the IR — only which keys exist and which
-    variables they demand. The ``.env`` form is derived from this, so there
-    is no second place to keep it in step.
+
+def _resolve_env_defaults(value: str) -> str:
+    """``${VAR:default}`` becomes its default; ``${VAR}`` stays visible.
+
+    A required variable has no safe value to show, so its placeholder is
+    kept as-is — the reader sees exactly which knob the field hangs on.
+    """
+
+    def sub(match: "re.Match[str]") -> str:
+        default = match.group(2)
+        return default if default else "${" + match.group(1) + "}"
+
+    return _ENV_PATTERN.sub(sub, value)
+
+
+def _resource_fields(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """The scalar, non-secret fields of one declared resource.
+
+    Secrets are dropped by field NAME, before any value handling — an
+    api_key's placeholder or default must never reach the IR.
+    """
+    fields: Dict[str, Any] = {}
+    for key, value in entry.items():
+        if _SECRET_FIELD.search(str(key)):
+            continue
+        if isinstance(value, str):
+            fields[key] = _resolve_env_defaults(value)
+        elif isinstance(value, (int, float, bool)):
+            fields[key] = value
+    return fields
+
+
+def extract_resources(manifest: Manifest) -> Dict[str, Any]:
+    """Declared resource keys, per-resource details, and the env contract.
+
+    Details carry only what a viewer may show: scalar fields with env
+    defaults resolved, secret-named fields dropped. An op's ``resource``
+    attribute names a SECOND-level entry (``llm.inhouse`` → "inhouse"),
+    so details are indexed by both levels — category and name.
     """
     keys: List[str] = []
     required: List[str] = []
     optional: Dict[str, str] = {}
+    details: Dict[str, Any] = {}
     for path in manifest.resources.files(manifest.root):
-        found, live = _parse_resources(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        found, live = _parse_resources(text)
         keys.extend(found)
         req, opt = _scan_env(live)
         required.extend(req)
         optional.update(opt)
+        try:
+            import yaml
+
+            loaded = yaml.safe_load(text)
+        except Exception:  # noqa: BLE001 - malformed file already handled above
+            loaded = None
+        if isinstance(loaded, dict):
+            for category, group in loaded.items():
+                if not isinstance(group, dict):
+                    continue
+                named = {k: v for k, v in group.items() if isinstance(v, dict)}
+                for name, entry in named.items():
+                    details[str(name)] = {"category": str(category),
+                                          **_resource_fields(entry)}
+                flat = {k: v for k, v in group.items() if not isinstance(v, dict)}
+                if flat:
+                    details.setdefault(str(category), {"category": str(category)})
+                    details[str(category)].update(_resource_fields(flat))
     return {
         "keys": sorted(set(keys)),
+        "details": details,
         "env": {"required": sorted(set(required)), "optional": dict(sorted(optional.items()))},
     }
 

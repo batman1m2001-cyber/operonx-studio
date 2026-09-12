@@ -102,7 +102,7 @@ const OP_VISUALS = {
   "FuncOp":            {icon: "ƒ", color: "var(--k-func)"},
   "GraphOp":           {icon: "▣", color: "var(--k-graph)"},
   "BranchOp":          {icon: "⑃", color: "var(--k-branch)"},
-  "LLMOp":             {icon: "✦", color: "var(--k-llm)"},
+  "LLMOp":             {icon: "✧", color: "var(--k-llm)"},
   "EmbeddingOp":       {icon: "⛁", color: "var(--k-res)"},
   "RerankOp":          {icon: "⛁", color: "var(--k-res)"},
   "VectorSearchOp":    {icon: "⛁", color: "var(--k-res)"},
@@ -114,7 +114,7 @@ const OP_VISUALS = {
   "DenoiseClassifier": {icon: "≈", color: "var(--k-audio)"},
 };
 const OP_FAMILIES = [
-  [/LLM|Chat|Completion/,                    {icon: "✦", color: "var(--k-llm)"}],
+  [/LLM|Chat|Completion/,                    {icon: "✧", color: "var(--k-llm)"}],
   [/Graph/,                                  {icon: "▣", color: "var(--k-graph)"}],
   [/Branch|Rout|Switch/,                     {icon: "⑃", color: "var(--k-branch)"}],
   [/Embed|Rerank|Search|Fetch|Retriev|Store/, {icon: "⛁", color: "var(--k-res)"}],
@@ -132,7 +132,51 @@ function visualOf(kind) {
 }
 
 function kindColor(node) { return visualOf(node.kind).color; }
-function kindIcon(node) { return visualOf(node.kind).icon; }
+
+/* An LLM op's icon is its BACKEND, not just "some LLM": the resource
+ * it names carries model / url / api_type, and those betray the
+ * provider. Glyphs are text-presentation (︎) so no emoji font paints
+ * over them. Unknown backends keep the generic hollow spark. */
+const LLM_PROVIDERS = {
+  claude: {icon: "✳︎", label: "Claude"},
+  gemini: {icon: "✦",  label: "Gemini"},
+  openai: {icon: "⬡",  label: "OpenAI"},
+  vllm:   {icon: "⚙︎", label: "vLLM"},
+  ollama: {icon: "◉",  label: "Ollama"},
+  mistral: {icon: "Ⓜ", label: "Mistral"},
+};
+
+function resourceOf(node) {
+  const name = Array.isArray(node.resource) ? node.resource[0] : node.resource;
+  return name ? ((state.ir.resources || {}).details || {})[name] || null : null;
+}
+
+function llmProvider(node) {
+  if (!(node.kind || "").match(/LLM|Chat|Completion/)) return null;
+  const det = resourceOf(node) || {};
+  const hay = [node.resource, det.api_type, det.provider, det.model,
+               det.base_url, det.url].filter(Boolean).join(" ").toLowerCase();
+  if (/claude|anthropic/.test(hay)) return "claude";
+  if (/gemini|generativelanguage|vertex/.test(hay)) return "gemini";
+  if (/mistral/.test(hay)) return "mistral";
+  if (/ollama|:11434/.test(hay)) return "ollama";
+  if (/gpt-|o[134]-mini|api\.openai\.com/.test(hay)) return "openai";
+  // an HF-style org/model id, or a self-hosted url, means a vLLM-class
+  // gateway even when it speaks the openai protocol
+  if (/vllm/.test(hay) || /^[\w.-]+\/[\w.-]+$/.test(det.model || "")
+      || (/localhost|127\.0\.0\.1|:8000\b/.test(hay))) return "vllm";
+  if (/openai/.test(hay)) return "openai";
+  return null;
+}
+
+function kindIcon(node) {
+  const v = visualOf(node.kind);
+  if (v.color === "var(--k-llm)") {
+    const p = llmProvider(node);
+    if (p) return LLM_PROVIDERS[p].icon;
+  }
+  return v.icon;
+}
 
 /* With a run painted, an op either executed or it didn't — and the
  * ones that didn't fade back, so the picture becomes the path taken.
@@ -1408,6 +1452,8 @@ function select(key) {
   // What flows in, what flows out, and WHO it links to — the essential
   // card, always visible, links as chips you can click, not dotted text.
   panel.append(portsSection(it));
+  const res = resourceSection(n);
+  if (res) panel.append(res);
   const llm = llmSection(n, execP);
   if (llm) panel.append(llm);
   if (n.routes) panel.append(routeSection(it, execP));
@@ -1528,6 +1574,44 @@ function routeSection(it, execP) {
 
 /* LLMOp: the traced conversation when there is one — role-labelled
  * bubbles with the response emphasized — else the authored templates. */
+/* The resource an op leans on is part of what the op IS — an LLM op
+ * without its model and endpoint is half a description. Secrets never
+ * reach the IR (masked at extraction), so everything here is safe. */
+function resourceSection(n) {
+  if (!n.resource) return null;
+  const names = Array.isArray(n.resource) ? n.resource : [n.resource];
+  const all = (state.ir.resources || {}).details || {};
+  const sec = el("section");
+  sec.append(el("div", "stitle", "Resource"));
+  const provider = llmProvider(n);
+  for (const name of names) {
+    const det = all[name];
+    const head = el("div", "resname mono");
+    head.append(`⛁ ${name}` + (det && det.category ? `  ·  ${det.category}` : ""));
+    sec.append(head);
+    if (provider) {
+      const row = el("div", "resrow");
+      row.append(el("span", "reskey", "backend"));
+      row.append(el("span", "resval resbackend",
+        `${LLM_PROVIDERS[provider].icon} ${LLM_PROVIDERS[provider].label}`));
+      sec.append(row);
+    }
+    if (det) {
+      for (const [k, v] of Object.entries(det)) {
+        if (k === "category") continue;
+        const row = el("div", "resrow");
+        row.append(el("span", "reskey", k));
+        row.append(el("span", "resval mono", String(v)));
+        sec.append(row);
+      }
+    } else {
+      sec.append(el("div", "note",
+        "named here, but no matching entry in the project's resource files"));
+    }
+  }
+  return sec;
+}
+
 function llmSection(n, execP) {
   if (!(n.kind || "").includes("LLM")) return null;
   const byName = {};
