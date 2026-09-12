@@ -1148,7 +1148,6 @@ function select(key) {
     panel.append(el("div", "rolenote dormnote",
       `— did not execute in ${state.run.run}. The values below are its wiring, not a recording.`));
   }
-  if (n.kind === "FuncOp" || n.code) panel.append(signatureLine(n));
   if (n.serve_role) {
     panel.append(el("div", "rolenote",
       n.serve_role === "ingress"
@@ -1170,28 +1169,15 @@ function select(key) {
     : null;
 
   if (execP) panel.append(valuesSection(n, execP));
+  // What flows in, what flows out, and WHO it links to — the essential
+  // card, always visible, links as chips you can click, not dotted text.
+  panel.append(portsSection(it));
   const llm = llmSection(n, execP);
   if (llm) panel.append(llm);
   if (n.routes) panel.append(routeSection(it, execP));
   if (execP) panel.append(executionsSection(n, execP));
   if (n.code) panel.append(codeSection(n));
   if (n.graph) panel.append(membersSection(it));
-  // Wiring, params and source: the main event without a run, one click
-  // away with one — the values above already answer the first question.
-  panel.append(wiringSection(it, !state.run));
-}
-
-function signatureLine(n) {
-  const params = (n.inputs || []).map(inp => {
-    const b = inp.binding || {};
-    if (b.kind === "literal" && ["string", "number", "boolean"].includes(typeof b.value)) {
-      const lit = JSON.stringify(b.value);
-      return inp.name + "=" + (lit.length > 14 ? lit.slice(0, 12) + "…" : lit);
-    }
-    return inp.name;
-  });
-  const outs = (n.outputs || []).join(", ");
-  return el("div", "sigline mono", `(${params.join(", ")}) → ${outs || "∅"}`);
 }
 
 function valuesSection(n, execP) {
@@ -1455,26 +1441,162 @@ function codeSection(n) {
   return sec;
 }
 
-function wiringSection(it, open) {
-  const n = it.node;
-  const box = el("details", "foldbox");
-  box.open = open;
-  const sum = el("summary");
-  sum.append(el("span", "stitle", "Wiring & params"));
-  box.append(sum);
-
-  for (const inp of n.inputs || []) box.append(inputRow(it, inp));
-  if (!(n.inputs || []).length) box.append(el("div", "note", "no inputs"));
-
-  const outs = el("div", "outrow");
-  for (const o of n.outputs || []) outs.append(el("span", "outchip mono", o));
-  if (outs.childNodes.length) box.append(outs);
-
-  const src = n.source || {};
-  for (const [label, loc] of [["defined", src.defined_at], ["wired", src.wired_at]]) {
-    if (loc && loc.file) box.append(el("div", "srcline mono", `${label}  ${loc.file}:${loc.line}`));
+/* The graph a node lives in — the top-level graph, or its container's. */
+function graphOf(it) {
+  const parts = it.key.split("/");
+  if (parts.length > 1) {
+    const parent = state.rendered.get(parts.slice(0, -1).join("/"));
+    if (parent && parent.node.graph) return parent.node.graph;
   }
-  return box;
+  return state.graph;
+}
+
+function jumpTo(name, depth) {
+  let best = null;
+  for (const [, item] of state.rendered) {
+    if (item.node.name !== name) continue;
+    if (item.depth === depth) { best = item; break; }
+    if (!best || item.depth < best.depth) best = item;
+  }
+  if (best) { select(best.key); centerOn(best); }
+}
+
+/* PORTS — the card that answers the only three questions that matter
+ * cold: what comes in, what goes out, and who it links to. Links are
+ * chips you click, not `a ← b.x` text; everything secondary (dotted
+ * paths, transforms, file lines) hides in tooltips and the Code fold. */
+function portsSection(it) {
+  const n = it.node;
+  const holder = graphOf(it) || {};
+  const sec = el("section");
+  sec.append(el("div", "stitle", "Ports"));
+
+  const chip = (cls, text, tip, onclick) => {
+    const c = el(onclick ? "button" : "span", `pchip ${cls}`, text);
+    if (tip) c.title = tip;
+    if (onclick) c.onclick = onclick;
+    return c;
+  };
+
+  const row = (dir, name, links) => {
+    const r = el("div", "portrow");
+    r.append(el("span", `pdot ${dir}`));
+    r.append(el("span", "pname mono", name));
+    const box = el("span", "plinks");
+    for (const l of links) box.append(l);
+    r.append(box);
+    sec.append(r);
+    return r;
+  };
+
+  for (const inp of n.inputs || []) {
+    const b = inp.binding || {};
+    const name = inp.name + (inp.required ? " *" : "");
+    if (b.kind === "ref") {
+      const src = (b.from || "").split(".").pop();
+      const isCell = !(holder.nodes || []).some(m => m.name === src);
+      let label = src + (b.output && b.output !== src ? `.${b.output}` : "");
+      if (b.consume) label += b.consume.mode === "collect" ? " ⧉" : " ∥";
+      const tip = `${b.from}.${b.output}`
+        + (b.transforms ? ` · ${b.transforms} transform` : "")
+        + (b.consume ? (b.consume.mode === "collect"
+            ? " · collect: buffers every yield, delivers a list"
+            : ` · parallel${b.consume.max ? " ≤" + b.consume.max : ""}: yields fan out concurrently`) : "");
+      row("in", name, [isCell
+        ? chip("pcell", `◌ ${b.output || src}`, `graph cell — ${tip}`)
+        : chip("pref", label, tip, () => jumpTo(src, it.depth))]);
+    } else if (b.kind === "scratch") {
+      row("in", name, [chip("pscratch", `⌂ ${b.key ?? b.value ?? "?"}`,
+        "session scratch — set by the serve layer")]);
+    } else if (b.kind === "literal") {
+      const preview = JSON.stringify(b.value);
+      const c = chip("plit", preview.length > 22 ? preview.slice(0, 20) + "…" : preview,
+        it.depth > 0 ? "literal — edit in the nested graph's own source"
+                     : "literal — click to edit", null);
+      const r = row("in", name, [c]);
+      if (it.depth === 0) {
+        c.onclick = () => {
+          if (r._editor) { r._editor.hidden = !r._editor.hidden; return; }
+          r._editor = literalEditor(n, inp);
+          r.after(r._editor);
+        };
+        c.classList.add("peditable");
+      }
+    } else {
+      row("in", name, [chip("pmuted", b.kind || "unbound")]);
+    }
+  }
+
+  // outputs: who consumes each one, right here in this graph
+  const consumers = {};
+  for (const m of holder.nodes || []) {
+    for (const i2 of m.inputs || []) {
+      const b2 = i2.binding || {};
+      if (b2.kind === "ref" && (b2.from || "").split(".").pop() === n.name) {
+        (consumers[b2.output] = consumers[b2.output] || []).push(m.name);
+      }
+    }
+  }
+  for (const o of n.outputs || []) {
+    const who = [...new Set(consumers[o] || [])];
+    row("out", o, who.length
+      ? who.map(w => chip("pref", w, `${n.name}.${o} → ${w}`, () => jumpTo(w, it.depth)))
+      : [chip("pmuted", n.end ? "graph exit" : "unconsumed here")]);
+  }
+  if (!(n.inputs || []).length && !(n.outputs || []).length) {
+    sec.append(el("div", "note", "no declared ports"));
+  }
+  return sec;
+}
+
+/* the one edit the studio allows, folded away until the value is clicked */
+function literalEditor(node, inp) {
+  const b = inp.binding || {};
+  const wrap = el("div", "inrow");
+  const field = el("input");
+  field.type = "text";
+  field.value = JSON.stringify(b.value);
+  const bar = el("div", "apply");
+  const btn = el("button", null, "Preview change");
+  const status = el("span", "srcline");
+  bar.append(btn, status);
+  const diffBox = el("div", "diffbox");
+  diffBox.style.display = "none";
+  wrap.append(field, bar, diffBox);
+
+  btn.onclick = async () => {
+    let value;
+    try { value = JSON.parse(field.value); }
+    catch { status.textContent = "not valid JSON"; return; }
+    status.textContent = "…";
+    try {
+      const plan = await api(`/api/p/${PID}/edit`, {
+        graph: state.graph.name, action: "set_param",
+        op_name: node.name, param: inp.name, value, dry_run: true,
+      });
+      if (!plan.changed) { status.textContent = "no change"; diffBox.style.display = "none"; return; }
+      diffBox.textContent = "";
+      for (const line of (plan.diff || "").split("\n")) {
+        const cls = line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "";
+        diffBox.append(el("div", cls, line));
+      }
+      diffBox.style.display = "block";
+      status.textContent = "";
+      const confirm = el("button", "primary", "Apply");
+      confirm.onclick = async () => {
+        try {
+          await api(`/api/p/${PID}/edit`, {
+            graph: state.graph.name, action: "set_param",
+            op_name: node.name, param: inp.name, value, dry_run: false,
+          });
+          status.textContent = "applied ✓ — reloading";
+          toast(`${node.name}.${inp.name} rewritten in source`);
+        } catch (e) { status.textContent = e.message; }
+      };
+      bar.append(confirm);
+    } catch (e) { status.textContent = e.message; }
+  };
+  return wrap;
 }
 
 /* The drill-down under the aggregate: one dense line per recorded
@@ -1606,90 +1728,6 @@ function executionsSection(n, execP) {
     show(rows[rows.length - 1], table.lastChild);
   }).catch(e => { box.textContent = e.message; });
   return sec;
-}
-
-function inputRow(it, inp) {
-  const node = it.node;
-  const row = el("div", "inrow");
-  row.append(el("div", "iname mono", inp.name + (inp.required ? " *" : "")));
-  const b = inp.binding || {};
-  const from = el("div", "ifrom");
-  if (b.kind === "ref") {
-    from.append("← ");
-    const src = el("span", "src mono", `${(b.from || "").split(".").pop()}.${b.output}`);
-    from.append(src);
-    if (b.transforms) from.append(` (+${b.transforms} transform)`);
-    if (b.consume) {
-      from.append(b.consume.mode === "collect"
-        ? " · collect (buffers every yield until EOF, delivers a list)"
-        : ` · parallel${b.consume.max ? " ≤" + b.consume.max : ""} (yields fan out concurrently)`);
-    }
-    row.append(from);
-  } else if (b.kind === "scratch") {
-    from.append(`← SCRATCH[${JSON.stringify(b.key ?? b.value ?? "?")}]`);
-    row.append(from);
-  } else if (b.kind === "literal" && it.depth > 0) {
-    // An op inside an opened container belongs to the nested graph, which
-    // the manifest may not declare — the set_param edit path addresses
-    // graphs by manifest name. Show the value; edit it where it lives.
-    from.textContent = `literal ${JSON.stringify(b.value)} — edit in the nested graph's own source`;
-    row.append(from);
-  } else if (b.kind === "literal") {
-    from.textContent = "literal — editable";
-    row.append(from);
-    // The one edit the studio allows: a literal param, rewritten in the
-    // source through a typed edit that previews its own diff. Wiring is
-    // never editable here — that is code, and code is edited as code.
-    const field = el("input");
-    field.type = "text";
-    field.value = JSON.stringify(b.value);
-    const bar = el("div", "apply");
-    const btn = el("button", null, "Preview change");
-    const status = el("span", "srcline");
-    bar.append(btn, status);
-    const diffBox = el("div", "diffbox");
-    diffBox.style.display = "none";
-    row.append(field, bar, diffBox);
-
-    btn.onclick = async () => {
-      let value;
-      try { value = JSON.parse(field.value); }
-      catch { status.textContent = "not valid JSON"; return; }
-      status.textContent = "…";
-      try {
-        const plan = await api(`/api/p/${PID}/edit`, {
-          graph: state.graph.name, action: "set_param",
-          op_name: node.name, param: inp.name, value, dry_run: true,
-        });
-        if (!plan.changed) { status.textContent = "no change"; diffBox.style.display = "none"; return; }
-        diffBox.textContent = "";
-        for (const line of (plan.diff || "").split("\n")) {
-          const cls = line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "";
-          const ln = el("div", cls, line);
-          diffBox.append(ln);
-        }
-        diffBox.style.display = "block";
-        status.textContent = "";
-        const confirm = el("button", "primary", "Apply");
-        confirm.onclick = async () => {
-          try {
-            await api(`/api/p/${PID}/edit`, {
-              graph: state.graph.name, action: "set_param",
-              op_name: node.name, param: inp.name, value, dry_run: false,
-            });
-            status.textContent = "applied ✓ — reloading";
-            toast(`${node.name}.${inp.name} rewritten in source`);
-            // the watcher sees the mtime; the poll below re-renders
-          } catch (e) { status.textContent = e.message; }
-        };
-        bar.append(confirm);
-      } catch (e) { status.textContent = e.message; }
-    };
-  } else {
-    from.textContent = b.kind || "unbound";
-    row.append(from);
-  }
-  return row;
 }
 
 function inspectServe(serve) {

@@ -38,10 +38,11 @@
   --sh-3: 0 8px 20px rgba(105, 78, 12, .16), 0 28px 70px rgba(105, 78, 12, .28);
   --gold-grad: linear-gradient(135deg, #e6ba4d 0%, #cf9a13 55%, #b9860a 100%);
   --tr: .16s cubic-bezier(.4, 0, .2, 1);
-  /* the energy: data flows in light-blue laser; gold stays structural */
-  --wire: #3f8ef0;
-  --wire-deep: #1d5fd0;
-  --wire-glow: rgba(63, 142, 240, .16);
+  /* the energy: data flows in light-blue laser — muted, not neon;
+     gold stays structural */
+  --wire: #6a9bd4;
+  --wire-deep: #41729f;
+  --wire-glow: rgba(106, 155, 212, .14);
 }
 
 * { box-sizing: border-box; }
@@ -199,7 +200,7 @@ header.bar select {
 #world { position: relative; margin: 0 auto; }
 #plane { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 #edges { position: absolute; overflow: visible; pointer-events: none; }
-#edges path { fill: none; stroke: #a9c4e4; stroke-width: 2; stroke-linecap: round; }
+#edges path { fill: none; stroke: #b7c8dc; stroke-width: 2; stroke-linecap: round; }
 #edges path.soft { stroke-dasharray: 6 5; }
 #edges path.hot { stroke: var(--wire-deep); stroke-width: 2.5; }
 #edges path.serve { stroke: var(--k-serve); stroke-dasharray: 2 4; }
@@ -320,12 +321,12 @@ body.resizing { user-select: none; cursor: col-resize; }
 .badge.run { color: var(--text); background: var(--panel);
   box-shadow: 0 1px 2px rgba(122, 92, 18, .12); }
 .node .port { position: absolute; width: 12px; height: 12px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #cfe4ff, #4a93ee 75%);
-  border: 1.5px solid #2f77d0;
-  box-shadow: 0 0 6px rgba(63, 142, 240, .45);
+  background: radial-gradient(circle at 35% 30%, #dde9f5, #779fca 75%);
+  border: 1.5px solid #5c83ab;
+  box-shadow: 0 0 6px rgba(106, 155, 212, .4);
   transition: box-shadow var(--tr), transform var(--tr); }
 .node:hover .port, .node.selected .port {
-  box-shadow: 0 0 10px rgba(63, 142, 240, .8); transform: scale(1.15); }
+  box-shadow: 0 0 10px rgba(106, 155, 212, .75); transform: scale(1.15); }
 /* top-down: data enters through the crown, leaves through the base */
 .port.in { top: -7px; left: 50%; margin-left: -6px; }
 .port.out { bottom: -7px; left: 50%; margin-left: -6px; }
@@ -349,11 +350,11 @@ body.resizing { user-select: none; cursor: col-resize; }
 }
 #edges path.eglow.back { stroke: rgba(179, 102, 26, .16); }
 #edges path.ecore.back { stroke: #b3661a; }
-#edges path.eglow.hot { stroke: rgba(29, 95, 208, .3); }
+#edges path.eglow.hot { stroke: rgba(65, 114, 159, .3); }
 #edges path.ecore.hot { stroke: var(--wire-deep); stroke-width: 5; }
 #edges path.eray.hot { stroke-width: 2; }
 #edges circle.espark { fill: #fff; stroke: var(--wire); stroke-width: 1.6; }
-#edges circle.espark.tailspark { fill: #a8ccf5; opacity: .7; stroke: none; }
+#edges circle.espark.tailspark { fill: #bccfe3; opacity: .7; stroke: none; }
 #edges circle.espark.back { stroke: #b3661a; }
 /* if/else routes: the beam in branch amber; the ELSE fallback dashed,
    laserless — a path that exists but is not flowing */
@@ -365,7 +366,7 @@ body.resizing { user-select: none; cursor: col-resize; }
 #edges path.eray.cond.relse { display: none; }
 #edges circle.espark.cond { stroke: #b3661a; }
 /* soft merge edges: the same family, a quieter voice — never gray */
-#edges path.soft { stroke: #8fb6e8; opacity: .8; }
+#edges path.soft { stroke: #a3b9d2; opacity: .8; }
 .node.serve-node { background: linear-gradient(180deg, #fdf6dd, #fbf0cb);
   border-color: #dcc172; width: 190px; }
 .node.serve-node::before { background: var(--k-serve); }
@@ -968,3 +969,25 @@ header.bar .pname:hover { text-decoration: underline; }
   width: 100% !important; height: 100%; max-height: none;
   display: flex; border: none; border-radius: 0; box-shadow: none;
   border-top: none; }
+
+/* ── PORTS: in, out, and who it links to — chips, not dotted text ── */
+.portrow { display: flex; align-items: center; gap: 9px; padding: 3px 0; }
+.pdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.pdot.in { border: 2px solid #7fa0c4; background: #fff; }
+.pdot.out { background: #7fa0c4; }
+.pname { flex: none; min-width: 96px; font-size: 12px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; }
+.plinks { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.pchip { font: 11px ui-monospace, "SF Mono", Consolas, monospace;
+  border-radius: 999px; padding: 1px 9px; border: 1px solid var(--line);
+  background: #fff; box-shadow: none; }
+button.pchip { cursor: pointer; }
+button.pchip:hover { box-shadow: none; filter: brightness(.97); }
+.pchip.pref { color: #41729f; border-color: #ccd9e8; background: #f4f8fc; }
+button.pchip.pref:hover { border-color: #8fafd0; }
+.pchip.pscratch { color: #8a7d5c; border-color: #e4ddc8; background: #faf7ef; }
+.pchip.pcell { color: #7d54a8; border-color: #ddd2ec; background: #faf7fd; }
+.pchip.plit { color: #2c7a5c; border-color: #cfe2d9; background: #f3faf7; }
+.pchip.peditable { cursor: pointer; }
+.pchip.peditable:hover { border-color: #7fb59d; }
+.pchip.pmuted { color: var(--muted); background: transparent; font-style: italic; }
