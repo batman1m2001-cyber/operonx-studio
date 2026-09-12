@@ -157,7 +157,7 @@ function ranInRun(n) {
  * ARE the GraphOp's boundary — inner entries hang off START, inner
  * exits feed END, and external edges plug into the pills instead of
  * the container's rim. */
-const B_W = 34, B_H = 34, B_GAP = 40;
+const B_W = 66, B_H = 28, B_GAP = 40;
 
 function withBoundaries(model, key, depth) {
   // top-down: START above the first row, END below the last — current
@@ -653,8 +653,8 @@ function render() {
     svg.append(rect);
     edgeGlyph(svg, it.x + it.w / 2, it.y - 12, label, "zonelabel");
   };
-  for (const gi of gatesIn) doorFrame(gi, "⇥ INGRESS");
-  for (const go of gatesOut) doorFrame(go, "EGRESS ⇥");
+  for (const gi of gatesIn) doorFrame(gi, "INGRESS");
+  for (const go of gatesOut) doorFrame(go, "EGRESS");
   state._hasIngress = gatesIn.length > 0;
 
   if (!state._hasIngress) {
@@ -684,7 +684,6 @@ function render() {
       p.setAttribute("d", `M ${cx} ${y2 - 74} L ${cx} ${y2}`);
       p.setAttribute("class", "serve");
       svg.append(p);
-      edgeGlyph(svg, cx + 44, y2 - 44, "client ⇣", "servelabel");
     }
   }
   for (const gOut of gatesOut) {
@@ -694,7 +693,6 @@ function render() {
     p.setAttribute("class", "serve");
     svg.append(p);
     bouton(svg, cx, y1 + 74, "b-serve");
-    edgeGlyph(svg, cx + 44, y1 + 44, "⇣ client", "servelabel");
   }
 
   // The main graph has terminals too — the flow, like every opened
@@ -1061,7 +1059,9 @@ function boundaryCard(it) {
   card.style.top = `${it.y}px`;
   card.style.width = `${it.w}px`;
   card.style.height = `${it.h}px`;
-  card.append(el("span", "bglyph", n.boundary === "start" ? "▶" : "■"));
+  // ︎ forces TEXT presentation — without it Chromium may pick the
+  // emoji ▶️, which paints a stray blue box inside the button
+  card.append(el("span", "bglyph", n.boundary === "start" ? "▶︎" : "■︎"));
   card.append(el("span", "blabel", n.name));
   card.title = n.boundary === "start"
     ? "The GraphOp's own input boundary — edges from outside arrive here."
@@ -1078,7 +1078,17 @@ function boundaryCard(it) {
 function nameChips(n) {
   const box = el("span", "nchips");
   if (n.kind) {
-    const c = el("span", "nchip kind", String(n.kind).replace(/Op$/i, "").toUpperCase());
+    // a long custom kind must not eat the op's name: strip the Op
+    // suffix, then keep whole camel-case words while they fit — the
+    // full kind always lives in the tooltip
+    const words = String(n.kind).replace(/Op$/, "")
+      .match(/[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+/g) || [n.kind];
+    let short = words[0];
+    for (const w of words.slice(1)) {
+      if ((short + w).length > 9) break;
+      short += w;
+    }
+    const c = el("span", "nchip kind", short.toUpperCase());
     c.title = n.kind;
     box.append(c);
   }
@@ -1110,14 +1120,13 @@ function opCard(it) {
   // labelled as a boundary so nobody hunts for business logic inside.
   if (n.serve_role) {
     card.classList.add("gate", `gate-${n.serve_role}`);
-    card.append(el("div", "nname",
-      n.serve_role === "ingress" ? `⇥ ${n.name}` : `${n.name} ⇥`));
-    // the ingress IS the transport — it wears the endpoint's name
+    // the author's name, unadorned — the frame's INGRESS/EGRESS label
+    // is the one word that explains the zone
+    card.append(el("div", "nname", n.name));
+    // the ingress IS the transport — one compact line, nothing more
     const t = n.serve_role === "ingress" && serveFor(state.graph);
-    card.append(el("div", "nkind mono",
-      t ? `${t.kind}${t.path ? " " + t.path : ""} → run`
-        : n.serve_role === "ingress" ? "ingress · client → run"
-                                     : "egress · run → client"));
+    if (t) card.append(el("div", "nkind mono",
+      t.kind + (t.path ? ` · ${t.path}` : "")));
     if (t && t.description) card.title = t.description;
   } else if (n.routes && n.routes.length) {
     // a router is a DECISION CARD: one row per condition, each row

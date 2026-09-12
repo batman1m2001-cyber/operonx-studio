@@ -337,7 +337,9 @@ body.resizing { user-select: none; cursor: col-resize; }
 .nchip.gen { padding: 0.5px 3px; }
 .nchip.gen { color: #a35d13; border-color: #e2c087; background: #fbf3e2; }
 /* the kind chip wears its family colour — clearly not part of the name */
-.nchip.kind { color: var(--kind, var(--k-default));
+.nchip.kind { max-width: 76px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--kind, var(--k-default));
   border-color: color-mix(in srgb, var(--kind, var(--k-default)) 35%, #fff);
   background: color-mix(in srgb, var(--kind, var(--k-default)) 7%, #fff); }
 /* specks at far zoom — the silhouette is the message out there */
@@ -945,11 +947,11 @@ header.bar .pname:hover { text-decoration: underline; }
 
 /* ── boundary pills & serve zones ─────────────────────────────────── */
 
-/* START/END inside an opened GraphOp: its ports as circuit terminals —
-   push-button contacts the outside wires screw into */
+/* START/END terminals: circuit push-buttons, now pills with the word
+   INSIDE — no floating caps underneath, no stray beads */
 .node.bnode {
-  min-height: 0; padding: 0; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
+  min-height: 0; padding: 0 4px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
   background: radial-gradient(circle at 34% 28%, #fff9e4 0%, #f2dd96 45%, #d9b44a 100%);
   border: 2px solid #b28414;
   box-shadow: 0 0 0 3px rgba(178, 132, 20, .22),
@@ -962,11 +964,11 @@ header.bar .pname:hover { text-decoration: underline; }
               0 0 0 7px rgba(178, 132, 20, .12),
               inset 0 2px 3px rgba(255, 255, 255, .85),
               inset 0 -3px 5px rgba(146, 104, 12, .35); }
-.bnode .bglyph { color: #7c5a06; font-size: 11px; line-height: 1;
+.bnode .bglyph { color: #7c5a06; font-size: 10px; line-height: 1;
   text-shadow: 0 1px 0 rgba(255, 255, 255, .6); }
-.bnode .blabel { position: absolute; top: calc(100% + 5px); left: 50%;
-  transform: translateX(-50%); font-size: 9px; font-weight: 700;
-  letter-spacing: .14em; color: var(--accent-deep); }
+.bnode .blabel { font-size: 9px; font-weight: 700;
+  letter-spacing: .12em; color: #7c5a06;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .5); }
 
 /* the quiet ties from START to entries and exits to END */
 .wires path.bedge {
