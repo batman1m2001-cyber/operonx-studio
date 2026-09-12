@@ -236,6 +236,31 @@ def layout_graph(graph: Dict) -> Layout:
         layers.setdefault(depth_of[node_id], []).append(node_id)
     _order_layers(layers, forward, backward)
 
+    # A decision card's wires leave their condition rows top-to-bottom
+    # and fan to both sides. They can only NEST (never cross) when each
+    # side puts its earlier conditions farther out: on the left that is
+    # plain route order, but on the right it is the mirror — the first
+    # right-going condition must sit farthest right. So keep the left
+    # half of a fan in route order and reverse the right half.
+    for raw in ir_nodes:
+        routes = raw.get("routes") or []
+        targets: List[str] = []
+        for r in routes:
+            t = resolve(r.get("target", ""))
+            if t in depth_of and t not in targets:
+                targets.append(t)
+        if len(targets) < 3 or len({depth_of[t] for t in targets}) != 1:
+            continue
+        row = layers[depth_of[targets[0]]]
+        group = set(targets)
+        slots = [i for i, nid in enumerate(row) if nid in group]
+        if len(slots) != len(targets):
+            continue
+        mid = (len(targets) + 1) // 2
+        arranged = targets[:mid] + targets[mid:][::-1]
+        for slot, nid in zip(slots, arranged):
+            row[slot] = nid
+
     sorted_depths = sorted(layers)
     widest = max((len(layers[d]) for d in sorted_depths), default=1)
 

@@ -550,7 +550,12 @@ function render() {
         const side = tgt && portCX(tgt) < it.x + it.w / 2 ? -1 : 1;
         rrow.classList.toggle("left", side < 0);
         if (!(t in it.condPorts)) {
-          it.condPorts[t] = {y: rrow.offsetTop + rrow.offsetHeight / 2, side};
+          // x/y of the row's own DOT (card-relative): the wire must
+          // emerge from the condition box itself, not the card border
+          it.condPorts[t] = {
+            x: side < 0 ? rrow.offsetLeft - 1
+                        : rrow.offsetLeft + rrow.offsetWidth + 1,
+            y: rrow.offsetTop + rrow.offsetHeight / 2, side};
         }
       }
     }
@@ -805,7 +810,8 @@ function render() {
         // tangent in — control distances scale with the actual gap so
         // a near neighbour gets a tight elbow, not a balloon
         const side = rowPort.side;
-        const x1 = side > 0 ? A.x + A.w : A.x;
+        const x1 = A.x + (rowPort.x != null ? rowPort.x
+                                            : (side > 0 ? A.w : 0));
         const y1 = A.y + rowPort.y;
         const x2 = portCX(B), y2 = B.y;
         const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5));

@@ -1033,10 +1033,13 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 
 /* ── the router as a decision card: one row per condition ─────────── */
 .node.branch {
-  border-radius: 14px; padding: 9px 12px 8px 14px;
+  border-radius: 14px; padding: 9px 12px 8px 12px;
   border: 2px solid color-mix(in srgb, var(--k-branch) 45%, #dbe4f0);
   background: linear-gradient(180deg, #fffdfa, #fbf6ee);
 }
+/* the kind-accent bar reads as a stray thick line on a tall decision
+   card — the amber border already says "branch" */
+.node.branch::before { display: none; }
 .node.branch .brlist { margin-top: 6px; display: flex;
   flex-direction: column; gap: 3px; }
 .brrow { position: relative; display: flex; align-items: center;
