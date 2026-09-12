@@ -2101,6 +2101,136 @@ function inspectServe(serve) {
 
 /* ── traces ───────────────────────────────────────────────────────── */
 
+/* ── the resource hub: every declared backing service, who uses it,
+   and whether the env contract is satisfied. Read-only by design —
+   the server checks variables by NAME and never returns a value. */
+async function showResources() {
+  const box = $("#resources");
+  box.textContent = "";
+  const res = state.ir.resources || {};
+  const details = res.details || {};
+  box.append(el("h2", "reshead", "Resource hub"));
+  box.append(el("div", "note",
+    "declared in the project's resource files — secret fields never leave the server"));
+
+  // reverse index: resource name → the ops that lean on it — including
+  // ops nested inside GraphOps, which carry their graph inline
+  const uses = {};
+  const walk = (nodes, graph) => {
+    for (const n of nodes || []) {
+      const names = Array.isArray(n.resource) ? n.resource
+        : n.resource ? [n.resource] : [];
+      for (const r of names) (uses[r] = uses[r] || []).push({graph, node: n});
+      if (n.graph) walk(n.graph.nodes, graph);
+    }
+  };
+  for (const g of state.ir.graphs || []) walk(g.nodes, g);
+
+  const cats = {};
+  for (const [name, det] of Object.entries(details)) {
+    const c = det.category || "other";
+    (cats[c] = cats[c] || []).push([name, det]);
+  }
+  for (const cat of Object.keys(cats).sort()) {
+    box.append(el("div", "rescat", cat));
+    for (const [name, det] of cats[cat].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const card = el("div", "rescard");
+      card.append(el("div", "resname mono", `⛁ ${name}`));
+      const provider = det.category === "llm"
+        ? llmProvider({kind: "LLMOp", resource: name}) : null;
+      if (provider) {
+        const row = el("div", "resrow");
+        row.append(el("span", "reskey", "backend"));
+        row.append(el("span", "resval resbackend",
+          `${LLM_PROVIDERS[provider].icon} ${LLM_PROVIDERS[provider].label}`));
+        card.append(row);
+      }
+      for (const [k, v] of Object.entries(det)) {
+        if (k === "category") continue;
+        const row = el("div", "resrow");
+        row.append(el("span", "reskey", k));
+        row.append(el("span", "resval mono", String(v)));
+        card.append(row);
+      }
+      const urow = el("div", "resrow");
+      urow.append(el("span", "reskey", "used by"));
+      const val = el("span", "usedby");
+      const u = uses[name] || [];
+      if (!u.length) val.append(el("span", "note", "no op names it"));
+      for (const use of u) {
+        const c = el("button", "pchip pref", use.node.name);
+        c.title = `${use.graph.name} · ${use.node.kind} — jump to it`;
+        c.onclick = () => jumpToOp(use.graph, use.node);
+        val.append(c);
+      }
+      urow.append(val);
+      card.append(urow);
+      box.append(card);
+    }
+  }
+  const covered = new Set([...Object.keys(details),
+    ...Object.values(details).map(d => d.category)]);
+  const loose = (res.keys || []).filter(k => !covered.has(k));
+  if (loose.length) {
+    box.append(el("div", "rescat", "declared, details not parsed"));
+    const card = el("div", "rescard");
+    for (const k of loose) card.append(el("span", "chip", `⛁ ${k}`));
+    box.append(card);
+  }
+
+  // the env contract, with a health light per variable
+  box.append(el("div", "rescat", "environment contract"));
+  const envBox = el("div");
+  box.append(envBox);
+  try {
+    const h = await api(`/api/p/${PID}/env-health`);
+    const env = res.env || {};
+    const rows = [];
+    for (const name of env.required || [])
+      rows.push([name, h.env[name] || "missing", null]);
+    for (const [name, dflt] of Object.entries(env.optional || {}))
+      rows.push([name, h.env[name] || "default", dflt]);
+    if (!rows.length) envBox.append(el("div", "note", "no variables demanded"));
+    for (const [name, stat, dflt] of rows) {
+      const row = el("div", "envrow");
+      row.append(el("span", `envdot ${stat}`));
+      row.append(el("span", "envname mono", name));
+      row.append(el("span", `envstat ${stat}`,
+        stat === "set" ? "set" : stat === "missing"
+          ? "MISSING — required, and nothing sets it" : "unset · default applies"));
+      if (dflt != null && stat === "default")
+        row.append(el("span", "envdflt mono", String(dflt)));
+      envBox.append(row);
+    }
+    if (!h.dotenv) envBox.append(el("div", "note",
+      "no .env file in the project root — variables can only come from the process environment"));
+  } catch {
+    envBox.append(el("div", "note", "env health unavailable"));
+  }
+}
+
+function jumpToOp(graph, node) {
+  switchTab("flow");
+  if (state.graph !== graph
+      && (state.ir.graphs || []).includes(graph)) {
+    state.graph = graph;
+    $("#graph-pick").value = graph.name;
+    state.sel = null;
+    state.expanded.clear();
+    render();
+    fit();
+  }
+  const find = () => [...state.rendered.values()]
+    .find(x => !x.inner && x.node.name === node.name);
+  let it = find();
+  if (!it) {
+    // nested inside a collapsed GraphOp — open everything and retry
+    expandAll(true);
+    it = find();
+  }
+  if (it) { select(it.key); centerOn(it); }
+}
+
 async function showTraces() {
   const box = $("#traces");
   box.textContent = "";
@@ -2327,7 +2457,9 @@ function switchTab(name) {
     b.classList.toggle("active", b.dataset.tab === name);
   $("#stage").style.display = name === "flow" ? "" : "none";
   $("#traces").hidden = name !== "traces";
+  $("#resources").hidden = name !== "resources";
   if (name === "traces") showTraces();
+  if (name === "resources") showResources();
   pushView();
 }
 

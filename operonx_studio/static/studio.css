@@ -1122,6 +1122,30 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .resval { color: #3d6f9e; word-break: break-all; min-width: 0; }
 .resval.resbackend { color: #6b3fa0; font-weight: 650; }
 
+/* ── the Resources tab: the project's backing services, plainly ──── */
+#resources { flex: 1; overflow: auto; padding: 22px 26px; }
+#resources .reshead { margin: 0 0 4px; font-size: 19px; letter-spacing: -.01em; }
+.rescat { color: var(--accent-deep); font-size: 10.5px; letter-spacing: .14em;
+  text-transform: uppercase; font-weight: 700; margin: 20px 0 8px; }
+.rescard { border: 1px solid var(--line-soft); border-radius: var(--r-md);
+  background: var(--panel); padding: 12px 16px 10px; margin-bottom: 10px;
+  box-shadow: var(--sh-1); max-width: 720px; }
+.rescard .resname { margin-bottom: 6px; }
+.usedby { display: flex; gap: 5px; flex-wrap: wrap; min-width: 0; }
+.envrow { display: flex; gap: 10px; align-items: baseline; padding: 5px 8px;
+  border-bottom: 1px solid var(--line-soft); font-size: 12px; max-width: 720px; }
+.envrow:last-child { border-bottom: none; }
+.envdot { width: 9px; height: 9px; border-radius: 50%; flex: none;
+  align-self: center; }
+.envdot.set { background: var(--ok); }
+.envdot.missing { background: var(--err);
+  box-shadow: 0 0 7px rgba(207, 63, 54, .55); }
+.envdot.default { background: #c9b45e; }
+.envname { font-weight: 600; min-width: 220px; }
+.envstat { color: var(--muted); }
+.envstat.missing { color: var(--err); font-weight: 650; }
+.envdflt { color: #3d6f9e; word-break: break-all; min-width: 0; }
+
 /* decision table in the inspector */
 .drow { display: flex; align-items: center; gap: 8px; padding: 6px 9px;
   border: 1px solid var(--line); border-radius: 9px; margin-bottom: 6px;

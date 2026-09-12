@@ -737,3 +737,35 @@ entry = "main:flow"
     c = next(n for n in graph["nodes"] if n["name"] == "c")
     exports = c["graph"]["exports"]
     assert {"from": "a", "output": "loud", "as": "shout"} in exports
+
+
+def test_resource_hub_reads_names_never_values(client, project):
+    """Details reach the IR with defaults resolved and secrets dropped;
+    env-health reports set/missing/default by NAME, never a value."""
+    (project / "operonx.toml").write_text(
+        MANIFEST + '\n[resources]\noverlay = "resources.yaml"\n', encoding="utf-8")
+    (project / "resources.yaml").write_text(
+        "llm:\n"
+        "  main:\n"
+        "    api_type: openai\n"
+        "    api_key: ${DEMO_HUB_KEY}\n"
+        "    model: ${DEMO_HUB_MODEL:gpt-4o-mini}\n"
+        "    base_url: ${DEMO_HUB_URL}\n",
+        encoding="utf-8")
+    (project / ".env").write_text("DEMO_HUB_KEY=super-secret\n", encoding="utf-8")
+    pid = _open(client, project)
+
+    ir = client.get(f"/api/p/{pid}/ir").json()
+    det = ir["resources"]["details"]["main"]
+    assert det["category"] == "llm"
+    assert det["model"] == "gpt-4o-mini"        # optional default resolved
+    assert det["base_url"] == "${DEMO_HUB_URL}"  # required stays a placeholder
+    assert "api_key" not in det                  # secret field never enters the IR
+    assert "super-secret" not in json.dumps(ir)
+
+    health = client.get(f"/api/p/{pid}/env-health").json()
+    assert health["dotenv"] is True
+    assert health["env"]["DEMO_HUB_KEY"] == "set"
+    assert health["env"]["DEMO_HUB_URL"] == "missing"
+    assert health["env"]["DEMO_HUB_MODEL"] == "default"
+    assert "super-secret" not in json.dumps(health)

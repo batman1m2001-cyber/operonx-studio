@@ -737,6 +737,39 @@ def build_studio_app(recents: Optional[Recents] = None):
         result = watcher.refresh_swr()
         return JSONResponse({"stamp": result.stamp, "ok": result.ok})
 
+    @app.get("/api/p/{pid}/env-health")
+    def project_env_health(pid: str) -> JSONResponse:
+        """Whether each env variable the resource files demand is satisfied.
+
+        Checked by NAME only — against the project's ``.env`` and the
+        server's own environment. Values never enter a response: this is
+        a health light, not a secrets viewer.
+        """
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        result = watcher.refresh_swr()
+        ir = result.ir if result.ok else {}
+        contract = ((ir or {}).get("resources") or {}).get("env") or {}
+        defined: set = set()
+        env_path = watcher.root / ".env"
+        if env_path.is_file():
+            for raw in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                name = line.split("=", 1)[0].strip()
+                if name.startswith("export "):
+                    name = name[len("export "):].strip()
+                if name:
+                    defined.add(name)
+        status: Dict[str, str] = {}
+        for name in contract.get("required") or []:
+            status[name] = "set" if (name in defined or name in os.environ) else "missing"
+        for name in (contract.get("optional") or {}):
+            status[name] = "set" if (name in defined or name in os.environ) else "default"
+        return JSONResponse({"env": status, "dotenv": env_path.is_file()})
+
     @app.post("/api/p/{pid}/edit")
     def project_edit(pid: str, body: Dict[str, Any]) -> JSONResponse:
         """A typed edit — ``set_param`` from the inspector rides this.
