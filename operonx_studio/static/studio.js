@@ -1434,16 +1434,17 @@ function select(key) {
   // member-scan latest-values view before their grouped passes.
   if (execP && !n.graph) panel.append(executionsSection(n, execP));
   if (execP && n.graph) panel.append(valuesSection(n, execP));
-  // What flows in, what flows out, and WHO it links to — the essential
-  // card, always visible, links as chips you can click, not dotted text.
-  panel.append(portsSection(it));
+  // With a run painted the panel is a TRACE reader: ports would only
+  // repeat what every execution already shows, and code lives in the
+  // flow view — both stand down until the run is cleared.
+  if (!state.run) panel.append(portsSection(it));
   const res = resourceSection(n);
   if (res) panel.append(res);
   const llm = llmSection(n, execP);
   if (llm) panel.append(llm);
   if (n.routes) panel.append(routeSection(it, execP));
   if (execP && n.graph) panel.append(executionsSection(n, execP));
-  if (n.code) panel.append(codeSection(n));
+  if (n.code && !state.run) panel.append(codeSection(n));
   if (n.graph) panel.append(membersSection(it));
 }
 
