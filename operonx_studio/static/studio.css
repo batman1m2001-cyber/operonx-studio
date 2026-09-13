@@ -1121,6 +1121,11 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .reskey { color: var(--muted); min-width: 74px; flex: none; }
 .resval { color: #3d6f9e; word-break: break-all; min-width: 0; }
 .resval.resbackend { color: #6b3fa0; font-weight: 650; }
+/* an env knob inside a field value: the NAME as a pill, never a value */
+.envtok { display: inline-block; padding: 0 5px; margin: 0 3px 1px 0;
+  border-radius: 5px; font-size: 10.5px; line-height: 1.6;
+  color: #6b3fa0; background: #f5efff; border: 1px solid #ddccf2; }
+.envdefault { color: #3d6f9e; margin-right: 3px; }
 
 /* ── the Resources tab: the project's backing services, plainly ──── */
 #resources { flex: 1; overflow: auto; padding: 22px 26px; }

@@ -739,9 +739,11 @@ entry = "main:flow"
     assert {"from": "a", "output": "loud", "as": "shout"} in exports
 
 
-def test_resource_hub_reads_names_never_values(client, project):
-    """Details reach the IR with defaults resolved and secrets dropped;
-    env-health reports set/missing/default by NAME, never a value."""
+def test_resource_hub_shows_declarations_never_values(client, project):
+    """Details reach the IR VERBATIM — placeholders included, so the
+    viewer can show which env knob each field hangs on — while a
+    hardcoded secret value is masked and a .env value never appears
+    anywhere. env-health reports set/missing/default by NAME only."""
     (project / "operonx.toml").write_text(
         MANIFEST + '\n[resources]\noverlay = "resources.yaml"\n', encoding="utf-8")
     (project / "resources.yaml").write_text(
@@ -750,22 +752,42 @@ def test_resource_hub_reads_names_never_values(client, project):
         "    api_type: openai\n"
         "    api_key: ${DEMO_HUB_KEY}\n"
         "    model: ${DEMO_HUB_MODEL:gpt-4o-mini}\n"
-        "    base_url: ${DEMO_HUB_URL}\n",
+        "    base_url: ${DEMO_HUB_URL}\n"
+        "    timeout_s: 30.5\n"
+        "    stream: true\n"
+        "  sloppy:\n"
+        "    api_key: sk-hardcoded-oops\n"
+        "    api_key_header: X-API-Key\n"
+        "    model: claude-sonnet-5\n",
         encoding="utf-8")
-    (project / ".env").write_text("DEMO_HUB_KEY=super-secret\n", encoding="utf-8")
+    (project / ".env").write_text(
+        "# comment lines and blanks are ignored\n"
+        "\n"
+        "export DEMO_HUB_KEY=super-secret\n", encoding="utf-8")
     pid = _open(client, project)
 
     ir = client.get(f"/api/p/{pid}/ir").json()
     det = ir["resources"]["details"]["main"]
     assert det["category"] == "llm"
-    assert det["model"] == "gpt-4o-mini"        # optional default resolved
-    assert det["base_url"] == "${DEMO_HUB_URL}"  # required stays a placeholder
-    assert "api_key" not in det                  # secret field never enters the IR
-    assert "super-secret" not in json.dumps(ir)
+    # verbatim: the ${VAR} names ARE the point — safe, and useful
+    assert det["api_key"] == "${DEMO_HUB_KEY}"
+    assert det["model"] == "${DEMO_HUB_MODEL:gpt-4o-mini}"
+    assert det["base_url"] == "${DEMO_HUB_URL}"
+    # non-string scalars survive as themselves
+    assert det["timeout_s"] == 30.5
+    assert det["stream"] is True
+    # a secret HARDCODED in yaml is masked; a non-secret literal is not
+    sloppy = ir["resources"]["details"]["sloppy"]
+    assert sloppy["api_key"] == "•••"
+    assert sloppy["api_key_header"] == "X-API-Key"  # ABOUT a secret ≠ a secret
+    assert sloppy["model"] == "claude-sonnet-5"
+    dumped = json.dumps(ir)
+    assert "super-secret" not in dumped
+    assert "sk-hardcoded-oops" not in dumped
 
     health = client.get(f"/api/p/{pid}/env-health").json()
     assert health["dotenv"] is True
-    assert health["env"]["DEMO_HUB_KEY"] == "set"
+    assert health["env"]["DEMO_HUB_KEY"] == "set"      # export form parsed
     assert health["env"]["DEMO_HUB_URL"] == "missing"
     assert health["env"]["DEMO_HUB_MODEL"] == "default"
     assert "super-secret" not in json.dumps(health)

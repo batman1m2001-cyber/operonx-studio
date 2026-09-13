@@ -133,18 +133,10 @@ function visualOf(kind) {
 
 function kindColor(node) { return visualOf(node.kind).color; }
 
-/* An LLM op's icon is its BACKEND, not just "some LLM": the resource
- * it names carries model / url / api_type, and those betray the
- * provider. Glyphs are text-presentation (︎) so no emoji font paints
- * over them. Unknown backends keep the generic hollow spark. */
-const LLM_PROVIDERS = {
-  claude: {icon: "✳︎", label: "Claude"},
-  gemini: {icon: "✦",  label: "Gemini"},
-  openai: {icon: "⬡",  label: "OpenAI"},
-  vllm:   {icon: "⚙︎", label: "vLLM"},
-  ollama: {icon: "◉",  label: "Ollama"},
-  mistral: {icon: "Ⓜ", label: "Mistral"},
-};
+/* An LLM op's icon is its BACKEND, not just "some LLM" — detection
+ * lives in providers.js (pure, node-tested); this file only wires it
+ * to the canvas. */
+const LLM_PROVIDERS = Providers.PROVIDERS;
 
 function resourceOf(node) {
   const name = Array.isArray(node.resource) ? node.resource[0] : node.resource;
@@ -153,20 +145,8 @@ function resourceOf(node) {
 
 function llmProvider(node) {
   if (!(node.kind || "").match(/LLM|Chat|Completion/)) return null;
-  const det = resourceOf(node) || {};
-  const hay = [node.resource, det.api_type, det.provider, det.model,
-               det.base_url, det.url].filter(Boolean).join(" ").toLowerCase();
-  if (/claude|anthropic/.test(hay)) return "claude";
-  if (/gemini|generativelanguage|vertex/.test(hay)) return "gemini";
-  if (/mistral/.test(hay)) return "mistral";
-  if (/ollama|:11434/.test(hay)) return "ollama";
-  if (/gpt-|o[134]-mini|api\.openai\.com/.test(hay)) return "openai";
-  // an HF-style org/model id, or a self-hosted url, means a vLLM-class
-  // gateway even when it speaks the openai protocol
-  if (/vllm/.test(hay) || /^[\w.-]+\/[\w.-]+$/.test(det.model || "")
-      || (/localhost|127\.0\.0\.1|:8000\b/.test(hay))) return "vllm";
-  if (/openai/.test(hay)) return "openai";
-  return null;
+  return Providers.detectProvider(
+    {resource: node.resource, fields: resourceOf(node) || {}});
 }
 
 function kindIcon(node) {
@@ -1574,9 +1554,31 @@ function routeSection(it, execP) {
 
 /* LLMOp: the traced conversation when there is one — role-labelled
  * bubbles with the response emphasized — else the authored templates. */
+/* A field value with its ${VAR} knobs rendered as env pills: the var
+ * NAME shows (that is safe and useful), the value never travels here.
+ * A `${VAR:default}` pill carries its default right after it. */
+function envValue(v) {
+  const out = el("span", "resval mono");
+  const s = String(v);
+  const re = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}/g;
+  let last = 0, m;
+  while ((m = re.exec(s))) {
+    if (m.index > last) out.append(s.slice(last, m.index));
+    const tok = el("span", "envtok", "${" + m[1] + "}");
+    tok.title = m[2] !== undefined && m[2] !== ""
+      ? `env variable — default: ${m[2]}` : "env variable — required";
+    out.append(tok);
+    if (m[2]) out.append(el("span", "envdefault", m[2]));
+    last = re.lastIndex;
+  }
+  if (last < s.length) out.append(s.slice(last));
+  return out;
+}
+
 /* The resource an op leans on is part of what the op IS — an LLM op
- * without its model and endpoint is half a description. Secrets never
- * reach the IR (masked at extraction), so everything here is safe. */
+ * without its model and endpoint is half a description. Hardcoded
+ * secrets never reach the IR (masked at extraction); env-bound ones
+ * appear as their ${VAR} pill. */
 function resourceSection(n) {
   if (!n.resource) return null;
   const names = Array.isArray(n.resource) ? n.resource : [n.resource];
@@ -1601,7 +1603,7 @@ function resourceSection(n) {
         if (k === "category") continue;
         const row = el("div", "resrow");
         row.append(el("span", "reskey", k));
-        row.append(el("span", "resval mono", String(v)));
+        row.append(envValue(v));
         sec.append(row);
       }
     } else {
@@ -2149,7 +2151,7 @@ async function showResources() {
         if (k === "category") continue;
         const row = el("div", "resrow");
         row.append(el("span", "reskey", k));
-        row.append(el("span", "resval mono", String(v)));
+        row.append(envValue(v));
         card.append(row);
       }
       const urow = el("div", "resrow");

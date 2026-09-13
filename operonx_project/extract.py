@@ -503,34 +503,29 @@ def _parse_resources(text: str) -> Tuple[List[str], str]:
 
 
 _SECRET_FIELD = re.compile(r"key|token|secret|password|credential", re.IGNORECASE)
-
-
-def _resolve_env_defaults(value: str) -> str:
-    """``${VAR:default}`` becomes its default; ``${VAR}`` stays visible.
-
-    A required variable has no safe value to show, so its placeholder is
-    kept as-is — the reader sees exactly which knob the field hangs on.
-    """
-
-    def sub(match: "re.Match[str]") -> str:
-        default = match.group(2)
-        return default if default else "${" + match.group(1) + "}"
-
-    return _ENV_PATTERN.sub(sub, value)
+# ``api_key_header: X-API-Key`` names a header, it does not hold one —
+# fields ABOUT a secret are not the secret
+_SECRET_EXEMPT = re.compile(r"header|name|path|file|url|id$", re.IGNORECASE)
+_PLACEHOLDER_ONLY = re.compile(r"^\s*\$\{[A-Za-z_][A-Za-z0-9_]*(?::[^}]*)?\}\s*$")
 
 
 def _resource_fields(entry: Dict[str, Any]) -> Dict[str, Any]:
-    """The scalar, non-secret fields of one declared resource.
+    """Every scalar field of one declared resource, VERBATIM.
 
-    Secrets are dropped by field NAME, before any value handling — an
-    api_key's placeholder or default must never reach the IR.
+    The declaration is what the viewer shows — ``${VAR:default}`` and all,
+    so the reader sees exactly which env knob each field hangs on. The
+    one exception: a secret-named field whose value is NOT purely an env
+    placeholder is a hardcoded credential, and it leaves as ``•••``.
     """
     fields: Dict[str, Any] = {}
     for key, value in entry.items():
-        if _SECRET_FIELD.search(str(key)):
-            continue
         if isinstance(value, str):
-            fields[key] = _resolve_env_defaults(value)
+            secretish = (_SECRET_FIELD.search(str(key))
+                         and not _SECRET_EXEMPT.search(str(key)))
+            if secretish and not _PLACEHOLDER_ONLY.match(value):
+                fields[key] = "•••"
+            else:
+                fields[key] = value
         elif isinstance(value, (int, float, bool)):
             fields[key] = value
     return fields
