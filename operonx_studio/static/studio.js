@@ -1964,6 +1964,95 @@ function literalEditor(node, inp) {
  * record is pre-selected. */
 function fmtCtx(c) { return Array.isArray(c) ? c.join(".") : (c || ""); }
 
+/* ── trace values: EXPOSED, not a debugger tree ─────────────────────
+ * A person reading a trace wants the values in front of their eyes:
+ * strings as readable text blocks, dicts as flat key/value rows all
+ * open, scalars plain. Nothing to expand unless it is truly huge. */
+function traceValue(v, depth = 0) {
+  if (v === null || v === undefined) return el("span", "tvnull", "null");
+  if (typeof v === "boolean" || typeof v === "number")
+    return el("span", "tvnum", String(v));
+  if (typeof v === "string") {
+    if (v === "") return el("span", "tvempty", "empty");
+    if (v === "[]") return el("span", "tvempty", "empty list");
+    const s = el("div", "tvstr");
+    if (v.length > 480) {
+      const head = document.createTextNode(v.slice(0, 480) + "… ");
+      const btn = el("button", "tvmore", `show all (${v.length} chars)`);
+      btn.onclick = () => { s.textContent = v; };
+      s.append(head, btn);
+    } else s.textContent = v;
+    return s;
+  }
+  if (Array.isArray(v)) {
+    if (!v.length) return el("span", "tvempty", "empty list");
+    const flat = JSON.stringify(v);
+    if (flat.length < 110 && v.every(x =>
+        x === null || ["string", "number", "boolean"].includes(typeof x)))
+      return el("span", "tvnum", flat);
+    const box = el("div", "tvdict");
+    v.slice(0, 10).forEach((x, i) => {
+      const row = el("div", "tvrow");
+      row.append(el("span", "tvkey", String(i)));
+      row.append(traceValue(x, depth + 1));
+      box.append(row);
+    });
+    if (v.length > 10) box.append(el("div", "tvempty", `+ ${v.length - 10} more`));
+    return box;
+  }
+  if (typeof v === "object") {
+    if (v.$unserializable) return el("span", "tvtoken", `⊘ ${v.$unserializable}`);
+    if (v.$media) {
+      const t = el("span", "tvtoken",
+        `▶ media${v.bytes ? ` · ${(v.bytes / 1024).toFixed(1)} KB` : ""}`);
+      t.title = v.$media;
+      return t;
+    }
+    if (depth >= 2) {
+      const s = el("div", "tvstr");
+      const flat = JSON.stringify(v);
+      s.textContent = flat.length > 300 ? flat.slice(0, 300) + "…" : flat;
+      return s;
+    }
+    const box = el("div", "tvdict");
+    for (const [k, x] of Object.entries(v)) {
+      const row = el("div", "tvrow");
+      row.append(el("span", "tvkey", k));
+      row.append(traceValue(x, depth + 1));
+      box.append(row);
+    }
+    return box;
+  }
+  return el("span", "tvnum", String(v));
+}
+
+/* the run's inputs and outputs as the two familiar port zones — blue
+ * in, warm out — every variable a labelled block, every value open */
+function valueZones(box, inputs, outputs, scratchKeyOf = {}) {
+  const zone = (label, values, cls) => {
+    const z = el("div", `pzone ${cls}`);
+    z.append(el("div", "tvhead", label));
+    const entries = values && typeof values === "object"
+      ? Object.entries(values) : [];
+    if (!entries.length) z.append(el("div", "tvempty", "none recorded"));
+    for (const [k, v] of entries) {
+      const varbox = el("div", "tvvar");
+      const nm = el("div", "pname", k);
+      if (cls === "pzin" && k in scratchKeyOf) {
+        const pill = el("span", "pchip pscratch", `⌂ ${scratchKeyOf[k]}`);
+        pill.title = "read from a SCRATCH cell — the cell's observed value at this step";
+        nm.append(" ", pill);
+      }
+      varbox.append(nm);
+      varbox.append(traceValue(v));
+      z.append(varbox);
+    }
+    box.append(z);
+  };
+  zone("inputs", inputs, "pzin");
+  zone("outputs", outputs, "pzout");
+}
+
 function executionsSection(n, execP) {
   const sec = el("section");
   sec.append(el("div", "stitle", "Executions"));
@@ -2050,29 +2139,18 @@ function executionsSection(n, execP) {
         + "." + String(d.getMilliseconds()).padStart(3, "0").slice(0, 1);
     };
 
-    // one clicked run = ITS values, plainly: one row per variable,
-    // never a single collapsed {N}-tree the reader has to unfold
-    const kv = (label, values) => {
-      detail.append(el("div", "plabel", label));
-      if (!values || typeof values !== "object" || !Object.keys(values).length) {
-        detail.append(el("div", "note", "none recorded"));
-        return;
-      }
-      for (const [k, v] of Object.entries(values)) {
-        const row = el("div", "vrow");
-        row.append(el("span", "vkey mono", k));
-        row.append(Values.render(v));
-        detail.append(row);
-      }
-    };
+    // which inputs are SCRATCH reads — the IR's bindings say so
+    const scratchKeyOf = {};
+    for (const inp of n.inputs || []) {
+      if (inp.binding && inp.binding.kind === "scratch")
+        scratchKeyOf[inp.name] = inp.binding.key || inp.name;
+    }
     const show = (ex, row) => {
       if (active) active.classList.remove("active");
       active = row; row.classList.add("active");
       detail.textContent = "";
-      if (ex.ctx) detail.append(el("div", "srcline mono", `ctx · ${fmtCtx(ex.ctx)}`));
       if (ex.error) detail.append(el("div", "srcline bad", String(ex.error)));
-      kv("inputs", ex.inputs);
-      kv("outputs", ex.outputs);
+      valueZones(detail, ex.inputs, ex.outputs, scratchKeyOf);
       if (ex.members) {
         detail.append(el("div", "plabel", "members"));
         for (const m of ex.members) {
@@ -2605,21 +2683,7 @@ async function renderExecPanel(run, e, execs) {
         if (nn.graph) walk(nn.graph);
       }
     })(state.graph);
-    for (const [label, values] of [["inputs", match.inputs], ["outputs", match.outputs]]) {
-      if (!values || !Object.keys(values).length) continue;
-      vbox.append(el("div", "plabel", label));
-      for (const [k, v] of Object.entries(values)) {
-        const row = el("div", "vrow");
-        row.append(el("span", "vkey mono", k));
-        if (label === "inputs" && k in scratchKeyOf) {
-          const pill = el("span", "pchip pscratch", `⌂ ${scratchKeyOf[k]}`);
-          pill.title = "read from a SCRATCH cell — this is the cell's observed value at this step";
-          row.append(pill);
-        }
-        row.append(Values.render(v));
-        vbox.append(row);
-      }
-    }
+    valueZones(vbox, match.inputs, match.outputs, scratchKeyOf);
   } catch (err) {
     vbox.textContent = "";
     vbox.append(el("div", "note", err.message));
