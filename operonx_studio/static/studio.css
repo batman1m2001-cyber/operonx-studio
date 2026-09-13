@@ -1130,6 +1130,12 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 /* ── the run canvas: flow lanes on a time axis (Traces tab) ──────── */
 .tlhead { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
   margin-bottom: 10px; }
+.tlmodes { display: inline-flex; gap: 2px; background: var(--panel-2);
+  border-radius: 999px; padding: 3px; }
+.tlmodes button { border: none; border-radius: 999px; padding: 4px 12px;
+  font-size: 12px; box-shadow: none; background: transparent; }
+.tlmodes button.on { background: #fff; font-weight: 650;
+  color: var(--accent-deep); box-shadow: var(--sh-1); }
 .tlhead .tltitle { font-weight: 700; font-size: 14px; color: var(--accent-deep); }
 .tlworld { position: relative; }
 .tlwires { position: absolute; inset: 0; pointer-events: none; }

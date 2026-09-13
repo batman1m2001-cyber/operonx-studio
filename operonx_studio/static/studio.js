@@ -2292,13 +2292,13 @@ async function showTraces() {
       r.source === "langfuse" ? "langfuse"
         : `local${r.also_langfuse ? " + langfuse" : ""} · ${(r.size / 1024).toFixed(1)} KB`));
     const actions = el("td", "runacts");
-    const paint = el("button", null, "paint");
-    paint.title = "color the canvas with this run's durations and errors";
+    const paint = el("button", null, "graph");
+    paint.title = "graph mode: this run painted onto the real workflow canvas";
     paint.onclick = (ev) => { ev.stopPropagation(); paintRun(r.run); };
-    const open = el("button", null, "open");
-    open.title = "the run canvas: the workflow's shape on a real time axis";
+    const open = el("button", null, "timeline");
+    open.title = "timeline mode: every execution on a real ms axis";
     open.onclick = (ev) => { ev.stopPropagation(); showRunCanvas(r.run); };
-    actions.append(open, paint);
+    actions.append(paint, open);
     if (r.source !== "langfuse") {
       const rm = el("button", "danger", "✕");
       rm.title = "delete this recorded run from disk";
@@ -2367,6 +2367,15 @@ async function showRunCanvas(run) {
   back.onclick = () => showTraces();
   head.append(back);
   head.append(el("span", "tltitle mono", run));
+  // the two ways to look at one run: GRAPH keeps the workflow's real
+  // shape (the flow canvas, painted); TIMELINE trades shape for time
+  const modes = el("span", "tlmodes");
+  const gm = el("button", null, "graph mode");
+  gm.title = "this run painted onto the real workflow canvas";
+  gm.onclick = () => paintRun(run);
+  const tm = el("button", "on", "timeline mode");
+  modes.append(gm, tm);
+  head.append(modes);
   const errs = execs.filter(e => e.status === "error").length;
   head.append(el("span", "chip", `${data.total} executions`));
   const span = execs.length ? execs[execs.length - 1].start_ms : 0;
@@ -2374,7 +2383,7 @@ async function showRunCanvas(run) {
   if (errs) head.append(el("span", "chip cbad", `${errs} errors`));
   if (data.total > execs.length)
     head.append(el("span", "chip", `showing first ${execs.length}`));
-  head.append(el("span", "note", "time flows down · x is the op's flow lane · click a card for its values"));
+  head.append(el("span", "note", "time flows down · one card per execution · click a card for its values"));
   box.append(head);
 
   // lanes: only the ops that RAN, packed tight, ordered by FIRST
@@ -2689,6 +2698,11 @@ $("#run-err").onclick = () => {
   }
   if (found) { select(found.key); centerOn(found); }
   else toast(`'${name}' errored but is not on this canvas`, true);
+};
+
+// graph mode ⇄ timeline mode: same run, two pictures
+$("#run-timeline").onclick = () => {
+  if (state.run) { switchTab("traces"); showRunCanvas(state.run.run); }
 };
 
 $("#run-clear").onclick = () => {
