@@ -75,6 +75,41 @@ UI:
 - The flow-info panel (nothing selected): final state of the run, with
   a step scrubber.
 
+## Phase 1.5 — one trace lake: local ∪ Langfuse, deduped
+
+operonx already ships every trace to Langfuse when a `LangfuseConsumer`
+is configured — and the consumer is honest: each OpExecution becomes a
+span whose METADATA carries `op_full_name`, `ctx`, `status`,
+`duration_ms` and the full `upstreams` list. Nothing the timeline or
+provenance features need is lost in the round-trip. The studio already
+half-drinks from it: `lf:`-prefixed runs list beside local ones and
+normalize through the same `_op_executions` path, cached in redis.
+
+What "sync" still requires:
+
+- **Dedup to one row.** A run consumed both locally and to Langfuse is
+  today two rows (`case-x-123` and `lf:<id>`). The trace id IS the join
+  key (callbot: trace_id = call_id = local dir name). Merge rule: one
+  row, badges for both sources, LOCAL wins as the data source (faster,
+  complete, has media); Langfuse is the fallback when the local dir is
+  gone — and the deep-link out to the Langfuse UI either way.
+- **Source-agnostic record contract.** The new features consume ONE
+  shape: `{op_name, op_full_name, ctx, start, end, duration_ms, status,
+  error, inputs, outputs, upstreams}`. The Langfuse adapter must
+  reconstruct `ctx` (parse the formatted string back) and `upstreams`
+  from span metadata — covered by a fixture test with a recorded
+  Langfuse observation payload, so a Langfuse-only trace drives the
+  timeline, provenance edges and state replay identically.
+- **Import to local (explicit, not automatic).** A "pull to local"
+  action on a Langfuse-only run materialises it as a standard run dir
+  (`nodes.jsonl` + meta) so it survives Langfuse retention and works
+  offline. Media that was offloaded to another machine's disk stays a
+  named absence, never a broken player.
+- If Phase 1 lands recorder cell events (Option B), the
+  LangfuseConsumer carries them too — as trace-level events — so the
+  state timeline also survives the trip. Same approval gate: that is
+  operonx core.
+
 ## Phase 2 — the timeline canvas (time-warp mode)
 
 Not a second page — the SAME canvas, warped. With a run painted, a
@@ -137,7 +172,9 @@ scratch, step scrubber.
 
 ## Order and size
 
-P0 (half a day, produces a decision) → P2 (the big visible win, ~2-3
+P0 (half a day, produces a decision) → P1.5 (the record contract FIRST,
+~1 session — everything after builds on the one shape, so the Langfuse
+adapter cannot be an afterthought) → P2 (the big visible win, ~2-3
 sessions) → P3 (1 session) → P1 (depends on P0's answer; replay ≈ 1
 session, recorder path adds the operonx PR + approval gate).
 
