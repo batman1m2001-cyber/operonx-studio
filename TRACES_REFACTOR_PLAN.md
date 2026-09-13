@@ -60,6 +60,22 @@ that prove it, and the A-or-B decision. **Option B touches operonx
 core — it ships only with explicit approval, as its own tiny PR,
 nothing else riding along.**
 
+**ANSWERED (2026-09-13): imperative writes exist — replay alone would
+lie.** The callbot writes cells from inside op bodies
+(`pipeline/egress.py:435 SCRATCH["hangup_sent"] = True`,
+`pipeline/routing.py:231 SCRATCH["last_customer_speech"] = ...`) and,
+worse, MUTATES objects held in cells (`routing.py:237
+SCRATCH["clock"].phase = phase`) — invisible to any event system,
+recorder included. Consequences:
+
+- Shipped now, honestly labelled: **observed scratch READS** — an
+  input bound from a cell is already traced with its value, so the
+  panel marks it `⌂ cell` and shows the cell's value AT THAT STEP.
+  Zero core changes, never wrong, admittedly partial.
+- A full state-per-step timeline requires the Option B recorder event
+  AND would still miss in-place mutations. Awaiting the user's call;
+  parked until then.
+
 ## Phase 1 — scratch state per step
 
 Whichever path P0 picks, the studio ends up with one thing: a **state
@@ -110,11 +126,12 @@ What "sync" still requires:
   state timeline also survives the trip. Same approval gate: that is
   operonx core.
 
-## Phase 2 — the timeline canvas (time-warp mode)
+## Phase 2 — the run canvas: flow and timeline MERGED, inside Traces
 
-Not a second page — the SAME canvas, warped. With a run painted, a
-toggle (`Flow ⇄ Timeline`, hotkey T) relocates ops onto a vertical time
-axis:
+**Decision (user, 2026-09-13): this lives in the Traces tab only — the
+Flow tab's canvas is untouched.** Opening a run in Traces replaces the
+old separate waterfall with one merged picture: the workflow's shape
+laid onto a real time axis:
 
 - **y = start time** on a ms axis drawn at the left edge — ticks,
   labels, and a ruler that follows the cursor. 46 s of call with µs
@@ -182,11 +199,12 @@ P2 before P1 on purpose: the timeline is pure studio work on data that
 already exists, while scratch may block on the core question — the
 refactor should not idle behind it.
 
-## Decisions I need from you
+## Decisions (resolved 2026-09-13)
 
-1. **Instance cards vs stretched op**: one card per execution (above) —
-   or one card per op stretched from first start to last end with
-   beads for each run? Plan assumes instance cards.
-2. **Scratch recording**: if P0 finds imperative writes, do you approve
-   the additive operonx recorder event (Option B)?
-3. **Axis**: compressed-with-marked-breaks (assumed) vs strictly linear?
+1. **Merged, in Traces only** — the run canvas is the Traces tab's run
+   view; the Flow tab never warps.
+2. Instance cards and the compressed axis go as planned ("do as you
+   like"); revisit after the demo.
+3. Scratch recording: P0 asks before any operonx core change stands.
+4. **Demo first**: ship the run canvas + run-first panel on local
+   traces, then iterate.

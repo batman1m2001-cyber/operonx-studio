@@ -791,3 +791,72 @@ def test_resource_hub_shows_declarations_never_values(client, project):
     assert health["env"]["DEMO_HUB_URL"] == "missing"
     assert health["env"]["DEMO_HUB_MODEL"] == "default"
     assert "super-secret" not in json.dumps(health)
+
+
+def test_flow_endpoint_serves_the_run_canvas_contract(client, project, tmp_path):
+    """One shape for the run canvas: relative start_ms in time order,
+    normalised upstream refs, ctx flattened to a string — from LOCAL
+    records here; the Langfuse path is pinned on _flow_records below."""
+    _traced(project, tmp_path, "call-flow", [
+        {"op_id": "g.a#main", "op_name": "a", "op_full_name": "g.a",
+         "ctx": ["main"], "start_time": 100.0, "end_time": 100.005,
+         "duration_ms": 5.0, "status": "ok",
+         "inputs": {}, "outputs": {"x": 1}, "upstreams": []},
+        {"op_id": "g.b#main.[0]", "op_name": "b", "op_full_name": "g.b",
+         "ctx": ["main", "[0]"], "start_time": 100.010, "end_time": 100.020,
+         "duration_ms": 10.0, "status": "error", "error": "boom",
+         "inputs": {"x": 1}, "outputs": {},
+         "upstreams": [{"from_op_id": "g.a#main", "from_key": "x", "to_key": "x"}]},
+    ])
+    pid = _open(client, project)
+    got = client.get(f"/api/p/{pid}/trace/call-flow/flow").json()
+    assert got["total"] == 2
+    a, b = got["executions"]
+    assert (a["op"], a["start_ms"]) == ("a", 0.0)
+    assert b["start_ms"] == 10.0                      # relative, ms
+    assert b["ctx"] == "main.[0]"                     # flattened
+    assert b["status"] == "error" and b["error"] == "boom"
+    assert b["upstreams"] == [{"from": "g.a#main", "from_key": "x", "to_key": "x"}]
+    # values never ride the canvas payload — the panel fetches them per op
+    assert "inputs" not in a and "outputs" not in a
+
+
+def test_flow_records_normalise_langfuse_shaped_records():
+    """A record as _lf_records yields it (ctx already a string, upstream
+    refs keyed "from") must produce the identical contract."""
+    from operonx_studio.app import _flow_records
+
+    got = _flow_records([
+        {"op_id": "g.b#main.[0]", "op_name": "b", "op_full_name": "g.b",
+         "ctx": "main.[0]", "start_time": 55.5, "duration_ms": 2.0,
+         "status": "ok", "error": None,
+         "upstreams": [{"from": "g.a#main", "from_key": "x", "to_key": "y"}]},
+    ], "lf:t1")
+    e = got["executions"][0]
+    assert e["ctx"] == "main.[0]"
+    assert e["start_ms"] == 0.0
+    assert e["upstreams"] == [{"from": "g.a#main", "from_key": "x", "to_key": "y"}]
+
+
+def test_langfuse_runs_merge_into_local_rows(client, project, tmp_path, monkeypatch):
+    """A run recorded both locally and in Langfuse is ONE row: local
+    wins as the data source, the Langfuse copy becomes a badge."""
+    import operonx_studio.app as appmod
+
+    _traced(project, tmp_path, "call-both", [{"op_name": "a", "duration_ms": 1.0}])
+    manifest = (project / "operonx.toml").read_text()
+    (project / "operonx.toml").write_text(
+        manifest + '\n[studio.langfuse]\nhost = "http://lf.example"\n'
+        'public_key = "pk"\nsecret_key = "sk"\n', encoding="utf-8")
+    monkeypatch.setattr(appmod, "_lf_runs", lambda cfg, limit=50: [
+        {"run": "lf:call-both", "mtime": 1.0, "size": None,
+         "source": "langfuse", "name": "call-both"},
+        {"run": "lf:only-remote", "mtime": 2.0, "size": None,
+         "source": "langfuse", "name": "only-remote"},
+    ])
+    pid = _open(client, project)
+    runs = client.get(f"/api/p/{pid}/traces").json()["runs"]
+    names = sorted(r["run"] for r in runs)
+    assert names == ["call-both", "lf:only-remote"]   # deduped, remote kept
+    local = next(r for r in runs if r["run"] == "call-both")
+    assert local["source"] == "local" and local.get("also_langfuse") is True

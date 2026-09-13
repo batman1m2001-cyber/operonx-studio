@@ -250,6 +250,45 @@ def _op_executions(records, run_name: str, op_name: str, limit: int = 50) -> Dic
             "showing": len(keep), "executions": list(keep)}
 
 
+def _flow_records(records, run_name: str, cap: int = 3000) -> Dict[str, Any]:
+    """Every execution of one run, light: timing, ctx, status and
+    provenance — no recorded values (the panel fetches those per op).
+    One shape for local and Langfuse records; upstream refs normalise
+    to {"from": op_id, "from_key", "to_key"}.
+    """
+    out: List[Dict[str, Any]] = []
+    t0: Optional[float] = None
+    for rec in records:
+        start = rec.get("start_time")
+        if start is None:
+            continue
+        t0 = start if t0 is None or start < t0 else t0
+        ups = []
+        for u in rec.get("upstreams") or []:
+            src = u.get("from_op_id") or u.get("from")
+            if src:
+                ups.append({"from": src, "from_key": u.get("from_key"),
+                            "to_key": u.get("to_key")})
+        ctx = rec.get("ctx")
+        if isinstance(ctx, list):
+            ctx = ".".join(str(c) for c in ctx)
+        out.append({
+            "id": rec.get("op_id") or f"{rec.get('op_full_name')}#{ctx}",
+            "op": rec.get("op_name"),
+            "full": rec.get("op_full_name"),
+            "ctx": ctx,
+            "start": start,
+            "dur_ms": rec.get("duration_ms") or 0.0,
+            "status": rec.get("status"),
+            "error": rec.get("error"),
+            "upstreams": ups,
+        })
+    out.sort(key=lambda r: r["start"])
+    for r in out:
+        r["start_ms"] = round((r.pop("start") - (t0 or 0.0)) * 1000.0, 3)
+    return {"run": run_name, "total": len(out), "executions": out[:cap]}
+
+
 def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]:
     """Per-op aggregates for one recorded run.
 
@@ -370,6 +409,10 @@ def _lf_records(cfg: Dict[str, str], trace_id: str):
             duration = (_iso_epoch(obs["endTime"]) - _iso_epoch(obs["startTime"])) * 1000.0
         status = meta.get("status") or ("error" if obs.get("level") == "ERROR" else "ok")
         yield {
+            # the consumer wrote the op_id as the span's own id, and the
+            # upstream provenance into metadata — hand both back so a
+            # Langfuse run drives the run canvas exactly like a local one
+            "op_id": obs.get("id"),
             "op_name": obs.get("name"),
             "op_full_name": meta.get("op_full_name") or obs.get("name"),
             "start_time": _iso_epoch(obs.get("startTime")),
@@ -379,6 +422,7 @@ def _lf_records(cfg: Dict[str, str], trace_id: str):
             "ctx": meta.get("ctx"),
             "inputs": obs.get("input"),
             "outputs": obs.get("output"),
+            "upstreams": meta.get("upstreams"),
         }
 
 
@@ -437,7 +481,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     def _page(name: str) -> HTMLResponse:
         text = (STATIC / name).read_text(encoding="utf-8")
         for asset in ("studio.css", "studio.js", "values.js", "chat.js",
-                      "home.js", "providers.js"):
+                      "home.js", "providers.js", "timeline.js"):
             text = text.replace(f"/static/{asset}", f"/static/{asset}?v={asset_v}")
         return HTMLResponse(text, headers={"Cache-Control": "no-cache"})
 
@@ -888,7 +932,21 @@ def build_studio_app(recents: Optional[Recents] = None):
         if lf is not None and not local_only:
             payload["langfuse"] = lf["host"]
             try:
-                runs.extend(_lf_runs(lf))
+                # SYNC, not a second list: the trace id is the join key
+                # (LangfuseConsumer names its trace with the local run's
+                # id). A run recorded in both places is ONE row — local
+                # wins as the data source (complete, has media), the
+                # Langfuse copy becomes a badge on it.
+                local_ids = {r["run"] for r in runs}
+                for lr in _lf_runs(lf):
+                    twin = lr["run"][3:] if lr["run"].startswith("lf:") else lr["run"]
+                    if twin in local_ids or lr.get("name") in local_ids:
+                        for r in runs:
+                            if r["run"] == twin or r["run"] == lr.get("name"):
+                                r["also_langfuse"] = True
+                                break
+                        continue
+                    runs.append(lr)
             except Exception as exc:  # noqa: BLE001 — someone else's server
                 payload["langfuse_error"] = str(exc)
         runs.sort(key=lambda r: -(r["mtime"] or 0))
@@ -952,6 +1010,25 @@ def build_studio_app(recents: Optional[Recents] = None):
         shutil.rmtree(run_dir)
         summary_cache.pop(str(run_dir), None)
         return JSONResponse({"ok": True})
+
+    @app.get("/api/p/{pid}/trace/{run}/flow")
+    def trace_flow(pid: str, run: str) -> JSONResponse:
+        """The run canvas's food: every execution, light — timing, ctx,
+        status and upstream provenance, one shape for local and
+        Langfuse runs. Values stay with the per-op endpoint."""
+        if run.startswith("lf:"):
+            got = _lf_for(pid, run)
+            if isinstance(got, JSONResponse):
+                return got
+            cfg, trace_id = got
+            try:
+                return JSONResponse(_flow_records(_lf_records(cfg, trace_id), run))
+            except Exception as exc:  # noqa: BLE001 — someone else's server
+                return JSONResponse({"error": f"langfuse: {exc}"}, status_code=502)
+        run_dir = _local_run_dir(pid, run)
+        if isinstance(run_dir, JSONResponse):
+            return run_dir
+        return JSONResponse(_flow_records(_local_records(run_dir), run_dir.name))
 
     @app.get("/api/p/{pid}/trace/{run}/timeline")
     def trace_timeline(pid: str, run: str) -> JSONResponse:

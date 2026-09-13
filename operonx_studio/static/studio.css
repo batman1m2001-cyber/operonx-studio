@@ -1127,6 +1127,50 @@ button.pchip.pref:hover { border-color: #8fafd0; }
   color: #6b3fa0; background: #f5efff; border: 1px solid #ddccf2; }
 .envdefault { color: #3d6f9e; margin-right: 3px; }
 
+/* ── the run canvas: flow lanes on a time axis (Traces tab) ──────── */
+.tlhead { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 10px; }
+.tlhead .tltitle { font-weight: 700; font-size: 14px; color: var(--accent-deep); }
+.tlworld { position: relative; }
+.tlwires { position: absolute; inset: 0; pointer-events: none; }
+.tlwires .tlrail { stroke: #dbe4f0; stroke-width: 1.5; stroke-dasharray: 2 6; }
+.tlwires .tllane { fill: #6b7a90; font-size: 11px; font-weight: 650;
+  text-anchor: middle; }
+.tlwires .tltick { fill: #9aa8bb; font-size: 9.5px;
+  font-family: ui-monospace, monospace; }
+.tlwires .tlbreak { fill: #b3661a; font-size: 9.5px; font-style: italic;
+  font-family: ui-monospace, monospace; }
+.tlwires .tlwire { fill: none; stroke: var(--wire); stroke-width: 1.6;
+  opacity: .55; pointer-events: stroke; }
+.tlwires .tlwire.err { stroke: var(--err); }
+.tlwires .tlwire.hot { stroke: var(--wire-deep); stroke-width: 2.5; opacity: 1; }
+.tlop { position: absolute; width: 150px; cursor: pointer;
+  display: flex; align-items: flex-start; gap: 6px; padding: 2px 9px;
+  border: 1.5px solid color-mix(in srgb, var(--wire) 55%, #dbe4f0);
+  border-radius: 9px; background: linear-gradient(180deg, #fff, #f3f7fc);
+  box-shadow: 0 2px 8px rgba(70, 100, 150, .12); overflow: hidden;
+  transition: box-shadow var(--tr), border-color var(--tr); }
+.tlop .tlname { flex: 1 1 auto; min-width: 52px; text-align: left; }
+.tlop:hover { border-color: var(--wire-deep);
+  box-shadow: 0 3px 12px rgba(70, 100, 150, .25); }
+.tlop.err { border-color: var(--err); background:
+  linear-gradient(180deg, #fff, #fdf1f0); }
+.tlop.sel { border-color: #38c4ea;
+  background: radial-gradient(80% 120% at 50% 35%, #f2fdff 0%, #d9f7ff 55%, #a3e9ff 100%);
+  box-shadow: 0 0 0 1.5px rgba(38, 199, 245, .45), 0 0 20px rgba(0, 208, 255, .5); }
+.tlop .tlname { font-weight: 650; font-size: 11.5px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.tlop .tlmeta { flex: 0 1 auto; min-width: 0; color: var(--muted);
+  font-size: 9px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.runrow { display: flex; gap: 10px; width: 100%; align-items: baseline;
+  padding: 4px 9px; border: 1px solid var(--line-soft); background: #fff;
+  border-radius: 7px; margin-bottom: 4px; font-size: 11.5px; cursor: pointer;
+  box-shadow: none; }
+.runrow.on { border-color: #38c4ea; background: #f2fdff; }
+.runrow.bad { border-color: color-mix(in srgb, var(--err) 45%, #fff); }
+.runrow span:last-child { margin-left: auto; color: var(--muted); }
+
 /* ── the Resources tab: the project's backing services, plainly ──── */
 #resources { flex: 1; overflow: auto; padding: 22px 26px; }
 #resources .reshead { margin: 0 0 4px; font-size: 19px; letter-spacing: -.01em; }

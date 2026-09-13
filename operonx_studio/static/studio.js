@@ -2289,15 +2289,16 @@ async function showTraces() {
     }
     tr.append(act);
     tr.append(el("td", null,
-      r.source === "langfuse" ? "langfuse" : `local · ${(r.size / 1024).toFixed(1)} KB`));
+      r.source === "langfuse" ? "langfuse"
+        : `local${r.also_langfuse ? " + langfuse" : ""} · ${(r.size / 1024).toFixed(1)} KB`));
     const actions = el("td", "runacts");
     const paint = el("button", null, "paint");
     paint.title = "color the canvas with this run's durations and errors";
     paint.onclick = (ev) => { ev.stopPropagation(); paintRun(r.run); };
-    const tl = el("button", null, "timeline");
-    tl.title = "when did every op run — the run as a waterfall";
-    tl.onclick = (ev) => { ev.stopPropagation(); showTimeline(r.run); };
-    actions.append(paint, tl);
+    const open = el("button", null, "open");
+    open.title = "the run canvas: the workflow's shape on a real time axis";
+    open.onclick = (ev) => { ev.stopPropagation(); showRunCanvas(r.run); };
+    actions.append(open, paint);
     if (r.source !== "langfuse") {
       const rm = el("button", "danger", "✕");
       rm.title = "delete this recorded run from disk";
@@ -2314,11 +2315,282 @@ async function showTraces() {
       actions.append(rm);
     }
     tr.append(actions);
-    tr.onclick = () => paintRun(r.run);
+    tr.onclick = () => showRunCanvas(r.run);
     tbody.append(tr);
   }
   table.append(tbody);
   box.append(table);
+}
+
+/* ── the RUN CANVAS: flow and timeline merged, Traces-tab only ──────
+ * The workflow's shape survives — every op keeps its flow-layout LANE
+ * (x) — while the vertical becomes a real ms axis: one slim card per
+ * EXECUTION at its true start, sized by its duration, wired by the
+ * provenance the recorder actually saw. Long idle gaps compress into
+ * marked breaks so a 46-second call still reads as one page. */
+
+// the flow layout with every GraphOp open, computed off to the side —
+// the live canvas's expansion state is not disturbed
+function fullFlatLayout() {
+  const saved = state.expanded;
+  const all = new Set();
+  (function walk(g, prefix) {
+    for (const n of g.nodes || []) {
+      if (n.graph) { all.add(prefix + n.id); walk(n.graph, prefix + n.id + "/"); }
+    }
+  })(state.graph, "");
+  state.expanded = all;
+  try {
+    const model = placeGraph(state.graph, "", 0);
+    return flattenModel(model, 0, 0, {nodes: [], edges: []});
+  } finally {
+    state.expanded = saved;
+  }
+}
+
+// the time math lives in timeline.js — pure, node-tested
+const TL = Timeline.TL;
+const timePlace = Timeline.timePlace;
+const fmtMs = Timeline.fmtMs;
+
+async function showRunCanvas(run) {
+  const box = $("#traces");
+  box.textContent = "";
+  let data;
+  try {
+    data = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/flow`);
+  } catch (e) { box.append(el("div", "note", e.message)); return; }
+  const execs = data.executions || [];
+
+  const head = el("div", "tlhead");
+  const back = el("button", null, "← runs");
+  back.onclick = () => showTraces();
+  head.append(back);
+  head.append(el("span", "tltitle mono", run));
+  const errs = execs.filter(e => e.status === "error").length;
+  head.append(el("span", "chip", `${data.total} executions`));
+  const span = execs.length ? execs[execs.length - 1].start_ms : 0;
+  head.append(el("span", "chip", `${fmtMs(span)} span`));
+  if (errs) head.append(el("span", "chip cbad", `${errs} errors`));
+  if (data.total > execs.length)
+    head.append(el("span", "chip", `showing first ${execs.length}`));
+  head.append(el("span", "note", "time flows down · x is the op's flow lane · click a card for its values"));
+  box.append(head);
+
+  // lanes: only the ops that RAN, packed tight, ordered by FIRST
+  // appearance in time — in a DAG the first-run order IS the flow's
+  // structural order, so the picture reads as the workflow descending
+  // left-to-right, and the first screen is never empty
+  const lane = Timeline.laneOrder(execs);
+  const opsRan = [...lane.keys()];
+  const laneOf = (e) => TL.axisW + lane.get(e.op) * TL.pitch + TL.laneW / 2 + 16;
+  const worldW = TL.axisW + opsRan.length * TL.pitch + 220;
+
+  const height = timePlace(execs);
+  const world = el("div", "tlworld");
+  world.style.height = `${height}px`;
+  world.style.width = `${worldW}px`;
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("class", "tlwires");
+  svg.setAttribute("width", worldW);
+  svg.setAttribute("height", height);
+  world.append(svg);
+
+  const byId = new Map();
+  for (const e of execs) byId.set(e.id, e);
+
+  // lane ghosts: a faint rail per op column, so the flow's skeleton
+  // stays visible under the instances
+  for (const name of opsRan) {
+    const x = laneOf({op: name});
+    const rail = document.createElementNS(SVGNS, "line");
+    rail.setAttribute("x1", x); rail.setAttribute("x2", x);
+    rail.setAttribute("y1", TL.padTop - 26); rail.setAttribute("y2", height - 90);
+    rail.setAttribute("class", "tlrail");
+    svg.append(rail);
+    const lbl = document.createElementNS(SVGNS, "text");
+    lbl.setAttribute("x", x); lbl.setAttribute("y", TL.padTop - 34);
+    lbl.setAttribute("class", "tllane");
+    lbl.textContent = name;
+    svg.append(lbl);
+  }
+
+  // axis: a label whenever enough time passed, plus break markers
+  let lastLbl = -1e9;
+  for (const e of execs) {
+    if (e.gapBreak) {
+      const brk = document.createElementNS(SVGNS, "text");
+      brk.setAttribute("x", 8); brk.setAttribute("y", e.y - 8);
+      brk.setAttribute("class", "tlbreak");
+      brk.textContent = `≈ +${fmtMs(e.gapBreak)} idle`;
+      svg.append(brk);
+      lastLbl = e.start_ms;
+    } else if (e.start_ms - lastLbl > 40) {
+      const t = document.createElementNS(SVGNS, "text");
+      t.setAttribute("x", 8); t.setAttribute("y", e.y + 4);
+      t.setAttribute("class", "tltick");
+      t.textContent = fmtMs(e.start_ms);
+      svg.append(t);
+      lastLbl = e.start_ms;
+    }
+  }
+
+  // provenance wires: what actually fed what
+  for (const e of execs) {
+    for (const u of e.upstreams || []) {
+      const src = byId.get(u.from);
+      if (!src) continue;
+      const x1 = laneOf(src), y1 = src.y + src.h;
+      const x2 = laneOf(e), y2 = e.y;
+      const p = document.createElementNS(SVGNS, "path");
+      const c = Math.max(18, Math.min(70, (y2 - y1) * 0.5));
+      p.setAttribute("d", `M ${x1} ${y1} C ${x1} ${y1 + c}, ${x2} ${y2 - c}, ${x2} ${y2}`);
+      p.setAttribute("class", "tlwire" + (e.status === "error" ? " err" : ""));
+      p.dataset.dst = e.id;
+      const tip = document.createElementNS(SVGNS, "title");
+      tip.textContent = `${src.op}.${u.from_key} → ${e.op}.${u.to_key}`;
+      p.append(tip);
+      svg.append(p);
+    }
+  }
+
+  // one slim card per execution
+  for (const e of execs) {
+    const card = el("div", "tlop" + (e.status === "error" ? " err" : ""));
+    card.style.left = `${laneOf(e) - TL.laneW / 2}px`;
+    card.style.top = `${e.y}px`;
+    card.style.height = `${e.h}px`;
+    card.append(el("span", "tlname", e.op));
+    card.append(el("span", "tlmeta mono",
+      `${fmtMs(e.dur_ms)}${e.ctx ? " · " + e.ctx : ""}`));
+    card.title = `${e.full || e.op} · started +${fmtMs(e.start_ms)}`
+      + (e.error ? `\n${e.error}` : "");
+    card.onclick = () => selectExecution(run, e, execs, world);
+    e.el = card;
+    world.append(card);
+  }
+  box.append(world);
+  state._tlrun = run;
+}
+
+// selecting an instance: highlight it, its wires, and open the
+// run-first panel — values, provenance, and this op's other runs
+function selectExecution(run, e, execs, world) {
+  for (const other of execs) if (other.el) other.el.classList.remove("sel");
+  e.el.classList.add("sel");
+  for (const w of world.querySelectorAll(".tlwire"))
+    w.classList.toggle("hot", w.dataset.dst === e.id);
+  renderExecPanel(run, e, execs);
+}
+
+async function renderExecPanel(run, e, execs) {
+  const panel = $("#inspector");
+  panel.classList.remove("off");
+  panel.textContent = "";
+  const head = el("div", "phead");
+  head.append(el("h3", null, e.op));
+  const chips = el("div", "chips");
+  chips.append(el("span", "chip", e.ctx || "main"));
+  chips.append(el("span", `chip ${e.status === "error" ? "cbad" : ""}`, e.status));
+  chips.append(el("span", "chip", `+${fmtMs(e.start_ms)}`));
+  chips.append(el("span", "chip", fmtMs(e.dur_ms)));
+  head.append(chips);
+  panel.append(head);
+  if (e.error) panel.append(el("div", "rolenote dormnote", e.error));
+
+  // every run of THIS op, the selected one marked — a generator's fan
+  const mine = execs.filter(x => x.op === e.op);
+  if (mine.length > 1) {
+    const sec = el("section");
+    sec.append(el("div", "stitle", `Runs · ${mine.length}`));
+    for (const x of mine.slice(0, 60)) {
+      const row = el("button", "runrow" + (x === e ? " on" : "")
+        + (x.status === "error" ? " bad" : ""));
+      row.append(el("span", "mono", `+${fmtMs(x.start_ms)}`));
+      row.append(el("span", null, fmtMs(x.dur_ms)));
+      row.append(el("span", "mono", x.ctx || ""));
+      row.onclick = () => {
+        x.el?.scrollIntoView({block: "center", behavior: "smooth"});
+        x.el?.click();
+      };
+      sec.append(row);
+    }
+    panel.append(sec);
+  }
+
+  // provenance: which executions fed this one
+  if ((e.upstreams || []).length) {
+    const sec = el("section");
+    sec.append(el("div", "stitle", "Fed by"));
+    const byId = new Map(execs.map(x => [x.id, x]));
+    for (const u of e.upstreams) {
+      const src = byId.get(u.from);
+      const row = el("div", "resrow");
+      row.append(el("span", "reskey mono", u.to_key || ""));
+      const chip = el("button", "pchip pref",
+        `${src ? src.op : u.from}.${u.from_key || ""}`);
+      if (src) chip.onclick = () => {
+        src.el?.scrollIntoView({block: "center", behavior: "smooth"});
+        src.el?.click();
+      };
+      row.append(chip);
+      sec.append(row);
+    }
+    panel.append(sec);
+  }
+
+  // the values — fetched per op, matched to this execution by start
+  const sec = el("section");
+  sec.append(el("div", "stitle", "Values"));
+  const vbox = el("div", null, "…");
+  sec.append(vbox);
+  panel.append(sec);
+  try {
+    const got = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`
+      + `/op/${encodeURIComponent(e.op)}?limit=200`);
+    const match = (got.executions || []).find(x =>
+      Math.abs((x.duration_ms ?? -1) - e.dur_ms) < 0.001
+      && (x.ctx == null || e.ctx == null
+          || String(Array.isArray(x.ctx) ? x.ctx.join(".") : x.ctx) === String(e.ctx)))
+      || (got.executions || [])[0];
+    vbox.textContent = "";
+    if (!match) { vbox.append(el("div", "note", "values were not kept for this execution")); return; }
+    // which inputs came out of SCRATCH cells — the IR knows the
+    // binding, the record knows the value: together they are the
+    // OBSERVED state reads of this step. (Full state-per-step needs
+    // recorder events — see TRACES_REFACTOR_PLAN P0: imperative
+    // writes exist, replay alone would lie.)
+    const scratchKeyOf = {};
+    (function walk(g) {
+      for (const nn of g.nodes || []) {
+        if (nn.name === e.op) {
+          for (const inp of nn.inputs || []) {
+            if (inp.binding && inp.binding.kind === "scratch")
+              scratchKeyOf[inp.name] = inp.binding.key || inp.name;
+          }
+        }
+        if (nn.graph) walk(nn.graph);
+      }
+    })(state.graph);
+    for (const [label, values] of [["inputs", match.inputs], ["outputs", match.outputs]]) {
+      if (!values || !Object.keys(values).length) continue;
+      vbox.append(el("div", "plabel", label));
+      for (const [k, v] of Object.entries(values)) {
+        const row = el("div", "vrow");
+        row.append(el("span", "vkey mono", k));
+        if (label === "inputs" && k in scratchKeyOf) {
+          const pill = el("span", "pchip pscratch", `⌂ ${scratchKeyOf[k]}`);
+          pill.title = "read from a SCRATCH cell — this is the cell's observed value at this step";
+          row.append(pill);
+        }
+        row.append(Values.render(v));
+        vbox.append(row);
+      }
+    }
+  } catch (err) {
+    vbox.textContent = "";
+    vbox.append(el("div", "note", err.message));
+  }
 }
 
 /* The run as a waterfall: one lane per op, every recorded execution a
