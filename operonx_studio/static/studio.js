@@ -1428,7 +1428,12 @@ function select(key) {
     ? api(`/api/p/${PID}/trace/${encodeURIComponent(state.run.run)}/op/${encodeURIComponent(n.name)}`)
     : null;
 
-  if (execP) panel.append(valuesSection(n, execP));
+  // A painted run leads with THE RUNS: click an execution, see its
+  // inputs and outputs — that is what a trace is for. Everything else
+  // (wiring, resource, code) queues behind. Containers keep the
+  // member-scan latest-values view before their grouped passes.
+  if (execP && !n.graph) panel.append(executionsSection(n, execP));
+  if (execP && n.graph) panel.append(valuesSection(n, execP));
   // What flows in, what flows out, and WHO it links to — the essential
   // card, always visible, links as chips you can click, not dotted text.
   panel.append(portsSection(it));
@@ -1437,7 +1442,7 @@ function select(key) {
   const llm = llmSection(n, execP);
   if (llm) panel.append(llm);
   if (n.routes) panel.append(routeSection(it, execP));
-  if (execP) panel.append(executionsSection(n, execP));
+  if (execP && n.graph) panel.append(executionsSection(n, execP));
   if (n.code) panel.append(codeSection(n));
   if (n.graph) panel.append(membersSection(it));
 }
@@ -1956,6 +1961,8 @@ function literalEditor(node, inp) {
  * execution — rank, member, duration with an inline bar, status — and
  * ONE detail area below the table (not fifty accordions). The latest
  * record is pre-selected. */
+function fmtCtx(c) { return Array.isArray(c) ? c.join(".") : (c || ""); }
+
 function executionsSection(n, execP) {
   const sec = el("section");
   sec.append(el("div", "stitle", "Executions"));
@@ -2042,15 +2049,29 @@ function executionsSection(n, execP) {
         + "." + String(d.getMilliseconds()).padStart(3, "0").slice(0, 1);
     };
 
+    // one clicked run = ITS values, plainly: one row per variable,
+    // never a single collapsed {N}-tree the reader has to unfold
+    const kv = (label, values) => {
+      detail.append(el("div", "plabel", label));
+      if (!values || typeof values !== "object" || !Object.keys(values).length) {
+        detail.append(el("div", "note", "none recorded"));
+        return;
+      }
+      for (const [k, v] of Object.entries(values)) {
+        const row = el("div", "vrow");
+        row.append(el("span", "vkey mono", k));
+        row.append(Values.render(v));
+        detail.append(row);
+      }
+    };
     const show = (ex, row) => {
       if (active) active.classList.remove("active");
       active = row; row.classList.add("active");
       detail.textContent = "";
+      if (ex.ctx) detail.append(el("div", "srcline mono", `ctx · ${fmtCtx(ex.ctx)}`));
       if (ex.error) detail.append(el("div", "srcline bad", String(ex.error)));
-      detail.append(el("div", "plabel", "outputs"));
-      detail.append(Values.render(ex.outputs ?? null, {open: true, priority: n.outputs || []}));
-      detail.append(el("div", "plabel", "inputs"));
-      detail.append(Values.render(ex.inputs ?? null, {}));
+      kv("inputs", ex.inputs);
+      kv("outputs", ex.outputs);
       if (ex.members) {
         detail.append(el("div", "plabel", "members"));
         for (const m of ex.members) {
@@ -2066,9 +2087,11 @@ function executionsSection(n, execP) {
       const row = el("button", "exline" + (ex.status === "ok" ? "" : " bad"));
       row.append(el("span", "exn mono", `#${idx}`));
       row.append(el("span", "extime mono", clock(ex.start_time)));
+      // every run wears its dispatch ctx — WHICH pass this was is half
+      // of understanding a generator's fan
       row.append(el("span", "exop mono",
-        ex.members ? `${ex.members.length} ops`
-                   : (ex.op && ex.op !== n.name ? ex.op : "")));
+        ex.members ? `${ex.members.length} ops` : fmtCtx(ex.ctx)));
+      row.title = ex.ctx ? `ctx ${fmtCtx(ex.ctx)}` : "";
       const bar = el("span", "exbar");
       bar.style.setProperty("--w", `${Math.max(2, 100 * (ex.duration_ms || 0) / maxMs)}%`);
       row.append(bar);
