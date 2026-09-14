@@ -277,7 +277,12 @@ function flattenModel(model, ox, oy, out) {
 const portCX = (it) => it.x + it.w / 2;
 
 function bezier(x1, y1, x2, y2) {
-  const dy = Math.max(40, Math.abs(y2 - y1) / 2);
+  const gap = Math.abs(y2 - y1);
+  // dead vertical: a line, not a curve pretending to bend
+  if (Math.abs(x2 - x1) < 3) return `M ${x1} ${y1} L ${x2} ${y2}`;
+  // handles must never outrun the gap — a 40px handle on a 30px hop
+  // overshoots both ends and folds the wire into a kink
+  const dy = gap < 80 ? gap * 0.45 : Math.max(40, gap / 2);
   return `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`;
 }
 
