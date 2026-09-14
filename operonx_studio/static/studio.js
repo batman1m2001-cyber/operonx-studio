@@ -181,29 +181,33 @@ function ranInRun(n) {
  * ARE the GraphOp's boundary — inner entries hang off START, inner
  * exits feed END, and external edges plug into the pills instead of
  * the container's rim. */
-const B_W = 66, B_H = 28, B_GAP = 40;
+const B_W = 66, B_H = 28;   // the main flow's standalone terminal pills
+const KB = 26;              // a container's boundary KNOB
+const K_TOP = 18;           // room between the title strip and the first row
 
 function withBoundaries(model, key, depth) {
-  // top-down: START above the first row, END below the last — current
-  // enters at the top terminal and leaves at the bottom one
-  for (const it of model.items) it.y += B_H + B_GAP;
-  const contentBottom = (model.h - 48) + B_H + B_GAP;
-  const midX = Math.max(6, (model.w - 48) / 2 - B_W / 2);
-  const pill = (which, x, y) => ({
+  // An opened GraphOp's ports are KNOBS on its own border: START
+  // straddles the top edge (above the title strip), END the bottom.
+  // Outside wires plug into the knobs; the container's height is
+  // defined by END's centre, so the knob always sits on the edge.
+  for (const it of model.items) it.y += K_TOP;
+  const contentBottom = (model.h - 48) + K_TOP;
+  const midX = Math.max(6, (model.w - 48) / 2 - KB / 2);
+  const knob = (which, x, y) => ({
     key: `${key}/__${which}`,
     node: {id: `__${which}__`, name: which.toUpperCase(),
-           kind: "__boundary__", boundary: which},
-    depth, inner: null, x, y, w: B_W, h: B_H,
+           kind: "__boundary__", boundary: which, knob: true},
+    depth, inner: null, x, y, w: KB, h: KB,
   });
-  const start = pill("start", midX, 10);
-  const end = pill("end", midX, contentBottom + B_GAP);
+  const start = knob("start", midX, -HEADER - KB / 2);
+  const end = knob("end", midX, contentBottom + 22 - KB / 2);
   const edges = [...model.edges];
   for (const it of model.items) {
     if (it.node.start) edges.push({src: "__start__", dst: it.node.id, boundary: true});
     if (it.node.end) edges.push({src: it.node.id, dst: "__end__", boundary: true});
   }
   model.items.push(start, end);
-  return {items: model.items, edges, w: model.w, h: end.y + B_H + 26};
+  return {items: model.items, edges, w: model.w, h: end.y + KB / 2};
 }
 
 function placeGraph(g, prefix, depth) {
@@ -678,7 +682,12 @@ function render() {
         && !sub.key.slice(c.key.length + 1).includes("/"));
       if (!kids.length) continue;
       const bottom = partRows(kids);
-      const newH = Math.max(c.h, bottom + 18 - c.y);
+      // the END knob rode any shift with its row — the container's
+      // bottom edge follows the knob's centre, never the other way
+      const endKnob = kids.find(k => k.node.boundary === "end");
+      const newH = Math.max(c.h, endKnob
+        ? (endKnob.y + endKnob.h / 2) - c.y
+        : bottom + 18 - c.y);
       if (newH !== c.h) {
         c.h = newH;
         const cc = state.cardEls.get(c.key);
@@ -1111,11 +1120,20 @@ function boundaryCard(it) {
   // ︎ forces TEXT presentation — without it Chromium may pick the
   // emoji ▶️, which paints a stray blue box inside the button
   card.append(el("span", "bglyph", n.boundary === "start" ? "▶︎" : "■︎"));
-  card.append(el("span", "blabel", n.name));
-  card.title = n.boundary === "start"
-    ? "The GraphOp's own input boundary — edges from outside arrive here."
-    : "The GraphOp's own output boundary — results leave for the outside here.";
   const parentKey = it.key.split("/").slice(0, -1).join("/");
+  if (n.knob) {
+    // a knob on the container's border: glyph only, the word in the tip
+    card.classList.add("knob");
+    const owner = state.rendered.get(parentKey)?.node.name || "this graph";
+    card.title = n.boundary === "start"
+      ? `START of ${owner} — outside wires plug in here`
+      : `END of ${owner} — results leave for the outside here`;
+  } else {
+    card.append(el("span", "blabel", n.name));
+    card.title = n.boundary === "start"
+      ? "The flow's input boundary — the session starts here."
+      : "The flow's output boundary — results leave here.";
+  }
   card.onclick = (ev) => { ev.stopPropagation(); select(parentKey); };
   return card;
 }

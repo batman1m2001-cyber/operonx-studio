@@ -980,6 +980,14 @@ header.bar .pname:hover { text-decoration: underline; }
               inset 0 -3px 5px rgba(146, 104, 12, .35); }
 .bnode .bglyph { color: #7c5a06; font-size: 10px; line-height: 1;
   text-shadow: 0 1px 0 rgba(255, 255, 255, .6); }
+/* a container's boundary KNOB: a round contact sitting on the border
+   line itself, with a white collar so the dashed edge reads as
+   passing behind it */
+.node.bnode.knob { padding: 0; border-radius: 50%; z-index: 2;
+  box-shadow: 0 0 0 2.5px #fff, 0 0 0 4px rgba(178, 132, 20, .35),
+              inset 0 2px 3px rgba(255, 255, 255, .85),
+              inset 0 -3px 5px rgba(146, 104, 12, .35); }
+.node.bnode.knob .bglyph { font-size: 9px; }
 .bnode .blabel { font-size: 9px; font-weight: 700;
   letter-spacing: .12em; color: #7c5a06;
   text-shadow: 0 1px 0 rgba(255, 255, 255, .5); }
