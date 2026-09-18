@@ -1038,13 +1038,26 @@ header.bar .pname:hover { text-decoration: underline; }
   border-top: none; }
 
 /* ── PORTS: in, out, and who it links to — chips, not dotted text ── */
-.portrow { display: flex; align-items: center; gap: 9px; padding: 3px 0; }
-.pname { flex: none; min-width: 96px; font-size: 12px; font-weight: 600;
-  overflow: hidden; text-overflow: ellipsis; }
-.plinks { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+/* A row is name · arrow · chips and must never be wider than the panel.
+   The name may shrink to an ellipsis (it used to be flex: none, so a long
+   `play_without_interrupt *` pushed the chips out of the card) and a chip
+   is capped at its box: a long `PARENT.conversation_history` ellipsises
+   inside the zone instead of running past its edge; the title holds the
+   full text. */
+.portrow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px;
+  padding: 3px 0; min-width: 0; }
+.pname { flex: 0 1 auto; max-width: 100%; font-size: 12px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the chips ask for 150px beside the name; when the row is tighter than
+   that they drop to their own line at full width, and only a chip longer
+   than the whole row ellipsises */
+.plinks { display: flex; flex: 1 1 150px; flex-wrap: wrap; gap: 4px;
+  min-width: 0; }
 .pchip { font: 11px ui-monospace, "SF Mono", Consolas, monospace;
   border-radius: 999px; padding: 1px 9px; border: 1px solid var(--line);
-  background: #fff; box-shadow: none; }
+  background: #fff; box-shadow: none;
+  max-width: 100%; box-sizing: border-box; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
 button.pchip { cursor: pointer; }
 button.pchip:hover { box-shadow: none; filter: brightness(.97); }
 .pchip.pref { color: #41729f; border-color: #ccd9e8; background: #f4f8fc; }

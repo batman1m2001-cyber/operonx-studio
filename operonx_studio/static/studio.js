@@ -1851,7 +1851,7 @@ function portsSection(it) {
 
   const chip = (cls, text, tip, onclick) => {
     const c = el(onclick ? "button" : "span", `pchip ${cls}`, text);
-    if (tip) c.title = tip;
+    c.title = tip || text;   // a chip may ellipsise; the title always has it whole
     if (onclick) c.onclick = onclick;
     return c;
   };
