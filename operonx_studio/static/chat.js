@@ -361,17 +361,17 @@
     document.body.append(fab);
     // studio.js fires its panel event before this script loads — read
     // the stored preference directly for the initial state
-    const initialOn = store.get("panelRight", true);
+    const panelOn = store.get("panelRight", true);
+    const initialOn = panelOn && store.get("sideTab", "inspect") === "assistant";
     dock.hidden = !initialOn;
-    fab.classList.toggle("hidden", initialOn);
+    fab.classList.toggle("hidden", panelOn);
     document.addEventListener("oxdock", (ev) => {
       dock.hidden = !ev.detail.on;
-      fab.classList.toggle("hidden", ev.detail.on);
+      fab.classList.toggle("hidden", ev.detail.panel ?? ev.detail.on);
       if (ev.detail.on) scrolled();
     });
-    const flip = () => { const b = document.getElementById("btn-right"); if (b) b.click(); };
-    fab.onclick = flip;
-    close.onclick = flip;
+    fab.onclick = () => window.oxSide ? window.oxSide.show("assistant") : null;
+    close.onclick = () => window.oxSide ? window.oxSide.show("inspect") : null;
   } else {
     const toggle = (open) => {
       panel.classList.toggle("open", open);

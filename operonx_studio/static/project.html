@@ -29,8 +29,7 @@
       <button id="btn-find" title="find a node (/ or Ctrl+K)">🔍</button>
       <button id="btn-legend" title="what am I looking at?">?</button>
     </div>
-    <button id="btn-left" class="paneltoggle" title="info panel">◧</button>
-    <button id="btn-right" class="paneltoggle" title="assistant panel">◨</button>
+    <button id="btn-right" class="paneltoggle" title="side panel (inspect · assistant)">◨</button>
     <span class="live" id="live"><span class="dot"></span><span id="live-text">live</span></span>
   </header>
 
@@ -43,8 +42,6 @@
   </div>
 
   <div class="main">
-    <aside id="inspector" class="open"></aside>
-    <div id="dragbar" title="drag to resize · double-click to reset"></div>
     <div id="stage">
       <div id="world">
         <div id="plane">
@@ -62,7 +59,15 @@
     </div>
     <div id="traces" hidden></div>
     <div id="resources" hidden></div>
-    <aside id="chatdock" hidden></aside>
+    <div id="dragbar" title="drag to resize · double-click to reset"></div>
+    <aside id="sidebar">
+      <nav id="sidetabs">
+        <button data-side="inspect" class="active">Inspect</button>
+        <button data-side="assistant">Assistant</button>
+      </nav>
+      <div id="inspector" class="open"></div>
+      <aside id="chatdock" hidden></aside>
+    </aside>
   </div>
 </div>
 <script src="/static/values.js"></script>

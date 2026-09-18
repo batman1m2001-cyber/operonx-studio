@@ -1395,6 +1395,8 @@ function select(key) {
   const it = state.rendered.get(state.sel);
   if (!it) { state.sel = null; renderFlowInfo(); return; }
   const n = it.node;
+  // an op was picked on the canvas: its detail is the point, bring the tab forward
+  if (recall("panelRight", true) && recall("sideTab", "inspect") !== "inspect") showSide("inspect");
   panel.textContent = "";
   panel.scrollTop = 0;
 
@@ -2225,6 +2227,7 @@ function executionsSection(n, execP) {
 function inspectServe(serve) {
   const panel = $("#inspector");
   panel.classList.add("open");
+  if (recall("panelRight", true) && recall("sideTab", "inspect") !== "inspect") showSide("inspect");
   panel.textContent = "";
   panel.append(el("h3", null, `serve · ${serve.kind}`));
   panel.append(el("div", "kind mono", serve.path || ""));
@@ -2876,18 +2879,36 @@ function switchTab(name) {
   pushView();
 }
 
-/* ── side panels: info left, assistant right, both optional ──────── */
+/* ── the side panel: one panel on the right, two tabs ──────────────
+   Inspect is the project summary or the selected op; Assistant is the
+   chat. The panel is optional; the tab is remembered. Selecting an op
+   brings the Inspect tab forward, the chat bubble brings Assistant. */
 
 function applyPanels() {
-  const leftOn = recall("panelLeft", true);
-  const rightOn = recall("panelRight", true);
-  $("#inspector").classList.toggle("off", !leftOn);
-  $("#btn-left").classList.toggle("active", leftOn);
-  $("#btn-right").classList.toggle("active", rightOn);
-  document.dispatchEvent(new CustomEvent("oxdock", {detail: {on: rightOn}}));
+  const on = recall("panelRight", true);
+  const tab = recall("sideTab", "inspect");
+  $("#sidebar").classList.toggle("off", !on);
+  $("#btn-right").classList.toggle("active", on);
+  for (const b of document.querySelectorAll("#sidetabs button"))
+    b.classList.toggle("active", b.dataset.side === tab);
+  $("#inspector").hidden = tab !== "inspect";
+  // `on`: the chat is showing; `panel`: the sidebar is open at all — the
+  // floating bubble stays away whenever the panel is open, since the
+  // Assistant tab is one click away inside it
+  document.dispatchEvent(new CustomEvent("oxdock", {detail: {on: on && tab === "assistant", panel: on}}));
 }
-$("#btn-left").onclick = () => { store("panelLeft", !recall("panelLeft", true)); applyPanels(); };
-$("#btn-right").onclick = () => { store("panelRight", !recall("panelRight", true)); applyPanels(); };
+function showSide(tab) {
+  store("panelRight", true);
+  store("sideTab", tab);
+  applyPanels();
+}
+window.oxSide = {
+  show: showSide,
+  toggle: () => { store("panelRight", !recall("panelRight", true)); applyPanels(); },
+};
+$("#btn-right").onclick = window.oxSide.toggle;
+for (const b of document.querySelectorAll("#sidetabs button"))
+  b.onclick = () => showSide(b.dataset.side);
 
 /* ── the legend: the visual language, written down on screen ──────── */
 
@@ -3114,8 +3135,8 @@ function centerOn(item) {
 /* ── resizable inspector ──────────────────────────────────────────── */
 
 (() => {
-  // the info panel sits on the LEFT now; its handle drags rightward
-  const bar = $("#dragbar"), panel = $("#inspector");
+  // the side panel sits on the RIGHT; its handle drags leftward
+  const bar = $("#dragbar"), panel = $("#sidebar");
   const saved = recall("panelW", null);
   if (saved) panel.style.width = `${saved}px`;
   let dragging = false;
@@ -3126,8 +3147,8 @@ function centerOn(item) {
   });
   bar.addEventListener("pointermove", (ev) => {
     if (!dragging) return;
-    const left = $(".main").getBoundingClientRect().left;
-    const width = Math.min(720, Math.max(280, ev.clientX - left));
+    const right = $(".main").getBoundingClientRect().right;
+    const width = Math.min(720, Math.max(300, right - ev.clientX));
     panel.style.width = `${width}px`;
   });
   bar.addEventListener("pointerup", () => {
@@ -3136,8 +3157,8 @@ function centerOn(item) {
     store("panelW", parseInt(panel.style.width, 10) || 340);
   });
   bar.addEventListener("dblclick", () => {
-    panel.style.width = "340px";
-    store("panelW", 340);
+    panel.style.width = "380px";
+    store("panelW", 380);
   });
 })();
 
