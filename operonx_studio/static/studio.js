@@ -1473,6 +1473,7 @@ function select(key) {
   // With a run painted the panel is a TRACE reader: ports would only
   // repeat what every execution already shows, and code lives in the
   // flow view — both stand down until the run is cleared.
+  if (n.description) panel.append(el("div", "rolenote", n.description));
   if (!state.run) panel.append(portsSection(it));
   const res = resourceSection(n);
   if (res) panel.append(res);

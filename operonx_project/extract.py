@@ -315,6 +315,14 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
                 node["code"] = source
         except (OSError, TypeError):
             pass
+    # The op's role in one paragraph: `description=` when the author set
+    # one, else the first paragraph of the docstring — the function's for
+    # a FuncOp, the graph function's for a GraphOp, the class's for an
+    # op class. Rendered on the card and in the inspector, so a reader
+    # learns what an op is for without opening its code.
+    desc = _describe(op, code_fn)
+    if desc:
+        node["description"] = desc
     # A branch's whole meaning is WHICH condition routes WHERE, and the
     # op stores exactly that: `cases` as (ref, target) pairs with their
     # human descriptions ("score >= 90"), plus the else target. Without
@@ -529,6 +537,32 @@ def _resource_fields(entry: Dict[str, Any]) -> Dict[str, Any]:
         elif isinstance(value, (int, float, bool)):
             fields[key] = value
     return fields
+
+
+def _describe(op: Any, code_fn: Any) -> str:
+    """One paragraph for the op: an explicit ``description=`` wins, else
+    the first paragraph of the function's docstring (a FuncOp) or of the
+    op class's (TTSOp, a classifier). A FuncOp's own ``description`` is
+    the docstring's first LINE, so when the docstring continues that
+    line the paragraph is used instead. The generic container classes
+    describe nothing about this graph, so they are skipped — a GraphOp
+    is described by ``description=`` at the call site."""
+    import inspect
+
+    explicit = " ".join(str(_slot(op, "description") or "").split())
+    doc = ""
+    for target in (code_fn, type(op)):
+        if target is None:
+            continue
+        if inspect.isclass(target) and target.__module__.startswith("operonx."):
+            continue
+        text = (inspect.getdoc(target) or "").strip()
+        if text:
+            doc = " ".join(text.split("\n\n", 1)[0].split())
+            break
+    if doc and (not explicit or doc.startswith(explicit)):
+        return doc[:400]
+    return explicit[:400]
 
 
 def extract_resources(manifest: Manifest) -> Dict[str, Any]:
