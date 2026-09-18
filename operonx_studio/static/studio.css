@@ -1272,3 +1272,8 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 /* a row whose target lies left carries its port on the left */
 .brrow.left { padding: 2px 8px 2px 16px; }
 .brrow.left .brport { left: -6px; right: auto; }
+
+/* docked in the sidebar the chat is a tab: the tab is its title and the
+   Inspect tab is its "close", so only the new-conversation button stays */
+#chatdock .chat-head { padding: 6px 10px; }
+#chatdock .chat-title, #chatdock .chat-close { display: none; }
