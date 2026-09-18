@@ -704,12 +704,27 @@ function render() {
 
   const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
   const maxY = Math.max(model.h, ...flat.nodes.map(n => n.y + n.h));
-  // headroom above: the transport card, or the door frame's label;
-  // width includes the right margin where loop returns bulge
-  const minY = gatesIn.length
+  // The extent is the box everything drawn must fit in, so it has to know
+  // about the main flow's terminals before they are placed below: START
+  // stands 96 above the entries and END 96 below the exits. Headroom used
+  // to come from the door frame alone, which is only the topmost thing
+  // when the ingress door IS the entry — a graph whose first op precedes
+  // the door (seed, then recv) drew START above the canvas and lost it.
+  const at = (name) => flat.nodes.find(it => it.depth === 0 && it.node.name === name);
+  const entryTies = (g.entries || []).map(at).filter(Boolean);
+  const exitTies = (g.exits || []).map(at).filter(Boolean);
+  let minY = gatesIn.length
     ? Math.min(...gatesIn.map(x => x.y)) - 70
     : -NODE_H - 140;
-  state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: maxY + 175};
+  if (entryTies.length) {
+    minY = Math.min(minY, Math.min(...entryTies.map(it => it.y)) - 96 - 40);
+  }
+  let bottom = maxY + 175;
+  if (exitTies.length) {
+    bottom = Math.max(bottom, Math.max(...exitTies.map(it => it.y + it.h)) + 96 + B_H + 40);
+  }
+  // width includes the right margin where loop returns bulge
+  state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: bottom};
 
   for (const layer of [svg, $("#edgetop")]) {
     layer.setAttribute("width", maxX + 620);
@@ -767,9 +782,7 @@ function render() {
   // exits. With the client stubs gone, ties land dead-centre on every
   // card, doors included.
   if (flat.nodes.length) {
-    const at = (name) => flat.nodes.find(it => it.depth === 0 && it.node.name === name);
-    const entryTies = (g.entries || []).map(at).filter(Boolean);
-    const exitTies = (g.exits || []).map(at).filter(Boolean);
+    // entryTies / exitTies were resolved above, where the extent needed them
     const over = (items) => items.reduce((s, it) => s + portCX(it), 0)
       / items.length - B_W / 2;
     const tie = (x1, y1, x2, y2) => {
