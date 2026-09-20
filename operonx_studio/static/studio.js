@@ -2434,6 +2434,7 @@ function jumpToOp(graph, node) {
 }
 
 async function showTraces() {
+  leaveWorkflow();
   const box = $("#traces");
   box.textContent = "";
   let data;
@@ -2495,10 +2496,10 @@ async function showTraces() {
     const tree = el("button", null, "tree");
     tree.title = "the run as a tree: what ran for what, in order";
     tree.onclick = (ev) => { ev.stopPropagation(); showRunTree(r.run); };
-    const flow = el("button", null, "flow");
-    flow.title = "the flow canvas with this run's values on every card";
-    flow.onclick = (ev) => { ev.stopPropagation(); paintRun(r.run); };
-    actions.append(tree, flow);
+    const wf = el("button", null, "workflow");
+    wf.title = "the flow with this run's values on every card";
+    wf.onclick = (ev) => { ev.stopPropagation(); showRunWorkflow(r.run); };
+    actions.append(tree, wf);
     if (r.source !== "langfuse") {
       const rm = el("button", "danger", "✕");
       rm.title = "delete this recorded run from disk";
@@ -2508,7 +2509,7 @@ async function showTraces() {
         try {
           await api(`/api/p/${PID}/trace/${encodeURIComponent(r.run)}/delete`, {});
           toast(`deleted ${r.run}`);
-          if (state.run && state.run.run === r.run) $("#run-clear").onclick();
+          if (state.run && state.run.run === r.run) leaveWorkflow();
           showTraces();
         } catch (e) { toast(e.message, true); }
       };
@@ -2527,8 +2528,8 @@ async function showTraces() {
  * (a yield record contains everything dispatched for that item), one
  * row per execution wearing the op's flow icon and chips, its show-key
  * values and a duration bar on one scale.
- * FLOW: the Flow tab itself, painted — the same layout, every card
- * carrying the run's real values, and a turn picker in the banner so
+ * WORKFLOW: the flow canvas moved into this pane and painted — the same
+ * layout, every card carrying the run's real values, a turn picker so
  * the cards show one turn's values and the ops that did not run in
  * that turn fade. Both read /tree. */
 
@@ -2565,7 +2566,7 @@ function execValues(node, outputs, max) {
 
 const execsOf = (rows) => rows.filter(r => r.kind === "record");
 
-function runHeader(run, data, mode) {
+function runHeader(run, data, mode, extras) {
   const head = el("div", "tlhead");
   const back = el("button", null, "← runs");
   back.onclick = () => showTraces();
@@ -2574,11 +2575,12 @@ function runHeader(run, data, mode) {
   const bt = el("button", mode === "tree" ? "on" : "", "tree");
   bt.title = "the run as a tree: what ran for what, in order";
   bt.onclick = () => showRunTree(run);
-  const bf = el("button", mode === "flow" ? "on" : "", "flow");
-  bf.title = "the flow canvas with this run's values on every card; pick a turn in the banner";
-  bf.onclick = () => paintRun(run);
+  const bf = el("button", mode === "workflow" ? "on" : "", "workflow");
+  bf.title = "the flow with this run's values on every card; pick a turn to read one exchange";
+  bf.onclick = () => showRunWorkflow(run);
   modes.append(bt, bf);
   head.append(modes);
+  for (const x of extras || []) head.append(x);
   const recs = execsOf(data.rows);
   head.append(el("span", "chip", `${recs.length} executions`));
   head.append(el("span", "chip", `${fmtMs(data.total_ms)} span`));
@@ -2592,6 +2594,7 @@ async function loadRunTree(run) {
 }
 
 async function showRunTree(run) {
+  leaveWorkflow();
   const box = $("#traces");
   box.textContent = "";
   let data;
@@ -2767,26 +2770,38 @@ async function renderExecPanel(run, e, execs) {
   }
 }
 
-async function paintRun(run) {
-  const data = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`);
+/* WORKFLOW view: the flow canvas itself, moved into the Traces pane and
+ * painted with this run — the same layout, every card carrying real
+ * values, a turn picker to read one exchange. The paint lives only
+ * here: leaving the view moves the canvas home and clears it, so the
+ * Flow tab is always the clean flow. */
+async function showRunWorkflow(run) {
+  if (state.tab !== "traces") switchTab("traces");
+  const box = $("#traces");
+  box.textContent = "";
+  let data, tree;
+  try {
+    [data, tree] = await Promise.all([
+      api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`), loadRunTree(run)]);
+  } catch (e) { box.append(el("div", "note", e.message)); return; }
   state.run = data;
   state.errIdx = 0;
   // every execution with its values, by op and by turn — the cards
   // read one turn's values when a turn is picked, the last otherwise
   state.runTurn = null;
-  state.runTurns = [];
+  state.runTurns = tree.turns || [];
   state.runByOpTurn = new Map();
-  try {
-    const tree = await loadRunTree(run);
-    state.runTurns = tree.turns || [];
-    for (const e of execsOf(tree.rows)) {
-      const key = (e.ctx || "").split(".").slice(0, 2).join(".");
-      if (!state.runByOpTurn.has(e.op)) state.runByOpTurn.set(e.op, new Map());
-      state.runByOpTurn.get(e.op).set(key, e);   // rows are in time order: last wins
-    }
-  } catch (e) { toast(e.message, true); }
-  const pick = $("#run-turn");
-  pick.textContent = "";
+  for (const e of execsOf(tree.rows)) {
+    const key = (e.ctx || "").split(".").slice(0, 2).join(".");
+    if (!state.runByOpTurn.has(e.op)) state.runByOpTurn.set(e.op, new Map());
+    state.runByOpTurn.get(e.op).set(key, e);   // rows are in time order: last wins
+  }
+  // heat scale: the run's slowest average paints the hottest border
+  state.heatMax = Math.max(0, ...Object.values(data.ops || {})
+    .map(o => o.runs ? o.total_ms / o.runs : 0));
+
+  const pick = el("select", "turnpick");
+  pick.title = "which turn's values the cards show";
   const whole = el("option", null, "whole run · last values");
   whole.value = "";
   pick.append(whole);
@@ -2795,22 +2810,21 @@ async function paintRun(run) {
     o.value = t.key;
     pick.append(o);
   }
-  pick.hidden = !state.runTurns.length;
   pick.onchange = () => { state.runTurn = pick.value || null; render(); renderFlowInfo(); };
-  // heat scale: the run's slowest average paints the hottest border
-  state.heatMax = Math.max(0, ...Object.values(data.ops || {})
-    .map(o => o.runs ? o.total_ms / o.runs : 0));
-  $("#run-name").textContent = data.run + (data.truncated ? " (truncated)" : "");
-  // the banner answers "how did it go" before any clicking
-  const bits = [`${Object.keys(data.ops || {}).length} ops`,
-                `${data.records ?? "?"} rec`];
-  if (data.wall_s != null) bits.push(`${data.wall_s.toFixed(1)}s`);
-  if (data.errors) bits.push(`${data.errors} err`);
-  $("#run-stats").textContent = bits.join(" · ");
-  $("#run-stats").classList.toggle("bad", !!data.errors);
-  $("#run-err").hidden = !data.errors;
-  $("#runbanner").classList.add("show");
-  switchTab("flow");
+  const extras = [pick];
+  if (data.errors) {
+    const eb = el("button", "cbad", "error →");
+    eb.title = "select the errored ops one by one";
+    eb.onclick = walkErrors;
+    extras.push(eb);
+  }
+  box.append(runHeader(run, tree, "workflow", extras));
+  box.classList.add("workflow");
+  const stage = $("#stage");
+  if (!state._stageHome) state._stageHome = {parent: stage.parentNode, next: stage.nextSibling};
+  stage.style.display = "";
+  box.append(stage);
+  state.workflowOn = true;
   render();
   pushView();
   renderFlowInfo();
@@ -2818,7 +2832,7 @@ async function paintRun(run) {
 
 /* "error →": center + select the errored ops one by one, opening
  * containers if the culprit is folded away inside one. */
-$("#run-err").onclick = () => {
+function walkErrors() {
   if (!state.run) return;
   const names = Object.entries(state.run.ops || {})
     .filter(([, o]) => o.errors).map(([name]) => name);
@@ -2832,23 +2846,25 @@ $("#run-err").onclick = () => {
   }
   if (found) { select(found.key); centerOn(found); }
   else toast(`'${name}' errored but is not on this canvas`, true);
-};
+}
 
-// graph mode ⇄ timeline mode: same run, two pictures
-$("#run-timeline").onclick = () => {
-  if (state.run) { switchTab("traces"); showRunTree(state.run.run); }
-};
-
-$("#run-clear").onclick = () => {
+// the canvas goes home and the paint comes off — the Flow tab never
+// shows a run
+function leaveWorkflow() {
+  if (!state.workflowOn) return;
+  state.workflowOn = false;
+  const stage = $("#stage");
+  $("#traces").classList.remove("workflow");
+  const home = state._stageHome;
+  home.parent.insertBefore(stage, home.next && home.next.parentNode === home.parent ? home.next : null);
+  stage.style.display = state.tab === "flow" ? "" : "none";
   state.run = null;
   state.runTurn = null;
   state.runByOpTurn = null;
   state.heatMax = 0;
-  $("#runbanner").classList.remove("show");
   render();
-  pushView();
   renderFlowInfo();
-};
+}
 
 /* every nested graph at once — opening five GraphOps one by one to see
  * a pipeline is ritual, not choice */
@@ -2876,6 +2892,7 @@ $("#btn-find").onclick = () => openFind();
 /* ── tabs, graph switch, pan/zoom, live reload ────────────────────── */
 
 function switchTab(name) {
+  leaveWorkflow();
   state.tab = name;
   for (const b of document.querySelectorAll(".tabs button"))
     b.classList.toggle("active", b.dataset.tab === name);
@@ -3237,7 +3254,7 @@ async function poll() {
     if (state.follow && pollN % 4 === 0) {
       const t = await api(`/api/p/${PID}/traces?local_only=1`);
       const newest = (t.runs || []).find(r => r.source === "local");
-      if (newest && (!state.run || state.run.run !== newest.run)) await paintRun(newest.run);
+      if (newest && (!state.run || state.run.run !== newest.run)) await showRunWorkflow(newest.run);
     }
   } catch { /* daemon briefly away; the next poll answers */ }
   setTimeout(poll, 1500);

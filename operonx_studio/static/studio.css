@@ -825,15 +825,14 @@ body.resizing { user-select: none; cursor: col-resize; }
   background: var(--gold-grad); color: #fff; cursor: pointer; box-shadow: none; }
 
 /* run overlay banner */
-#runbanner {
-  display: none; align-items: center; gap: 10px;
-  padding: 7px 16px; background: #eef6ec;
-  border-bottom: 1px solid rgba(33, 138, 76, .35);
-  font-size: 13px; flex: none;
-}
-#runbanner.show { display: flex; }
-#runbanner b { color: var(--ok); }
-#runbanner button { padding: 3px 12px; font-size: 12px; border-radius: 999px; }
+/* the workflow view: the canvas lives inside the Traces pane while a
+   run is open there — header on top, the stage filling the rest */
+#traces.workflow { display: flex; flex-direction: column; padding: 12px 16px 0; overflow: hidden; }
+#traces.workflow .tlhead { flex: none; }
+#traces.workflow #stage { flex: 1; min-height: 0; margin: 0 -16px; border-top: 1px solid var(--line); }
+.turnpick { font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--panel); max-width: 260px; }
+.tlhead button.cbad { color: var(--err); border-color: rgba(207, 63, 54, .5); }
 
 /* ── UX pass: orientation, run investigation, navigation ─────────── */
 
@@ -894,7 +893,6 @@ header.bar .pname:hover { text-decoration: underline; }
 
 /* run banner extras */
 #run-stats { color: var(--muted); font-size: 12.5px; }
-#run-turn { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); max-width: 260px; }
 #run-stats.bad { color: var(--err); font-weight: 600; }
 #run-err { border-color: rgba(207, 63, 54, .5); color: var(--err); }
 
