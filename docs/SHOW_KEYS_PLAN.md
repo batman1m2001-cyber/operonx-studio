@@ -70,3 +70,8 @@ inspector marks, role line.
   → text`, `synthesize → audio = media · 18.0 KB` with a run painted.
 - Phase 4 (callbot declarations) needs operonx ≥ 1.6.0 in the callbot
   venv: `show_keys=` on 1.5.0 lands in the input mapping and raises.
+- 2026-09-20 — phase 4 done in the callbot working tree against a
+  local 1.5.1 build (`uv pip install` of the branch): 14 ops declared,
+  3 class defaults, suite 216 passed, IR verified. operonx bump commit
+  d69c60e on `feat/show-keys`; push, PR and merge to `main` still to
+  do (blocked for the agent by permission) — that publishes 1.5.1.
