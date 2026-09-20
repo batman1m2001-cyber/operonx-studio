@@ -2437,9 +2437,11 @@ async function showTraces() {
   leaveWorkflow();
   const box = $("#traces");
   box.textContent = "";
+  const mine = (state.tracesView = {});
   let data;
   try { data = await api(`/api/p/${PID}/traces`); }
   catch (e) { box.append(el("div", "errbox", e.message)); return; }
+  if (state.tracesView !== mine) return;   // another view took the pane meanwhile
   if (!data.configured) {
     box.append(el("div", "note",
       'No trace directory declared. Add to operonx.toml:\n\n[studio]\ntraces = "/path/your/consumer/writes"'));
@@ -2597,8 +2599,10 @@ async function showRunTree(run) {
   leaveWorkflow();
   const box = $("#traces");
   box.textContent = "";
+  const mine = (state.tracesView = {});
   let data;
   try { data = await loadRunTree(run); } catch (e) { box.append(el("div", "note", e.message)); return; }
+  if (state.tracesView !== mine) return;
   box.append(runHeader(run, data, "tree"));
   const rows = data.rows, total = Math.max(1, data.total_ms), execs = execsOf(rows);
   const tree = el("div", "rtree");
@@ -2776,14 +2780,17 @@ async function renderExecPanel(run, e, execs) {
  * here: leaving the view moves the canvas home and clears it, so the
  * Flow tab is always the clean flow. */
 async function showRunWorkflow(run) {
-  if (state.tab !== "traces") switchTab("traces");
+  if (state.tab !== "traces") switchTab("traces", {quiet: true});
+  leaveWorkflow();
   const box = $("#traces");
   box.textContent = "";
+  const mine = (state.tracesView = {});
   let data, tree;
   try {
     [data, tree] = await Promise.all([
       api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`), loadRunTree(run)]);
   } catch (e) { box.append(el("div", "note", e.message)); return; }
+  if (state.tracesView !== mine) return;
   state.run = data;
   state.errIdx = 0;
   // every execution with its values, by op and by turn — the cards
@@ -2891,7 +2898,7 @@ $("#btn-find").onclick = () => openFind();
 
 /* ── tabs, graph switch, pan/zoom, live reload ────────────────────── */
 
-function switchTab(name) {
+function switchTab(name, opts) {
   leaveWorkflow();
   state.tab = name;
   for (const b of document.querySelectorAll(".tabs button"))
@@ -2899,7 +2906,8 @@ function switchTab(name) {
   $("#stage").style.display = name === "flow" ? "" : "none";
   $("#traces").hidden = name !== "traces";
   $("#resources").hidden = name !== "resources";
-  if (name === "traces") showTraces();
+  // quiet: the caller is about to fill the Traces pane itself
+  if (name === "traces" && !(opts && opts.quiet)) showTraces();
   if (name === "resources") showResources();
   pushView();
 }
