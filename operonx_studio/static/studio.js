@@ -2485,13 +2485,16 @@ async function showTraces() {
       r.source === "langfuse" ? "langfuse"
         : `local${r.also_langfuse ? " + langfuse" : ""} · ${(r.size / 1024).toFixed(1)} KB`));
     const actions = el("td", "runacts");
-    const paint = el("button", null, "graph");
-    paint.title = "graph mode: this run painted onto the real workflow canvas";
+    const tree = el("button", null, "tree");
+    tree.title = "the run as a tree: what ran for what, in order";
+    tree.onclick = (ev) => { ev.stopPropagation(); showRunTree(r.run); };
+    const flow = el("button", null, "flow");
+    flow.title = "the flow's cards, one per execution, placed when they ran";
+    flow.onclick = (ev) => { ev.stopPropagation(); showRunFlow(r.run); };
+    const paint = el("button", null, "paint");
+    paint.title = "paint this run's averages onto the Flow tab";
     paint.onclick = (ev) => { ev.stopPropagation(); paintRun(r.run); };
-    const open = el("button", null, "timeline");
-    open.title = "timeline mode: every execution on a real ms axis";
-    open.onclick = (ev) => { ev.stopPropagation(); showRunCanvas(r.run); };
-    actions.append(paint, open);
+    actions.append(tree, flow, paint);
     if (r.source !== "langfuse") {
       const rm = el("button", "danger", "✕");
       rm.title = "delete this recorded run from disk";
@@ -2508,87 +2511,206 @@ async function showTraces() {
       actions.append(rm);
     }
     tr.append(actions);
-    tr.onclick = () => showRunCanvas(r.run);
+    tr.onclick = () => showRunTree(r.run);
     tbody.append(tr);
   }
   table.append(tbody);
   box.append(table);
 }
 
-/* ── the RUN CANVAS: flow and timeline merged, Traces-tab only ──────
- * The workflow's shape survives — every op keeps its flow-layout LANE
- * (x) — while the vertical becomes a real ms axis: one slim card per
- * EXECUTION at its true start, sized by its duration, wired by the
- * provenance the recorder actually saw. Long idle gaps compress into
- * marked breaks so a 46-second call still reads as one page. */
-
-// the flow layout with every GraphOp open, computed off to the side —
-// the live canvas's expansion state is not disturbed
-function fullFlatLayout() {
-  const saved = state.expanded;
-  const all = new Set();
-  (function walk(g, prefix) {
-    for (const n of g.nodes || []) {
-      if (n.graph) { all.add(prefix + n.id); walk(n.graph, prefix + n.id + "/"); }
-    }
-  })(state.graph, "");
-  state.expanded = all;
-  try {
-    const model = placeGraph(state.graph, "", 0);
-    return flattenModel(model, 0, 0, {nodes: [], edges: []});
-  } finally {
-    state.expanded = saved;
-  }
-}
+/* ── the run, two ways (Traces tab) ─────────────────────────────────
+ * TREE: the run as operonx's ctx tree — the same parents Langfuse gets
+ * (a yield record contains everything dispatched for that item), one
+ * row per execution wearing the op's flow icon and chips, its show-key
+ * values and a duration bar on one scale.
+ * FLOW BY TIME: the real flow cards, one per execution, x = the op's
+ * lane, y = the moment it ran, wired by the provenance the recorder
+ * saw. Both read /tree; the aggregate paint on the Flow tab is the
+ * third view and answers a different question (how slow on average). */
 
 // the time math lives in timeline.js — pure, node-tested
 const TL = Timeline.TL;
 const timePlace = Timeline.timePlace;
 const fmtMs = Timeline.fmtMs;
 
-async function showRunCanvas(run) {
-  const box = $("#traces");
-  box.textContent = "";
-  let data;
-  try {
-    data = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/flow`);
-  } catch (e) { box.append(el("div", "note", e.message)); return; }
-  const execs = data.executions || [];
+// the IR node behind an op name, nested graphs included — the flow's
+// icon, kind colour, chips and show keys all hang off it
+function irNodeByName(name) {
+  if (!state._irByName || state._irByName.graph !== state.graph) {
+    const m = new Map();
+    (function walk(g) {
+      for (const n of (g && g.nodes) || []) {
+        if (!m.has(n.name)) m.set(n.name, n);
+        if (n.graph) walk(n.graph);
+      }
+    })(state.graph);
+    state._irByName = {graph: state.graph, map: m};
+  }
+  return state._irByName.map.get(name) || null;
+}
 
+// "key = value" per show key present in this execution's outputs; an
+// op with no show keys (a door, an op the extractor could not see)
+// falls back to its first two recorded outputs
+function execValues(node, outputs, max) {
+  if (!outputs) return [];
+  let keys = ((node && node.show_keys) || []).filter(k => k in outputs);
+  if (!keys.length) keys = Object.keys(outputs).filter(k => !k.startsWith("_"));
+  return keys.slice(0, 2).map(k => [k, Values.brief(outputs[k], max)]);
+}
+
+/* Cards on the time axis: y follows time, compressed like the tree's
+ * bars (busy stretches proportional, idle gaps clamped and marked), but
+ * a step is forced only between two executions in the SAME column —
+ * four monitors starting at 0 ms sit side by side, not staircased. y
+ * never decreases, so time still reads top-down across columns. */
+function placeByTime(execs, laneOf, cardH) {
+  const k = TL.k, maxStep = 190, gap = 14;
+  let y = TL.padTop, prev = null;
+  const laneBottom = new Map();
+  for (const e of execs) {
+    delete e.gapBreak;
+    if (prev != null) {
+      const step = (e.start_ms - prev) * k;
+      if (step > maxStep) e.gapBreak = e.start_ms - prev;
+      y += Math.min(Math.max(step, 0), maxStep);
+    }
+    const lane = laneOf(e);
+    const floor = laneBottom.has(lane) ? laneBottom.get(lane) + gap : -Infinity;
+    y = Math.max(y, floor);
+    e.y = y;
+    laneBottom.set(lane, y + cardH);
+    prev = e.start_ms;
+  }
+  return y + cardH + 120;
+}
+
+const execsOf = (rows) => rows.filter(r => r.kind === "record");
+
+function runHeader(run, data, mode) {
   const head = el("div", "tlhead");
   const back = el("button", null, "← runs");
   back.onclick = () => showTraces();
-  head.append(back);
-  head.append(el("span", "tltitle mono", run));
-  // the two ways to look at one run: GRAPH keeps the workflow's real
-  // shape (the flow canvas, painted); TIMELINE trades shape for time
+  head.append(back, el("span", "tltitle mono", run));
   const modes = el("span", "tlmodes");
-  const gm = el("button", null, "graph mode");
-  gm.title = "this run painted onto the real workflow canvas";
-  gm.onclick = () => paintRun(run);
-  const tm = el("button", "on", "timeline mode");
-  modes.append(gm, tm);
+  const bt = el("button", mode === "tree" ? "on" : "", "tree");
+  bt.title = "the run as a tree: what ran for what, in order";
+  bt.onclick = () => showRunTree(run);
+  const bf = el("button", mode === "flow" ? "on" : "", "flow by time");
+  bf.title = "the flow's cards, one per execution, placed when they ran";
+  bf.onclick = () => showRunFlow(run);
+  const bp = el("button", "", "paint");
+  bp.title = "paint this run's averages onto the Flow tab";
+  bp.onclick = () => paintRun(run);
+  modes.append(bt, bf, bp);
   head.append(modes);
-  const errs = execs.filter(e => e.status === "error").length;
-  head.append(el("span", "chip", `${data.total} executions`));
-  const span = execs.length ? execs[execs.length - 1].start_ms : 0;
-  head.append(el("span", "chip", `${fmtMs(span)} span`));
+  const recs = execsOf(data.rows);
+  head.append(el("span", "chip", `${recs.length} executions`));
+  head.append(el("span", "chip", `${fmtMs(data.total_ms)} span`));
+  const errs = recs.filter(r => r.status === "error").length;
   if (errs) head.append(el("span", "chip cbad", `${errs} errors`));
-  if (data.total > execs.length)
-    head.append(el("span", "chip", `showing first ${execs.length}`));
-  head.append(el("span", "note", "time flows down · one card per execution · click a card for its values"));
-  box.append(head);
+  return head;
+}
 
-  // lanes: only the ops that RAN, packed tight, ordered by FIRST
-  // appearance in time — in a DAG the first-run order IS the flow's
-  // structural order, so the picture reads as the workflow descending
-  // left-to-right, and the first screen is never empty
+async function loadRunTree(run) {
+  return api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/tree`);
+}
+
+async function showRunTree(run) {
+  const box = $("#traces");
+  box.textContent = "";
+  let data;
+  try { data = await loadRunTree(run); } catch (e) { box.append(el("div", "note", e.message)); return; }
+  box.append(runHeader(run, data, "tree"));
+  const rows = data.rows, total = Math.max(1, data.total_ms), execs = execsOf(rows);
+  const tree = el("div", "rtree");
+  const hdr = el("div", "rhdr");
+  for (const h of ["observation", "value", "when · how long"]) hdr.append(el("span", null, h));
+  tree.append(hdr);
+  const els = [];
+  rows.forEach((r, i) => {
+    const row = el("div", "rrow" + (r.kids ? " has" : "") + (r.kind !== "record" ? " " + r.kind : "")
+      + (r.status === "error" ? " err" : ""));
+    const name = el("div", "rname");
+    const guides = el("span", "rind");
+    for (let d = 0; d < r.depth; d++) guides.append(el("i"));
+    const tog = el("span", "rtog", r.kids ? "▾" : "");
+    const node = r.op ? irNodeByName(r.op) : null;
+    const ico = el("span", "rico", node ? kindIcon(node) : (r.kind === "container" ? "▣" : "≋"));
+    if (node) ico.style.setProperty("--kind", kindColor(node));
+    name.append(guides, tog, ico, el("span", "rn", r.name));
+    if (node) { const chips = nameChips(node); if (chips) name.append(chips); }
+    row.append(name);
+    const val = el("div", "rval mono");
+    if (r.kind === "record") {
+      if (r.error) { val.textContent = r.error.trim().split("\n").pop().slice(0, 90); val.classList.add("bad"); }
+      else {
+        for (const [k, v] of execValues(node, r.outputs, 36)) {
+          if (val.childNodes.length) val.append(" · ");
+          val.append(el("span", "rk", k + " = "), el("span", "rv", v));
+        }
+      }
+    } else {
+      val.textContent = r.kind === "container" ? "graph" : "stream item — not recorded (transient)";
+    }
+    row.append(val);
+    const bar = el("div", "rbar");
+    const b = el("b");
+    b.style.left = `${(r.start_ms / total * 100).toFixed(2)}%`;
+    b.style.width = `${Math.max(0.4, r.dur_ms / total * 100).toFixed(2)}%`;
+    bar.append(b, el("s", "mono", fmtMs(r.dur_ms)));
+    row.append(bar);
+    row.title = r.ctx + (r.wall_start
+      ? " · " + new Date(r.wall_start * 1000).toLocaleTimeString([], {hour12: false}) : "");
+    tree.append(row);
+    els.push(row);
+    // fold: hide every deeper row that follows, until a row no deeper
+    tog.onclick = (ev) => {
+      ev.stopPropagation();
+      if (!r.kids) return;
+      const open = row.dataset.open !== "0";
+      row.dataset.open = open ? "0" : "1";
+      tog.textContent = open ? "▸" : "▾";
+      for (let j = i + 1; j < rows.length && rows[j].depth > r.depth; j++) {
+        els[j].hidden = open;
+        if (!open) { els[j].dataset.open = "1"; if (rows[j].kids) els[j].querySelector(".rtog").textContent = "▾"; }
+      }
+    };
+    if (r.kind === "record") {
+      r.el = row;
+      row.onclick = () => {
+        for (const o of els) o.classList.remove("sel");
+        row.classList.add("sel");
+        renderExecPanel(run, r, execs);
+      };
+    }
+  });
+  box.append(tree);
+  state._tlrun = run;
+}
+
+async function showRunFlow(run) {
+  const box = $("#traces");
+  box.textContent = "";
+  let data;
+  try { data = await loadRunTree(run); } catch (e) { box.append(el("div", "note", e.message)); return; }
+  box.append(runHeader(run, data, "flow"));
+  box.append(el("div", "note", "time flows down · one card per execution · a column per op · click a card for its values"));
+  const execs = execsOf(data.rows).slice().sort((a, b) => a.start_ms - b.start_ms);
+
+  // lanes: only the ops that ran, ordered by first appearance — in a
+  // DAG that IS the flow's order, so the picture reads as the workflow
+  // descending left-to-right, and the first screen is never empty
   const lane = Timeline.laneOrder(execs);
   const opsRan = [...lane.keys()];
-  const laneOf = (e) => TL.axisW + lane.get(e.op) * TL.pitch + TL.laneW / 2 + 16;
-  const worldW = TL.axisW + opsRan.length * TL.pitch + 220;
+  const PITCH = NODE_W + 44;
+  const laneLeft = (e) => TL.axisW + lane.get(e.op) * PITCH + 16;
+  const laneMid = (e) => laneLeft(e) + NODE_W / 2;
+  const worldW = TL.axisW + opsRan.length * PITCH + 220;
 
-  const height = timePlace(execs);
+  // a real card is ~130px tall; only same-column neighbours need that room
+  const CARD_H = 132;
+  const height = placeByTime(execs, (e) => lane.get(e.op), CARD_H);
   const world = el("div", "tlworld");
   world.style.height = `${height}px`;
   world.style.width = `${worldW}px`;
@@ -2598,13 +2720,8 @@ async function showRunCanvas(run) {
   svg.setAttribute("height", height);
   world.append(svg);
 
-  const byId = new Map();
-  for (const e of execs) byId.set(e.id, e);
-
-  // lane ghosts: a faint rail per op column, so the flow's skeleton
-  // stays visible under the instances
   for (const name of opsRan) {
-    const x = laneOf({op: name});
+    const x = laneMid({op: name});
     const rail = document.createElementNS(SVGNS, "line");
     rail.setAttribute("x1", x); rail.setAttribute("x2", x);
     rail.setAttribute("y1", TL.padTop - 26); rail.setAttribute("y2", height - 90);
@@ -2617,9 +2734,7 @@ async function showRunCanvas(run) {
     svg.append(lbl);
   }
 
-  // turns: every top-level dispatch group (one level-1 yield and all
-  // that ran for it) gets a band rule at its first execution, labelled
-  // by the yield that opened it — the same grouping Langfuse shows
+  // turns: a band rule where each level-1 yield's dispatch group begins
   const firstAt = new Map();
   for (const e of execs) {
     const key = (e.ctx || "").split(".").slice(0, 2).join(".");
@@ -2627,7 +2742,9 @@ async function showRunCanvas(run) {
   }
   for (const t of data.turns || []) {
     const y = firstAt.get(t.key);
-    if (y == null) continue;
+    // a turn that opens with the run needs no rule: the run's start is
+    // the rule, and a label there would sit on the column names
+    if (y == null || y <= TL.padTop + 4) continue;
     const rule = document.createElementNS(SVGNS, "line");
     rule.setAttribute("x1", 4); rule.setAttribute("x2", worldW - 8);
     rule.setAttribute("y1", y - 14); rule.setAttribute("y2", y - 14);
@@ -2660,13 +2777,47 @@ async function showRunCanvas(run) {
     }
   }
 
-  // provenance wires: what actually fed what
+  // the flow's own card per execution, carrying THIS execution's values
+  for (const e of execs) {
+    const node = irNodeByName(e.op) || {name: e.op, kind: "FuncOp", show_keys: [], inputs: [], outputs: []};
+    const it = {key: `run/${e.id}`, node, x: laneLeft(e), y: e.y, w: NODE_W, h: NODE_H, depth: 0};
+    const card = opCard(it);
+    card.classList.remove("dormant", "heated", "selected");
+    for (const b of card.querySelectorAll(".badge.run, .badge.expand")) b.remove();
+    let det = card.querySelector(".detail");
+    if (det) det.textContent = "";
+    const vs = execValues(node, e.outputs, 40);
+    if (vs.length) {
+      if (!det) { det = el("div", "detail"); card.append(det); }
+      for (const [k, v] of vs) {
+        const row = el("div", "dshow mono");
+        row.append(el("span", "dkey", "→ " + k), el("span", "dval", " = " + v));
+        det.append(row);
+      }
+    } else if (det) det.remove();
+    let badges = card.querySelector(".badges");
+    if (!badges) { badges = el("div", "badges"); card.append(badges); }
+    const idx = e.is_yield ? ` · [${(e.ctx || "").split(".").pop().replace(/[\[\]]/g, "")}]` : "";
+    const chip = el("span", "badge run", fmtMs(e.dur_ms) + idx);
+    if (e.status === "error") { chip.classList.add("err"); card.classList.add("errorlit"); }
+    badges.append(chip);
+    card.title = `${e.op} · ${e.ctx} · started +${fmtMs(e.start_ms)}` + (e.error ? `\n${e.error}` : "");
+    card.onclick = (ev) => { ev.stopPropagation(); selectExecution(run, e, execs, world); };
+    card.ondblclick = null;
+    e.el = card;
+    world.append(card);
+  }
+  box.append(world);
+
+  // provenance wires: what actually fed what — drawn after the cards
+  // are in the DOM, so a wire leaves the card's real bottom edge
+  const byId = new Map(execs.map(x => [x.id, x]));
   for (const e of execs) {
     for (const u of e.upstreams || []) {
       const src = byId.get(u.from);
       if (!src) continue;
-      const x1 = laneOf(src), y1 = src.y + src.h;
-      const x2 = laneOf(e), y2 = e.y;
+      const x1 = laneMid(src), y1 = src.y + (src.el ? src.el.offsetHeight : NODE_H);
+      const x2 = laneMid(e), y2 = e.y;
       const p = document.createElementNS(SVGNS, "path");
       const c = Math.max(18, Math.min(70, (y2 - y1) * 0.5));
       p.setAttribute("d", `M ${x1} ${y1} C ${x1} ${y1 + c}, ${x2} ${y2 - c}, ${x2} ${y2}`);
@@ -2678,31 +2829,14 @@ async function showRunCanvas(run) {
       svg.append(p);
     }
   }
-
-  // one slim card per execution
-  for (const e of execs) {
-    const card = el("div", "tlop" + (e.status === "error" ? " err" : ""));
-    card.style.left = `${laneOf(e) - TL.laneW / 2}px`;
-    card.style.top = `${e.y}px`;
-    card.style.height = `${e.h}px`;
-    card.append(el("span", "tlname", e.op));
-    card.append(el("span", "tlmeta mono",
-      `${fmtMs(e.dur_ms)}${e.ctx ? " · " + e.ctx : ""}`));
-    card.title = `${e.full || e.op} · started +${fmtMs(e.start_ms)}`
-      + (e.error ? `\n${e.error}` : "");
-    card.onclick = () => selectExecution(run, e, execs, world);
-    e.el = card;
-    world.append(card);
-  }
-  box.append(world);
   state._tlrun = run;
 }
 
 // selecting an instance: highlight it, its wires, and open the
 // run-first panel — values, provenance, and this op's other runs
 function selectExecution(run, e, execs, world) {
-  for (const other of execs) if (other.el) other.el.classList.remove("sel");
-  e.el.classList.add("sel");
+  for (const other of execs) if (other.el) other.el.classList.remove("selected", "sel");
+  e.el.classList.add("selected");
   for (const w of world.querySelectorAll(".tlwire"))
     w.classList.toggle("hot", w.dataset.dst === e.id);
   renderExecPanel(run, e, execs);
@@ -2811,63 +2945,6 @@ async function renderExecPanel(run, e, execs) {
   }
 }
 
-/* The run as a waterfall: one lane per op, every recorded execution a
- * bar at its true offset. WHEN is the half of debugging the aggregate
- * view cannot answer. */
-async function showTimeline(run) {
-  const box = $("#traces");
-  box.textContent = "";
-  const bar = el("div", "tracebar");
-  const back = el("button", null, "← runs");
-  back.onclick = showTraces;
-  bar.append(back);
-  box.append(bar);
-
-  let data;
-  try { data = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/timeline`); }
-  catch (e) { box.append(el("div", "errbox", e.message)); return; }
-  const spans = data.spans || [];
-  if (!spans.length) { box.append(el("div", "note", "no timed records in this run")); return; }
-
-  const total = Math.max(0.001, ...spans.map(s => s.start + s.dur_ms / 1000));
-  bar.append(el("span", "srcline",
-    `${run} · ${data.total} executions · ${total.toFixed(2)}s`
-    + (data.total > spans.length ? ` · first ${spans.length} shown` : "")));
-
-  const lanes = new Map();          // op -> its bar container, first-seen order
-  const chart = el("div", "tl");
-  for (const s of spans) {
-    let lane = lanes.get(s.op);
-    if (!lane) {
-      const row = el("div", "tlrow");
-      const label = el("button", "tlname mono", s.op);
-      label.title = "select this op on the canvas";
-      label.onclick = () => {
-        const found = [...state.rendered.values()].find(x => x.node.name === s.op)
-          || (expandAll(true), [...state.rendered.values()].find(x => x.node.name === s.op));
-        switchTab("flow");
-        if (found) { select(found.key); centerOn(found); }
-      };
-      lane = el("div", "tltrack");
-      row.append(label, lane);
-      chart.append(row);
-      lanes.set(s.op, lane);
-    }
-    const b = el("div", "tlbar" + (s.status === "ok" ? "" : " bad"));
-    b.style.left = `${(s.start / total) * 100}%`;
-    b.style.width = `${Math.max(0.35, (s.dur_ms / 1000 / total) * 100)}%`;
-    b.title = `${s.op} · +${s.start.toFixed(3)}s · ${s.dur_ms.toFixed(1)}ms · ${s.status}`
-      + (s.error ? `\n${s.error}` : "");
-    lane.append(b);
-  }
-  box.append(chart);
-
-  const axis = el("div", "tlaxis");
-  for (let i = 0; i <= 4; i++)
-    axis.append(el("span", "mono", `${(total * i / 4).toFixed(2)}s`));
-  box.append(axis);
-}
-
 async function paintRun(run) {
   const data = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`);
   state.run = data;
@@ -2911,7 +2988,7 @@ $("#run-err").onclick = () => {
 
 // graph mode ⇄ timeline mode: same run, two pictures
 $("#run-timeline").onclick = () => {
-  if (state.run) { switchTab("traces"); showRunCanvas(state.run.run); }
+  if (state.run) { switchTab("traces"); showRunTree(state.run.run); }
 };
 
 $("#run-clear").onclick = () => {

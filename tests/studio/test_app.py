@@ -925,3 +925,39 @@ def test_flow_endpoint_groups_executions_into_turns(client, project, tmp_path):
     assert "_stream" not in by_op["audio"]
     drill = client.get(f"/api/p/{pid}/trace/call-turns/op/prompt").json()
     assert drill["executions"][0]["wall_start"] == 1_800_000_000.1
+
+
+def test_tree_endpoint_applies_the_ctx_rules(client, project, tmp_path):
+    """The Traces tab's tree is operonx's own build_tree over the recorded
+    rows: a yield record contains what it dispatched, an op at a ctx whose
+    level-1 yield was not recorded hangs from a stand-in named after the
+    transient stream, values ride bounded, rows come depth-first."""
+    _traced(project, tmp_path, "call-tree", [
+        {"op_id": "g.audio#main", "op_name": "audio", "op_full_name": "g.audio",
+         "ctx": ["main"], "start_time": 100.0, "end_time": 103.0, "duration_ms": 3000.0,
+         "status": "ok", "inputs": {}, "outputs": {"_transient_stream": True, "items": 9}, "upstreams": []},
+        {"op_id": "g.prompt#main.[0]", "op_name": "prompt", "op_full_name": "g.prompt",
+         "ctx": ["main", "[0]"], "start_time": 100.1, "end_time": 100.2, "duration_ms": 100.0,
+         "status": "ok", "is_yield": True, "wall_start": 1_800_000_000.1,
+         "inputs": {}, "outputs": {"text": "y" * 500}, "upstreams": []},
+        {"op_id": "g.say#main.[0]", "op_name": "say", "op_full_name": "g.say",
+         "ctx": ["main", "[0]"], "start_time": 100.2, "end_time": 100.3, "duration_ms": 100.0,
+         "status": "ok", "inputs": {}, "outputs": {"said": True},
+         "upstreams": [{"from_op_id": "g.prompt#main.[0]", "from_key": "text", "to_key": "text"}]},
+        {"op_id": "g.vad#main.[7].[0]", "op_name": "vad", "op_full_name": "g.vad",
+         "ctx": ["main", "[7]", "[0]"], "start_time": 101.0, "end_time": 101.1, "duration_ms": 100.0,
+         "status": "ok", "is_yield": True, "inputs": {}, "outputs": {}, "upstreams": []},
+    ])
+    pid = _open(client, project)
+    got = client.get(f"/api/p/{pid}/trace/call-tree/tree").json()
+    assert got["total_ms"] == 3000.0
+    names = [(r["name"], r["depth"], r["kind"]) for r in got["rows"]]
+    assert names == [("audio", 0, "record"), ("prompt [0]", 0, "record"), ("say", 1, "record"),
+                     ("audio [7]", 0, "stand-in"), ("vad [0]", 1, "record")]
+    by_name = {r["name"]: r for r in got["rows"]}
+    assert by_name["say"]["parent"] == "g.prompt#main.[0]"
+    assert by_name["vad [0]"]["parent"] == by_name["audio [7]"]["id"]
+    assert by_name["prompt [0]"]["outputs"]["text"] == "y" * 200      # bounded
+    assert by_name["prompt [0]"]["wall_start"] == 1_800_000_000.1
+    assert by_name["say"]["upstreams"] == [{"from": "g.prompt#main.[0]", "from_key": "text", "to_key": "text"}]
+    assert [t["label"] for t in got["turns"]] == ["prompt [0]", "audio [7]"]

@@ -298,6 +298,81 @@ def _flow_records(records, run_name: str, cap: int = 3000) -> Dict[str, Any]:
     return {"run": run_name, "total": len(out), "executions": out[:cap], "turns": turns}
 
 
+def _tree_records(records, run_name: str) -> Dict[str, Any]:
+    """The run as the tree Langfuse gets: operonx's own `build_tree` over
+    the recorded rows, so the studio and Langfuse never disagree on a
+    parent. Rows come out depth-first, siblings by start time, each with
+    what a tree row prints (name, kind, timing, status) and what the
+    inspector needs (ctx, upstreams, outputs bounded to card size)."""
+    from operonx.core.workflow_trace import OpExecution, UpstreamRef, WorkflowTrace
+    from operonx.telemetry.consumers.langfuse import build_tree
+
+    execs: List[OpExecution] = []
+    raw_by_id: Dict[str, Dict[str, Any]] = {}
+    for rec in records:
+        start = rec.get("start_time")
+        if start is None:
+            continue
+        ctx = rec.get("ctx")
+        ctx_t = tuple(ctx) if isinstance(ctx, list) else tuple((ctx or "main").split("."))
+        op_id = rec.get("op_id") or f"{rec.get('op_full_name')}#{'.'.join(ctx_t)}"
+        ups = []
+        for u in rec.get("upstreams") or []:
+            src = u.get("from_op_id") or u.get("from")
+            if src:
+                ups.append(UpstreamRef(from_op_id=src, from_op_name=u.get("from_op_name") or "",
+                                       from_op_full_name=u.get("from_op_full_name") or "",
+                                       from_key=u.get("from_key") or "", to_key=u.get("to_key") or ""))
+        dur = float(rec.get("duration_ms") or 0.0)
+        execs.append(OpExecution(
+            op_id=op_id, op_name=rec.get("op_name") or "?", op_full_name=rec.get("op_full_name") or rec.get("op_name") or "?",
+            ctx=ctx_t, start_time=float(start), end_time=float(start) + dur / 1000.0,
+            inputs={}, outputs=rec.get("outputs") if isinstance(rec.get("outputs"), dict) else {},
+            upstreams=ups, status=rec.get("status") or "ok", error=rec.get("error"),
+            op_type=rec.get("op_type") or "", is_yield=bool(rec.get("is_yield")),
+        ))
+        raw_by_id[op_id] = rec
+    if not execs:
+        return {"run": run_name, "total_ms": 0.0, "rows": [], "turns": []}
+    t0 = min(e.start_time for e in execs)
+    t1 = max(e.end_time for e in execs)
+    trace = WorkflowTrace(trace_id=run_name, workflow_name=run_name, started_at=t0, ended_at=t1, nodes=execs)
+    nodes = build_tree(trace)
+    children: Dict[Optional[str], List[str]] = {}
+    for n in nodes.values():
+        children.setdefault(n["parent"], []).append(n["id"])
+    rows: List[Dict[str, Any]] = []
+
+    def emit(nid: str, depth: int) -> None:
+        n = nodes[nid]
+        rec = n["record"]
+        row: Dict[str, Any] = {
+            "id": nid, "parent": n["parent"], "depth": depth, "kind": n["kind"], "name": n["name"],
+            "op": rec.op_name if rec else None, "ctx": n["ctx"],
+            "start_ms": round((n["start"] - t0) * 1000.0, 3),
+            "dur_ms": round((n["end"] - n["start"]) * 1000.0, 3),
+            "kids": len(children.get(nid, [])),
+        }
+        if rec is not None:
+            row.update({
+                "status": rec.status, "error": rec.error, "is_yield": rec.is_yield, "op_type": rec.op_type,
+                "wall_start": raw_by_id.get(nid, {}).get("wall_start"),
+                "upstreams": [{"from": u.from_op_id, "from_key": u.from_key, "to_key": u.to_key} for u in rec.upstreams],
+                "outputs": _printable_outputs(rec.outputs),
+            })
+        rows.append(row)
+        for k in sorted(children.get(nid, []), key=lambda k: nodes[k]["start"]):
+            emit(k, depth + 1)
+
+    roots = sorted(children.get(None, []), key=lambda k: (len(nodes[k]["ctx"].split(".")) > 1, nodes[k]["start"]))
+    for r in roots:
+        emit(r, 0)
+    flat = [{"op": r["op"], "ctx": r["ctx"], "start_ms": r["start_ms"], "dur_ms": r["dur_ms"],
+             "is_yield": r.get("is_yield"), "_stream": bool((r.get("outputs") or {}).get("_transient_stream"))}
+            for r in rows if r["kind"] == "record"]
+    return {"run": run_name, "total_ms": round((t1 - t0) * 1000.0, 3), "rows": rows, "turns": _turns_of(flat)}
+
+
 def _turns_of(execs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """The run's top-level dispatch groups, from ctx alone.
 
@@ -821,8 +896,9 @@ def build_studio_app(recents: Optional[Recents] = None):
         for g in graphs:
             for n in g.get("nodes") or []:
                 if not n.get("serve_role") and n["name"] in declared:
+                    # a manifest-declared door is a real op wearing a door's
+                    # frame; it keeps the show keys it declared
                     n["serve_role"] = declared[n["name"]]
-                    n["show_keys"] = []   # a door has nothing to say
 
     @app.get("/api/p/{pid}/ir")
     def project_ir(pid: str) -> JSONResponse:
@@ -1108,6 +1184,24 @@ def build_studio_app(recents: Optional[Recents] = None):
         if isinstance(run_dir, JSONResponse):
             return run_dir
         return JSONResponse(_flow_records(_local_records(run_dir), run_dir.name))
+
+    @app.get("/api/p/{pid}/trace/{run}/tree")
+    def trace_tree(pid: str, run: str) -> JSONResponse:
+        """The run as a tree (operonx's ctx rules), for the Traces tab's
+        tree and flow-by-time views. Same source rules as /flow."""
+        if run.startswith("lf:"):
+            got = _lf_for(pid, run)
+            if isinstance(got, JSONResponse):
+                return got
+            cfg, trace_id = got
+            try:
+                return JSONResponse(_tree_records(_lf_records(cfg, trace_id), run))
+            except Exception as exc:  # noqa: BLE001 — someone else's server
+                return JSONResponse({"error": f"langfuse: {exc}"}, status_code=502)
+        run_dir = _local_run_dir(pid, run)
+        if isinstance(run_dir, JSONResponse):
+            return run_dir
+        return JSONResponse(_tree_records(_local_records(run_dir), run_dir.name))
 
     @app.get("/api/p/{pid}/trace/{run}/timeline")
     def trace_timeline(pid: str, run: str) -> JSONResponse:
