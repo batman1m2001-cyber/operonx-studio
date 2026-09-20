@@ -67,3 +67,19 @@ test("fmtBytes", () => {
   assert.equal(fmtBytes(2048), "2.0 KB");
   assert.equal(fmtBytes(3 * 1024 * 1024), "3.0 MB");
 });
+
+test("brief: one card line per value, cut, never a payload", () => {
+  const { brief } = require("../../operonx_studio/static/values.js");
+  assert.equal(brief("alo em nghe ạ"), '"alo em nghe ạ"');
+  assert.equal(brief("x".repeat(80), 20), '"' + "x".repeat(18) + "…");
+  assert.equal(brief(42), "42");
+  assert.equal(brief(true), "true");
+  assert.equal(brief(null), "∅");
+  assert.equal(brief({ $media_ref: "media/abc.npy", bytes: 38912 }), "media · 38.0 KB");
+  assert.equal(brief({ $media_ref: "media/abc.npy" }), "media");
+  assert.equal(brief({ $len: 12 }), "[12]");
+  assert.equal(brief({ $keys: ["intent", "error", "a", "b"] }), "{intent, error, a, …}");
+  assert.equal(brief([1, 2, 3]), "[3]");
+  assert.equal(brief({ intent: "busy", error: null }), "{intent, error}");
+  assert.equal(brief("A".repeat(2000)), "payload · 2.0 KB");
+});

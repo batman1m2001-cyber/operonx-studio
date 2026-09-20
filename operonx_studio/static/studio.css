@@ -1090,6 +1090,12 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .detail .dports { font-size: 9.5px; color: #5c83ab; margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail .dports.dout { color: #a8642a; }
+/* the show line: the output that stands for the op, and with a run
+   painted, its last value — one line, cut, never a payload */
+.detail .dshow { font-size: 9.5px; margin-top: 2px; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail .dshow .dkey { color: #a8642a; }
+.detail .dshow .dval { color: #3b5f86; }
 /* far out, badges are noise too */
 #world[data-zoom="lo"] .node .badges .badge:not(.run):not(.err) { display: none; }
 

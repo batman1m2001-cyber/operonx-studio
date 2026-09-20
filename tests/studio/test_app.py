@@ -860,3 +860,34 @@ def test_langfuse_runs_merge_into_local_rows(client, project, tmp_path, monkeypa
     assert names == ["call-both", "lf:only-remote"]   # deduped, remote kept
     local = next(r for r in runs if r["run"] == "call-both")
     assert local["source"] == "local" and local.get("also_langfuse") is True
+
+
+def test_summary_carries_the_last_outputs_bounded(client, project, tmp_path):
+    """The canvas prints an op's show-key values without a second fetch:
+    the summary keeps the LAST execution's outputs, cut to card size —
+    scalars and short strings whole, media markers whole, a list as its
+    length, a dict as its keys, a long string cut at 200 characters."""
+    traces = tmp_path / "traces"
+    run = traces / "call-009"
+    run.mkdir(parents=True)
+    records = [
+        {"op_name": "a", "duration_ms": 1.0, "status": "ok",
+         "outputs": {"text": "first"}},
+        {"op_name": "a", "duration_ms": 1.0, "status": "ok",
+         "outputs": {"text": "y" * 500, "n": 3, "ok": True, "none": None,
+                     "audio": {"$media_ref": "media/x.npy"},
+                     "frames": [1, 2, 3], "usage": {"prompt_tokens": 1, "total": 2}}},
+    ]
+    (run / "nodes.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in records), encoding="utf-8")
+    manifest = (project / "operonx.toml").read_text()
+    (project / "operonx.toml").write_text(
+        manifest + f'\n[studio]\ntraces = "{traces}"\n', encoding="utf-8")
+
+    pid = _open(client, project)
+    last = client.get(f"/api/p/{pid}/trace/call-009").json()["ops"]["a"]["last"]
+    assert last["text"] == "y" * 200
+    assert last["n"] == 3 and last["ok"] is True and last["none"] is None
+    assert last["audio"] == {"$media_ref": "media/x.npy"}
+    assert last["frames"] == {"$len": 3}
+    assert last["usage"] == {"$keys": ["prompt_tokens", "total"]}

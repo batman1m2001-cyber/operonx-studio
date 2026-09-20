@@ -1290,14 +1290,26 @@ function opCard(it) {
     // tooltip and the inspector — and, zoomed in close, on the card
     // itself (the .detail block shows only at [data-zoom="hi"])
     card.title = n.kind + (n.bound ? ` · ${n.bound}` : "") + (n.is_gen ? " · generator" : "");
+    // Zoomed in, the card says what the op PRODUCES, not its port
+    // list: inputs are the wires, and most outputs are plumbing every
+    // op passes along. show_keys (declared on the op, its kind's
+    // default, or the extractor's pick from the dataflow) name the one
+    // or two outputs that stand for it. With a run painted the same
+    // line carries the last execution's value, cut to a card's width.
     const det = el("div", "detail");
-    const brief = (names) => names.length > 3
-      ? names.slice(0, 3).join(", ") + ` +${names.length - 3}`
-      : names.join(", ");
-    const ins = (n.inputs || []).map(i => i.name);
-    if (ins.length) det.append(el("div", "dports mono", "← " + brief(ins)));
-    if ((n.outputs || []).length)
-      det.append(el("div", "dports mono dout", "→ " + brief(n.outputs)));
+    const keys = (n.show_keys || []).slice(0, 2);
+    const last = state.run && state.run.ops[n.name] && state.run.ops[n.name].last;
+    for (const k of keys) {
+      const row = el("div", "dshow mono");
+      row.append(el("span", "dkey", "→ " + k));
+      if (last && k in last) {
+        row.append(el("span", "dval", " = " + Values.brief(last[k], 40)));
+        row.title = `${k}: last value of ${state.run.run}`;
+      } else {
+        row.title = "show key: the output that stands for this op";
+      }
+      det.append(row);
+    }
     if (det.childNodes.length) card.append(det);
   }
 

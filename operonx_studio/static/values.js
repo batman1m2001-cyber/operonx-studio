@@ -185,7 +185,32 @@
     return wrap;
   }
 
-  const api = { spec, render, fmtBytes, looksPayload };
+  /* One line for a card: the value cut to `max` characters, never a
+   * payload. Built on spec() so every type rule lives in one place;
+   * the server's bounded shapes ({$len}, {$keys}) print as sizes. */
+  function brief(v, max) {
+    max = max || 40;
+    const cut = (s) => (s.length > max ? s.slice(0, max - 1) + "…" : s);
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      if ("$len" in v) return `[${v.$len}]`;
+      if ("$keys" in v) return `{${v.$keys.slice(0, 3).join(", ")}${v.$keys.length > 3 ? ", …" : ""}}`;
+      if ("$type" in v) return `<${v.$type}>`;
+    }
+    const s = spec(v);
+    switch (s.t) {
+      case "token": return s.cls === "null" ? "∅" : s.text;
+      case "str": return cut(JSON.stringify(s.text));
+      case "longstr": return cut(JSON.stringify(s.head));
+      case "payload": return `payload · ${s.size}`;
+      case "media": return s.size ? `media · ${s.size}` : "media";
+      case "unser": return "…";
+      case "arr": return `[${s.count}]`;
+      case "obj": return `{${s.children.slice(0, 3).map((c) => c[0]).join(", ")}${s.count > 3 ? ", …" : ""}}`;
+      default: return "…";
+    }
+  }
+
+  const api = { spec, render, fmtBytes, looksPayload, brief };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.Values = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -179,7 +179,7 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                 **{k: nodes_by_id.get(n.id, {}).get(k) for k in
                    ("bound", "start", "end", "outputs", "inputs", "source",
                     "loop", "is_gen", "transient", "serve_role", "code",
-                    "resource", "routes", "description")},
+                    "resource", "routes", "description", "show_keys")},
                 "subgraph_ops": len((nodes_by_id.get(n.id, {}).get("graph") or {}).get("nodes") or []) or None,
                 "graph": _subgraph(n.id),
             }
@@ -289,6 +289,39 @@ def _flow_records(records, run_name: str, cap: int = 3000) -> Dict[str, Any]:
     return {"run": run_name, "total": len(out), "executions": out[:cap]}
 
 
+_PRINTABLE_STR = 200
+
+
+def _printable_outputs(outputs: Any) -> Optional[Dict[str, Any]]:
+    """One record's outputs cut down to what fits on a card.
+
+    Scalars stay. Strings are cut at 200 characters. The trace
+    consumer's own markers (``$media``, ``$media_ref``,
+    ``$unserializable``) stay whole, they are already small. A list
+    becomes ``{"$len": n}`` and any other dict ``{"$keys": [...]}``:
+    a card prints a size, never a payload, and the inspector fetches
+    the full value per op when asked.
+    """
+    if not isinstance(outputs, dict):
+        return None
+    out: Dict[str, Any] = {}
+    for key, value in outputs.items():
+        if isinstance(value, str):
+            out[key] = value if len(value) <= _PRINTABLE_STR else value[:_PRINTABLE_STR]
+        elif value is None or isinstance(value, (bool, int, float)):
+            out[key] = value
+        elif isinstance(value, dict):
+            if any(m in value for m in ("$media", "$media_ref", "$unserializable")):
+                out[key] = value
+            else:
+                out[key] = {"$keys": list(value.keys())[:5]}
+        elif isinstance(value, (list, tuple)):
+            out[key] = {"$len": len(value)}
+        else:
+            out[key] = {"$type": type(value).__name__}
+    return out
+
+
 def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]:
     """Per-op aggregates for one recorded run.
 
@@ -307,8 +340,13 @@ def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]
         name = rec.get("op_name") or rec.get("op_full_name") or "?"
         agg = per_op.setdefault(name, {
             "runs": 0, "errors": 0, "total_ms": 0.0, "max_ms": 0.0, "last_error": None,
+            "last": None,
         })
         agg["runs"] += 1
+        # The last execution's outputs, bounded to what a card can print:
+        # the canvas shows the op's show_keys values without a second
+        # fetch. Records arrive in write order, so the last one wins.
+        agg["last"] = _printable_outputs(rec.get("outputs"))
         duration = float(rec.get("duration_ms") or 0.0)
         agg["total_ms"] += duration
         agg["max_ms"] = max(agg["max_ms"], duration)
@@ -744,6 +782,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             for n in g.get("nodes") or []:
                 if not n.get("serve_role") and n["name"] in declared:
                     n["serve_role"] = declared[n["name"]]
+                    n["show_keys"] = []   # a door has nothing to say
 
     @app.get("/api/p/{pid}/ir")
     def project_ir(pid: str) -> JSONResponse:

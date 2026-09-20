@@ -344,3 +344,59 @@ tag_value = "t"
         )
         node = extract_project(m)["graphs"][0]["nodes"][0]
         assert node["source"]["wired_at"]["line"] > 0
+
+
+SHOW = """
+from operonx.core import END, PARENT, START, graph, op
+
+@op(show_keys="text")
+def declared(x: int):
+    return {"text": str(x), "n": x}
+
+@op
+def passthrough(text: str, n: int):
+    # `text` goes in and comes out: plumbing. `flag` is this op's product.
+    return {"text": text, "flag": n > 1, "n": n}
+
+@op
+def rare(text: str, flag: bool):
+    # `text` is produced by two other ops; `verdict` only here.
+    return {"verdict": flag, "text": text}
+
+@op
+def sink(verdict: bool, text: str):
+    return {"done": verdict}
+
+@graph
+def flow(x):
+    a = declared(x=x, show_keys=["n", "text"])
+    b = passthrough(text=a["text"], n=a["n"])
+    c = rare(text=b["text"], flag=b["flag"])
+    d = sink(verdict=c["verdict"], text=c["text"])
+    d["done"] >> PARENT["done"]
+    START >> a >> b >> c >> d >> END
+"""
+
+
+class TestShowKeys:
+    def _nodes(self, tmp_path):
+        ir = extract_project(project(tmp_path, SHOW, LINEAR_MANIFEST))
+        return {n["name"]: n for n in ir["graphs"][0]["nodes"]}
+
+    def test_call_site_declaration_rides_the_ir(self, tmp_path):
+        assert self._nodes(tmp_path)["a"]["show_keys"] == ["n", "text"]
+
+    def test_auto_drops_passthrough_keys(self, tmp_path):
+        # text and n go in and come out; flag is the one left
+        assert self._nodes(tmp_path)["b"]["show_keys"] == ["flag"]
+
+    def test_auto_prefers_the_rarest_key(self, tmp_path):
+        # text is output by three ops, verdict by one
+        assert self._nodes(tmp_path)["c"]["show_keys"] == ["verdict"]
+
+    def test_auto_picks_exactly_one(self, tmp_path):
+        nodes = self._nodes(tmp_path)
+        assert all(len(nodes[k]["show_keys"]) == 1 for k in ("b", "c", "d"))
+
+    def test_plain_case(self, tmp_path):
+        assert self._nodes(tmp_path)["d"]["show_keys"] == ["done"]

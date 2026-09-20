@@ -323,6 +323,13 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
     desc = _describe(op, code_fn)
     if desc:
         node["description"] = desc
+    # The outputs that stand for the op — declared at the call site or
+    # on the decorator, else the op class's default (operonx ≥ 1.6).
+    # Empty here means "nobody said": _subgraph fills it from the
+    # dataflow once every node of the graph is known. A door has
+    # nothing to say.
+    declared = _slot(op, "show_keys", ()) or ()
+    node["show_keys"] = [] if node.get("serve_role") else [str(k) for k in declared]
     # A branch's whole meaning is WHICH condition routes WHERE, and the
     # op stores exactly that: `cases` as (ref, target) pairs with their
     # human descriptions ("score >= 90"), plus the else target. Without
@@ -349,6 +356,38 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
     if _slot(op, "_ops"):
         node["graph"] = _subgraph(op, root, anchors, module)
     return node
+
+
+def _auto_show_keys(node: Dict[str, Any], nodes: List[Dict[str, Any]]) -> List[str]:
+    """One output that stands for an op nobody described — from the dataflow.
+
+    Candidates are the op's outputs minus its own input names (a key
+    that goes in and comes out is plumbing being passed along) and
+    minus ``_``-prefixed keys (``__branch_target__``). Ranked by how
+    many ops in the graph output that key (the rarer, the more it is
+    THIS op's product), then by how many refs pull it from this op,
+    then by name. One key: an auto pick is a guess, and two guesses
+    read as a statement. Measured on a real flow the guess is right
+    about half the time — declare ``show_keys`` where it is wrong.
+    """
+    outputs = list(node.get("outputs") or [])
+    if not outputs:
+        return []
+    producers: Dict[str, int] = {}
+    consumers: Dict[str, int] = {}
+    for other in nodes:
+        for key in other.get("outputs") or []:
+            producers[key] = producers.get(key, 0) + 1
+        for inp in other.get("inputs") or []:
+            binding = inp.get("binding") or {}
+            if binding.get("kind") == "ref" and binding.get("from") == node["id"]:
+                key = binding.get("output")
+                consumers[key] = consumers.get(key, 0) + 1
+    own_inputs = {i["name"] for i in (node.get("inputs") or [])}
+    candidates = [k for k in outputs if k not in own_inputs and not k.startswith("_")]
+    pool = candidates or [k for k in outputs if not k.startswith("_")] or outputs
+    ranked = sorted(pool, key=lambda k: (producers.get(k, 0), -consumers.get(k, 0), k))
+    return [ranked[0]]
 
 
 def _loop_of(op: Any) -> Optional[Dict[str, Any]]:
@@ -385,6 +424,9 @@ def _subgraph(g: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[
         }
         for edge in (_slot(g, "_edges") or {}).values()
     ]
+    for node in nodes:
+        if not node["show_keys"] and not node.get("serve_role"):
+            node["show_keys"] = _auto_show_keys(node, nodes)
     out: Dict[str, Any] = {
         "nodes": nodes,
         "edges": edges,
