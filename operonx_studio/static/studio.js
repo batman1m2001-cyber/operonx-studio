@@ -164,9 +164,12 @@ function kindIcon(node) {
 function ranInRun(n) {
   if (!state.run) return true;
   if (n.kind === "__boundary__") return true;
-  if (state.run.ops[n.name]) return true;
   if (n.graph) return (n.graph.nodes || []).some(ranInRun);
-  return false;
+  if (state.runTurn && state.runByOpTurn) {
+    const byTurn = state.runByOpTurn.get(n.name);
+    return !!(byTurn && byTurn.has(state.runTurn));
+  }
+  return !!state.run.ops[n.name];
 }
 
 /* ── placement: expansion opens a GraphOp in place ────────────────── */
@@ -1298,13 +1301,17 @@ function opCard(it) {
     // line carries the last execution's value, cut to a card's width.
     const det = el("div", "detail");
     const keys = (n.show_keys || []).slice(0, 2);
-    const last = state.run && state.run.ops[n.name] && state.run.ops[n.name].last;
+    const turnExec = state.run && state.runTurn && state.runByOpTurn
+      && state.runByOpTurn.get(n.name) && state.runByOpTurn.get(n.name).get(state.runTurn);
+    const vals = turnExec ? turnExec.outputs
+      : (state.run && !state.runTurn && state.run.ops[n.name] && state.run.ops[n.name].last);
+    const where = turnExec ? `in ${state.runTurn}` : `last value of ${state.run ? state.run.run : ""}`;
     for (const k of keys) {
       const row = el("div", "dshow mono");
       row.append(el("span", "dkey", "→ " + k));
-      if (last && k in last) {
-        row.append(el("span", "dval", " = " + Values.brief(last[k], 40)));
-        row.title = `${k}: last value of ${state.run.run}`;
+      if (vals && k in vals) {
+        row.append(el("span", "dval", " = " + Values.brief(vals[k], 40)));
+        row.title = `${k}: ${where}`;
       } else {
         row.title = "show key: the output that stands for this op";
       }
@@ -2489,12 +2496,9 @@ async function showTraces() {
     tree.title = "the run as a tree: what ran for what, in order";
     tree.onclick = (ev) => { ev.stopPropagation(); showRunTree(r.run); };
     const flow = el("button", null, "flow");
-    flow.title = "the flow's cards, one per execution, placed when they ran";
-    flow.onclick = (ev) => { ev.stopPropagation(); showRunFlow(r.run); };
-    const paint = el("button", null, "paint");
-    paint.title = "paint this run's averages onto the Flow tab";
-    paint.onclick = (ev) => { ev.stopPropagation(); paintRun(r.run); };
-    actions.append(tree, flow, paint);
+    flow.title = "the flow canvas with this run's values on every card";
+    flow.onclick = (ev) => { ev.stopPropagation(); paintRun(r.run); };
+    actions.append(tree, flow);
     if (r.source !== "langfuse") {
       const rm = el("button", "danger", "✕");
       rm.title = "delete this recorded run from disk";
@@ -2523,10 +2527,10 @@ async function showTraces() {
  * (a yield record contains everything dispatched for that item), one
  * row per execution wearing the op's flow icon and chips, its show-key
  * values and a duration bar on one scale.
- * FLOW BY TIME: the real flow cards, one per execution, x = the op's
- * lane, y = the moment it ran, wired by the provenance the recorder
- * saw. Both read /tree; the aggregate paint on the Flow tab is the
- * third view and answers a different question (how slow on average). */
+ * FLOW: the Flow tab itself, painted — the same layout, every card
+ * carrying the run's real values, and a turn picker in the banner so
+ * the cards show one turn's values and the ops that did not run in
+ * that turn fade. Both read /tree. */
 
 // the time math lives in timeline.js — pure, node-tested
 const TL = Timeline.TL;
@@ -2559,32 +2563,6 @@ function execValues(node, outputs, max) {
   return keys.slice(0, 2).map(k => [k, Values.brief(outputs[k], max)]);
 }
 
-/* Cards on the time axis: y follows time, compressed like the tree's
- * bars (busy stretches proportional, idle gaps clamped and marked), but
- * a step is forced only between two executions in the SAME column —
- * four monitors starting at 0 ms sit side by side, not staircased. y
- * never decreases, so time still reads top-down across columns. */
-function placeByTime(execs, laneOf, cardH) {
-  const k = TL.k, maxStep = 190, gap = 14;
-  let y = TL.padTop, prev = null;
-  const laneBottom = new Map();
-  for (const e of execs) {
-    delete e.gapBreak;
-    if (prev != null) {
-      const step = (e.start_ms - prev) * k;
-      if (step > maxStep) e.gapBreak = e.start_ms - prev;
-      y += Math.min(Math.max(step, 0), maxStep);
-    }
-    const lane = laneOf(e);
-    const floor = laneBottom.has(lane) ? laneBottom.get(lane) + gap : -Infinity;
-    y = Math.max(y, floor);
-    e.y = y;
-    laneBottom.set(lane, y + cardH);
-    prev = e.start_ms;
-  }
-  return y + cardH + 120;
-}
-
 const execsOf = (rows) => rows.filter(r => r.kind === "record");
 
 function runHeader(run, data, mode) {
@@ -2596,13 +2574,10 @@ function runHeader(run, data, mode) {
   const bt = el("button", mode === "tree" ? "on" : "", "tree");
   bt.title = "the run as a tree: what ran for what, in order";
   bt.onclick = () => showRunTree(run);
-  const bf = el("button", mode === "flow" ? "on" : "", "flow by time");
-  bf.title = "the flow's cards, one per execution, placed when they ran";
-  bf.onclick = () => showRunFlow(run);
-  const bp = el("button", "", "paint");
-  bp.title = "paint this run's averages onto the Flow tab";
-  bp.onclick = () => paintRun(run);
-  modes.append(bt, bf, bp);
+  const bf = el("button", mode === "flow" ? "on" : "", "flow");
+  bf.title = "the flow canvas with this run's values on every card; pick a turn in the banner";
+  bf.onclick = () => paintRun(run);
+  modes.append(bt, bf);
   head.append(modes);
   const recs = execsOf(data.rows);
   head.append(el("span", "chip", `${recs.length} executions`));
@@ -2687,159 +2662,6 @@ async function showRunTree(run) {
   });
   box.append(tree);
   state._tlrun = run;
-}
-
-async function showRunFlow(run) {
-  const box = $("#traces");
-  box.textContent = "";
-  let data;
-  try { data = await loadRunTree(run); } catch (e) { box.append(el("div", "note", e.message)); return; }
-  box.append(runHeader(run, data, "flow"));
-  box.append(el("div", "note", "time flows down · one card per execution · a column per op · click a card for its values"));
-  const execs = execsOf(data.rows).slice().sort((a, b) => a.start_ms - b.start_ms);
-
-  // lanes: only the ops that ran, ordered by first appearance — in a
-  // DAG that IS the flow's order, so the picture reads as the workflow
-  // descending left-to-right, and the first screen is never empty
-  const lane = Timeline.laneOrder(execs);
-  const opsRan = [...lane.keys()];
-  const PITCH = NODE_W + 44;
-  const laneLeft = (e) => TL.axisW + lane.get(e.op) * PITCH + 16;
-  const laneMid = (e) => laneLeft(e) + NODE_W / 2;
-  const worldW = TL.axisW + opsRan.length * PITCH + 220;
-
-  // a real card is ~130px tall; only same-column neighbours need that room
-  const CARD_H = 132;
-  const height = placeByTime(execs, (e) => lane.get(e.op), CARD_H);
-  const world = el("div", "tlworld");
-  world.style.height = `${height}px`;
-  world.style.width = `${worldW}px`;
-  const svg = document.createElementNS(SVGNS, "svg");
-  svg.setAttribute("class", "tlwires");
-  svg.setAttribute("width", worldW);
-  svg.setAttribute("height", height);
-  world.append(svg);
-
-  for (const name of opsRan) {
-    const x = laneMid({op: name});
-    const rail = document.createElementNS(SVGNS, "line");
-    rail.setAttribute("x1", x); rail.setAttribute("x2", x);
-    rail.setAttribute("y1", TL.padTop - 26); rail.setAttribute("y2", height - 90);
-    rail.setAttribute("class", "tlrail");
-    svg.append(rail);
-    const lbl = document.createElementNS(SVGNS, "text");
-    lbl.setAttribute("x", x); lbl.setAttribute("y", TL.padTop - 34);
-    lbl.setAttribute("class", "tllane");
-    lbl.textContent = name;
-    svg.append(lbl);
-  }
-
-  // turns: a band rule where each level-1 yield's dispatch group begins
-  const firstAt = new Map();
-  for (const e of execs) {
-    const key = (e.ctx || "").split(".").slice(0, 2).join(".");
-    if (key.includes(".") && !firstAt.has(key)) firstAt.set(key, e.y);
-  }
-  for (const t of data.turns || []) {
-    const y = firstAt.get(t.key);
-    // a turn that opens with the run needs no rule: the run's start is
-    // the rule, and a label there would sit on the column names
-    if (y == null || y <= TL.padTop + 4) continue;
-    const rule = document.createElementNS(SVGNS, "line");
-    rule.setAttribute("x1", 4); rule.setAttribute("x2", worldW - 8);
-    rule.setAttribute("y1", y - 14); rule.setAttribute("y2", y - 14);
-    rule.setAttribute("class", "tlturn");
-    svg.append(rule);
-    const lbl = document.createElementNS(SVGNS, "text");
-    lbl.setAttribute("x", TL.axisW + 4); lbl.setAttribute("y", y - 18);
-    lbl.setAttribute("class", "tlturnlbl");
-    lbl.textContent = `${t.label} · ${t.count} exec${t.count === 1 ? "" : "s"}`;
-    svg.append(lbl);
-  }
-
-  // axis: a label whenever enough time passed, plus break markers
-  let lastLbl = -1e9;
-  for (const e of execs) {
-    if (e.gapBreak) {
-      const brk = document.createElementNS(SVGNS, "text");
-      brk.setAttribute("x", 8); brk.setAttribute("y", e.y - 8);
-      brk.setAttribute("class", "tlbreak");
-      brk.textContent = `≈ +${fmtMs(e.gapBreak)} idle`;
-      svg.append(brk);
-      lastLbl = e.start_ms;
-    } else if (e.start_ms - lastLbl > 40) {
-      const t = document.createElementNS(SVGNS, "text");
-      t.setAttribute("x", 8); t.setAttribute("y", e.y + 4);
-      t.setAttribute("class", "tltick");
-      t.textContent = fmtMs(e.start_ms);
-      svg.append(t);
-      lastLbl = e.start_ms;
-    }
-  }
-
-  // the flow's own card per execution, carrying THIS execution's values
-  for (const e of execs) {
-    const node = irNodeByName(e.op) || {name: e.op, kind: "FuncOp", show_keys: [], inputs: [], outputs: []};
-    const it = {key: `run/${e.id}`, node, x: laneLeft(e), y: e.y, w: NODE_W, h: NODE_H, depth: 0};
-    const card = opCard(it);
-    card.classList.remove("dormant", "heated", "selected");
-    for (const b of card.querySelectorAll(".badge.run, .badge.expand")) b.remove();
-    let det = card.querySelector(".detail");
-    if (det) det.textContent = "";
-    const vs = execValues(node, e.outputs, 40);
-    if (vs.length) {
-      if (!det) { det = el("div", "detail"); card.append(det); }
-      for (const [k, v] of vs) {
-        const row = el("div", "dshow mono");
-        row.append(el("span", "dkey", "→ " + k), el("span", "dval", " = " + v));
-        det.append(row);
-      }
-    } else if (det) det.remove();
-    let badges = card.querySelector(".badges");
-    if (!badges) { badges = el("div", "badges"); card.append(badges); }
-    const idx = e.is_yield ? ` · [${(e.ctx || "").split(".").pop().replace(/[\[\]]/g, "")}]` : "";
-    const chip = el("span", "badge run", fmtMs(e.dur_ms) + idx);
-    if (e.status === "error") { chip.classList.add("err"); card.classList.add("errorlit"); }
-    badges.append(chip);
-    card.title = `${e.op} · ${e.ctx} · started +${fmtMs(e.start_ms)}` + (e.error ? `\n${e.error}` : "");
-    card.onclick = (ev) => { ev.stopPropagation(); selectExecution(run, e, execs, world); };
-    card.ondblclick = null;
-    e.el = card;
-    world.append(card);
-  }
-  box.append(world);
-
-  // provenance wires: what actually fed what — drawn after the cards
-  // are in the DOM, so a wire leaves the card's real bottom edge
-  const byId = new Map(execs.map(x => [x.id, x]));
-  for (const e of execs) {
-    for (const u of e.upstreams || []) {
-      const src = byId.get(u.from);
-      if (!src) continue;
-      const x1 = laneMid(src), y1 = src.y + (src.el ? src.el.offsetHeight : NODE_H);
-      const x2 = laneMid(e), y2 = e.y;
-      const p = document.createElementNS(SVGNS, "path");
-      const c = Math.max(18, Math.min(70, (y2 - y1) * 0.5));
-      p.setAttribute("d", `M ${x1} ${y1} C ${x1} ${y1 + c}, ${x2} ${y2 - c}, ${x2} ${y2}`);
-      p.setAttribute("class", "tlwire" + (e.status === "error" ? " err" : ""));
-      p.dataset.dst = e.id;
-      const tip = document.createElementNS(SVGNS, "title");
-      tip.textContent = `${src.op}.${u.from_key} → ${e.op}.${u.to_key}`;
-      p.append(tip);
-      svg.append(p);
-    }
-  }
-  state._tlrun = run;
-}
-
-// selecting an instance: highlight it, its wires, and open the
-// run-first panel — values, provenance, and this op's other runs
-function selectExecution(run, e, execs, world) {
-  for (const other of execs) if (other.el) other.el.classList.remove("selected", "sel");
-  e.el.classList.add("selected");
-  for (const w of world.querySelectorAll(".tlwire"))
-    w.classList.toggle("hot", w.dataset.dst === e.id);
-  renderExecPanel(run, e, execs);
 }
 
 async function renderExecPanel(run, e, execs) {
@@ -2949,6 +2771,32 @@ async function paintRun(run) {
   const data = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`);
   state.run = data;
   state.errIdx = 0;
+  // every execution with its values, by op and by turn — the cards
+  // read one turn's values when a turn is picked, the last otherwise
+  state.runTurn = null;
+  state.runTurns = [];
+  state.runByOpTurn = new Map();
+  try {
+    const tree = await loadRunTree(run);
+    state.runTurns = tree.turns || [];
+    for (const e of execsOf(tree.rows)) {
+      const key = (e.ctx || "").split(".").slice(0, 2).join(".");
+      if (!state.runByOpTurn.has(e.op)) state.runByOpTurn.set(e.op, new Map());
+      state.runByOpTurn.get(e.op).set(key, e);   // rows are in time order: last wins
+    }
+  } catch (e) { toast(e.message, true); }
+  const pick = $("#run-turn");
+  pick.textContent = "";
+  const whole = el("option", null, "whole run · last values");
+  whole.value = "";
+  pick.append(whole);
+  for (const t of state.runTurns) {
+    const o = el("option", null, `${t.label} · ${t.count}`);
+    o.value = t.key;
+    pick.append(o);
+  }
+  pick.hidden = !state.runTurns.length;
+  pick.onchange = () => { state.runTurn = pick.value || null; render(); renderFlowInfo(); };
   // heat scale: the run's slowest average paints the hottest border
   state.heatMax = Math.max(0, ...Object.values(data.ops || {})
     .map(o => o.runs ? o.total_ms / o.runs : 0));
@@ -2993,6 +2841,8 @@ $("#run-timeline").onclick = () => {
 
 $("#run-clear").onclick = () => {
   state.run = null;
+  state.runTurn = null;
+  state.runByOpTurn = null;
   state.heatMax = 0;
   $("#runbanner").classList.remove("show");
   render();

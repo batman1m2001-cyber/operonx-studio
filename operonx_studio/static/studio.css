@@ -894,6 +894,7 @@ header.bar .pname:hover { text-decoration: underline; }
 
 /* run banner extras */
 #run-stats { color: var(--muted); font-size: 12.5px; }
+#run-turn { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); max-width: 260px; }
 #run-stats.bad { color: var(--err); font-weight: 600; }
 #run-err { border-color: rgba(207, 63, 54, .5); color: var(--err); }
 
@@ -1148,27 +1149,6 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .tlmodes button.on { background: #fff; font-weight: 650;
   color: var(--accent-deep); box-shadow: var(--sh-1); }
 .tlhead .tltitle { font-weight: 700; font-size: 14px; color: var(--accent-deep); }
-.tlworld { position: relative; }
-.tlwires { position: absolute; inset: 0; pointer-events: none; }
-.tlwires .tlturn { stroke: var(--turn, #b7791f); stroke-opacity: .45; stroke-dasharray: 3 4; }
-.tlwires .tlturnlbl { font-size: 10px; font-weight: 600; font-family: ui-monospace, monospace; fill: var(--turn, #b7791f);
-  letter-spacing: .04em; }
-.tlwires .tlrail { stroke: #dbe4f0; stroke-width: 1.5; stroke-dasharray: 2 6; }
-.tlwires .tllane { fill: #6b7a90; font-size: 11px; font-weight: 650;
-  text-anchor: middle; }
-.tlwires .tltick { fill: #9aa8bb; font-size: 9.5px;
-  font-family: ui-monospace, monospace; }
-.tlwires .tlbreak { fill: #b3661a; font-size: 9.5px; font-style: italic;
-  font-family: ui-monospace, monospace; }
-.tlwires .tlwire { fill: none; stroke: var(--wire); stroke-width: 1.6;
-  opacity: .55; pointer-events: stroke; }
-.tlwires .tlwire.err { stroke: var(--err); }
-.tlwires .tlwire.hot { stroke: var(--wire-deep); stroke-width: 2.5; opacity: 1; }
-/* the flow's cards on the time axis carry their detail block always —
-   the semantic-zoom gate belongs to the Flow tab's world, not here */
-.tlworld .node .detail { display: block; }
-.tlworld .node { cursor: pointer; }
-
 /* the run tree: one row per observation — icon, name, chips, value, bar */
 .rtree { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel);
   overflow-x: auto; }
