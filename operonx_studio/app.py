@@ -243,6 +243,7 @@ def _op_executions(records, run_name: str, op_name: str, limit: int = 50) -> Dic
             "status": rec.get("status"),
             "error": rec.get("error"),
             "ctx": rec.get("ctx"),
+            "wall_start": rec.get("wall_start"),
             "inputs": rec.get("inputs"),
             "outputs": rec.get("outputs"),
         })
@@ -282,11 +283,48 @@ def _flow_records(records, run_name: str, cap: int = 3000) -> Dict[str, Any]:
             "status": rec.get("status"),
             "error": rec.get("error"),
             "upstreams": ups,
+            # a generator's yield record contains everything dispatched for
+            # that item (operonx ≥ 1.6 writes the flag; older runs get None)
+            "is_yield": rec.get("is_yield"),
+            "wall_start": rec.get("wall_start"),
+            "_stream": bool((rec.get("outputs") or {}).get("_transient_stream")),
         })
     out.sort(key=lambda r: r["start"])
     for r in out:
         r["start_ms"] = round((r.pop("start") - (t0 or 0.0)) * 1000.0, 3)
-    return {"run": run_name, "total": len(out), "executions": out[:cap]}
+    turns = _turns_of(out)
+    for r in out:
+        r.pop("_stream", None)
+    return {"run": run_name, "total": len(out), "executions": out[:cap], "turns": turns}
+
+
+def _turns_of(execs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The run's top-level dispatch groups, from ctx alone.
+
+    Everything dispatched for one level-1 yield shares the ctx prefix
+    ``main.[i]``: that is a turn. It is named after the yield record at
+    that ctx (``bot_prompts [1]``) when the stream recorded it, else after
+    the root-level transient stream that did not (``audio_in [357]``) —
+    the same rule the Langfuse consumer uses for its stand-in span.
+    """
+    stream = next((e["op"] for e in execs if e.get("_stream") and "." not in (e["ctx"] or "")), None)
+    groups: Dict[str, Dict[str, Any]] = {}
+    for e in execs:
+        parts = (e["ctx"] or "").split(".")
+        if len(parts) < 2:
+            continue
+        key = ".".join(parts[:2])
+        g = groups.setdefault(key, {"key": key, "label": None, "start_ms": e["start_ms"],
+                                    "end_ms": e["start_ms"] + (e["dur_ms"] or 0.0), "count": 0})
+        g["count"] += 1
+        g["end_ms"] = max(g["end_ms"], e["start_ms"] + (e["dur_ms"] or 0.0))
+        if g["label"] is None and e.get("is_yield") and e["ctx"] == key:
+            g["label"] = f"{e['op']} [{parts[1].strip('[]')}]"
+    for key, g in groups.items():
+        if g["label"] is None:
+            idx = key.split(".")[1].strip("[]")
+            g["label"] = f"{stream} [{idx}]" if stream else key
+    return sorted(groups.values(), key=lambda g: g["start_ms"])
 
 
 _PRINTABLE_STR = 200
@@ -458,6 +496,8 @@ def _lf_records(cfg: Dict[str, str], trace_id: str):
             "status": status,
             "error": obs.get("statusMessage"),
             "ctx": meta.get("ctx"),
+            "is_yield": meta.get("is_yield"),
+            "wall_start": _iso_epoch(obs.get("startTime")),
             "inputs": obs.get("input"),
             "outputs": obs.get("output"),
             "upstreams": meta.get("upstreams"),

@@ -1170,6 +1170,9 @@ button.pchip.pref:hover { border-color: #8fafd0; }
 .tlhead .tltitle { font-weight: 700; font-size: 14px; color: var(--accent-deep); }
 .tlworld { position: relative; }
 .tlwires { position: absolute; inset: 0; pointer-events: none; }
+.tlwires .tlturn { stroke: var(--turn, #b7791f); stroke-opacity: .45; stroke-dasharray: 3 4; }
+.tlwires .tlturnlbl { font-size: 10px; font-weight: 600; font-family: ui-monospace, monospace; fill: var(--turn, #b7791f);
+  letter-spacing: .04em; }
 .tlwires .tlrail { stroke: #dbe4f0; stroke-width: 1.5; stroke-dasharray: 2 6; }
 .tlwires .tllane { fill: #6b7a90; font-size: 11px; font-weight: 650;
   text-anchor: middle; }

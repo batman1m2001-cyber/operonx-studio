@@ -2617,6 +2617,29 @@ async function showRunCanvas(run) {
     svg.append(lbl);
   }
 
+  // turns: every top-level dispatch group (one level-1 yield and all
+  // that ran for it) gets a band rule at its first execution, labelled
+  // by the yield that opened it — the same grouping Langfuse shows
+  const firstAt = new Map();
+  for (const e of execs) {
+    const key = (e.ctx || "").split(".").slice(0, 2).join(".");
+    if (key.includes(".") && !firstAt.has(key)) firstAt.set(key, e.y);
+  }
+  for (const t of data.turns || []) {
+    const y = firstAt.get(t.key);
+    if (y == null) continue;
+    const rule = document.createElementNS(SVGNS, "line");
+    rule.setAttribute("x1", 4); rule.setAttribute("x2", worldW - 8);
+    rule.setAttribute("y1", y - 14); rule.setAttribute("y2", y - 14);
+    rule.setAttribute("class", "tlturn");
+    svg.append(rule);
+    const lbl = document.createElementNS(SVGNS, "text");
+    lbl.setAttribute("x", TL.axisW + 4); lbl.setAttribute("y", y - 18);
+    lbl.setAttribute("class", "tlturnlbl");
+    lbl.textContent = `${t.label} · ${t.count} exec${t.count === 1 ? "" : "s"}`;
+    svg.append(lbl);
+  }
+
   // axis: a label whenever enough time passed, plus break markers
   let lastLbl = -1e9;
   for (const e of execs) {
@@ -2696,6 +2719,13 @@ async function renderExecPanel(run, e, execs) {
   chips.append(el("span", `chip ${e.status === "error" ? "cbad" : ""}`, e.status));
   chips.append(el("span", "chip", `+${fmtMs(e.start_ms)}`));
   chips.append(el("span", "chip", fmtMs(e.dur_ms)));
+  if (e.wall_start) {
+    // the recorder's wall clock, so a card can be matched to a log line
+    const at = new Date(e.wall_start * 1000);
+    const c = el("span", "chip mono", at.toLocaleTimeString([], {hour12: false}) + "." + String(at.getMilliseconds()).padStart(3, "0"));
+    c.title = at.toISOString();
+    chips.append(c);
+  }
   head.append(chips);
   panel.append(head);
   if (e.error) panel.append(el("div", "rolenote dormnote", e.error));

@@ -891,3 +891,37 @@ def test_summary_carries_the_last_outputs_bounded(client, project, tmp_path):
     assert last["audio"] == {"$media_ref": "media/x.npy"}
     assert last["frames"] == {"$len": 3}
     assert last["usage"] == {"$keys": ["prompt_tokens", "total"]}
+
+
+def test_flow_endpoint_groups_executions_into_turns(client, project, tmp_path):
+    """Everything dispatched for one level-1 yield shares the ctx prefix
+    main.[i]: a turn, named after the yield record at that ctx when it
+    exists, else after the root-level transient stream that did not
+    record its yields — the same rule the Langfuse consumer applies."""
+    _traced(project, tmp_path, "call-turns", [
+        {"op_id": "g.audio#main", "op_name": "audio", "op_full_name": "g.audio",
+         "ctx": ["main"], "start_time": 100.0, "end_time": 103.0, "duration_ms": 3000.0,
+         "status": "ok", "inputs": {}, "outputs": {"_transient_stream": True, "items": 9}, "upstreams": []},
+        {"op_id": "g.prompt#main.[0]", "op_name": "prompt", "op_full_name": "g.prompt",
+         "ctx": ["main", "[0]"], "start_time": 100.1, "end_time": 100.2, "duration_ms": 100.0,
+         "status": "ok", "is_yield": True, "wall_start": 1_800_000_000.1,
+         "inputs": {}, "outputs": {"text": "hi"}, "upstreams": []},
+        {"op_id": "g.say#main.[0]", "op_name": "say", "op_full_name": "g.say",
+         "ctx": ["main", "[0]"], "start_time": 100.2, "end_time": 100.3, "duration_ms": 100.0,
+         "status": "ok", "is_yield": False, "inputs": {}, "outputs": {}, "upstreams": []},
+        {"op_id": "g.vad#main.[7].[0]", "op_name": "vad", "op_full_name": "g.vad",
+         "ctx": ["main", "[7]", "[0]"], "start_time": 101.0, "end_time": 101.1, "duration_ms": 100.0,
+         "status": "ok", "is_yield": True, "inputs": {}, "outputs": {}, "upstreams": []},
+    ])
+    pid = _open(client, project)
+    got = client.get(f"/api/p/{pid}/trace/call-turns/flow").json()
+    turns = got["turns"]
+    assert [t["key"] for t in turns] == ["main.[0]", "main.[7]"]
+    assert turns[0]["label"] == "prompt [0]" and turns[0]["count"] == 2
+    assert turns[1]["label"] == "audio [7]" and turns[1]["count"] == 1
+    assert turns[0]["start_ms"] == 100.0 and turns[0]["end_ms"] == 300.0
+    by_op = {e["op"]: e for e in got["executions"]}
+    assert by_op["prompt"]["is_yield"] is True and by_op["prompt"]["wall_start"] == 1_800_000_000.1
+    assert "_stream" not in by_op["audio"]
+    drill = client.get(f"/api/p/{pid}/trace/call-turns/op/prompt").json()
+    assert drill["executions"][0]["wall_start"] == 1_800_000_000.1
