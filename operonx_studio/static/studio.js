@@ -548,8 +548,25 @@ function render() {
   // client → ingress → flow → egress → client.
   const gatesIn = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "ingress");
   const gatesOut = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "egress");
-  for (const x of gatesIn) x.y -= 70;
+  // A door steps OUT of the flow only when it truly stands on the
+  // boundary: an ingress nothing in the flow feeds, an egress that
+  // feeds nothing. A door with a flow neighbour on its boundary side
+  // (seed first, then the door) is one step of the sequence and keeps
+  // its row — lifting it regardless dragged it up beside its feeder
+  // and drew the feeding wire flat across the row gap.
+  const flowEdge = (x) => !x.e.back && x.a.depth === 0 && x.b.depth === 0;
+  const fedByFlow = (it) => flat.edges.some(x => flowEdge(x) && x.b === it);
+  const feedsFlow = (it) => flat.edges.some(x => flowEdge(x) && x.a === it);
+  for (const x of gatesIn) {
+    if (fedByFlow(x)) continue;
+    // only step up when the lane above is actually clear
+    const clash = flat.nodes.some(o => o !== x && !o.inner
+      && o.x < x.x + x.w && o.x + o.w > x.x
+      && o.y + o.h < x.y + 1 && o.y + o.h > x.y - 100);
+    if (!clash) x.y -= 70;
+  }
   for (const x of gatesOut) {
+    if (feedsFlow(x)) continue;
     // the egress is not always on the last row — only step down out of
     // the flow when the lane below is actually clear
     const clash = flat.nodes.some(o => o !== x && !o.inner
@@ -617,12 +634,19 @@ function render() {
       // DOT on the side its target actually lies — the wire departs
       // exactly at the dot, never from the blind side of the card
       it.condPorts = {};
+      it.condDots = [];
       for (const rrow of card.querySelectorAll(".brrow")) {
         const t = rrow.dataset.target;
         const tgt = flat.nodes.find(o => o.depth === it.depth
           && o.node.name === t && o !== it);
         const side = tgt && portCX(tgt) < it.x + it.w / 2 ? -1 : 1;
         rrow.classList.toggle("left", side < 0);
+        // every row's dot, card-relative — the wire repaint above the
+        // card is masked out under each one, so the dot stays the
+        // terminal the wire emerges FROM, never a bead the wire buries
+        it.condDots.push({
+          x: side < 0 ? rrow.offsetLeft - 1 : rrow.offsetLeft + rrow.offsetWidth + 1,
+          y: rrow.offsetTop + rrow.offsetHeight / 2});
         if (!(t in it.condPorts)) {
           // x/y of the row's own DOT (card-relative): the wire must
           // emerge from the condition box itself, not the card border
@@ -918,21 +942,36 @@ function render() {
     }
     // a decision wire starts INSIDE the card, at its condition row's
     // dot — but edges paint beneath the cards. Repaint exactly the
-    // over-card stretch above the card, clipped to its rect: identical
-    // paths, so there is no seam and dashed elses stay in phase.
+    // over-card stretch above the card, masked to its rect: identical
+    // paths, so there is no seam and dashed elses stay in phase. The
+    // mask also cuts a hole under every condition dot: the repaint
+    // sits ABOVE the card, so without the hole a 12px glow starting at
+    // the dot's centre painted right over it.
     if (p.dataset.fromRow === "1") {
       const top = $("#edgetop");
-      const cid = "rowclip-" + A.key.replace(/[^A-Za-z0-9_-]/g, "_");
+      const cid = "rowmask-" + A.key.replace(/[^A-Za-z0-9_-]/g, "_");
       if (!top.querySelector(`#${cid}`)) {
-        const cp = document.createElementNS(SVGNS, "clipPath");
-        cp.setAttribute("id", cid);
+        const mk = document.createElementNS(SVGNS, "mask");
+        mk.setAttribute("id", cid);
+        mk.setAttribute("maskUnits", "userSpaceOnUse");
+        mk.setAttribute("x", A.x - 4); mk.setAttribute("y", A.y - 4);
+        mk.setAttribute("width", A.w + 8); mk.setAttribute("height", A.h + 8);
         const r = document.createElementNS(SVGNS, "rect");
         r.setAttribute("x", A.x - 4); r.setAttribute("y", A.y - 4);
         r.setAttribute("width", A.w + 8); r.setAttribute("height", A.h + 8);
-        cp.append(r); top.append(cp);
+        r.setAttribute("fill", "#fff");
+        mk.append(r);
+        for (const d of (A.condDots || [])) {
+          const hole = document.createElementNS(SVGNS, "circle");
+          hole.setAttribute("cx", A.x + d.x); hole.setAttribute("cy", A.y + d.y);
+          hole.setAttribute("r", 7.5);
+          hole.setAttribute("fill", "#000");
+          mk.append(hole);
+        }
+        top.append(mk);
       }
       const g2 = document.createElementNS(SVGNS, "g");
-      g2.setAttribute("clip-path", `url(#${cid})`);
+      g2.setAttribute("mask", `url(#${cid})`);
       const over = made.map(m => m.cloneNode(false));
       for (const m of over) g2.append(m);
       top.append(g2);
