@@ -961,3 +961,132 @@ def test_tree_endpoint_applies_the_ctx_rules(client, project, tmp_path):
     assert by_name["prompt [0]"]["wall_start"] == 1_800_000_000.1
     assert by_name["say"]["upstreams"] == [{"from": "g.prompt#main.[0]", "from_key": "text", "to_key": "text"}]
     assert [t["label"] for t in got["turns"]] == ["prompt [0]", "audio [7]"]
+
+
+# ── jobs: the three lists, and the records the jobs write ──────────────────
+
+JOBS_MAIN = '''
+from operonx.core import graph, op, START, END
+from operonx.app.serve import egress, ingress
+
+
+@op(bound="sync")
+def shout(item: dict = None):
+    if item.get("bad"):
+        raise ValueError("bad item")
+    return {"loud": {"id": item["id"], "text": item["text"].upper()}}
+
+
+@graph
+def door_flow():
+    src = ingress()
+    loud = shout(item=src["item"])
+    out = egress(item=loud["loud"])
+    START >> src >> loud >> out >> END
+'''
+
+JOBS_MANIFEST = '''
+[project]
+name = "jobs-demo"
+
+[[graph]]
+name  = "door_flow"
+entry = "main:door_flow"
+
+[[serve]]
+name  = "shout"
+kind  = "http"
+path  = "/shout"
+graph = "main:door_flow"
+
+[[job]]
+name   = "shout_all"
+graph  = "main:door_flow"
+source = "data.jsonl"
+sink   = "out.jsonl"
+key    = "id"
+schedule = "0 2 * * *"
+description = "louder, nightly"
+'''
+
+
+@pytest.fixture()
+def jobs_project(tmp_path: Path) -> Path:
+    root = tmp_path / "jobsdemo"
+    root.mkdir()
+    (root / "main.py").write_text(JOBS_MAIN, encoding="utf-8")
+    (root / "operonx.toml").write_text(JOBS_MANIFEST, encoding="utf-8")
+    (root / "data.jsonl").write_text(
+        '{"id": "a", "text": "x"}\n{"id": "b", "text": "y", "bad": true}\n{"id": "c", "text": "z"}\n',
+        encoding="utf-8")
+    return root
+
+
+def test_ir_carries_the_three_lists(client, jobs_project):
+    pid = _open(client, jobs_project)
+    ir = client.get(f"/api/p/{pid}/ir").json()
+    assert ir["application"] is True
+    assert [g["name"] for g in ir["graphs"]] == ["door_flow"]
+    assert [(s["name"], s["kind"], s["path"]) for s in ir["services"]] == [("shout", "http", "/shout")]
+    (job,) = ir["jobs"]
+    assert job["name"] == "shout_all" and job["kind"] == "job" and job["session"] == "per_item"
+    assert job["schedule"] == "0 2 * * *" and job["description"] == "louder, nightly"
+    assert job["record_dir"] == str(jobs_project / "jobs")
+
+
+def test_jobs_list_runs_and_items_from_the_records(client, jobs_project):
+    pid = _open(client, jobs_project)
+    listed = client.get(f"/api/p/{pid}/jobs").json()["jobs"]
+    assert listed[0]["name"] == "shout_all" and listed[0]["runs"] == 0 and listed[0]["last"] is None
+
+    # A run recorded the way operonx-run records it.
+    from operonx.app.jobs import Job
+
+    import importlib, sys
+    sys.path.insert(0, str(jobs_project))
+    try:
+        main = importlib.import_module("main")
+        job = Job("shout_all", graph=main.door_flow, source=jobs_project / "data.jsonl",
+                  sink=jobs_project / "out.jsonl", key="id", record_dir=jobs_project / "jobs")
+        run = job.run_sync()
+    finally:
+        sys.path.remove(str(jobs_project)); sys.modules.pop("main", None)
+    assert run.status == "failed"
+
+    listed = client.get(f"/api/p/{pid}/jobs").json()["jobs"]
+    assert listed[0]["runs"] == 1 and listed[0]["last"]["status"] == "failed"
+    assert listed[0]["last"]["counts"]["ok"] == 2 and listed[0]["last"]["counts"]["failed"] == 1
+
+    runs = client.get(f"/api/p/{pid}/jobs/shout_all/runs").json()
+    assert runs["job"]["name"] == "shout_all" and [r["run_id"] for r in runs["runs"]] == [run.run_id]
+
+    one = client.get(f"/api/p/{pid}/jobs/shout_all/runs/{run.run_id}").json()
+    assert one["run"]["status"] == "failed"
+    by_key = {i["key"]: i for i in one["items"]}            # recorded in completion order
+    assert {k: v["status"] for k, v in by_key.items()} == {"a": "ok", "b": "failed", "c": "ok"}
+    assert "bad item" in by_key["b"]["error"] and by_key["a"]["trace_id"]
+
+    assert client.get(f"/api/p/{pid}/jobs/nope/runs").status_code == 404
+    assert client.get(f"/api/p/{pid}/jobs/shout_all/runs/../../etc").status_code == 404
+    assert client.get(f"/api/p/{pid}/jobs/shout_all/runs/20990101T000000-000000").status_code == 404
+
+
+def test_run_starts_operonx_run_under_the_projects_interpreter(client, jobs_project):
+    import time as _time
+
+    pid = _open(client, jobs_project)
+    res = client.post(f"/api/p/{pid}/jobs/shout_all/run", json={"resume": False})
+    assert res.status_code == 200, res.text
+    started = res.json()
+    assert started["started"] == "shout_all" and started["pid"] > 0
+    assert Path(started["log"]).parent == jobs_project / "jobs" / "shout_all" / ".studio"
+    deadline = _time.time() + 60
+    while _time.time() < deadline:
+        runs = client.get(f"/api/p/{pid}/jobs/shout_all/runs").json()["runs"]
+        if runs and runs[0]["status"] != "running":
+            break
+        _time.sleep(0.5)
+    assert runs and runs[0]["status"] == "failed", Path(started["log"]).read_text(encoding="utf-8")[-800:]
+    assert runs[0]["counts"]["ok"] == 2
+
+    assert client.post(f"/api/p/{pid}/jobs/nope/run", json={}).status_code == 404

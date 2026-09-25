@@ -1264,3 +1264,38 @@ button.pchip.pref:hover { border-color: #8fafd0; }
    Inspect tab is its "close", so only the new-conversation button stays */
 #chatdock .chat-head { padding: 6px 10px; }
 #chatdock .chat-title, #chatdock .chat-close { display: none; }
+
+/* ── the project menu ───────────────────────────────────────────────── */
+.pmenubtn { font-size: 14px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+#pmenu { position: absolute; top: 40px; left: 120px; z-index: 40; display: flex; gap: 16px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: 0 8px 28px rgba(0,0,0,.14); }
+.pcol { min-width: 190px; max-width: 320px; }
+.ptitle { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; }
+.pnone { font-size: 12px; color: var(--muted); }
+.prow { display: flex; flex-direction: column; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.prow:hover { background: color-mix(in srgb, var(--line) 30%, transparent); }
+.prow.sel { box-shadow: inset 3px 0 0 #38c4ea; }
+.prow .pn { font-size: 13px; } .prow .ps { font-size: 11px; color: var(--muted); }
+
+/* ── the Jobs tab ───────────────────────────────────────────────────── */
+#jobs { padding: 12px; overflow: auto; }
+.jcols { display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: start; }
+.jlist { display: flex; flex-direction: column; gap: 6px; }
+.jrow { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); padding: 8px 10px; cursor: pointer; }
+.jrow:hover { background: color-mix(in srgb, var(--line) 30%, transparent); }
+.jrow.sel { box-shadow: inset 3px 0 0 #38c4ea; }
+.jhead { display: flex; gap: 6px; align-items: center; } .jn { font-weight: 600; font-size: 13px; }
+.jio { font-size: 11px; color: var(--muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jdesc { font-size: 12px; margin-top: 3px; }
+.jlast { display: flex; gap: 6px; align-items: center; margin-top: 5px; flex-wrap: wrap; } .jwhen { font-size: 11px; color: var(--muted); }
+.jdetail { min-width: 0; }
+.jbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; } .jtitle { font-weight: 600; font-size: 14px; margin-right: 6px; }
+.jpath { font-size: 11px; color: var(--muted); margin-left: auto; }
+.jruns, .jitems { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 10px; }
+.jruns th, .jitems th { text-align: left; font-weight: 500; color: var(--muted); padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.jruns td, .jitems td { padding: 4px 6px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.jruns tr { cursor: pointer; } .jruns tr.sel { background: #eaf7ff; } .jitems tr.err td { color: var(--err); }
+.jerr { max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.counts { display: inline-flex; gap: 4px; }
+.chip.cok { background: #e6f7ec; color: #1d7a3e; } .chip.crun { background: #fff4d6; color: #8a5a00; } .chip.cwarn { background: #fff4d6; color: #8a5a00; }

@@ -35,6 +35,9 @@ const state = {
   follow: false,     // repaint whenever a newer run appears
   stamp: 0,
   tab: "flow",
+  jobSel: null,       // the job the Jobs tab is showing
+  jobRun: null,       // and its run, if one is open
+  jobsView: null,     // token: the latest showJobs() owns the pane
   cardEls: new Map(), // render key -> card element (selection without re-render)
   edgeEls: [],        // [{a, b, els}] every drawn edge's paths, for hot/arrow nav
   errIdx: 0,          // cycling cursor for the "error →" jump
@@ -2905,9 +2908,11 @@ function switchTab(name, opts) {
     b.classList.toggle("active", b.dataset.tab === name);
   $("#stage").style.display = name === "flow" ? "" : "none";
   $("#traces").hidden = name !== "traces";
+  $("#jobs").hidden = name !== "jobs";
   $("#resources").hidden = name !== "resources";
   // quiet: the caller is about to fill the Traces pane itself
   if (name === "traces" && !(opts && opts.quiet)) showTraces();
+  if (name === "jobs") showJobs(state.jobSel);
   if (name === "resources") showResources();
   pushView();
 }
@@ -3245,6 +3250,7 @@ async function load(first) {
   pick.hidden = data.graphs.length <= 1;
   state.graph = data.graphs.find(g => g.name === current) || data.graphs[0];
   if (state.graph) pick.value = state.graph.name;
+  $("#btn-project").title = `${data.graphs.length} operons · ${(data.services || []).length} services · ${(data.jobs || []).length} jobs`;
   render();
   if (first) initView();
   pushView();
@@ -3270,3 +3276,244 @@ async function poll() {
 
 state.follow = recall("follow", false);
 load(true).then(() => setTimeout(poll, 1500));
+
+/* ── the project menu: Operons · Services · Jobs ───────────────────────
+ * The three lists the application layer declares (operonx.app), from
+ * the /ir payload. An Operon opens in the Flow tab; a Service opens the
+ * graph it serves; a Job opens the Jobs tab on that job. */
+
+function renderProjectMenu() {
+  const box = $("#pmenu");
+  box.textContent = "";
+  const ir = state.ir || {};
+  const col = (title, rows) => {
+    const c = el("div", "pcol");
+    c.append(el("div", "ptitle", title));
+    if (!rows.length) c.append(el("div", "pnone", "none"));
+    for (const r of rows) c.append(r);
+    return c;
+  };
+  const row = (name, sub, onclick, cls) => {
+    const r = el("div", "prow" + (cls ? " " + cls : ""));
+    r.append(el("span", "pn", name));
+    if (sub) r.append(el("span", "ps", sub));
+    r.onclick = () => { $("#pmenu").hidden = true; onclick(); };
+    return r;
+  };
+  const operons = (ir.graphs || []).map(g => row(g.name, `${g.nodes.length} ops`, () => {
+    state.graph = g; $("#graph-pick").value = g.name; switchTab("flow"); render(); renderFlowInfo();
+  }, state.graph && state.graph.name === g.name ? "sel" : ""));
+  const services = (ir.services || ir.serves || []).map(sv => row(
+    sv.name || sv.path, `${sv.kind} ${sv.path || ""}${sv.port ? " :" + sv.port : ""}${sv.session ? " · " + sv.session : ""}`,
+    () => {
+      const target = sv.graph ? (ir.graphs || []).find(g => sv.graph.endsWith(":" + g.name) || sv.graph === g.name) : null;
+      if (target) { state.graph = target; $("#graph-pick").value = target.name; switchTab("flow"); render(); renderFlowInfo(); }
+      else toast(sv.app ? `${sv.name}: an ASGI app, not a graph` : `${sv.name}: graph ${sv.graph} is not listed under [[graph]]`);
+    }));
+  const jobs = (ir.jobs || []).map(j => row(j.name,
+    `${j.kind === "runbook" ? "runbook" : j.session}${j.schedule ? " · " + j.schedule : ""}`,
+    () => { state.jobSel = j.name; switchTab("jobs"); }));
+  box.append(col("Operons", operons), col("Services", services), col("Jobs", jobs));
+}
+$("#btn-project").onclick = (ev) => {
+  ev.stopPropagation();
+  const box = $("#pmenu");
+  if (box.hidden) renderProjectMenu();
+  box.hidden = !box.hidden;
+};
+document.addEventListener("click", (ev) => {
+  const box = $("#pmenu");
+  if (!box.hidden && !box.contains(ev.target)) box.hidden = true;
+});
+
+/* ── the Jobs tab: the records the jobs write, and Run / Resume ────────
+ * A job is never a span; its truth is run.json + items.jsonl. The pane
+ * shows exactly those: the jobs with their last run, one job's runs, one
+ * run's items (or a runbook's tree). Run and Resume start `operonx-run`
+ * under the project's interpreter; the pane polls while a run is open. */
+
+let _jobsPoll = null;
+
+function statusChip(status) {
+  const cls = status === "ok" ? "cok" : status === "running" ? "crun"
+    : (status === "failed" || status === "stopped" || status === "timeout") ? "cbad" : "";
+  return el("span", "chip " + cls, status || "?");
+}
+
+function countsChips(counts) {
+  const wrap = el("span", "counts");
+  for (const [k, v] of Object.entries(counts || {})) {
+    if (!v && k !== "ok") continue;
+    wrap.append(el("span", "chip " + (k === "failed" || k === "timeout" ? "cbad" : k === "empty" ? "cwarn" : ""), `${k} ${v}`));
+  }
+  return wrap;
+}
+
+async function showJobs(sel, runId) {
+  const box = $("#jobs");
+  const mine = (state.jobsView = {});
+  let data;
+  try { data = await api(`/api/p/${PID}/jobs`); }
+  catch (e) { box.textContent = ""; box.append(el("div", "errbox", e.message)); return; }
+  if (state.jobsView !== mine) return;
+  box.textContent = "";
+  if (!data.jobs.length) {
+    box.append(el("div", "note",
+      'No [[job]] declared. Add one to operonx.toml:\n\n[[job]]\nname   = "score_calls"\ngraph  = "pipeline:score_call"\nsource = "data/calls.jsonl"\nsink   = "out/scores.jsonl"\nkey    = "call_id"'));
+    box.querySelector(".note").style.whiteSpace = "pre-wrap";
+    return;
+  }
+  const cols = el("div", "jcols");
+  const list = el("div", "jlist");
+  const detail = el("div", "jdetail");
+  cols.append(list, detail);
+  box.append(cols);
+
+  const picked = data.jobs.find(j => j.name === sel) || data.jobs[0];
+  state.jobSel = picked.name;
+  for (const j of data.jobs) {
+    const r = el("div", "jrow" + (j.name === picked.name ? " sel" : ""));
+    const head = el("div", "jhead");
+    head.append(el("span", "jn", j.name), el("span", "chip", j.kind === "runbook" ? "runbook" : j.session));
+    if (j.schedule) head.append(el("span", "chip", j.schedule));
+    r.append(head);
+    if (j.kind !== "runbook") r.append(el("div", "jio mono", `${j.source || "-"} → ${j.sink || "-"}`));
+    if (j.description) r.append(el("div", "jdesc", j.description));
+    const last = el("div", "jlast");
+    if (j.last) { last.append(statusChip(j.last.status), countsChips(j.last.counts), el("span", "jwhen", j.last.started || "")); }
+    else last.append(el("span", "jwhen", "never run"));
+    r.append(last);
+    r.onclick = () => showJobs(j.name);
+    list.append(r);
+  }
+  await renderJobDetail(detail, picked, runId, mine);
+}
+
+async function renderJobDetail(detail, job, runId, mine) {
+  detail.textContent = "";
+  const bar = el("div", "jbar");
+  bar.append(el("span", "jtitle", job.name));
+  const run = el("button", "primary", "▶ run");
+  run.title = `operonx-run ${job.name} — under the project's interpreter`;
+  run.onclick = () => startJob(job.name, false);
+  bar.append(run);
+  if (job.kind !== "runbook" && job.session !== "stream") {
+    const resume = el("button", null, "↻ resume");
+    resume.title = "only the keys the last run did not finish";
+    resume.onclick = () => startJob(job.name, true);
+    bar.append(resume);
+  }
+  const refresh = el("button", null, "⟳");
+  refresh.onclick = () => showJobs(job.name, state.jobRun);
+  bar.append(refresh);
+  bar.append(el("span", "jpath mono", job.record_dir || ""));
+  detail.append(bar);
+
+  let data;
+  try { data = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs`); }
+  catch (e) { detail.append(el("div", "errbox", e.message)); return; }
+  if (state.jobsView !== mine) return;
+  if (!data.runs.length) { detail.append(el("div", "note", "No runs recorded yet.")); return; }
+
+  const table = el("table", "jruns");
+  const hr = el("tr");
+  for (const h of ["run", "status", "counts", "started", "ended"]) hr.append(el("th", null, h));
+  const thead = el("thead"); thead.append(hr); table.append(thead);
+  const tbody = el("tbody");
+  const open = data.runs.find(r => r.run_id === runId) || data.runs[0];
+  state.jobRun = open.run_id;
+  for (const r of data.runs) {
+    const tr = el("tr", r.run_id === open.run_id ? "sel" : "");
+    tr.append(el("td", "mono", r.run_id));
+    const st = el("td"); st.append(statusChip(r.status)); tr.append(st);
+    const ct = el("td");
+    if (r.tree) { const c = countsOfTree(r.tree); ct.append(countsChips(c)); }
+    else ct.append(countsChips(r.counts));
+    tr.append(ct);
+    tr.append(el("td", null, r.started || ""), el("td", null, r.ended || (r.status === "running" ? "…" : "")));
+    tr.onclick = () => showJobs(job.name, r.run_id);
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  detail.append(table);
+
+  let one;
+  try { one = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs/${open.run_id}`); }
+  catch (e) { detail.append(el("div", "errbox", e.message)); return; }
+  if (state.jobsView !== mine) return;
+  if (one.run.tree) detail.append(renderRunbookTree(one.run.tree));
+  else detail.append(renderItems(one.items, one.run));
+  if (one.run.error) detail.append(el("div", "errbox", one.run.error));
+
+  // a running run: poll until it settles
+  clearTimeout(_jobsPoll);
+  if (open.status === "running" && state.tab === "jobs") {
+    _jobsPoll = setTimeout(() => { if (state.tab === "jobs") showJobs(job.name, open.run_id); }, 2500);
+  }
+}
+
+function countsOfTree(tree) {
+  const c = {ok: 0, failed: 0, skipped: 0};
+  const walk = (n) => { if (n.kind === "job") c[n.status] = (c[n.status] || 0) + 1; for (const k of n.children || []) walk(k); };
+  walk(tree);
+  return c;
+}
+
+function renderRunbookTree(tree) {
+  const box = el("div", "rtree");
+  const walk = (n, depth) => {
+    const row = el("div", "rrow" + (n.status === "failed" ? " err" : ""));
+    row.style.paddingLeft = `${8 + depth * 18}px`;
+    row.append(el("span", "rico", n.kind === "job" ? "⚙" : n.kind === "parallel" ? "⇉" : "→"));
+    row.append(el("span", "rn", n.kind === "job" ? n.name : n.kind));
+    row.append(statusChip(n.status));
+    if (n.ms) row.append(el("span", "rval", `${(n.ms / 1000).toFixed(2)}s`));
+    if (n.error) row.append(el("span", "rval", n.error));
+    if (n.run_id) row.append(el("span", "rval mono", n.run_id));
+    box.append(row);
+    for (const c of n.children || []) walk(c, depth + 1);
+  };
+  walk(tree, 0);
+  return box;
+}
+
+function renderItems(items, run) {
+  if (!items.length) {
+    const c = run.counts || {};
+    return el("div", "note", "fed" in c ? `one run: fed ${c.fed} · sent ${c.sent}${run.trace_id ? " · trace " + run.trace_id : ""}` : "no items recorded");
+  }
+  const table = el("table", "jitems");
+  const hr = el("tr");
+  for (const h of ["key", "status", "ms", "sent", "attempts", "error", "trace"]) hr.append(el("th", null, h));
+  const thead = el("thead"); thead.append(hr); table.append(thead);
+  const tbody = el("tbody");
+  for (const it of items) {
+    const tr = el("tr", it.status === "failed" || it.status === "timeout" ? "err" : "");
+    tr.append(el("td", "mono", it.key));
+    const st = el("td"); st.append(statusChip(it.status)); tr.append(st);
+    tr.append(el("td", "num", it.ms ? it.ms.toFixed(0) : ""), el("td", "num", String(it.sent ?? "")),
+              el("td", "num", String(it.attempts ?? "")), el("td", "jerr", it.error || ""));
+    const tc = el("td");
+    if (it.trace_id) {
+      const b = el("button", null, "trace");
+      b.title = it.trace_id;
+      b.onclick = async () => {
+        switchTab("traces", {quiet: true});
+        try { await showRunTree(it.trace_id); } catch (e) { toast(`trace ${it.trace_id} not in the traces dir`, true); }
+      };
+      tc.append(b);
+    }
+    tr.append(tc);
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  return table;
+}
+
+async function startJob(name, resume) {
+  try {
+    const r = await api(`/api/p/${PID}/jobs/${encodeURIComponent(name)}/run`, {resume});
+    toast(`${resume ? "resuming" : "running"} ${name} (pid ${r.pid})`);
+    setTimeout(() => showJobs(name), 1200);
+  } catch (e) { toast(e.message, true); }
+}

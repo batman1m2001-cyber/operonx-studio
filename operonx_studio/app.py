@@ -22,6 +22,8 @@ means the tabs say so instead of guessing.
 from __future__ import annotations
 
 import json
+import subprocess
+import re
 import os
 import time
 from pathlib import Path
@@ -51,6 +53,10 @@ def _studio_table(root: Path) -> Dict[str, Any]:
         return dict(raw.get("studio") or {})
     except Exception:  # noqa: BLE001
         return {}
+
+
+#: A job run directory: a UTC stamp to the microsecond, nothing a path could hide in.
+_RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}-[0-9]{6}$")
 
 
 def _traces_root(root: Path) -> Optional[Path]:
@@ -924,6 +930,9 @@ def build_studio_app(recents: Optional[Recents] = None):
             "stamp": result.stamp,
             "graphs": placed,
             "serves": ir.get("serves") or [],
+            "application": bool(ir.get("application")),
+            "services": ir.get("services") or ir.get("serves") or [],
+            "jobs": ir.get("jobs") or [],
             "resources": ir.get("resources") or {},
             "traces_configured": _traces_root(watcher.root) is not None,
         })
@@ -1302,6 +1311,119 @@ def build_studio_app(recents: Optional[Recents] = None):
         elif result.error:
             lines.append(f"NOTE: extraction currently fails: {result.error}")
         return watcher.root, "\n".join(lines)
+
+    # ── jobs: the records the jobs already write, and a way to start one ──
+    # The studio reads `run.json` / `items.jsonl` under each job's record_dir
+    # — nothing else — and starts a job the way a cron would: `operonx-run
+    # <name>` under the project's own interpreter, detached, its output in
+    # a log beside the records. It never imports the project.
+
+    def _jobs_of(watcher: ProjectWatcher) -> List[Dict[str, Any]]:
+        result = watcher.refresh_swr()
+        return list((result.ir or {}).get("jobs") or []) if result.ok else []
+
+    def _job(watcher: ProjectWatcher, name: str) -> Optional[Dict[str, Any]]:
+        return next((j for j in _jobs_of(watcher) if j.get("name") == name), None)
+
+    def _job_runs(job: Dict[str, Any]) -> List[Dict[str, Any]]:
+        base = Path(job["record_dir"]) / job["name"]
+        runs: List[Dict[str, Any]] = []
+        if not base.is_dir():
+            return runs
+        for entry in sorted(base.iterdir(), reverse=True):
+            meta = entry / "run.json"
+            if not entry.is_dir() or not meta.is_file():
+                continue
+            try:
+                data = json.loads(meta.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            data["path"] = str(entry)
+            runs.append(data)
+        return runs
+
+    def _run_dir(job: Dict[str, Any], run_id: str) -> Optional[Path]:
+        if not _RUN_ID.match(run_id):
+            return None
+        path = Path(job["record_dir"]) / job["name"] / run_id
+        return path if (path / "run.json").is_file() else None
+
+    @app.get("/api/p/{pid}/jobs")
+    def jobs(pid: str) -> JSONResponse:
+        """Every [[job]] with its last run, if any — the Jobs list."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        out = []
+        for job in _jobs_of(watcher):
+            runs = _job_runs(job)
+            last = runs[0] if runs else None
+            out.append({**job, "runs": len(runs),
+                        "last": ({k: last.get(k) for k in ("run_id", "status", "started", "ended", "counts")}
+                                 if last else None)})
+        return JSONResponse({"jobs": out})
+
+    @app.get("/api/p/{pid}/jobs/{name}/runs")
+    def job_runs(pid: str, name: str) -> JSONResponse:
+        watcher = _watcher(pid)
+        job = _job(watcher, name) if watcher else None
+        if job is None:
+            return JSONResponse({"error": f"unknown job {name!r}"}, status_code=404)
+        return JSONResponse({"job": job, "runs": _job_runs(job)})
+
+    @app.get("/api/p/{pid}/jobs/{name}/runs/{run_id}")
+    def job_run(pid: str, name: str, run_id: str) -> JSONResponse:
+        """One run: run.json plus its items (a job) or its tree (a runbook)."""
+        watcher = _watcher(pid)
+        job = _job(watcher, name) if watcher else None
+        path = _run_dir(job, run_id) if job else None
+        if path is None:
+            return JSONResponse({"error": "unknown run"}, status_code=404)
+        data = json.loads((path / "run.json").read_text(encoding="utf-8"))
+        items: List[Dict[str, Any]] = []
+        items_file = path / "items.jsonl"
+        if items_file.is_file():
+            with items_file.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line:
+                        try:
+                            items.append(json.loads(line))
+                        except ValueError:
+                            continue
+        log = path / ".studio.log"
+        tail = ""
+        if log.is_file():
+            try:
+                tail = log.read_text(encoding="utf-8", errors="replace")[-4000:]
+            except OSError:
+                tail = ""
+        return JSONResponse({"run": data, "items": items, "log": tail, "path": str(path)})
+
+    @app.post("/api/p/{pid}/jobs/{name}/run")
+    async def job_start(pid: str, name: str, body: Dict[str, Any]) -> JSONResponse:
+        """Start a job the way a cron does: `operonx-run <name>`, detached,
+        under the project's interpreter, its output in a log the run page
+        shows. The record it writes is what every other route reads."""
+        watcher = _watcher(pid)
+        job = _job(watcher, name) if watcher else None
+        if job is None:
+            return JSONResponse({"error": f"unknown job {name!r}"}, status_code=404)
+        resume = bool((body or {}).get("resume"))
+        if resume and job.get("session") == "stream":
+            return JSONResponse({"error": "a stream job cannot resume"}, status_code=400)
+        cmd = [watcher.interpreter(), "-m", "operonx.cli.run", name]
+        if resume:
+            cmd.append("--resume")
+        logs = Path(job["record_dir"]) / job["name"] / ".studio"
+        logs.mkdir(parents=True, exist_ok=True)
+        log = logs / f"{time.strftime('%Y%m%dT%H%M%S')}.log"
+        env = dict(os.environ)
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        with log.open("ab") as fh:
+            proc = subprocess.Popen(cmd, cwd=str(watcher.root), stdout=fh, stderr=subprocess.STDOUT,
+                                    env=env, start_new_session=True)
+        return JSONResponse({"started": name, "pid": proc.pid, "resume": resume, "log": str(log)})
 
     @app.post("/api/p/{pid}/chat")
     async def project_chat(pid: str, body: Dict[str, Any]) -> Any:

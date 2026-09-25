@@ -300,7 +300,7 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
     # them as ordinary ops invites the reader to look for business logic
     # inside a door.
     code_fn = _slot(op, "code_fn")
-    if (getattr(code_fn, "__module__", None) == "operonx.core.serve.ops"
+    if (getattr(code_fn, "__module__", None) in ("operonx.app.serve.ops", "operonx.core.serve.ops")
             and getattr(code_fn, "__name__", "") in ("ingress", "egress")):
         node["serve_role"] = code_fn.__name__
     elif code_fn is not None:
@@ -677,9 +677,38 @@ def extract_dependencies(root: Path) -> Dict[str, Any]:
     }
 
 
+def extract_application(manifest: Manifest) -> Dict[str, Any]:
+    """Services and jobs, as the application layer describes them.
+
+    ``operonx.app.Application.describe()`` is plain data and imports
+    nothing from the project, so this is cheap and cannot fail on project
+    code. A project on an operonx older than 1.7.1 has no application
+    layer: its ``[[serve]]`` blocks are listed the old way and it has no
+    jobs, which is true.
+    """
+    fallback = {"application": False, "services": [s.as_dict() for s in manifest.serves], "jobs": []}
+    try:
+        from operonx.app import Application
+    except ImportError:
+        return fallback
+    try:
+        app = Application.load(manifest.root / "operonx.toml")
+        described = app.describe()
+    except Exception as exc:                              # noqa: BLE001 — reported, never fatal
+        return {**fallback, "error": f"{type(exc).__name__}: {exc}"}
+    jobs = []
+    for entry, spec in zip(described["jobs"], app.manifest.jobs):
+        record_dir = Path(spec.record_dir) if spec.record_dir else Path("jobs")
+        if not record_dir.is_absolute():
+            record_dir = manifest.root / record_dir
+        jobs.append({**entry, "record_dir": str(record_dir)})
+    return {"application": True, "services": described["services"], "jobs": jobs}
+
+
 def extract_project(manifest: Manifest) -> Dict[str, Any]:
     """The whole project as one IR document."""
     anchors = collect_anchors(manifest.root, manifest.src)
+    application = extract_application(manifest)
     return {
         "ir_version": IR_VERSION,
         "project": manifest.name,
@@ -690,6 +719,11 @@ def extract_project(manifest: Manifest) -> Dict[str, Any]:
         # and cannot be discovered from the graph. Without it a served
         # pipeline renders as beginning from nowhere.
         "serves": [spec.as_dict() for spec in manifest.serves],
+        # The application layer's own account of the same, plus the jobs:
+        # the three lists the studio shows per project.
+        "application": application["application"],
+        "services": application["services"],
+        "jobs": application["jobs"],
         "resources": extract_resources(manifest),
         "dependencies": extract_dependencies(manifest.root),
     }
