@@ -19,7 +19,7 @@ version = "0.1.0"
 description = "Visual studio and project tooling for operonx — open a project, see the flow."
 requires-python = ">=3.10"
 dependencies = [
-    "operonx>=1.7.1",
+    "operonx>=1.7.3",
     "tomli>=2.0; python_version < '3.11'",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
