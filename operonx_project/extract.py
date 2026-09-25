@@ -469,6 +469,7 @@ def build_entry(spec: GraphSpec, root: Path) -> Any:
     from operonx.core import PARENT
 
     target = spec.resolve(root)
+    bound: Dict[str, Any] = {}
     if spec.bind:
         # Each bound reference is used **as-is**, never called. An earlier
         # draft called a zero-argument provider, which is ambiguous the
@@ -476,19 +477,30 @@ def build_entry(spec: GraphSpec, root: Path) -> Any:
         # `build_mock_chat_pipeline(agent, sink_op)` takes an op *as a
         # value*, and calling it would inject the wrong thing entirely.
         # Projects that need construction expose a module-level instance,
-        # which is what callbot already does (`agents.ahamove_hr:agent`).
-        try:
-            target = target(**spec.resolve_bind(root))
-        except Exception as exc:  # noqa: BLE001 — surface any project failure
-            raise ExtractError(f"graph '{spec.name}': builder raised {exc!r}") from exc
+        # which is what callbot already does (`agents.ahamove_hr:AGENT`).
+        bound = spec.resolve_bind(root)
+        if not getattr(target, "_operonx_graph", False):
+            # A plain function: a factory that takes the injections and
+            # returns the @graph.
+            try:
+                target = target(**bound)
+            except Exception as exc:  # noqa: BLE001 — surface any project failure
+                raise ExtractError(f"graph '{spec.name}': builder raised {exc!r}") from exc
+            bound = {}
+        # A @graph takes them as its own parameters: the decorator passes
+        # a static value into the body as-is (operonx ≥ 1.7.2), and the
+        # rest stay runtime inputs wired to PARENT below.
 
     try:
         params = list(inspect.signature(target).parameters)
     except (TypeError, ValueError) as exc:
         raise ExtractError(f"graph '{spec.name}': entry is not callable — {exc}") from exc
+    unknown = set(bound) - set(params)
+    if unknown:
+        raise ExtractError(f"graph '{spec.name}': no parameter {sorted(unknown)}; it takes {params}")
 
     try:
-        instance = target(**{p: PARENT[p] for p in params})
+        instance = target(**{p: PARENT[p] for p in params if p not in bound}, **bound)
     except Exception as exc:  # noqa: BLE001
         raise ExtractError(f"graph '{spec.name}': construction raised {exc!r}") from exc
 

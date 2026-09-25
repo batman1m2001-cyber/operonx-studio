@@ -3303,13 +3303,20 @@ function renderProjectMenu() {
   const operons = (ir.graphs || []).map(g => row(g.name, `${g.nodes.length} ops`, () => {
     state.graph = g; $("#graph-pick").value = g.name; switchTab("flow"); render(); renderFlowInfo();
   }, state.graph && state.graph.name === g.name ? "sel" : ""));
-  const services = (ir.services || ir.serves || []).map(sv => row(
-    sv.name || sv.path, `${sv.kind} ${sv.path || ""}${sv.port ? " :" + sv.port : ""}${sv.session ? " · " + sv.session : ""}`,
-    () => {
-      const target = sv.graph ? (ir.graphs || []).find(g => sv.graph.endsWith(":" + g.name) || sv.graph === g.name) : null;
+  const services = (ir.services || ir.serves || []).map(sv => {
+    const variants = sv.variants || [];
+    const base = sv.graph ? sv.graph.split(":").pop() : "";
+    const meta = `${sv.kind} ${sv.path || ""}${sv.port ? " :" + sv.port : ""}${sv.session ? " · " + sv.session : ""}` +
+      (variants.length ? ` · ${variants.length} variants` : "");
+    return row(sv.name || sv.path, meta, () => {
+      // one door, one compiled graph per variant: open the first, the
+      // Operons column lists them all as <graph>[<variant>]
+      const names = variants.length ? variants.map(v => `${base}[${v}]`) : [base];
+      const target = sv.graph ? (ir.graphs || []).find(g => names.includes(g.name)) : null;
       if (target) { state.graph = target; $("#graph-pick").value = target.name; switchTab("flow"); render(); renderFlowInfo(); }
       else toast(sv.app ? `${sv.name}: an ASGI app, not a graph` : `${sv.name}: graph ${sv.graph} is not listed under [[graph]]`);
-    }));
+    });
+  });
   const jobs = (ir.jobs || []).map(j => row(j.name,
     `${j.kind === "runbook" ? "runbook" : j.session}${j.schedule ? " · " + j.schedule : ""}`,
     () => { state.jobSel = j.name; switchTab("jobs"); }));

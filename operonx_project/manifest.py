@@ -32,6 +32,8 @@ Example::
 
 from __future__ import annotations
 
+import re
+
 import importlib
 import sys
 from dataclasses import dataclass, field
@@ -50,6 +52,9 @@ MANIFEST_NAME = "operonx.toml"
 
 class ManifestError(Exception):
     """The manifest is missing, malformed, or points at something unimportable."""
+
+
+_ENTRY_RE = re.compile(r"^[\w.]+:[\w.]+$")
 
 
 def _target(ref: str, where: str) -> Tuple[str, str]:
@@ -158,7 +163,7 @@ class GraphSpec:
 
     name: str
     entry: str
-    bind: Dict[str, str] = field(default_factory=dict)
+    bind: Dict[str, Any] = field(default_factory=dict)
     inputs: Dict[str, Any] = field(default_factory=dict)
     src: Tuple[str, ...] = (".",)
 
@@ -169,14 +174,19 @@ class GraphSpec:
     def resolve_bind(self, root: Path) -> Dict[str, Any]:
         """Import every declared injection, keyed by parameter name.
 
-        The referenced object is used exactly as it is found — never called.
-        A dependency may itself be a callable that the builder expects to
-        receive rather than invoke, so "call it if it is callable" would
-        silently inject the wrong value. Projects needing construction
-        expose a module-level instance.
+        A ``module:attr`` reference is used exactly as it is found — never
+        called. A dependency may itself be a callable that the builder
+        expects to receive rather than invoke, so "call it if it is
+        callable" would silently inject the wrong value. Projects needing
+        construction expose a module-level instance. Any other value (a
+        variant's literal) is passed as it is.
         """
         return {
-            param: _import(ref, f"graph '{self.name}' bind.{param}", root, self.src)
+            param: (
+                _import(ref, f"graph '{self.name}' bind.{param}", root, self.src)
+                if isinstance(ref, str) and _ENTRY_RE.match(ref)
+                else ref
+            )
             for param, ref in self.bind.items()
         }
 
@@ -236,6 +246,10 @@ class ServeSpec:
     path: str | None = None
     schedule: str | None = None
     description: str = ""
+    #: `[serve.variants]` — one compiled graph per name, each binding the
+    #: graph's build-time parameters. The graphs are listed as
+    #: ``<graph>[<variant>]``.
+    variants: Tuple[str, ...] = ()
 
     def as_dict(self) -> Dict[str, Any]:
         """The IR form. Optional fields are omitted rather than null."""
@@ -246,6 +260,8 @@ class ServeSpec:
             out["schedule"] = self.schedule
         if self.description:
             out["description"] = self.description
+        if self.variants:
+            out["variants"] = list(self.variants)
         return out
 
 
@@ -359,7 +375,22 @@ class Manifest:
             # one and needs no change of its own.
             _target(target, f"{where} graph")
             g_name = target.rsplit(":", 1)[1]
-            if g_name not in seen:
+            variants = entry.get("variants") or {}
+            if not isinstance(variants, dict) or not all(isinstance(v, dict) for v in variants.values()):
+                raise ManifestError(f"{where}: variants must be a table of tables")
+            if variants:
+                # One door, one compiled graph per variant: each binds the
+                # graph's build-time parameters (`module:attr` loaded, the
+                # rest literal), and is drawn as its own graph.
+                for v_name, bind in variants.items():
+                    label = f"{g_name}[{v_name}]"
+                    if label in seen:
+                        raise ManifestError(f"{path}: duplicate graph name {label!r}")
+                    seen.add(label)
+                    graphs.append(
+                        GraphSpec(name=label, entry=target, bind=dict(bind), inputs={}, src=src)
+                    )
+            elif g_name not in seen:
                 seen.add(g_name)
                 graphs.append(
                     GraphSpec(name=g_name, entry=target, bind={}, inputs={}, src=src)
@@ -373,6 +404,7 @@ class Manifest:
                     path=entry.get("path"),
                     schedule=entry.get("schedule"),
                     description=entry.get("description", ""),
+                    variants=tuple(str(v) for v in variants),
                 )
             )
 
