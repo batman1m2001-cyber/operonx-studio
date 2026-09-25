@@ -105,3 +105,57 @@ def test_variants_must_be_a_table_of_tables(project, tmp_path):
     )
     with pytest.raises(ManifestError, match="table of tables"):
         Manifest.load(tmp_path)
+
+
+# -- the application declared in Python -----------------------------------
+
+APP_MODULE = '''
+from operonx.app import Application, Service, http
+from operonx.app.serve import egress, ingress
+from operonx.core import END, START, graph, op
+
+
+@op(bound="sync")
+def shout(item: str = "", style=None) -> dict:
+    return {"reply": style(item)}
+
+
+@graph
+def door(style):
+    src = ingress()
+    loud = shout(item=src["item"], style=style)
+    out = egress(item=loud["reply"])
+    START >> src >> loud >> out >> END
+
+
+APP = Application(
+    "declared",
+    services=[Service("greet", http("POST", "/greet"), graph=door,
+                      variants={"loud": dict(style=str.upper), "quiet": dict(style=str.lower)},
+                      ingress=["src"], egress=["out"])],
+)
+'''
+
+
+@pytest.fixture(scope="module")
+def declared(tmp_path_factory):
+    root = tmp_path_factory.mktemp("declared")
+    tag = uuid.uuid4().hex[:6]
+    (root / f"appmod_{tag}.py").write_text(textwrap.dedent(APP_MODULE), encoding="utf-8")
+    (root / "operonx.toml").write_text(
+        f"[project]\nname = \"declared\"\napp = \"appmod_{tag}:APP\"\n", encoding="utf-8"
+    )
+    return root
+
+
+def test_a_manifest_that_points_at_an_app_loads_with_no_graphs_of_its_own(declared):
+    m = Manifest.load(declared)
+    assert m.app.endswith(":APP") and m.graphs == ()
+
+
+def test_the_graphs_and_doors_come_from_the_application(declared):
+    ir = extract_project(Manifest.load(declared))
+    assert [g["name"] for g in ir["graphs"]] == ["door[loud]", "door[quiet]"]
+    greet = ir["services"][0]
+    assert greet["variants"] == ["loud", "quiet"]
+    assert greet["ingress"] == ["src"] and greet["egress"] == ["out"]

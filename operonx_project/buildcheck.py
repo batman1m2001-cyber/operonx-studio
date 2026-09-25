@@ -145,7 +145,9 @@ def check_build(manifest: Manifest) -> List[BuildReport]:
     so a caller checking several projects must fork per project.
     """
     reports: List[BuildReport] = []
-    for spec in manifest.graphs:
+    from operonx_project.extract import graph_specs
+
+    for spec in graph_specs(manifest):
         attempts: List[NetworkAttempt] = []
         started = time.perf_counter()
         report = BuildReport(graph=spec.name)

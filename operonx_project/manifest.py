@@ -166,9 +166,15 @@ class GraphSpec:
     bind: Dict[str, Any] = field(default_factory=dict)
     inputs: Dict[str, Any] = field(default_factory=dict)
     src: Tuple[str, ...] = (".",)
+    #: The graph object itself, when the application was declared in
+    #: Python and handed it over (`Application.graphs`); `entry` is then
+    #: only its name.
+    obj: Any = field(default=None, compare=False, repr=False)
 
     def resolve(self, root: Path) -> Any:
         """Import and return the entry object."""
+        if self.obj is not None:
+            return self.obj
         return _import(self.entry, f"graph '{self.name}' entry", root, self.src)
 
     def resolve_bind(self, root: Path) -> Dict[str, Any]:
@@ -276,6 +282,9 @@ class Manifest:
     graphs: Tuple[GraphSpec, ...] = ()
     serves: Tuple[ServeSpec, ...] = ()
     src: Tuple[str, ...] = (".",)
+    #: `[project] app = "module:APP"`: the application is declared in
+    #: Python; graphs and services come from that object, not this file.
+    app: str | None = None
 
     @classmethod
     def load(cls, root: str | Path) -> "Manifest":
@@ -408,13 +417,17 @@ class Manifest:
                 )
             )
 
-        if not graphs:
+        app_ref = project.get("app")
+        if app_ref is not None:
+            _target(str(app_ref), f"{path}: [project] app")
+        if not graphs and not app_ref:
             # `[[graph]]` is no longer required, because a served graph
-            # names its own entry point. A manifest with neither is one
+            # names its own entry point. A manifest with neither — and no
+            # `[project] app` pointing at a Python declaration — is one
             # nothing can be loaded from, which is still worth refusing.
             raise ManifestError(
-                f"{path}: nothing to load — declare a [[graph]], or a "
-                f"[[serve]] naming a `module:function` entry point"
+                f"{path}: nothing to load — declare a [[graph]], a [[serve]] "
+                f"naming a `module:function` entry point, or [project] app"
             )
 
         return cls(
@@ -425,6 +438,7 @@ class Manifest:
             graphs=tuple(graphs),
             serves=tuple(serves),
             src=src,
+            app=str(app_ref) if app_ref else None,
         )
 
     def graph(self, name: str) -> GraphSpec:

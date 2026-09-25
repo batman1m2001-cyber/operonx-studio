@@ -881,8 +881,14 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": "unknown project"}, status_code=404)
         return _page("project.html")
 
-    def _declared_roles(root: Path, graphs: List[Dict[str, Any]]) -> None:
-        """Boundary ops the manifest names outright.
+    def _declared_roles(
+        root: Path, graphs: List[Dict[str, Any]], services: List[Dict[str, Any]] = ()
+    ) -> None:
+        """Boundary ops the application names outright.
+
+        Each service's ``ingress``/``egress`` (declared on the service in
+        Python or ``[[serve]]``) marks those ops in that service's graphs —
+        ``<graph>`` or ``<graph>[<variant>]``.
 
         A project with stream-level teardown writes its own ingress/egress
         over `current_session()` — the extension point, not a workaround —
@@ -893,6 +899,17 @@ def build_studio_app(recents: Optional[Recents] = None):
             ingress = ["recv"]
             egress  = ["played"]
         """
+        for sv in services or ():
+            base = str(sv.get("graph") or "").rpartition(":")[2]
+            roles = {str(n): role for role in ("ingress", "egress") for n in (sv.get(role) or [])}
+            if not base or not roles:
+                continue
+            for g in graphs:
+                if g.get("name") != base and not str(g.get("name", "")).startswith(base + "["):
+                    continue
+                for n in g.get("nodes") or []:
+                    if not n.get("serve_role") and n["name"] in roles:
+                        n["serve_role"] = roles[n["name"]]
         table = _studio_table(root)
         declared = {str(n): role
                     for role in ("ingress", "egress")
@@ -922,7 +939,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             })
         ir = result.ir
         placed = [_placed(g) for g in ir.get("graphs") or []]
-        _declared_roles(watcher.root, placed)
+        _declared_roles(watcher.root, placed, ir.get("services") or [])
         return JSONResponse({
             "name": ir.get("project"),
             "description": ir.get("description", ""),

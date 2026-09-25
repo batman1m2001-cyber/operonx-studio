@@ -470,7 +470,16 @@ def build_entry(spec: GraphSpec, root: Path) -> Any:
 
     target = spec.resolve(root)
     bound: Dict[str, Any] = {}
-    if spec.bind:
+    if spec.bind and spec.obj is not None:
+        # Handed over by the application: the values are the objects.
+        bound = dict(spec.bind)
+        if not getattr(target, "_operonx_graph", False):
+            try:
+                target = target(**bound)
+            except Exception as exc:  # noqa: BLE001
+                raise ExtractError(f"graph '{spec.name}': builder raised {exc!r}") from exc
+            bound = {}
+    elif spec.bind:
         # Each bound reference is used **as-is**, never called. An earlier
         # draft called a zero-argument provider, which is ambiguous the
         # moment a dependency is itself a callable: callbot's
@@ -708,13 +717,48 @@ def extract_application(manifest: Manifest) -> Dict[str, Any]:
         described = app.describe()
     except Exception as exc:                              # noqa: BLE001 — reported, never fatal
         return {**fallback, "error": f"{type(exc).__name__}: {exc}"}
+    # Where each job keeps its records: from the `[[job]]` block, or from
+    # the `Job` object when the application is declared in Python.
+    specs = {spec.name: spec.record_dir for spec in app.manifest.jobs}
+    if not specs and described["jobs"]:
+        try:
+            specs = {j.name: str(getattr(j, "record_dir", "") or "") for j in app.jobs}
+        except Exception:  # noqa: BLE001 — records unknown, jobs still listed
+            specs = {}
     jobs = []
-    for entry, spec in zip(described["jobs"], app.manifest.jobs):
-        record_dir = Path(spec.record_dir) if spec.record_dir else Path("jobs")
+    for entry in described["jobs"]:
+        rd = specs.get(entry["name"])
+        record_dir = Path(rd) if rd else Path("jobs")
         if not record_dir.is_absolute():
             record_dir = manifest.root / record_dir
         jobs.append({**entry, "record_dir": str(record_dir)})
     return {"application": True, "services": described["services"], "jobs": jobs}
+
+
+def graph_specs(manifest: Manifest) -> List[GraphSpec]:
+    """The graphs to draw. From the file when it declares them; from the
+    application object when ``[project] app`` points at one — its
+    ``graphs`` carry the objects and each variant's bound values, so
+    nothing is re-parsed and nothing can drift from what production runs.
+    """
+    if not manifest.app:
+        return list(manifest.graphs)
+    from operonx.app import Application
+
+    app = Application.load(manifest.root / "operonx.toml")
+    app.bootstrap()
+    own = {g.name for g in manifest.graphs}
+    specs = list(manifest.graphs)
+    for ref in app.graphs:
+        if ref.name in own:
+            continue
+        specs.append(
+            GraphSpec(
+                name=ref.name, entry=ref.entry, bind=dict(ref.bind), inputs={},
+                src=manifest.src, obj=ref.graph,
+            )
+        )
+    return specs
 
 
 def extract_project(manifest: Manifest) -> Dict[str, Any]:
@@ -725,7 +769,7 @@ def extract_project(manifest: Manifest) -> Dict[str, Any]:
         "ir_version": IR_VERSION,
         "project": manifest.name,
         "description": manifest.description,
-        "graphs": [extract_graph(spec, manifest.root, anchors) for spec in manifest.graphs],
+        "graphs": [extract_graph(spec, manifest.root, anchors) for spec in graph_specs(manifest)],
         # What puts work into each graph. Declared rather than derived —
         # the hop from a socket handler to `engine.start()` is not an op
         # and cannot be discovered from the graph. Without it a served
