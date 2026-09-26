@@ -1747,6 +1747,108 @@ def build_studio_app(recents: Optional[Recents] = None):
         added = Dataset(path).add([row])
         return JSONResponse({"added": added, "path": str(path)})
 
+    # ── the prompt workbench: an LLM op's prompt, tried on real inputs ──
+    # Samples are the op's recorded executions. An input with the same
+    # value in every sample is the prompt (editable); one that varies is
+    # the case's data. Trying an edit is re-running the op (the playground
+    # bridge) with it; saving writes it back where the text lives, when it
+    # lives there verbatim — otherwise the assistant is asked to.
+
+    PROMPT_SUFFIXES = {".yaml", ".yml", ".py", ".txt", ".md", ".json", ".jinja", ".j2", ".toml"}
+
+    @app.get("/api/p/{pid}/prompts/{op}/samples")
+    def prompt_samples(pid: str, op: str, limit: int = 20) -> JSONResponse:
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        pr = project_runs(watcher.root)
+        samples: List[Dict[str, Any]] = []
+        cursor = None
+        for _ in range(20):  # pages of runs, newest first, until enough samples
+            page = pr.store.list_runs(None, "started_desc", 100, cursor)
+            for s in page.items:
+                if s.origin not in ("service", "job", "playground", "eval") or not (s.service or s.job):
+                    continue
+                if (s.metadata or {}).get("toy") == "rerun":
+                    continue  # the workbench's own tries are not samples of real inputs
+                if not any(r.op == op for r in pr.store.rollups(RunFilter(trace_ids=[s.trace_id]))):
+                    continue
+                rec = pr.store.get_run(s.trace_id)
+                for row in (rec.nodes if rec else []):
+                    if row.get("op_name") != op:
+                        continue
+                    outs = row.get("outputs") or {}
+                    samples.append({"run": s.trace_id, "origin": s.origin, "name": s.name, "started": s.started_at,
+                                    "inputs": row.get("inputs") or {}, "status": row.get("status") or "ok",
+                                    "error": row.get("error"),
+                                    "content": outs.get("content"), "usage": outs.get("usage"),
+                                    "cost_usd": outs.get("cost_usd"), "duration_ms": row.get("duration_ms")})
+                    break
+                if len(samples) >= limit:
+                    break
+            cursor = page.next_cursor
+            if len(samples) >= limit or not cursor:
+                break
+
+        def placeholder(v: Any) -> bool:
+            return isinstance(v, str) and v.startswith("<") and v.endswith(">")
+
+        keys = sorted({k for smp in samples for k in smp["inputs"]})
+        constant, varying = {}, []
+        for k in keys:
+            vals = [smp["inputs"].get(k) for smp in samples]
+            if all(json.dumps(x, sort_keys=True, default=str) == json.dumps(vals[0], sort_keys=True, default=str)
+                   for x in vals) and not placeholder(vals[0]):
+                constant[k] = vals[0]
+            else:
+                varying.append(k)
+        return JSONResponse({"op": op, "samples": samples, "constant": constant, "varying": varying})
+
+    @app.post("/api/p/{pid}/prompts/save")
+    def prompt_save(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Write an edited prompt back where the original text lives — found
+        verbatim in exactly one project file; ``apply`` false (the default)
+        answers with the diff."""
+        import difflib
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        original, updated = str(body.get("original") or ""), str(body.get("updated") or "")
+        if len(original.strip()) < 8 or original == updated:
+            return JSONResponse({"error": "nothing to save"}, status_code=400)
+        from .daemon import SKIP_DIRS
+
+        def candidates():
+            # prompts live in text files the watcher does not track (.txt, .md, .j2…)
+            for dirpath, dirnames, filenames in os.walk(watcher.root):
+                dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+                for fname in filenames:
+                    path = Path(dirpath) / fname
+                    if path.suffix in PROMPT_SUFFIXES and path.stat().st_size < 2_000_000:
+                        yield path
+
+        hits = []
+        for path in sorted(candidates()):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            n = text.count(original)
+            if n:
+                hits.append((path, text, n))
+        if len(hits) != 1 or hits[0][2] != 1:
+            where = ", ".join(str(h[0].relative_to(watcher.root)) for h in hits) or "no file"
+            return JSONResponse({"error": f"the prompt's text is not in exactly one place verbatim ({where})",
+                                 "found": [str(h[0].relative_to(watcher.root)) for h in hits]}, status_code=409)
+        path, text, _ = hits[0]
+        new = text.replace(original, updated, 1)
+        rel = str(path.relative_to(watcher.root))
+        diff = "".join(difflib.unified_diff(text.splitlines(True), new.splitlines(True), f"a/{rel}", f"b/{rel}"))
+        if body.get("apply"):
+            path.write_text(new, encoding="utf-8")
+        return JSONResponse({"file": rel, "diff": diff, "applied": bool(body.get("apply"))})
+
     # ── evals and datasets ───────────────────────────────────────────────
     # An eval is a job (operonx.app.evals): its records are job records
     # whose items carry verdicts and whose run.json carries the pass rate.

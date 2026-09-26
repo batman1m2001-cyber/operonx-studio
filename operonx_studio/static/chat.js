@@ -552,6 +552,16 @@
     bubble({ w: "bot", text: "Fresh start — what shall we do?" });
   };
 
+  // Another screen can hand the assistant a task (the prompt workbench's
+  // "ask the assistant to save it"): the panel opens and the message goes.
+  window.oxAsk = (text) => {
+    if (window.oxSide) window.oxSide.show("assistant");
+    else { panel.classList.add("open"); fab.classList.add("hidden"); }
+    if (running) { toast && toast("The assistant is busy — try again when it is done", true); return; }
+    input.value = text;
+    bar.requestSubmit();
+  };
+
   // A turn that survived a reload: pick up where the cursor left off.
   const pending = store.get(K_TURN, null);
   if (pending && pending.id) follow(pending.id, pending.cursor || 0);

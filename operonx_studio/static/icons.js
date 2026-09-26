@@ -44,6 +44,7 @@ const Icons = (() => {
     review: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 4v-4h0A1.5 1.5 0 0 1 4 14.5Z"/><path d="M8.5 9h7M8.5 12h4"/>',
     server: '<rect x="3.5" y="4" width="17" height="6.5" rx="1.5"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.5"/><path d="M7.5 7.25h.01M7.5 16.75h.01"/>',
     bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+    prompt: '<path d="M5 6h14M5 11h9M5 16h5"/><path d="m14.5 19.5 5.2-5.2a1.4 1.4 0 0 0-2-2l-5.2 5.2-.5 2.5Z"/>',
     menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     collapse: '<path d="m11 17-5-5 5-5M18 17l-5-5 5-5"/>',
     graph: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="12" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M8.3 7.2 15.7 11M8.3 16.8l7.4-3.8"/>',
