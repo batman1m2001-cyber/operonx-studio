@@ -1186,6 +1186,8 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .tlhead { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
 .tlhead .tltitle { font: 600 14px var(--mono); color: var(--text); min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tlorigin { flex-basis: 100%; color: var(--text-2); font-size: var(--fs-md); margin-top: -4px; }
+.tlorigin .linkbtn { padding: 0 4px; min-height: 22px; font-weight: 600; }
 .tlhead .tlstats { color: var(--text-3); font-size: var(--fs-md); white-space: nowrap; }
 .tlhead .tlstats .bad { color: var(--err); font-weight: 500; }
 .tlmodes { display: inline-flex; gap: 2px; background: var(--surface-2); border-radius: var(--r-sm); padding: 3px; }
@@ -1301,6 +1303,63 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .jitems .linkbtn { padding: 0 6px; }
 
 
+
+/* ── Runs, by origin ───────────────────────────────────────────── */
+
+.runsview { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; align-items: start; }
+.runsrail { position: sticky; top: 0; display: flex; flex-direction: column; gap: 1px;
+  max-height: calc(100vh - 120px); overflow-y: auto; padding-bottom: 12px; }
+.railhead { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-3); padding: 14px 10px 4px; }
+.railitem { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0 10px;
+  border: none; border-radius: var(--r-sm); background: none; color: var(--text-2); font-weight: 500;
+  justify-content: flex-start; text-align: left; }
+.railitem:hover { background: var(--surface-2); color: var(--text); }
+.railitem.active { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.railname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.railcount { color: var(--text-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.raildot { width: 6px; height: 6px; border-radius: 50%; background: var(--err); flex: none; }
+.runsmain { min-width: 0; }
+.runshead { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 14px; }
+.runstitle { flex: 1; min-width: 0; }
+.runstools { display: flex; align-items: center; gap: 8px; }
+.runstitle h2 { margin: 0; font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.015em; }
+.runssub { color: var(--text-3); font-size: var(--fs-md); }
+.runspicker { display: none; }
+.runsbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.runssearch { flex: 1 1 220px; margin: 0; min-height: 30px; }
+.runssearch input[type=text] { min-height: 30px; padding: 4px 0; font-size: var(--fs-md); }
+.runsbar .followpin { margin-left: 4px; }
+.runstrip { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; min-width: 0; }
+.striplabel { font-size: var(--fs-sm); color: var(--text-3); white-space: nowrap; }
+.stripchips { display: flex; gap: 6px; overflow-x: auto; min-width: 0; padding-bottom: 2px; scrollbar-width: thin; }
+.stripchip { flex-direction: column; align-items: flex-start; gap: 0; min-height: 0; padding: 5px 10px;
+  border-radius: var(--r-sm); font-size: 12px; line-height: 1.35; white-space: nowrap; }
+.stripchip .stripsub { color: var(--text-3); font-weight: 400; font-size: 11px; }
+.stripchip.on { border-color: var(--accent); background: var(--accent-soft); }
+.stripchip.bad .stripsub { color: var(--err); }
+.runstable .stcell { width: 28px; padding-right: 0; }
+.stdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.stdot.bad { background: var(--err); }
+.runerr { color: var(--err); font-size: 12px; margin-top: 2px; max-width: 560px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runstable .runacts .iconbtn { opacity: 0; }
+.runstable tr:hover .runacts .iconbtn, .runstable .runacts .iconbtn:focus-visible { opacity: 1; }
+.runsfoot { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.runsfoot .note { font-size: var(--fs-sm); }
+@media (max-width: 1100px) { .runsview { grid-template-columns: 180px minmax(0, 1fr); gap: 18px; } }
+@media (max-width: 760px) {
+  .runsview { grid-template-columns: minmax(0, 1fr); }
+  .runsrail { display: none; }
+  .runshead { flex-wrap: wrap; align-items: center; gap: 8px; }
+  .runspicker { flex-basis: 100%; }
+  .runstable .runname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 52vw; }
+  .runstable .cellsub { display: none; }
+  .runspicker { display: block; width: 100%; min-height: 38px; font-weight: 600; }
+  .runssearch { flex-basis: 100%; order: -1; }
+  .runstable .runacts .iconbtn { opacity: 1; }
+}
+@media (hover: none) { .runstable .runacts .iconbtn { opacity: 1; } }
 
 /* ── Settings ─────────────────────────────────────────────────────── */
 

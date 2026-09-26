@@ -2470,118 +2470,11 @@ function paneNote(title, text, code) {
   return box;
 }
 
-async function showTraces() {
-  leaveWorkflow();
-  const box = $("#traces");
-  box.textContent = "";
-  state._tlrun = null;
-  renderFlowInfo();
-  const mine = (state.tracesView = {});
-  box.append(el("div", "note", "Loading runs…"));
-  let data;
-  try { data = await api(`/api/p/${PID}/traces`); }
-  catch (e) { box.textContent = ""; box.append(el("div", "errbox", e.message)); return; }
-  if (state.tracesView !== mine) return;   // another view took the pane meanwhile
-  box.textContent = "";
-  if (!data.configured) {
-    box.append(paneNote("No traces yet",
-      "The studio reads runs from the directory your trace consumer writes to. Declare it in operonx.toml:",
-      '[studio]\ntraces = "/path/your/consumer/writes"'));
-    return;
-  }
-  if (data.missing) {
-    box.append(paneNote("No runs recorded yet",
-      `The declared traces directory does not exist yet — it appears with the first recorded run: ${data.missing}`));
-    return;
-  }
-  // follow-latest: repaint whenever a newer local run lands
-  const topbar = el("div", "tracebar");
-  const h = el("h2", null, "Runs");
-  h.append(el("span", "count", String(data.runs.length)));
-  topbar.append(h);
-  const followBar = el("label", "followpin");
-  const pin = el("input");
-  pin.type = "checkbox";
-  pin.checked = state.follow;
-  pin.onchange = () => { state.follow = pin.checked; store("follow", state.follow); };
-  followBar.append(pin, "Open the newest run as it arrives");
-  followBar.title = "Checks the traces directory every few seconds";
-  topbar.append(followBar);
-  const refresh = Icons.button("refresh", "Refresh", "small");
-  refresh.onclick = showTraces;
-  topbar.append(refresh);
-  box.append(topbar);
-  if (data.langfuse_error) {
-    box.append(el("div", "errbox", `Langfuse (${data.langfuse}) is unreachable: ${data.langfuse_error}`));
-  }
-
-  if (!data.runs.length) {
-    box.append(paneNote("No runs recorded yet",
-      `Run the flow once and its trace lands here${data.root ? " — from " + data.root : ""}.`));
-    return;
-  }
-  const wrap = el("div", "tablewrap");
-  const table = el("table", "datatable");
-  const thead = el("thead");
-  const hr = el("tr");
-  for (const [h, cls] of [["Run"], ["Recorded"], ["Activity", "hide-sm"], ["", ""]]) hr.append(el("th", cls || null, h));
-  thead.append(hr); table.append(thead);
-  const tbody = el("tbody");
-  for (const r of data.runs) {
-    const tr = el("tr", "clickable");
-    const name = el("td");
-    name.append(el("div", "runname", r.source === "langfuse" ? (r.name || r.run) : r.run));
-    const where = r.source === "langfuse" ? "Langfuse" : `Local${r.also_langfuse ? " + Langfuse" : ""}`;
-    const what = r.origin && r.origin !== "adhoc" ? `${r.origin} ${r.name || ""}`.trim() : (r.workflow || "");
-    name.append(el("div", "runsrc", what ? `${where} · ${what}` : where));
-    tr.append(name);
-    const when = el("td", "nowrap");
-    if (r.mtime) {
-      when.append(el("div", null, fmtAgo(r.mtime * 1000)));
-      when.append(el("div", "cellsub", fmtWhen(r.mtime * 1000)));
-    }
-    tr.append(when);
-    const act = el("td", "hide-sm dim nowrap");
-    if (r.records !== undefined) {
-      const bits = [`${r.ops} ops`, `${r.records} records`];
-      if (r.wall_s != null) bits.push(`${r.wall_s.toFixed(1)}s`);
-      act.append(bits.join(" · "));
-      if (r.errors) { act.append(" · "); act.append(el("span", "errtext", `${r.errors} errors`)); }
-    }
-    tr.append(act);
-    const actions = el("td", "runacts");
-    const seg = el("span", "seg");
-    const tree = el("button", null, "Tree");
-    tree.type = "button";
-    tree.title = "The run as a tree: what ran for what, in order";
-    tree.onclick = (ev) => { ev.stopPropagation(); showRunTree(r.run); };
-    const wf = el("button", null, "Workflow");
-    wf.type = "button";
-    wf.title = "The flow with this run's values on every card";
-    wf.onclick = (ev) => { ev.stopPropagation(); showRunWorkflow(r.run); };
-    seg.append(tree, wf);
-    actions.append(seg);
-    if (r.source !== "langfuse") {
-      const rm = Icons.button("trash", undefined, "", "Delete this recorded run from disk");
-      rm.onclick = async (ev) => {
-        ev.stopPropagation();
-        if (!window.confirm(`Delete run ${r.run} from disk?`)) return;
-        try {
-          await api(`/api/p/${PID}/trace/${encodeURIComponent(r.run)}/delete`, {});
-          toast(`Deleted ${r.run}`);
-          if (state.run && state.run.run === r.run) leaveWorkflow();
-          showTraces();
-        } catch (e) { toast(e.message, true); }
-      };
-      actions.append(rm);
-    }
-    tr.append(actions);
-    tr.onclick = () => showRunTree(r.run);
-    tbody.append(tr);
-  }
-  table.append(tbody);
-  wrap.append(table);
-  box.append(wrap);
+/* The runs list is the Runs screen (runs.js): origin tree, filters,
+ * the runs in the chosen folder. Everything that used to "go back to the
+ * list" still calls this. */
+function showTraces() {
+  return RunsView.show();
 }
 
 /* Time, the way a person reads it: "3h ago" first, the exact local
@@ -2675,9 +2568,50 @@ function runHeader(run, data, mode, extras) {
   const recs = execsOf(data.rows);
   const stats = el("span", "tlstats", `${recs.length} executions · ${fmtMs(data.total_ms)}`);
   const errs = recs.filter(r => r.status === "error").length;
-  if (errs) { stats.append(" · "); stats.append(el("span", "bad", `${errs} errors`)); }
+  if (errs) { stats.append(" · "); stats.append(el("span", "bad", `${errs} error${errs > 1 ? "s" : ""}`)); }
   head.append(stats);
+  const origin = originLine(data.summary);
+  if (origin) head.append(origin);
   return head;
+}
+
+/* Where a run came from, as links back: the job run and item it was, the
+ * service that answered, the runbook run that grouped it — the other
+ * direction of the Jobs pane's Trace links. */
+function originLine(s) {
+  if (!s || !s.origin || s.origin === "adhoc") return null;
+  const line = el("div", "tlorigin");
+  const link = (text, title, onclick) => {
+    const b = el("button", "linkbtn", text);
+    b.type = "button";
+    b.title = title;
+    b.onclick = onclick;
+    return b;
+  };
+  if (s.origin === "job" || s.origin === "eval") {
+    line.append(`${s.origin === "eval" ? "Eval" : "Job"} `);
+    line.append(link(s.job, `All traces of ${s.job}`, () => RunsView.openFolder({kind: s.origin, name: s.job})));
+    if (s.key) line.append(` · item ${s.key}`);
+    if (s.job_run) {
+      line.append(" of run ");
+      line.append(link(s.job_run, "Open this job run in Jobs", () => {
+        state.jobSel = s.job; state.jobRun = s.job_run; switchTab("jobs"); showJobs(s.job, s.job_run);
+      }));
+    }
+    if (s.runbook) {
+      line.append(" · runbook ");
+      line.append(link(s.runbook, "Every trace of this runbook run",
+        () => RunsView.openFolder({kind: "runbook", name: s.runbook, runbook_run: s.runbook_run})));
+    }
+  } else if (s.origin === "service" || s.origin === "playground") {
+    line.append(s.origin === "playground" ? "Playground · " : "Service ");
+    line.append(link(s.service || s.name, "Every run of this service",
+      () => RunsView.openFolder({kind: s.origin, name: s.service || s.name})));
+    if (s.transport) line.append(` · ${s.transport}`);
+    if (s.session_id) line.append(` · session ${s.session_id}`);
+  }
+  if (s.version) line.append(` · code @${String(s.version).slice(0, 7)}${s.version_dirty ? " (uncommitted changes)" : ""}`);
+  return line;
 }
 
 async function loadRunTree(run) {

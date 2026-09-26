@@ -240,3 +240,83 @@ def test_the_automatic_sweep_can_be_switched_off(project, monkeypatch):
     pr = project_runs(project, sweep=False)
     assert pr.sweep() == {} and pr.store.count() == 4  # nothing deleted
     assert pr.sweep(force=True)["service"] == 1  # an explicit save still applies
+
+
+# -- P2: the origin tree -----------------------------------------------------------------
+
+APP_MAIN = '''
+from operonx.app import Application, Service, http
+from operonx.app.jobs import Job, Runbook
+from operonx.core import graph, op, START, END
+
+@op
+def a(x: int = 1):
+    return {"y": x}
+
+@graph
+def flow():
+    s = a()
+    START >> s >> END
+
+j1 = Job("qc", graph=flow, source=[], sink=[])
+j2 = Job("report", graph=flow, source=[], sink=[])
+APP = Application("tree-demo", services=[
+    Service("call", http("POST", "/call", port=9999), graph=flow),
+    Service("idle", http("POST", "/idle", port=9999), graph=flow),
+], jobs=[j1, j2, Runbook("nightly", j1 >> j2)])
+'''
+
+
+def _tree_project(tmp_path: Path) -> Path:
+    root = tmp_path / "treedemo"
+    root.mkdir()
+    (root / "main.py").write_text(APP_MAIN, encoding="utf-8")
+    (root / "operonx.toml").write_text('[project]\nname = "tree-demo"\napp = "main:APP"\n', encoding="utf-8")
+    store = FilesRunStore(root=root / ".operonx" / "runs", refresh_every=0)
+    store.consume(_trace("c1", origin="service", service="call"))
+    store.consume(_trace("c2", origin="service", service="call", error=True))
+    for i, rr in enumerate(["RB1", "RB1", "RB2"]):
+        store.consume(_trace(f"i{i}", origin="job", job="qc", job_run=f"J{i}", key=f"k{i}",
+                             runbook="nightly", runbook_run=rr, error=(rr == "RB2")))
+    store.consume(_trace("x1", age_days=40, origin="job", job="qc", job_run="OLD"))
+    store.consume(_trace("adhoc1"))
+    return root
+
+
+def test_the_origin_tree_lists_declared_things_and_counts_the_store(client, tmp_path):
+    root = _tree_project(tmp_path)
+    pid = _open(client, root)
+    tree = client.get(f"/api/p/{pid}/runs/origins", params={"since": NOW - 7 * 86400}).json()
+    services = {s["name"]: s for s in tree["services"]}
+    assert services["call"]["runs"] == 2 and services["call"]["errors"] == 1
+    assert services["idle"]["runs"] == 0 and services["idle"]["kind"] == "http"  # idle, still listed
+    jobs = {j["name"]: j for j in tree["jobs"]}
+    assert jobs["qc"]["runs"] == 3 and jobs["report"]["runs"] == 0  # the 40-day run is out of range
+    (nightly,) = tree["runbooks"]
+    assert nightly["name"] == "nightly" and nightly["runs"] == 2 and nightly["errors"] == 1  # runs, not traces
+    assert nightly["traces"] == 3
+    assert [a["name"] for a in tree["adhoc"]] == ["flow"] and tree["total"] == 6
+    everything = client.get(f"/api/p/{pid}/runs/origins").json()
+    assert {j["name"]: j["runs"] for j in everything["jobs"]}["qc"] == 4
+
+
+def test_groups_by_job_run_and_by_runbook_run(client, tmp_path):
+    root = _tree_project(tmp_path)
+    pid = _open(client, root)
+    by_run = client.get(f"/api/p/{pid}/runs/groups",
+                        params={"by": "job_run", "origin": "job", "name": "qc"}).json()["groups"]
+    assert sorted(g["job_run"] for g in by_run) == ["J0", "J1", "J2", "OLD"]
+    books = client.get(f"/api/p/{pid}/runs/groups",
+                       params={"by": "runbook_run", "origin": "job", "runbook": "nightly"}).json()["groups"]
+    assert {g["runbook_run"]: (g["runs"], g["errors"]) for g in books} == {"RB1": (2, 0), "RB2": (1, 1)}
+    one = client.get(f"/api/p/{pid}/runs", params={"runbook_run": "RB1"}).json()
+    assert sorted(r["run"] for r in one["runs"]) == ["i0", "i1"]
+    assert client.get(f"/api/p/{pid}/runs/groups", params={"by": "bogus"}).status_code == 400
+
+
+def test_a_trace_carries_the_summary_the_origin_line_links_from(client, tmp_path):
+    root = _tree_project(tmp_path)
+    pid = _open(client, root)
+    s = client.get(f"/api/p/{pid}/trace/i2/tree").json()["summary"]
+    assert (s["origin"], s["job"], s["job_run"], s["key"], s["runbook"], s["runbook_run"]) == (
+        "job", "qc", "J2", "k2", "nightly", "RB2")

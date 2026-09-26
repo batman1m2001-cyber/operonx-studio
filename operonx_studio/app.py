@@ -1039,6 +1039,83 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"runs": [_row(s) for s in page.items], "next": page.next_cursor,
                              "total": page.total, "source": pr.source})
 
+    @app.get("/api/p/{pid}/runs/groups")
+    def runs_groups(pid: str, by: str = "origin,name", origin: str = "", name: str = "",
+                    status: str = "", since: str = "", until: str = "", runbook: str = "",
+                    runbook_run: str = "", job_run: str = "") -> JSONResponse:
+        """Runs counted per group (``by`` = comma-separated fields)."""
+        pr = _runs(pid)
+        if pr is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        where = _filter_from({k: v for k, v in dict(origin=origin, name=name, status=status,
+                              since=since, until=until, runbook_run=runbook_run,
+                              job_run=job_run).items() if v})
+        if runbook:
+            where.metadata["runbook"] = runbook
+        try:
+            return JSONResponse({"groups": pr.store.groups(where, by=[b for b in by.split(",") if b])})
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @app.get("/api/p/{pid}/runs/origins")
+    def runs_origins(pid: str, since: str = "", until: str = "") -> JSONResponse:
+        """The Runs screen's tree: every service, job, runbook the
+        application declares (so an idle one still shows, with 0), plus
+        whatever the store holds beyond them, counted in the range."""
+        watcher = _watcher(pid)
+        pr = _runs(pid)
+        if pr is None or watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        where = _filter_from({k: v for k, v in dict(since=since, until=until).items() if v})
+        try:
+            counted = pr.store.groups(where, by=["origin", "name"])
+            books = pr.store.groups(RunFilter(origin="job", since=where.since, until=where.until),
+                                    by=["runbook", "runbook_run"])
+        except Exception as exc:  # noqa: BLE001 — a store that cannot answer says so
+            return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=502)
+        result = watcher.refresh_swr()
+        ir = result.ir if result.ok else {}
+
+        def blank(name: str, **extra: Any) -> Dict[str, Any]:
+            return {"name": name, "runs": 0, "errors": 0, "last_started": None, **extra}
+
+        folders: Dict[str, Dict[str, Dict[str, Any]]] = {o: {} for o in
+                                                        ("service", "job", "eval", "playground", "adhoc")}
+        for sv in (ir or {}).get("services") or []:
+            if sv.get("kind") == "asgi":
+                continue
+            folders["service"][sv["name"]] = blank(sv["name"], kind=sv.get("kind"), path=sv.get("path"))
+        runbooks: Dict[str, Dict[str, Any]] = {}
+        for j in (ir or {}).get("jobs") or []:
+            if j.get("kind") == "runbook":
+                runbooks[j["name"]] = blank(j["name"], schedule=j.get("schedule"))
+            else:
+                folders["job"][j["name"]] = blank(j["name"], session=j.get("session"))
+        for g in counted:
+            origin = g["origin"] if g["origin"] in folders else "adhoc"
+            row = folders[origin].setdefault(g["name"] or "?", blank(g["name"] or "?"))
+            row.update(runs=row["runs"] + g["runs"], errors=row["errors"] + g["errors"],
+                       last_started=max(x for x in (row["last_started"], g["last_started"]) if x is not None))
+        for g in books:  # a runbook counts its RUNS (each groups many traces)
+            if not g.get("runbook"):
+                continue
+            row = runbooks.setdefault(g["runbook"], blank(g["runbook"]))
+            row.update(runs=row["runs"] + 1, errors=row["errors"] + (1 if g["errors"] else 0),
+                       traces=row.get("traces", 0) + g["runs"],
+                       last_started=max(x for x in (row["last_started"], g["last_started"]) if x is not None))
+        total = sum(g["runs"] for g in counted)
+        return JSONResponse({
+            "total": total,
+            "errors": sum(g["errors"] for g in counted),
+            "services": list(folders["service"].values()),
+            "jobs": list(folders["job"].values()),
+            "evals": list(folders["eval"].values()),
+            "runbooks": list(runbooks.values()),
+            "playground": list(folders["playground"].values()),
+            "adhoc": list(folders["adhoc"].values()),
+            "source": pr.source,
+        })
+
     @app.get("/api/p/{pid}/trace/{run}")
     def trace(pid: str, run: str) -> JSONResponse:
         got = _record(pid, run)
