@@ -1644,6 +1644,109 @@ def build_studio_app(recents: Optional[Recents] = None):
     def services_log(pid: str, key: str) -> JSONResponse:
         return JSONResponse({"key": key, "log": procs.log_tail(pid, key)})
 
+    # ── the review queue: runs read as conversations, judged, labelled ──
+    from .review import ReviewLog, conversation
+
+    def _reviewer() -> str:
+        # one login today; a team server returns real accounts here
+        return (auth or {}).get("user") or "local"
+
+    def _egress_ops(watcher: ProjectWatcher) -> set:
+        names: set = set()
+
+        def walk(g: Any) -> None:
+            for n in (g or {}).get("nodes") or []:
+                if n.get("serve_role") == "egress":
+                    names.add(n.get("name"))
+                walk(n.get("graph"))
+
+        for g in (watcher.refresh_swr().ir or {}).get("graphs") or []:
+            walk(g)
+        return names
+
+    @app.get("/api/p/{pid}/review/queue")
+    def review_queue(pid: str, origin: str = "", name: str = "", status: str = "", verdict: str = "unreviewed",
+                     label: str = "", limit: int = 50) -> JSONResponse:
+        """Runs to read, newest first, with their reviews; ``verdict`` is
+        unreviewed | good | bad | all."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        pr = project_runs(watcher.root)
+        f = RunFilter(origin=origin or None, name=name or None, status=status or None)
+        page = pr.store.list_runs(f, "started_desc", 500, None)
+        reviews = ReviewLog(watcher.root).latest()
+        out, counts = [], {"unreviewed": 0, "good": 0, "bad": 0}
+        for s in page.items:
+            rev = reviews.get(s.trace_id)
+            v = (rev or {}).get("verdict")
+            counts["unreviewed" if not v else v] += 1
+            if verdict == "unreviewed" and v:
+                continue
+            if verdict in ("good", "bad") and v != verdict:
+                continue
+            if label and label not in ((rev or {}).get("labels") or []):
+                continue
+            out.append({**_row(s), "review": rev})
+        return JSONResponse({"runs": out[: max(1, min(limit, 500))], "counts": counts, "total": page.total})
+
+    @app.get("/api/p/{pid}/review/run/{run}")
+    def review_run(pid: str, run: str) -> JSONResponse:
+        watcher = _watcher(pid)
+        got = _record(pid, run)
+        if isinstance(got, JSONResponse):
+            return got
+        rows, rec = got
+        return JSONResponse({"summary": _row(rec.summary),
+                             "turns": conversation(rows, rec.summary.metadata or {}, _egress_ops(watcher)),
+                             "review": ReviewLog(watcher.root).get(run)})
+
+    @app.post("/api/p/{pid}/review/run/{run}")
+    def review_save(pid: str, run: str, body: Dict[str, Any]) -> JSONResponse:
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        labels = body.get("labels") or []
+        if isinstance(labels, str):
+            labels = [x for x in labels.split(",")]
+        try:
+            rec = ReviewLog(watcher.root).put(run, verdict=body.get("verdict") or None, labels=labels,
+                                              note=str(body.get("note") or ""), user=_reviewer())
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(rec)
+
+    @app.post("/api/p/{pid}/review/run/{run}/dataset")
+    def review_to_dataset(pid: str, run: str, body: Dict[str, Any]) -> JSONResponse:
+        """A reviewed run becomes a case: what the user said is the input;
+        the review's labels and note ride along. The expected output is left
+        for whoever fixes it — a bad answer is not one."""
+        from operonx.app.evals import Dataset
+
+        watcher = _watcher(pid)
+        name = str(body.get("dataset") or "")
+        if watcher is None or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", name):
+            return JSONResponse({"error": "a dataset name is letters, digits, _ . -"}, status_code=400)
+        got = _record(pid, run)
+        if isinstance(got, JSONResponse):
+            return got
+        rows, rec = got
+        said = [t["text"] for t in conversation(rows, rec.summary.metadata or {}, _egress_ops(watcher))
+                if t["who"] == "user"]
+        if not said:
+            return JSONResponse({"error": "nothing the user said was recorded in this run"}, status_code=400)
+        review = ReviewLog(watcher.root).get(run) or {}
+        row: Dict[str, Any] = {"input": said[0] if len(said) == 1 else said,
+                               "tags": sorted(set((review.get("labels") or []) + ([f"review:{review['verdict']}"]
+                                                                                   if review.get("verdict") else []))),
+                               "from": {"run": run, "origin": rec.summary.origin, "name": rec.summary.name}}
+        if review.get("note"):
+            row["note"] = review["note"]
+        found = next((d for d in _datasets(watcher) if d["name"] == name), None)
+        path = Path(found["path"]) if found else watcher.root / "datasets" / f"{name}.jsonl"
+        added = Dataset(path).add([row])
+        return JSONResponse({"added": added, "path": str(path)})
+
     # ── evals and datasets ───────────────────────────────────────────────
     # An eval is a job (operonx.app.evals): its records are job records
     # whose items carry verdicts and whose run.json carries the pass rate.
