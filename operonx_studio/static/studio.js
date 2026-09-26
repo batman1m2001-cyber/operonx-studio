@@ -2530,9 +2530,10 @@ async function showTraces() {
   for (const r of data.runs) {
     const tr = el("tr", "clickable");
     const name = el("td");
-    name.append(el("div", "runname", r.name || r.run));
-    name.append(el("div", "runsrc", r.source === "langfuse" ? "Langfuse"
-      : `Local${r.also_langfuse ? " + Langfuse" : ""} · ${(r.size / 1024).toFixed(1)} KB`));
+    name.append(el("div", "runname", r.source === "langfuse" ? (r.name || r.run) : r.run));
+    const where = r.source === "langfuse" ? "Langfuse" : `Local${r.also_langfuse ? " + Langfuse" : ""}`;
+    const what = r.origin && r.origin !== "adhoc" ? `${r.origin} ${r.name || ""}`.trim() : (r.workflow || "");
+    name.append(el("div", "runsrc", what ? `${where} · ${what}` : where));
     tr.append(name);
     const when = el("td", "nowrap");
     if (r.mtime) {
@@ -2996,17 +2997,25 @@ $("#btn-find").onclick = () => openFind();
 
 /* ── tabs, graph switch, pan/zoom, live reload ────────────────────── */
 
+/* Screens other files add (settings.js, runs.js, …): each registers
+ * {el, show} here and switchTab shows and hides it like the built-ins. */
+const PANES = {};
+function registerPane(name, pane) { PANES[name] = pane; }
+
 function switchTab(name, opts) {
   leaveWorkflow();
   state.tab = name;
-  for (const b of document.querySelectorAll(".tabs button")) {
-    b.classList.toggle("active", b.dataset.tab === name);
-    b.setAttribute("aria-selected", String(b.dataset.tab === name));
+  for (const b of document.querySelectorAll(".tabs button, [data-tabbtn]")) {
+    const on = (b.dataset.tab || b.dataset.tabbtn) === name;
+    b.classList.toggle("active", on);
+    b.setAttribute(b.dataset.tab ? "aria-selected" : "aria-pressed", String(on));
   }
   $("#stage").style.display = name === "flow" ? "" : "none";
   $("#traces").hidden = name !== "traces";
   $("#jobs").hidden = name !== "jobs";
   $("#resources").hidden = name !== "resources";
+  for (const [n, p] of Object.entries(PANES)) p.el.hidden = n !== name;
+  if (PANES[name]) PANES[name].show(opts);
   // quiet: the caller is about to fill the Traces pane itself
   if (name === "traces" && !(opts && opts.quiet)) showTraces();
   if (name === "jobs") showJobs(state.jobSel);

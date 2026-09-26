@@ -32,6 +32,7 @@
     </nav>
     <div class="spacer"></div>
     <span class="live" id="live" title="The studio re-extracts and redraws whenever the project's code changes"><span class="dot"></span><span id="live-text">live</span></span>
+    <button id="btn-settings" class="iconbtn" data-tabbtn="settings" aria-label="Settings" title="Settings — retention, where runs are kept"><i data-icon="settings"></i></button>
     <button id="btn-right" class="iconbtn paneltoggle" aria-label="Toggle the side panel" title="Side panel — inspect · assistant"><i data-icon="panel"></i></button>
   </header>
 
@@ -50,6 +51,7 @@
     <div id="traces" hidden></div>
     <div id="jobs" hidden></div>
     <div id="resources" hidden></div>
+    <div id="settings" class="pane" hidden></div>
 
     <!-- the canvas's own controls: they float over the canvas wherever it
          is showing (the Flow tab, or a run's workflow view) -->
@@ -89,6 +91,7 @@
 <script src="/static/providers.js"></script>
 <script src="/static/timeline.js"></script>
 <script src="/static/studio.js"></script>
+<script src="/static/settings.js"></script>
 <script src="/static/chat.js"></script>
 </body>
 </html>

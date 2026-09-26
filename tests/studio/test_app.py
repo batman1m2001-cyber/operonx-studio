@@ -202,10 +202,13 @@ def test_edit_refuses_wiring_with_a_reason(client, project):
     assert "missing" in res.json()["error"]
 
 
-def test_traces_unconfigured_says_so(client, project):
+def test_traces_default_to_the_projects_own_runs_dir(client, project):
+    """Nothing declared: the project's runs live where operonx files them
+    by default, <project>/.operonx/runs — an empty list, not an error."""
     pid = _open(client, project)
-    assert client.get(f"/api/p/{pid}/traces").json() == {
-        "configured": False, "runs": []}
+    data = client.get(f"/api/p/{pid}/traces").json()
+    assert data["configured"] and data["runs"] == []
+    assert data["root"].endswith(".operonx/runs")
 
 
 def test_traces_lists_runs_and_summarises_one(client, project, tmp_path):
@@ -345,24 +348,24 @@ LF_DETAIL = {"observations": [
 @pytest.fixture()
 def langfuse_project(project, monkeypatch):
     """A project declaring a Langfuse source, with the API faked at the
-    fetch seam — everything above `_lf_get` (auth, routing, mapping,
-    aggregation) runs for real."""
-    from operonx_studio import app as app_module
+    fetch seam — everything above `LangfuseRunStore._get` (auth, routing,
+    mapping, aggregation) runs for real."""
+    from operonx.telemetry.runs.langfuse import LangfuseRunStore
 
     (project / "operonx.toml").write_text(
         (project / "operonx.toml").read_text()
         + '\n[studio.langfuse]\nhost = "https://lf.example"\n'
           'public_key = "pk"\nsecret_key = "sk"\n', encoding="utf-8")
 
-    def fake_get(cfg, path, **params):
-        assert cfg["host"] == "https://lf.example" and cfg["public"] == "pk"
+    def fake_get(self, path, **params):
+        assert self.host == "https://lf.example"
         if path == "/api/public/traces":
             return LF_TRACES
         if path == "/api/public/traces/call-abc":
             return LF_DETAIL
         raise AssertionError(f"unexpected path {path}")
 
-    monkeypatch.setattr(app_module, "_lf_get", fake_get)
+    monkeypatch.setattr(LangfuseRunStore, "_get", fake_get)
     return project
 
 
@@ -397,12 +400,12 @@ def test_langfuse_drilldown_carries_inputs_and_outputs(client, langfuse_project)
 
 def test_a_langfuse_outage_degrades_to_a_note(client, langfuse_project, monkeypatch):
     """The local run list must not die with someone else's server."""
-    from operonx_studio import app as app_module
+    from operonx.telemetry.runs.langfuse import LangfuseRunStore
 
-    def broken(cfg, path, **params):
+    def broken(self, path, **params):
         raise OSError("connection refused")
 
-    monkeypatch.setattr(app_module, "_lf_get", broken)
+    monkeypatch.setattr(LangfuseRunStore, "_get", broken)
     pid = _open(client, langfuse_project)
     data = client.get(f"/api/p/{pid}/traces").json()
     assert data["configured"] and "connection refused" in data["langfuse_error"]
@@ -411,7 +414,7 @@ def test_a_langfuse_outage_degrades_to_a_note(client, langfuse_project, monkeypa
 
 
 def test_langfuse_env_interpolation(tmp_path, monkeypatch):
-    from operonx_studio.app import _langfuse_cfg
+    from operonx_studio.runs import _langfuse_spec as _langfuse_cfg
 
     (tmp_path / "operonx.toml").write_text(
         '[project]\nname="x"\n[studio.langfuse]\n'
@@ -419,8 +422,8 @@ def test_langfuse_env_interpolation(tmp_path, monkeypatch):
         'secret_key = "sk-literal"\n', encoding="utf-8")
     monkeypatch.setenv("T_LF_HOST", "https://lf.internal/")
     cfg = _langfuse_cfg(tmp_path)
-    assert cfg == {"host": "https://lf.internal", "public": "pk-default",
-                   "secret": "sk-literal"}
+    assert cfg == {"backend": "langfuse", "host": "https://lf.internal",
+                   "public_key": "pk-default", "secret_key": "sk-literal"}
     # an unset, defaultless variable leaves the source unconfigured
     monkeypatch.delenv("T_LF_HOST")
     assert _langfuse_cfg(tmp_path) is None
@@ -841,19 +844,18 @@ def test_flow_records_normalise_langfuse_shaped_records():
 def test_langfuse_runs_merge_into_local_rows(client, project, tmp_path, monkeypatch):
     """A run recorded both locally and in Langfuse is ONE row: local
     wins as the data source, the Langfuse copy becomes a badge."""
-    import operonx_studio.app as appmod
+    from operonx.telemetry.runs.langfuse import LangfuseRunStore
 
     _traced(project, tmp_path, "call-both", [{"op_name": "a", "duration_ms": 1.0}])
     manifest = (project / "operonx.toml").read_text()
     (project / "operonx.toml").write_text(
         manifest + '\n[studio.langfuse]\nhost = "http://lf.example"\n'
         'public_key = "pk"\nsecret_key = "sk"\n', encoding="utf-8")
-    monkeypatch.setattr(appmod, "_lf_runs", lambda cfg, limit=50: [
-        {"run": "lf:call-both", "mtime": 1.0, "size": None,
-         "source": "langfuse", "name": "call-both"},
-        {"run": "lf:only-remote", "mtime": 2.0, "size": None,
-         "source": "langfuse", "name": "only-remote"},
-    ])
+    listing = {"data": [
+        {"id": "call-both", "timestamp": "1970-01-01T00:00:01Z", "name": "call-both"},
+        {"id": "only-remote", "timestamp": "1970-01-01T00:00:02Z", "name": "only-remote"},
+    ]}
+    monkeypatch.setattr(LangfuseRunStore, "_get", lambda self, path, **p: listing)
     pid = _open(client, project)
     runs = client.get(f"/api/p/{pid}/traces").json()["runs"]
     names = sorted(r["run"] for r in runs)

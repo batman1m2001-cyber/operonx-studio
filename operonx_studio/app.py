@@ -59,16 +59,6 @@ def _studio_table(root: Path) -> Dict[str, Any]:
 _RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}-[0-9]{6}$")
 
 
-def _traces_root(root: Path) -> Optional[Path]:
-    declared = _studio_table(root).get("traces")
-    if not declared:
-        return None
-    path = Path(str(declared)).expanduser()
-    if not path.is_absolute():
-        path = root / path
-    return path
-
-
 def _inline_synthetic_loops(graph: Dict[str, Any]) -> Dict[str, Any]:
     """Open the compiler's hidden loop boxes back up, for the canvas.
 
@@ -200,20 +190,11 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# ── trace records: one shape, two sources ───────────────────────────────
-# The studio never invents trace data — it reads what a consumer recorded.
-# `LocalConsumer` writes `<run>/nodes.jsonl`; `LangfuseConsumer` ships the
-# same executions to Langfuse as spans. Both normalise to one record shape
-# here, and the aggregate + drill-down work over that.
-
-
-def _local_records(run_dir: Path):
-    with (run_dir / "nodes.jsonl").open(encoding="utf-8") as fh:
-        for line in fh:
-            try:
-                yield json.loads(line)
-            except json.JSONDecodeError:
-                continue
+# ── trace records: one shape, every store ───────────────────────────────
+# The studio never invents trace data — it reads what a consumer recorded,
+# through the project's RunStore (operonx_studio.runs). Every store hands
+# back the same rows (the shape `nodes.jsonl` holds; Langfuse observations
+# are mapped to it by operonx), and the helpers below work over those.
 
 
 def _op_executions(records, run_name: str, op_name: str, limit: int = 50) -> Dict[str, Any]:
@@ -484,120 +465,16 @@ def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]
             "truncated": count >= limit}
 
 
-# ── the Langfuse source ─────────────────────────────────────────────────
-
-
-def _langfuse_cfg(root: Path) -> Optional[Dict[str, str]]:
-    """The `[studio.langfuse]` table, env-interpolated, or nothing.
-
-        [studio.langfuse]
-        host       = "${LANGFUSE_HOST}"
-        public_key = "${LANGFUSE_PUBLIC_KEY}"
-        secret_key = "${LANGFUSE_SECRET_KEY}"
-
-    Values may be literal or `${VAR}` / `${VAR:default}`. Keys never land
-    in the IR or the page — they authenticate server-side fetches only.
-    """
-    import re
-
-    table = _studio_table(root).get("langfuse")
-    if not isinstance(table, dict):
-        return None
-
-    def env(value: Any) -> str:
-        value = str(value or "")
-        m = re.fullmatch(r"\$\{([A-Za-z0-9_]+)(?::([^}]*))?\}", value)
-        if m:
-            return os.environ.get(m.group(1)) or (m.group(2) or "")
-        return value
-
-    host = env(table.get("host")).rstrip("/")
-    public = env(table.get("public_key"))
-    secret = env(table.get("secret_key"))
-    if not (host and public and secret):
-        return None
-    return {"host": host, "public": public, "secret": secret}
-
-
-def _lf_get(cfg: Dict[str, str], path: str, **params: Any) -> Any:
-    import base64
-    import urllib.parse
-    import urllib.request
-
-    url = cfg["host"] + path
-    if params:
-        url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
-    token = base64.b64encode(f"{cfg['public']}:{cfg['secret']}".encode()).decode()
-    req = urllib.request.Request(url, headers={"Authorization": f"Basic {token}"})
-    with urllib.request.urlopen(req, timeout=30) as res:
-        return json.loads(res.read().decode("utf-8"))
-
-
-def _iso_epoch(stamp: Any) -> float:
-    from datetime import datetime
-
-    try:
-        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp()
-    except (ValueError, TypeError):
-        return 0.0
-
-
-def _lf_records(cfg: Dict[str, str], trace_id: str):
-    """One Langfuse trace's observations, as normal trace records.
-
-    `LangfuseConsumer._span_create` wrote what we need back verbatim:
-    span name = op_name, metadata carries op_full_name / status /
-    duration_ms, statusMessage the error, input/output the payloads.
-    A finished trace never changes, so the fetched detail rides the
-    studio cache — clicking around a Langfuse run costs one remote call,
-    not one per node.
-    """
-    from operonx_studio.cache import studio_cache
-
-    key = f"lf:trace:{cfg['host']}:{trace_id}"
-    detail = studio_cache().get_json(key)
-    if detail is None:
-        detail = _lf_get(cfg, f"/api/public/traces/{trace_id}")
-        studio_cache().set_json(key, detail, ttl=600)
-    for obs in detail.get("observations") or []:
-        meta = obs.get("metadata") or {}
-        duration = meta.get("duration_ms")
-        if duration is None and obs.get("startTime") and obs.get("endTime"):
-            duration = (_iso_epoch(obs["endTime"]) - _iso_epoch(obs["startTime"])) * 1000.0
-        status = meta.get("status") or ("error" if obs.get("level") == "ERROR" else "ok")
-        yield {
-            # the consumer wrote the op_id as the span's own id, and the
-            # upstream provenance into metadata — hand both back so a
-            # Langfuse run drives the run canvas exactly like a local one
-            "op_id": obs.get("id"),
-            "op_name": obs.get("name"),
-            "op_full_name": meta.get("op_full_name") or obs.get("name"),
-            "start_time": _iso_epoch(obs.get("startTime")),
-            "duration_ms": duration or 0.0,
-            "status": status,
-            "error": obs.get("statusMessage"),
-            "ctx": meta.get("ctx"),
-            "is_yield": meta.get("is_yield"),
-            "wall_start": _iso_epoch(obs.get("startTime")),
-            "inputs": obs.get("input"),
-            "outputs": obs.get("output"),
-            "upstreams": meta.get("upstreams"),
-        }
-
-
-def _lf_runs(cfg: Dict[str, str], limit: int = 50) -> List[Dict[str, Any]]:
-    listing = _lf_get(cfg, "/api/public/traces", limit=limit, orderBy="timestamp.DESC")
-    return [
-        {
-            "run": f"lf:{t['id']}",
-            "mtime": _iso_epoch(t.get("timestamp")),
-            "size": None,
-            "source": "langfuse",
-            "name": t.get("name"),
-        }
-        for t in listing.get("data") or []
-        if t.get("id")
-    ]
+def _dir_size(path: Path) -> int:
+    """Bytes under *path* (a run directory), best-effort."""
+    total = 0
+    for current, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += (Path(current) / name).stat().st_size
+            except OSError:
+                pass
+    return total
 
 
 # ── the app ─────────────────────────────────────────────────────────────
@@ -639,9 +516,9 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     def _page(name: str) -> HTMLResponse:
         text = (STATIC / name).read_text(encoding="utf-8")
-        for asset in ("studio.css", "studio.js", "values.js", "chat.js",
-                      "home.js", "providers.js", "timeline.js", "icons.js"):
-            text = text.replace(f"/static/{asset}", f"/static/{asset}?v={asset_v}")
+        # every local asset the page names gets the content version
+        text = re.sub(r'(/static/[A-Za-z0-9_.-]+\.(?:js|css))(?=["\'])',
+                      lambda m: f"{m.group(1)}?v={asset_v}", text)
         return HTMLResponse(text, headers={"Cache-Control": "no-cache"})
 
     @app.middleware("http")
@@ -784,20 +661,16 @@ def build_studio_app(recents: Optional[Recents] = None):
                     info["ops"] = sum(len(g.get("nodes") or []) for g in graphs)
                 elif last.error:
                     info["error"] = str(last.error).strip().splitlines()[-1][:200]
-            troot = _traces_root(ref.root)
-            if troot is not None and troot.is_dir():
-                newest, count = 0.0, 0
-                try:
-                    for entry in troot.iterdir():
-                        if entry.is_symlink() or not (entry / "nodes.jsonl").is_file():
-                            continue
-                        count += 1
-                        newest = max(newest, (entry / "nodes.jsonl").stat().st_mtime)
-                except OSError:
-                    pass
-                if count:
-                    info["runs"] = count
-                    info["newest"] = newest
+            try:
+                from operonx_studio.runs import project_runs as _pr
+
+                store = _pr(ref.root, sweep=False).store
+                newest = store.list_runs(limit=1)
+                if newest.items:
+                    info["runs"] = newest.total if newest.total is not None else store.count()
+                    info["newest"] = newest.items[0].started_at
+            except Exception:  # noqa: BLE001 — a card's signal is best-effort
+                pass
             out[ref.id] = info
         return JSONResponse({"health": out})
 
@@ -951,7 +824,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             "services": ir.get("services") or ir.get("serves") or [],
             "jobs": ir.get("jobs") or [],
             "resources": ir.get("resources") or {},
-            "traces_configured": _traces_root(watcher.root) is not None,
+            "traces_configured": True,
         })
 
     @app.get("/api/p/{pid}/stamp")
@@ -1042,216 +915,178 @@ def build_studio_app(recents: Optional[Recents] = None):
         payload["applied"] = True
         return JSONResponse(payload)
 
-    # ── traces ──────────────────────────────────────────────────────────
+    # ── runs ────────────────────────────────────────────────────────────
+    # Every route below reads the project's RunStore (operonx_studio.runs):
+    # the store the project's own services and jobs write into, opened from
+    # configuration. `lf:`-prefixed ids come from the read-only Langfuse
+    # source. The per-run helpers above (`_tree_records`, `_flow_records`,
+    # `_op_executions`, `_summarise_run`) work on a record's rows, whatever
+    # store they came from.
 
-    # Per-run activity summaries for the listing: memory first, then the
-    # shared studio cache (redis/disk), keyed on the nodes.jsonl mtime so
-    # a changed run recomputes and an unchanged one costs nothing —
-    # anywhere, across restarts. The trace dir itself stays read-only.
-    from operonx_studio.cache import studio_cache
+    from operonx.telemetry.runs import RunFilter
 
-    cache = studio_cache()
-    summary_cache: Dict[str, Any] = {}
+    from operonx_studio.runs import LF_PREFIX, project_runs, read_retention, write_retention
 
-    def _activity(entry: Path, nodes_mtime: float) -> Dict[str, Any]:
-        cached = summary_cache.get(str(entry))
-        if cached and cached[0] == nodes_mtime:
-            return cached[1]
-        key = f"tracesum:{entry}:{nodes_mtime}"
-        brief = cache.get_json(key)
-        if brief is None:
-            s = _summarise_run(_local_records(entry), entry.name)
-            brief = {"ops": len(s["ops"]), "records": s["records"],
-                     "errors": s["errors"], "wall_s": s["wall_s"]}
-            cache.set_json(key, brief, ttl=14 * 86400)
-        summary_cache[str(entry)] = (nodes_mtime, brief)
-        return brief
+    def _runs(pid: str):
+        watcher = _watcher(pid)
+        if watcher is None:
+            return None
+        return project_runs(watcher.root)
+
+    def _record(pid: str, run: str):
+        """(rows, record) for one run, or a JSONResponse saying why not."""
+        pr = _runs(pid)
+        if pr is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        store, rid = pr.split(run)
+        if store is None:
+            return JSONResponse({"error": "no Langfuse source configured"}, status_code=404)
+        try:
+            rec = store.get_run(rid)
+        except Exception as exc:  # noqa: BLE001 — a remote store may be away
+            return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=502)
+        if rec is None:
+            return JSONResponse({"error": "no such run"}, status_code=404)
+        return rec.nodes, rec
+
+    def _row(s, source: str = "local") -> Dict[str, Any]:
+        """A run summary as the list rows the UI reads."""
+        d = s.to_dict()
+        d.update({
+            "run": (LF_PREFIX + s.trace_id) if source == "langfuse" else s.trace_id,
+            "mtime": s.started_at,
+            "source": source,
+            "records": s.executions,
+            "wall_s": round(s.duration_ms / 1000.0, 2) if s.duration_ms else None,
+        })
+        return d
+
+    def _filter_from(params: Dict[str, Any]) -> RunFilter:
+        def num(key):
+            try:
+                return float(params[key]) if params.get(key) not in (None, "") else None
+            except (TypeError, ValueError):
+                return None
+
+        meta = {}
+        for pair in str(params.get("meta") or "").split(","):
+            k, sep, v = pair.partition(":")
+            if sep and k.strip():
+                meta[k.strip()] = v.strip()
+        return RunFilter(
+            origin=params.get("origin") or None,
+            name=params.get("name") or None,
+            status=params.get("status") or None,
+            since=num("since"),
+            until=num("until"),
+            version=params.get("version") or None,
+            job_run=params.get("job_run") or None,
+            runbook_run=params.get("runbook_run") or None,
+            metadata=meta,
+            search=params.get("q") or None,
+        )
 
     @app.get("/api/p/{pid}/traces")
     def traces(pid: str, local_only: int = 0) -> JSONResponse:
-        """Runs from every configured trace source, one list.
-
-        The studio reads what a consumer recorded — nothing else. A
-        `[studio] traces` dir lists LocalConsumer runs; a
-        `[studio.langfuse]` table lists the traces LangfuseConsumer
-        shipped. A Langfuse outage degrades to a note, never a 500 —
-        the local list must not die with someone else's server.
-        ``local_only`` exists for the follow-latest poll, which must not
-        hammer a remote API every few seconds.
-        """
-        watcher = _watcher(pid)
-        if watcher is None:
+        """The newest runs, from the project's store — plus, unless
+        ``local_only``, the Langfuse source's newest (a run present in
+        both is one row: the store wins, the Langfuse copy is a badge)."""
+        pr = _runs(pid)
+        if pr is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
-        root = _traces_root(watcher.root)
-        lf = _langfuse_cfg(watcher.root)
-        if root is None and lf is None:
-            return JSONResponse({"configured": False, "runs": []})
-
-        payload: Dict[str, Any] = {"configured": True}
-        runs: List[Dict[str, Any]] = []
-        if root is not None:
-            if not root.is_dir():
-                payload["missing"] = str(root)
-            else:
-                payload["root"] = str(root)
-                for entry in root.iterdir():
-                    # `latest` is LocalConsumer's alias symlink, not a run;
-                    # listing it would show every run twice.
-                    if entry.is_symlink():
-                        continue
-                    nodes = entry / "nodes.jsonl"
-                    if not nodes.is_file():
-                        continue
-                    stat = nodes.stat()
-                    runs.append({
-                        "run": entry.name,
-                        "mtime": stat.st_mtime,
-                        "size": stat.st_size,
-                        "source": "local",
-                        **_activity(entry, stat.st_mtime),
-                    })
-        if lf is not None and not local_only:
-            payload["langfuse"] = lf["host"]
+        payload: Dict[str, Any] = {"configured": True, "root": pr.source}
+        runs = [_row(s) for s in pr.store.list_runs(limit=200).items]
+        if pr.remote is not None and not local_only:
+            payload["langfuse"] = pr.remote.config.get("host")
             try:
-                # SYNC, not a second list: the trace id is the join key
-                # (LangfuseConsumer names its trace with the local run's
-                # id). A run recorded in both places is ONE row — local
-                # wins as the data source (complete, has media), the
-                # Langfuse copy becomes a badge on it.
                 local_ids = {r["run"] for r in runs}
-                for lr in _lf_runs(lf):
-                    twin = lr["run"][3:] if lr["run"].startswith("lf:") else lr["run"]
-                    if twin in local_ids or lr.get("name") in local_ids:
-                        for r in runs:
-                            if r["run"] == twin or r["run"] == lr.get("name"):
-                                r["also_langfuse"] = True
-                                break
+                for s in pr.remote.list_runs(limit=50).items:
+                    if s.trace_id in local_ids:
+                        next(r for r in runs if r["run"] == s.trace_id)["also_langfuse"] = True
                         continue
-                    runs.append(lr)
+                    runs.append(_row(s, "langfuse"))
             except Exception as exc:  # noqa: BLE001 — someone else's server
                 payload["langfuse_error"] = str(exc)
         runs.sort(key=lambda r: -(r["mtime"] or 0))
         payload["runs"] = runs[:200]
         return JSONResponse(payload)
 
-    def _local_run_dir(pid: str, run: str):
-        """Resolve a local run's directory, or a JSONResponse explaining why not."""
-        watcher = _watcher(pid)
-        if watcher is None:
+    @app.get("/api/p/{pid}/runs")
+    def runs_list(
+        pid: str, origin: str = "", name: str = "", status: str = "", since: str = "",
+        until: str = "", version: str = "", job_run: str = "", runbook_run: str = "",
+        meta: str = "", q: str = "", order: str = "", limit: str = "", cursor: str = "",
+    ) -> JSONResponse:
+        """Runs by filter, one page at a time — the Runs screen's list.
+        ``meta=key:value,key:value`` matches metadata; ``q`` searches ids,
+        keys and metadata."""
+        pr = _runs(pid)
+        if pr is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
-        root = _traces_root(watcher.root)
-        if root is None:
-            return JSONResponse({"error": "no [studio] traces configured"}, status_code=404)
-        run_dir = (root / run).resolve()
-        # The run name came from a URL; it must not walk out of the root.
-        if root.resolve() not in run_dir.parents:
-            return JSONResponse({"error": "no such run"}, status_code=404)
-        if not (run_dir / "nodes.jsonl").is_file():
-            return JSONResponse({"error": "no such run"}, status_code=404)
-        return run_dir
-
-    def _lf_for(pid: str, run: str):
-        """Langfuse config + trace id for an `lf:` run, or an error response."""
-        watcher = _watcher(pid)
-        if watcher is None:
-            return JSONResponse({"error": "unknown project"}, status_code=404)
-        cfg = _langfuse_cfg(watcher.root)
-        if cfg is None:
-            return JSONResponse({"error": "no [studio.langfuse] configured"}, status_code=404)
-        return cfg, run[3:]
+        params = {k: v for k, v in dict(
+            origin=origin, name=name, status=status, since=since, until=until, version=version,
+            job_run=job_run, runbook_run=runbook_run, meta=meta, q=q, order=order,
+            limit=limit, cursor=cursor).items() if v}
+        try:
+            limit = max(1, min(int(params.get("limit") or 100), 1000))
+        except ValueError:
+            limit = 100
+        try:
+            page = pr.store.list_runs(_filter_from(params), order=params.get("order") or "started_desc",
+                                      limit=limit, cursor=params.get("cursor") or None)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"runs": [_row(s) for s in page.items], "next": page.next_cursor,
+                             "total": page.total, "source": pr.source})
 
     @app.get("/api/p/{pid}/trace/{run}")
     def trace(pid: str, run: str) -> JSONResponse:
-        if run.startswith("lf:"):
-            got = _lf_for(pid, run)
-            if isinstance(got, JSONResponse):
-                return got
-            cfg, trace_id = got
-            try:
-                return JSONResponse(_summarise_run(_lf_records(cfg, trace_id), run))
-            except Exception as exc:  # noqa: BLE001 — someone else's server
-                return JSONResponse({"error": f"langfuse: {exc}"}, status_code=502)
-        run_dir = _local_run_dir(pid, run)
-        if isinstance(run_dir, JSONResponse):
-            return run_dir
-        return JSONResponse(_summarise_run(_local_records(run_dir), run_dir.name))
+        got = _record(pid, run)
+        if isinstance(got, JSONResponse):
+            return got
+        rows, rec = got
+        out = _summarise_run(rows, run)
+        out["summary"] = rec.summary.to_dict()
+        return JSONResponse(out)
 
     @app.post("/api/p/{pid}/trace/{run}/delete")
     def trace_delete(pid: str, run: str) -> JSONResponse:
-        """Remove one recorded local run. Langfuse rows live on someone
-        else's server — the studio never reaches into those."""
-        if run.startswith("lf:"):
-            return JSONResponse({"error": "langfuse traces are read-only here"},
-                                status_code=400)
-        run_dir = _local_run_dir(pid, run)
-        if isinstance(run_dir, JSONResponse):
-            return run_dir
-        import shutil
-
-        shutil.rmtree(run_dir)
-        summary_cache.pop(str(run_dir), None)
+        """Remove one recorded run. Langfuse rows live on someone else's
+        server — the studio never reaches into those."""
+        if run.startswith(LF_PREFIX):
+            return JSONResponse({"error": "langfuse traces are read-only here"}, status_code=400)
+        pr = _runs(pid)
+        if pr is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        if not pr.store.delete_runs(RunFilter(trace_ids=[run])):
+            return JSONResponse({"error": "no such run"}, status_code=404)
         return JSONResponse({"ok": True})
 
     @app.get("/api/p/{pid}/trace/{run}/flow")
     def trace_flow(pid: str, run: str) -> JSONResponse:
-        """The run canvas's food: every execution, light — timing, ctx,
-        status and upstream provenance, one shape for local and
-        Langfuse runs. Values stay with the per-op endpoint."""
-        if run.startswith("lf:"):
-            got = _lf_for(pid, run)
-            if isinstance(got, JSONResponse):
-                return got
-            cfg, trace_id = got
-            try:
-                return JSONResponse(_flow_records(_lf_records(cfg, trace_id), run))
-            except Exception as exc:  # noqa: BLE001 — someone else's server
-                return JSONResponse({"error": f"langfuse: {exc}"}, status_code=502)
-        run_dir = _local_run_dir(pid, run)
-        if isinstance(run_dir, JSONResponse):
-            return run_dir
-        return JSONResponse(_flow_records(_local_records(run_dir), run_dir.name))
+        """Every execution, light — timing, ctx, status, provenance."""
+        got = _record(pid, run)
+        return got if isinstance(got, JSONResponse) else JSONResponse(_flow_records(got[0], run))
 
     @app.get("/api/p/{pid}/trace/{run}/tree")
     def trace_tree(pid: str, run: str) -> JSONResponse:
-        """The run as a tree (operonx's ctx rules), for the Traces tab's
-        tree and flow-by-time views. Same source rules as /flow."""
-        if run.startswith("lf:"):
-            got = _lf_for(pid, run)
-            if isinstance(got, JSONResponse):
-                return got
-            cfg, trace_id = got
-            try:
-                return JSONResponse(_tree_records(_lf_records(cfg, trace_id), run))
-            except Exception as exc:  # noqa: BLE001 — someone else's server
-                return JSONResponse({"error": f"langfuse: {exc}"}, status_code=502)
-        run_dir = _local_run_dir(pid, run)
-        if isinstance(run_dir, JSONResponse):
-            return run_dir
-        return JSONResponse(_tree_records(_local_records(run_dir), run_dir.name))
+        """The run as a tree (operonx's ctx rules)."""
+        got = _record(pid, run)
+        if isinstance(got, JSONResponse):
+            return got
+        out = _tree_records(got[0], run)
+        out["summary"] = got[1].summary.to_dict()
+        return JSONResponse(out)
 
     @app.get("/api/p/{pid}/trace/{run}/timeline")
     def trace_timeline(pid: str, run: str) -> JSONResponse:
-        """The run as a waterfall: every recorded execution with its
-        start offset and duration, ordered by when it began. The values
-        drill-down stays with the per-op endpoint; this answers WHEN."""
-        if run.startswith("lf:"):
-            got = _lf_for(pid, run)
-            if isinstance(got, JSONResponse):
-                return got
-            cfg, trace_id = got
-            try:
-                records = list(_lf_records(cfg, trace_id))
-            except Exception as exc:  # noqa: BLE001 — someone else's server
-                return JSONResponse({"error": f"langfuse: {exc}"}, status_code=502)
-        else:
-            run_dir = _local_run_dir(pid, run)
-            if isinstance(run_dir, JSONResponse):
-                return run_dir
-            records = list(_local_records(run_dir))
-
+        """The run as a waterfall: every execution's offset and duration."""
+        got = _record(pid, run)
+        if isinstance(got, JSONResponse):
+            return got
         spans: List[Dict[str, Any]] = []
         t0 = None
-        for rec in records:
+        for rec in got[0]:
             start = rec.get("start_time")
             if start is None:
                 continue
@@ -1267,31 +1102,97 @@ def build_studio_app(recents: Optional[Recents] = None):
         spans.sort(key=lambda s: s["start"])
         for s in spans:
             s["start"] = round(s.pop("start") - (t0 or 0.0), 4)
-        total = len(spans)
-        return JSONResponse({"run": run, "total": total,
-                             "spans": spans[:3000]})
+        return JSONResponse({"run": run, "total": len(spans), "spans": spans[:3000]})
 
     @app.get("/api/p/{pid}/trace/{run}/op/{op_name}")
     def trace_op(pid: str, run: str, op_name: str, limit: int = 50) -> JSONResponse:
-        """One op's executions in one run — the drill-down under the
-        aggregate, with the recorded inputs and outputs. Same run-name
-        containment rule as the summary endpoint above."""
-        limit = max(1, min(limit, 200))
-        if run.startswith("lf:"):
-            got = _lf_for(pid, run)
-            if isinstance(got, JSONResponse):
-                return got
-            cfg, trace_id = got
-            try:
-                return JSONResponse(
-                    _op_executions(_lf_records(cfg, trace_id), run, op_name, limit=limit))
-            except Exception as exc:  # noqa: BLE001 — someone else's server
-                return JSONResponse({"error": f"langfuse: {exc}"}, status_code=502)
-        run_dir = _local_run_dir(pid, run)
-        if isinstance(run_dir, JSONResponse):
-            return run_dir
-        return JSONResponse(
-            _op_executions(_local_records(run_dir), run_dir.name, op_name, limit=limit))
+        """One op's executions in one run, with recorded inputs and outputs."""
+        got = _record(pid, run)
+        if isinstance(got, JSONResponse):
+            return got
+        return JSONResponse(_op_executions(got[0], run, op_name, limit=max(1, min(limit, 200))))
+
+    # ── settings: retention ──────────────────────────────────────────────
+
+    @app.get("/api/p/{pid}/settings")
+    def settings(pid: str) -> JSONResponse:
+        """What Settings shows: where runs are kept and for how long."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        pr = project_runs(watcher.root)  # the first open sweeps, as every route's does
+        return JSONResponse({
+            "store": pr.source,
+            "backend": pr.spec.get("backend"),
+            "writable": pr.store.writable,
+            "langfuse": pr.remote.config.get("host") if pr.remote is not None else None,
+            "retention": read_retention(watcher.root),
+            "last_sweep": pr.last_sweep,
+            "swept_at": pr.swept_at or None,
+            "runs": pr.store.count(),
+        })
+
+    def _policy_from(body: Dict[str, Any]) -> Dict[str, Optional[float]]:
+        raw = body.get("retention") or {}
+        policy: Dict[str, Optional[float]] = {}
+        for origin, value in raw.items():
+            if value is None or value == "forever":
+                policy[origin] = None
+            else:
+                days = float(value)
+                if days < 0:
+                    raise ValueError(f"{origin}: days must be 0 or more")
+                policy[origin] = days
+        return policy
+
+    @app.post("/api/p/{pid}/settings/retention/preview")
+    def retention_preview(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """How many runs, and how much disk, a policy would free — before
+        anything is saved or deleted."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        try:
+            policy = _policy_from(body)
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        pr = project_runs(watcher.root, sweep=False)
+        now = time.time()
+        out: Dict[str, Any] = {}
+        for origin, days in policy.items():
+            if days is None:
+                out[origin] = {"runs": 0, "bytes": 0}
+                continue
+            where = RunFilter(origin=origin, until=now - days * 86400.0)
+            runs, size, cursor = 0, 0, None
+            while True:
+                page = pr.store.list_runs(where, limit=500, cursor=cursor)
+                for s in page.items:
+                    runs += 1
+                    if s.location and pr.spec.get("backend") == "files":
+                        size += _dir_size(Path(pr.spec["root"]) / s.location)
+                cursor = page.next_cursor
+                if not cursor:
+                    break
+            out[origin] = {"runs": runs, "bytes": size}
+        return JSONResponse({"preview": out})
+
+    @app.post("/api/p/{pid}/settings/retention")
+    def retention_save(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Save the policy to operonx.toml and apply it now."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        try:
+            policy = {**read_retention(watcher.root), **_policy_from(body)}
+            write_retention(watcher.root, policy)
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except OSError as exc:
+            return JSONResponse({"error": f"could not write operonx.toml: {exc}"}, status_code=500)
+        pr = project_runs(watcher.root, sweep=False)
+        deleted = pr.sweep(force=True)
+        return JSONResponse({"retention": read_retention(watcher.root), "deleted": deleted})
 
     # ── the assistant ───────────────────────────────────────────────────
     # The ✦ panel is a real Claude Code session on this machine (chat.py
@@ -1306,9 +1207,9 @@ def build_studio_app(recents: Optional[Recents] = None):
             return None, ""
         lines = [f"# Project briefing: {ref.name}",
                  f"Root (your working directory): {watcher.root}"]
-        traces = _traces_root(watcher.root)
-        if traces is not None:
-            lines.append(f"Traces directory: {traces}")
+        pr = project_runs(watcher.root, sweep=False)
+        lines.append(f"Runs are kept in: {pr.source} "
+                     "(operonx.telemetry.runs.open_run_store; run directories hold nodes.jsonl)")
         result = watcher.refresh_swr()
         if result.ok and result.ir:
             import tempfile

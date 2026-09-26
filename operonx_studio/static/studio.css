@@ -1122,7 +1122,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 
 /* ── panes: Traces, Jobs, Resources share one page rhythm ──────────── */
 
-#traces, #jobs, #resources { flex: 1; min-width: 0; overflow: auto; padding: 24px 28px 48px; background: var(--surface); }
+#traces, #jobs, #resources, .pane { flex: 1; min-width: 0; overflow: auto; padding: 24px 28px 48px; background: var(--surface); }
 .panehead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .panehead h2 { margin: 0; font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.015em; }
 .panehead .count { color: var(--text-3); font-weight: 500; font-size: var(--fs-base); }
@@ -1302,6 +1302,41 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 
 
 
+/* ── Settings ─────────────────────────────────────────────────────── */
+
+.setsection { max-width: 820px; margin-bottom: 28px; }
+.setsectitle { font-size: var(--fs-lg); font-weight: 650; margin: 0 0 8px; }
+.setintro { color: var(--text-2); font-size: var(--fs-md); margin: 0 0 14px; max-width: 640px; }
+.facts { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+.factrow { display: flex; gap: 16px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft);
+  font-size: var(--fs-md); min-width: 0; }
+.factrow:last-child { border-bottom: none; }
+.factkey { width: 120px; flex: none; color: var(--text-3); }
+.factval { min-width: 0; overflow-wrap: anywhere; }
+.setform { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+.setrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center;
+  padding: 12px 14px; border-bottom: 1px solid var(--border-soft); }
+.setrow:last-child { border-bottom: none; }
+.setname { font-weight: 600; font-size: var(--fs-base); }
+.sethelp { color: var(--text-3); font-size: var(--fs-sm); }
+.setctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.setdays { width: 84px !important; text-align: right; font-variant-numeric: tabular-nums; min-height: 34px; }
+.setdays:disabled { background: var(--surface-2); color: var(--text-3); }
+.setunit { color: var(--text-3); font-size: var(--fs-md); }
+.setforever { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-md);
+  color: var(--text-2); cursor: pointer; margin-left: 6px; user-select: none; }
+.sethint { grid-column: 1 / -1; color: var(--warn); font-size: var(--fs-sm); }
+.sethint:empty { display: none; }
+.setfoot { display: flex; align-items: center; gap: 16px; margin-top: 14px; }
+.setnote { flex: 1; color: var(--text-2); font-size: var(--fs-md); }
+.setnote.bad { color: var(--err); }
+@media (max-width: 760px) {
+  .setrow { grid-template-columns: minmax(0, 1fr); }
+  .setctl { justify-content: flex-start; }
+  .setfoot { flex-direction: column; align-items: stretch; }
+  .factkey { width: 90px; }
+}
+
 /* ── the assistant: floating button + chat panel, every page ──────── */
 
 .chat-fab {
@@ -1454,7 +1489,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   .canvasbar #btn-expand, .canvasbar .tsep:first-of-type { display: none; }
   .findbox, #legend { left: 12px; bottom: 64px; }
 
-  #traces, #jobs, #resources { padding: 16px 14px 88px; }
+  #traces, #jobs, #resources, .pane { padding: 16px 14px 88px; }
   #traces.workflow { padding: 10px 12px 0; }
   #traces.workflow #stage { margin: 0 -12px; }
   .panehead h2, .tracebar h2, .jtitle { font-size: 18px; }
