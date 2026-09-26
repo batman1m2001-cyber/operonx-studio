@@ -263,9 +263,49 @@ const PlayView = (() => {
           rp.onclick = () => replayRun(r.trace_id, md);
           acts.append(rp);
         }
+        // one message in, the reply out: that is a case for an eval
+        if ((md.playground_script || []).filter(m => m.kind !== "bytes").length === 1 && r.status !== "error") {
+          const add = el("button", "linkbtn", "Add to dataset"); add.type = "button";
+          add.onclick = () => addForm(row, r.trace_id, add);
+          acts.append(add);
+        }
         row.append(acts);
         recent.append(row);
       }
+    }
+
+    async function addForm(row, run, btn) {
+      if (row.querySelector(".playadd")) return;
+      btn.disabled = true;
+      let names = [];
+      try { names = (await api(`/api/p/${PID}/evals`)).datasets.map(x => x.name); } catch { /* a new one, then */ }
+      const form = el("div", "playadd");
+      const pick = el("select");
+      pick.setAttribute("aria-label", "Dataset");
+      for (const n of names) { const o = el("option", null, n); o.value = n; pick.append(o); }
+      const other = el("option", null, "New dataset…"); other.value = ""; pick.append(other);
+      const fresh = el("input"); fresh.type = "text"; fresh.placeholder = "dataset name";
+      fresh.setAttribute("aria-label", "New dataset name");
+      fresh.hidden = names.length > 0;
+      pick.onchange = () => { fresh.hidden = pick.value !== ""; if (!fresh.hidden) fresh.focus(); };
+      const exp = el("label");
+      const cb = el("input"); cb.type = "checkbox"; cb.checked = true;
+      exp.append(cb, "the reply is the expected output");
+      const go = el("button", "primary", "Add"); go.type = "button";
+      const cancel = el("button", "linkbtn", "Cancel"); cancel.type = "button";
+      cancel.onclick = () => { form.remove(); btn.disabled = false; };
+      go.onclick = async () => {
+        const name = pick.value || fresh.value.trim();
+        if (!name) { fresh.focus(); return; }
+        go.disabled = true;
+        try {
+          const got = await api(`/api/p/${PID}/datasets/${encodeURIComponent(name)}/rows`, {from_run: run, expected: cb.checked});
+          toast(got.added.length ? `Added a case to ${name}` : `${name} already has this case`);
+          form.remove(); btn.disabled = false;
+        } catch (err) { toast(err.message, true); go.disabled = false; }
+      };
+      form.append(pick, fresh, exp, go, cancel);
+      row.append(form);
     }
 
     async function replayRun(run, md) {

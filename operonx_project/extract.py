@@ -737,7 +737,8 @@ def extract_application(manifest: Manifest) -> Dict[str, Any]:
     jobs = []
     for entry in described["jobs"]:
         rd = specs.get(entry["name"])
-        record_dir = Path(rd) if rd else Path("jobs")
+        # an eval records under evals/ unless it says otherwise
+        record_dir = Path(rd) if rd else Path("evals" if entry.get("kind") == "eval" else "jobs")
         if not record_dir.is_absolute():
             record_dir = manifest.root / record_dir
         jobs.append({**entry, "record_dir": str(record_dir)})

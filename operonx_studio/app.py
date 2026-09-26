@@ -1421,13 +1421,17 @@ def build_studio_app(recents: Optional[Recents] = None):
         lines.append(
             "\n## Working in the studio\n"
             "You have studio tools (mcp__studio__*): list_runs, open_run, op_values, monitor, "
-            "compare_runs, select_op, run_job, rerun_op, play, set_llm_price. Prefer them to reading run "
-            "files: they answer from the run store, and what you open appears on the user's screen.\n"
+            "compare_runs, select_op, run_job, rerun_op, play, run_eval, set_llm_price. Prefer them to reading "
+            "run files: they answer from the run store, and what you open appears on the user's screen.\n"
             "To check a change: rerun_op re-runs the op a recorded run failed or was slow in, in the "
-            "current code; play drives a service through its real door like a client would.\n"
+            "current code; play drives a service through its real door like a client would; run_eval runs an "
+            "eval and reports pass rate before → after with the cases that flipped. Evals are "
+            "operonx.app.evals.Eval (a job with a dataset and evaluators); datasets are JSONL files under "
+            "datasets/ ({\"id\", \"input\", \"expected\", \"tags\"} per line) you may add cases to.\n"
             "In your replies, link to studio things with markdown links the page turns into buttons: "
             "[text](studio:run/<run id>), [text](studio:op/<op name>), [text](studio:tab/<flow|traces|"
-            "monitor|jobs|resources|settings>), [text](studio:monitor/<service|job>/<name>). "
+            "monitor|jobs|resources|settings>), [text](studio:monitor/<service|job>/<name>), "
+            "[text](studio:eval/<eval name>). "
             "Name runs and ops by link rather than pasting ids.\n"
             "Code edits you make are shown to the user as a diff with Keep / Undo; keep each turn's "
             "change focused. After changing code, check it (tests, a job run, or the relevant run) and "
@@ -1565,6 +1569,181 @@ def build_studio_app(recents: Optional[Recents] = None):
                                     env=env, start_new_session=True)
         return JSONResponse({"started": name, "pid": proc.pid, "resume": resume, "log": str(log)})
 
+    # ── evals and datasets ───────────────────────────────────────────────
+    # An eval is a job (operonx.app.evals): its records are job records
+    # whose items carry verdicts and whose run.json carries the pass rate.
+    # Datasets are JSONL files in the project; the studio reads and appends
+    # them with operonx's own Dataset, never a copy of its rules.
+
+    def _dataset_file(root: Path, ref: str) -> Path:
+        text = str(ref or "")
+        if text.startswith("dataset:"):
+            return root / "datasets" / f"{text.partition(':')[2]}.jsonl"
+        path = Path(text)
+        return path if path.is_absolute() else root / path
+
+    def _datasets(watcher: ProjectWatcher) -> List[Dict[str, Any]]:
+        from operonx.app.evals import Dataset
+
+        found: Dict[str, Dict[str, Any]] = {}
+        folder = watcher.root / "datasets"
+        paths = sorted(folder.glob("*.jsonl")) if folder.is_dir() else []
+        evals = [j for j in _jobs_of(watcher) if j.get("kind") == "eval"]
+        paths += [_dataset_file(watcher.root, e.get("dataset") or "") for e in evals]
+        for path in paths:
+            key = str(path.resolve())
+            if key in found or not path.name:
+                continue
+            try:
+                rows = Dataset(path).rows()
+                error = None
+            except ValueError as exc:
+                rows, error = [], str(exc)
+            tags: Dict[str, int] = {}
+            for r in rows:
+                for t in r.get("tags") or []:
+                    tags[str(t)] = tags.get(str(t), 0) + 1
+            found[key] = {"name": path.stem, "path": str(path), "exists": path.is_file(), "cases": len(rows),
+                          "expected": sum(1 for r in rows if r.get("expected") is not None), "tags": tags,
+                          "error": error,
+                          "used_by": [e["name"] for e in evals
+                                      if _dataset_file(watcher.root, e.get("dataset") or "").resolve() == path.resolve()]}
+        return list(found.values())
+
+    def _eval_runs(job: Dict[str, Any], limit: int = 30) -> List[Dict[str, Any]]:
+        return [{k: r.get(k) for k in ("run_id", "status", "started", "ended", "counts", "eval", "error")}
+                for r in _job_runs(job)[:limit]]
+
+    @app.get("/api/p/{pid}/evals")
+    def evals_list(pid: str) -> JSONResponse:
+        """Every eval with its recent runs (newest first), and every dataset."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        evals = [{**j, "runs": _eval_runs(j)} for j in _jobs_of(watcher) if j.get("kind") == "eval"]
+        return JSONResponse({"evals": evals, "datasets": _datasets(watcher)})
+
+    @app.get("/api/p/{pid}/evals/{name}/runs/{run_id}")
+    def eval_run(pid: str, name: str, run_id: str, against: str = "") -> JSONResponse:
+        """One eval run, case by case, with what changed since *against*
+        (by default the run before it): ``fixed`` and ``regressed`` cases."""
+        watcher = _watcher(pid)
+        job = _job(watcher, name) if watcher else None
+        if job is None or job.get("kind") != "eval":
+            return JSONResponse({"error": f"unknown eval {name!r}"}, status_code=404)
+        runs = _job_runs(job)
+        ids = [r["run_id"] for r in runs]
+        if run_id not in ids:
+            return JSONResponse({"error": "unknown run"}, status_code=404)
+
+        def items_of(rid: str) -> List[Dict[str, Any]]:
+            path = _run_dir(job, rid) if rid else None
+            items: List[Dict[str, Any]] = []
+            if path is None or not (path / "items.jsonl").is_file():
+                return items
+            with (path / "items.jsonl").open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        items.append(json.loads(line))
+                    except ValueError:
+                        continue
+            return items
+
+        if not against:
+            older = [r for r in runs[ids.index(run_id) + 1:] if r.get("status") != "running"]
+            against = older[0]["run_id"] if older else ""
+        items = items_of(run_id)
+        before = {i["key"]: i for i in items_of(against)} if against in ids else {}
+        flips = {}
+        for it in items:
+            was = before.get(it["key"])
+            if was is None or "verdict" not in was or "verdict" not in it:
+                continue
+            a, b = bool(was["verdict"].get("passed")), bool(it["verdict"].get("passed"))
+            if a != b:
+                flips[it["key"]] = "fixed" if b else "regressed"
+        run = next(r for r in runs if r["run_id"] == run_id)
+        prev = next((r for r in runs if r["run_id"] == against), None)
+        return JSONResponse({"run": run, "items": items, "against": against or None,
+                             "against_eval": (prev or {}).get("eval"), "flips": flips,
+                             "new_cases": [i["key"] for i in items if before and i["key"] not in before]})
+
+    @app.get("/api/p/{pid}/datasets/{name}")
+    def dataset_rows(pid: str, name: str, limit: int = 500) -> JSONResponse:
+        from operonx.app.evals import Dataset
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        found = next((d for d in _datasets(watcher) if d["name"] == name), None)
+        path = Path(found["path"]) if found else watcher.root / "datasets" / f"{name}.jsonl"
+        try:
+            rows = Dataset(path).rows()
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        try:
+            shown = str(path.resolve().relative_to(watcher.root.resolve()))
+        except ValueError:
+            shown = str(path)
+        return JSONResponse({"name": name, "path": str(path), "shown": shown, "total": len(rows),
+                             "rows": rows[: max(1, min(limit, 5000))]})
+
+    @app.post("/api/p/{pid}/datasets/{name}/rows")
+    def dataset_add(pid: str, name: str, body: Dict[str, Any]) -> JSONResponse:
+        """Append cases (deduped by id). ``from_run`` builds one from a
+        recorded playground run: what was sent is the input, and with
+        ``expected`` what the door sent back is the expected output."""
+        from operonx.app.evals import Dataset
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", name):
+            return JSONResponse({"error": "a dataset name is letters, digits, _ . -"}, status_code=400)
+        rows = list(body.get("rows") or [])
+        run = str(body.get("from_run") or "")
+        if run:
+            got = _record(pid, run)
+            if isinstance(got, JSONResponse):
+                return got
+            md = got[1].summary.metadata or {}
+            script = [m for m in md.get("playground_script") or [] if m.get("kind") in ("text", "json")]
+            if len(script) != 1:
+                return JSONResponse({"error": "a case is one input: pick a playground run that sent exactly one "
+                                              "message (a multi-turn session is not one case)"}, status_code=400)
+            msg = script[0]
+            row: Dict[str, Any] = {"input": msg.get("value") if msg["kind"] == "json" else msg.get("text"),
+                                   "from": {"run": run, "service": got[1].summary.service}}
+            if body.get("expected"):
+                egress = set()
+
+                def walk(g: Any) -> None:
+                    for n in (g or {}).get("nodes") or []:
+                        if n.get("serve_role") == "egress":
+                            egress.add(n.get("name"))
+                        walk(n.get("graph"))
+
+                for g in (watcher.refresh_swr().ir or {}).get("graphs") or []:
+                    walk(g)
+                sent = [r.get("inputs", {}).get("item") for r in got[0] if r.get("op_name") in egress]
+                sent = [s for s in sent if not (isinstance(s, str) and "transient" in s)]
+                if not sent:
+                    return JSONResponse({"error": "this run's reply was not recorded, so it can't be the "
+                                                  "expected output"}, status_code=400)
+                row["expected"] = sent[0] if len(sent) == 1 else sent
+            if body.get("tags"):
+                row["tags"] = [str(t) for t in body["tags"]]
+            rows.append(row)
+        if not rows:
+            return JSONResponse({"error": "no cases to add"}, status_code=400)
+        found = next((d for d in _datasets(watcher) if d["name"] == name), None)
+        path = Path(found["path"]) if found else watcher.root / "datasets" / f"{name}.jsonl"
+        try:
+            added = Dataset(path).add(rows)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"added": added, "path": str(path), "skipped": len(rows) - len(added)})
+
     # ── the assistant's hands: UI actions and undo ──────────────────────
     # The studio tool server (operonx_studio.mcp) posts what it opened;
     # the page polls and shows it, so the user watches the agent work.
@@ -1573,7 +1752,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     @app.post("/api/p/{pid}/ui/action")
     def ui_action(pid: str, body: Dict[str, Any]) -> JSONResponse:
         kind = str(body.get("kind") or "")
-        if kind not in ("open_run", "open_monitor", "compare", "select_op", "open_jobs", "open_tab"):
+        if kind not in ("open_run", "open_monitor", "compare", "select_op", "open_jobs", "open_tab", "open_eval"):
             return JSONResponse({"error": f"unknown action {kind!r}"}, status_code=400)
         queue = ui_actions.setdefault(pid, [])
         seq = (queue[-1]["seq"] + 1) if queue else 1

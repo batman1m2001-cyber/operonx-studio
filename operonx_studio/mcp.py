@@ -238,6 +238,47 @@ def t_play(s: Studio, a: Dict[str, Any]) -> str:
     return "\n".join(out) or "nothing came back"
 
 
+def t_run_eval(s: Studio, a: Dict[str, Any]) -> str:
+    """Run an eval to the end and report it against the run before: the
+    pass rate then and now, and every case that flipped."""
+    name = str(a["name"])
+    before = {r["run_id"] for e in s.call("/evals")["evals"] if e["name"] == name for r in e["runs"]}
+    s.call(f"/jobs/{urllib.parse.quote(name, safe='')}/run", {})
+    s.show("open_eval", name=name)
+    deadline = time.time() + float(a.get("timeout") or 900)
+    run = None
+    while time.time() < deadline:
+        ev = next((e for e in s.call("/evals")["evals"] if e["name"] == name), None)
+        if ev is None:
+            return f"no eval named {name!r}"
+        fresh = [r for r in ev["runs"] if r["run_id"] not in before]
+        if fresh and fresh[0]["status"] != "running":
+            run = fresh[0]
+            break
+        time.sleep(2)
+    if run is None:
+        return f"{name} is still running after the wait; its record will say when it ends"
+    got = s.call(f"/evals/{urllib.parse.quote(name, safe='')}/runs/{run['run_id']}")
+    s.show("open_eval", name=name, run=run["run_id"])
+    now, then = got["run"].get("eval") or {}, got.get("against_eval") or {}
+
+    def rate(e: Dict[str, Any]) -> str:
+        return f"{e.get('passed')}/{e.get('cases')} ({100 * (e.get('pass_rate') or 0):.1f}%)" if e else "—"
+
+    lines = [f"{name} run {run['run_id']}: {run['status']} — passed {rate(now)}"
+             + (f"; before ({got['against']}): {rate(then)}" if then else " (no earlier run to compare)")]
+    items = {i["key"]: i for i in got["items"]}
+    for key, flip in sorted(got["flips"].items(), key=lambda kv: kv[1]):
+        v = (items.get(key) or {}).get("verdict") or {}
+        why = v.get("error") or "; ".join(f"{k}: {c.get('reason') or ('pass' if c.get('passed') else 'fail')}"
+                                          for k, c in (v.get("checks") or {}).items())
+        lines.append(f"  {flip}: {key} — {why}"[:400])
+    failing = [k for k, i in items.items() if not (i.get("verdict") or {}).get("passed") and k not in got["flips"]]
+    if failing:
+        lines.append(f"  still failing: {', '.join(failing[:20])}" + (" …" if len(failing) > 20 else ""))
+    return "\n".join(lines)
+
+
 def _schema(props: Dict[str, Any], required: List[str] = ()) -> Dict[str, Any]:
     return {"type": "object", "properties": props, "required": list(required)}
 
@@ -288,6 +329,11 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                             "recorded run.",
              "schema": _schema({"service": _S, "messages": {"type": "array"}, "query": {"type": "object"},
                                 "toy": _S, "replay_of": _S, "timeout": _N}, ["service"])},
+    "run_eval": {"fn": t_run_eval,
+                 "description": "Run one of the project's evals (a dataset, the system under test, evaluators) to "
+                                "the end and report the pass rate against the run before it, with every case that "
+                                "flipped (fixed / regressed). The way to verify a change end to end.",
+                 "schema": _schema({"name": _S, "timeout": _N}, ["name"])},
     "set_llm_price": {"fn": t_price,
                       "description": "Preview (apply=false) or write (apply=true) an LLM resource's prices in "
                                      "USD per 1M tokens, in the project's resources file. 0 declares a free "

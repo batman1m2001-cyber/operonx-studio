@@ -3628,6 +3628,8 @@ async function performUi(kind, args) {
     state.jobSel = args.job; switchTab("jobs");
   } else if (kind === "open_tab") {
     switchTab(args.tab);
+  } else if (kind === "open_eval") {
+    switchTab("evals", {name: args.name, run: args.run});
   }
 }
 
@@ -3641,6 +3643,7 @@ window.oxStudioLink = (href) => {
   if (kind === "run") return performUi("open_run", {run: arg});
   if (kind === "op") return performUi("select_op", {op: arg});
   if (kind === "tab") return performUi("open_tab", {tab: arg === "runs" ? "traces" : arg});
+  if (kind === "eval") return performUi("open_eval", {name: rest[0], run: rest[1] || ""});
   if (kind === "monitor") return performUi("open_monitor", {target: rest.length > 1 ? `${rest[0]}:${decodeURIComponent(rest.slice(1).join("/"))}` : ""});
   return null;
 };
