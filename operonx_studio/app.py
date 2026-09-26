@@ -640,7 +640,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     def _page(name: str) -> HTMLResponse:
         text = (STATIC / name).read_text(encoding="utf-8")
         for asset in ("studio.css", "studio.js", "values.js", "chat.js",
-                      "home.js", "providers.js", "timeline.js"):
+                      "home.js", "providers.js", "timeline.js", "icons.js"):
             text = text.replace(f"/static/{asset}", f"/static/{asset}?v={asset_v}")
         return HTMLResponse(text, headers={"Cache-Control": "no-cache"})
 

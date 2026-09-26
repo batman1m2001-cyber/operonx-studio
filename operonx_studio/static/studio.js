@@ -536,6 +536,8 @@ function serveNodesFor(graph) {
 
 function render() {
   const g = state.graph;
+  const gname = $("#graph-name");
+  if (gname) gname.textContent = g ? g.name : "no graph";
   const nodesBox = $("#nodes");
   const svg = $("#edges");
   nodesBox.textContent = "";
@@ -1070,6 +1072,17 @@ function renderFlowInfo() {
   const panel = $("#inspector");
   panel.textContent = "";
   panel.scrollTop = 0;
+  // the Traces list (or a run's tree) has no flow on screen: say what
+  // the panel will show instead of describing a canvas nobody sees
+  if (state.tab === "traces" && !state.workflowOn) {
+    const hint = el("div", "sidehint");
+    hint.append(el("div", "sidehint-title", "Nothing selected"));
+    hint.append(el("p", null, state._tlrun
+      ? "Pick an execution in the tree to see what went in, what came out, and what fed it."
+      : "Open a run to read it as a tree, or as the flow with its values painted on every card."));
+    panel.append(hint);
+    return;
+  }
   const g = state.graph;
   if (!g) return;
 
@@ -1457,7 +1470,8 @@ function select(key) {
   if (!it) { state.sel = null; renderFlowInfo(); return; }
   const n = it.node;
   // an op was picked on the canvas: its detail is the point, bring the tab forward
-  if (recall("panelRight", true) && recall("sideTab", "inspect") !== "inspect") showSide("inspect");
+  // (on a phone the panel is a sheet that only a selection opens)
+  if (MOBILE.matches || (panelWanted() && recall("sideTab", "inspect") !== "inspect")) showSide("inspect");
   panel.textContent = "";
   panel.scrollTop = 0;
 
@@ -2288,7 +2302,8 @@ function executionsSection(n, execP) {
 function inspectServe(serve) {
   const panel = $("#inspector");
   panel.classList.add("open");
-  if (recall("panelRight", true) && recall("sideTab", "inspect") !== "inspect") showSide("inspect");
+  // (on a phone the panel is a sheet that only a selection opens)
+  if (MOBILE.matches || (panelWanted() && recall("sideTab", "inspect") !== "inspect")) showSide("inspect");
   panel.textContent = "";
   panel.append(el("h3", null, `serve · ${serve.kind}`));
   panel.append(el("div", "kind mono", serve.path || ""));
@@ -2314,9 +2329,12 @@ async function showResources() {
   box.textContent = "";
   const res = state.ir.resources || {};
   const details = res.details || {};
-  box.append(el("h2", "reshead", "Resource hub"));
-  box.append(el("div", "note",
-    "declared in the project's resource files — secret fields never leave the server"));
+  const head = el("div", "panehead");
+  head.append(el("h2", null, "Resources"));
+  box.append(head);
+  box.append(el("p", "panesub",
+    "The backing services this project declares, which ops use them, and whether the "
+    + "environment they need is set. Secret fields never leave the server."));
 
   // reverse index: resource name → the ops that lean on it — including
   // ops nested inside GraphOps, which carry their graph inline
@@ -2336,11 +2354,17 @@ async function showResources() {
     const c = det.category || "other";
     (cats[c] = cats[c] || []).push([name, det]);
   }
+  if (!Object.keys(cats).length && !(res.keys || []).length) {
+    box.append(paneNote("No resources declared",
+      "Resources are the LLMs, stores and services ops call by name. Declare them in a resources file next to operonx.toml."));
+  }
   for (const cat of Object.keys(cats).sort()) {
-    box.append(el("div", "rescat", cat));
+    box.append(el("h3", "rescat", cat));
+    const grid = el("div", "resgrid");
+    box.append(grid);
     for (const [name, det] of cats[cat].sort((a, b) => a[0].localeCompare(b[0]))) {
       const card = el("div", "rescard");
-      card.append(el("div", "resname mono", `⛁ ${name}`));
+      card.append(el("div", "resname", name));
       const provider = det.category === "llm"
         ? llmProvider({kind: "LLMOp", resource: name}) : null;
       if (provider) {
@@ -2361,7 +2385,7 @@ async function showResources() {
       urow.append(el("span", "reskey", "used by"));
       const val = el("span", "usedby");
       const u = uses[name] || [];
-      if (!u.length) val.append(el("span", "note", "no op names it"));
+      if (!u.length) val.append(el("span", "note", "No op uses it"));
       for (const use of u) {
         const c = el("button", "pchip pref", use.node.name);
         c.title = `${use.graph.name} · ${use.node.kind} — jump to it`;
@@ -2370,22 +2394,22 @@ async function showResources() {
       }
       urow.append(val);
       card.append(urow);
-      box.append(card);
+      grid.append(card);
     }
   }
   const covered = new Set([...Object.keys(details),
     ...Object.values(details).map(d => d.category)]);
   const loose = (res.keys || []).filter(k => !covered.has(k));
   if (loose.length) {
-    box.append(el("div", "rescat", "declared, details not parsed"));
-    const card = el("div", "rescard");
-    for (const k of loose) card.append(el("span", "chip", `⛁ ${k}`));
+    box.append(el("h3", "rescat", "declared, details not parsed"));
+    const card = el("div", "rescard usedby");
+    for (const k of loose) card.append(el("span", "chip", k));
     box.append(card);
   }
 
   // the env contract, with a health light per variable
-  box.append(el("div", "rescat", "environment contract"));
-  const envBox = el("div");
+  box.append(el("h3", "rescat", "Environment"));
+  const envBox = el("div", "envlist");
   box.append(envBox);
   try {
     const h = await api(`/api/p/${PID}/env-health`);
@@ -2395,22 +2419,22 @@ async function showResources() {
       rows.push([name, h.env[name] || "missing", null]);
     for (const [name, dflt] of Object.entries(env.optional || {}))
       rows.push([name, h.env[name] || "default", dflt]);
-    if (!rows.length) envBox.append(el("div", "note", "no variables demanded"));
+    if (!rows.length) envBox.append(el("div", "envrow note", "The project asks for no environment variables."));
     for (const [name, stat, dflt] of rows) {
       const row = el("div", "envrow");
       row.append(el("span", `envdot ${stat}`));
       row.append(el("span", "envname mono", name));
       row.append(el("span", `envstat ${stat}`,
-        stat === "set" ? "set" : stat === "missing"
-          ? "MISSING — required, and nothing sets it" : "unset · default applies"));
+        stat === "set" ? "Set" : stat === "missing"
+          ? "Missing — required, and nothing sets it" : "Not set — the default applies"));
       if (dflt != null && stat === "default")
         row.append(el("span", "envdflt mono", String(dflt)));
       envBox.append(row);
     }
-    if (!h.dotenv) envBox.append(el("div", "note",
-      "no .env file in the project root — variables can only come from the process environment"));
+    if (!h.dotenv) envBox.append(el("div", "envrow note",
+      "No .env file in the project root — variables can only come from the process environment."));
   } catch {
-    envBox.append(el("div", "note", "env health unavailable"));
+    envBox.append(el("div", "envrow note", "Environment status is unavailable."));
   }
 }
 
@@ -2436,84 +2460,114 @@ function jumpToOp(graph, node) {
   if (it) { select(it.key); centerOn(it); }
 }
 
+/* A pane's "nothing here yet" — what is missing and the exact lines
+ * that fix it, instead of a grey sentence. */
+function paneNote(title, text, code) {
+  const box = el("div", "panenote");
+  box.append(el("h3", null, title));
+  box.append(el("div", null, text));
+  if (code) box.append(el("pre", null, code));
+  return box;
+}
+
 async function showTraces() {
   leaveWorkflow();
   const box = $("#traces");
   box.textContent = "";
+  state._tlrun = null;
+  renderFlowInfo();
   const mine = (state.tracesView = {});
+  box.append(el("div", "note", "Loading runs…"));
   let data;
   try { data = await api(`/api/p/${PID}/traces`); }
-  catch (e) { box.append(el("div", "errbox", e.message)); return; }
+  catch (e) { box.textContent = ""; box.append(el("div", "errbox", e.message)); return; }
   if (state.tracesView !== mine) return;   // another view took the pane meanwhile
+  box.textContent = "";
   if (!data.configured) {
-    box.append(el("div", "note",
-      'No trace directory declared. Add to operonx.toml:\n\n[studio]\ntraces = "/path/your/consumer/writes"'));
-    box.querySelector(".note").style.whiteSpace = "pre-wrap";
+    box.append(paneNote("No traces yet",
+      "The studio reads runs from the directory your trace consumer writes to. Declare it in operonx.toml:",
+      '[studio]\ntraces = "/path/your/consumer/writes"'));
     return;
   }
   if (data.missing) {
-    box.append(el("div", "note", `Declared traces dir does not exist yet: ${data.missing}`));
+    box.append(paneNote("No runs recorded yet",
+      `The declared traces directory does not exist yet — it appears with the first recorded run: ${data.missing}`));
     return;
-  }
-  if (data.langfuse_error) {
-    box.append(el("div", "note", `Langfuse (${data.langfuse}) unreachable: ${data.langfuse_error}`));
   }
   // follow-latest: repaint whenever a newer local run lands
   const topbar = el("div", "tracebar");
+  const h = el("h2", null, "Runs");
+  h.append(el("span", "count", String(data.runs.length)));
+  topbar.append(h);
   const followBar = el("label", "followpin");
   const pin = el("input");
   pin.type = "checkbox";
   pin.checked = state.follow;
   pin.onchange = () => { state.follow = pin.checked; store("follow", state.follow); };
-  followBar.append(pin, " auto-paint the newest run as it arrives");
+  followBar.append(pin, "Open the newest run as it arrives");
+  followBar.title = "Checks the traces directory every few seconds";
   topbar.append(followBar);
-  const refresh = el("button", null, "⟳ refresh");
+  const refresh = Icons.button("refresh", "Refresh", "small");
   refresh.onclick = showTraces;
   topbar.append(refresh);
   box.append(topbar);
+  if (data.langfuse_error) {
+    box.append(el("div", "errbox", `Langfuse (${data.langfuse}) is unreachable: ${data.langfuse_error}`));
+  }
 
   if (!data.runs.length) {
-    box.append(el("div", "note", `No runs recorded yet${data.root ? " in " + data.root : ""}`));
+    box.append(paneNote("No runs recorded yet",
+      `Run the flow once and its trace lands here${data.root ? " — from " + data.root : ""}.`));
     return;
   }
-  const table = el("table");
+  const wrap = el("div", "tablewrap");
+  const table = el("table", "datatable");
   const thead = el("thead");
   const hr = el("tr");
-  for (const h of ["run", "recorded", "activity", "source", ""]) hr.append(el("th", null, h));
+  for (const [h, cls] of [["Run"], ["Recorded"], ["Activity", "hide-sm"], ["", ""]]) hr.append(el("th", cls || null, h));
   thead.append(hr); table.append(thead);
   const tbody = el("tbody");
   for (const r of data.runs) {
-    const tr = el("tr", "run-row");
-    tr.append(el("td", "mono", r.name || r.run));
-    tr.append(el("td", null, r.mtime ? new Date(r.mtime * 1000).toLocaleString() : ""));
-    const act = el("td");
+    const tr = el("tr", "clickable");
+    const name = el("td");
+    name.append(el("div", "runname", r.name || r.run));
+    name.append(el("div", "runsrc", r.source === "langfuse" ? "Langfuse"
+      : `Local${r.also_langfuse ? " + Langfuse" : ""} · ${(r.size / 1024).toFixed(1)} KB`));
+    tr.append(name);
+    const when = el("td", "nowrap");
+    if (r.mtime) {
+      when.append(el("div", null, fmtAgo(r.mtime * 1000)));
+      when.append(el("div", "cellsub", fmtWhen(r.mtime * 1000)));
+    }
+    tr.append(when);
+    const act = el("td", "hide-sm dim nowrap");
     if (r.records !== undefined) {
-      act.append(el("span", "chip", `${r.ops} ops`));
-      act.append(el("span", "chip", `${r.records} rec`));
-      if (r.wall_s != null) act.append(el("span", "chip", `${r.wall_s.toFixed(1)}s`));
-      if (r.errors) act.append(el("span", "chip cbad", `${r.errors} err`));
+      const bits = [`${r.ops} ops`, `${r.records} records`];
+      if (r.wall_s != null) bits.push(`${r.wall_s.toFixed(1)}s`);
+      act.append(bits.join(" · "));
+      if (r.errors) { act.append(" · "); act.append(el("span", "errtext", `${r.errors} errors`)); }
     }
     tr.append(act);
-    tr.append(el("td", null,
-      r.source === "langfuse" ? "langfuse"
-        : `local${r.also_langfuse ? " + langfuse" : ""} · ${(r.size / 1024).toFixed(1)} KB`));
     const actions = el("td", "runacts");
-    const tree = el("button", null, "tree");
-    tree.title = "the run as a tree: what ran for what, in order";
+    const seg = el("span", "seg");
+    const tree = el("button", null, "Tree");
+    tree.type = "button";
+    tree.title = "The run as a tree: what ran for what, in order";
     tree.onclick = (ev) => { ev.stopPropagation(); showRunTree(r.run); };
-    const wf = el("button", null, "workflow");
-    wf.title = "the flow with this run's values on every card";
+    const wf = el("button", null, "Workflow");
+    wf.type = "button";
+    wf.title = "The flow with this run's values on every card";
     wf.onclick = (ev) => { ev.stopPropagation(); showRunWorkflow(r.run); };
-    actions.append(tree, wf);
+    seg.append(tree, wf);
+    actions.append(seg);
     if (r.source !== "langfuse") {
-      const rm = el("button", "danger", "✕");
-      rm.title = "delete this recorded run from disk";
+      const rm = Icons.button("trash", undefined, "", "Delete this recorded run from disk");
       rm.onclick = async (ev) => {
         ev.stopPropagation();
         if (!window.confirm(`Delete run ${r.run} from disk?`)) return;
         try {
           await api(`/api/p/${PID}/trace/${encodeURIComponent(r.run)}/delete`, {});
-          toast(`deleted ${r.run}`);
+          toast(`Deleted ${r.run}`);
           if (state.run && state.run.run === r.run) leaveWorkflow();
           showTraces();
         } catch (e) { toast(e.message, true); }
@@ -2525,7 +2579,37 @@ async function showTraces() {
     tbody.append(tr);
   }
   table.append(tbody);
-  box.append(table);
+  wrap.append(table);
+  box.append(wrap);
+}
+
+/* Time, the way a person reads it: "3h ago" first, the exact local
+ * time beside it. Anything that does not parse is shown as given. */
+function fmtWhen(t) {
+  const d = t instanceof Date ? t : new Date(t);
+  if (isNaN(d.getTime())) return String(t || "");
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false});
+  if (sameDay) return `Today ${time}`;
+  return `${d.toLocaleDateString([], {month: "short", day: "numeric"})}, ${time}`;
+}
+function fmtAgo(t) {
+  const d = t instanceof Date ? t : new Date(t);
+  if (isNaN(d.getTime())) return "";
+  const s = (Date.now() - d.getTime()) / 1000;
+  if (s < 45) return "just now";
+  if (s < 5400) return `${Math.max(1, Math.round(s / 60))} min ago`;
+  if (s < 129600) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+}
+function fmtSpan(a, b) {
+  const s = (new Date(b).getTime() - new Date(a).getTime()) / 1000;
+  if (!isFinite(s) || s < 0) return "";
+  if (s < 1) return `${Math.round(s * 1000)}ms`;
+  if (s < 60) return `${s < 10 ? s.toFixed(1) : Math.round(s)}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+  return `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
 }
 
 /* ── the run, two ways (Traces tab) ─────────────────────────────────
@@ -2573,24 +2657,25 @@ const execsOf = (rows) => rows.filter(r => r.kind === "record");
 
 function runHeader(run, data, mode, extras) {
   const head = el("div", "tlhead");
-  const back = el("button", null, "← runs");
+  const back = Icons.button("back", "Runs", "small ghost", "Back to all runs");
   back.onclick = () => showTraces();
-  head.append(back, el("span", "tltitle mono", run));
+  head.append(back, el("span", "tltitle", run));
   const modes = el("span", "tlmodes");
-  const bt = el("button", mode === "tree" ? "on" : "", "tree");
-  bt.title = "the run as a tree: what ran for what, in order";
+  modes.setAttribute("role", "tablist");
+  const bt = el("button", mode === "tree" ? "on" : "", "Tree");
+  bt.title = "The run as a tree: what ran for what, in order";
   bt.onclick = () => showRunTree(run);
-  const bf = el("button", mode === "workflow" ? "on" : "", "workflow");
-  bf.title = "the flow with this run's values on every card; pick a turn to read one exchange";
+  const bf = el("button", mode === "workflow" ? "on" : "", "Workflow");
+  bf.title = "The flow with this run's values on every card; pick a turn to read one exchange";
   bf.onclick = () => showRunWorkflow(run);
   modes.append(bt, bf);
   head.append(modes);
   for (const x of extras || []) head.append(x);
   const recs = execsOf(data.rows);
-  head.append(el("span", "chip", `${recs.length} executions`));
-  head.append(el("span", "chip", `${fmtMs(data.total_ms)} span`));
+  const stats = el("span", "tlstats", `${recs.length} executions · ${fmtMs(data.total_ms)}`);
   const errs = recs.filter(r => r.status === "error").length;
-  if (errs) head.append(el("span", "chip cbad", `${errs} errors`));
+  if (errs) { stats.append(" · "); stats.append(el("span", "bad", `${errs} errors`)); }
+  head.append(stats);
   return head;
 }
 
@@ -2610,7 +2695,7 @@ async function showRunTree(run) {
   const rows = data.rows, total = Math.max(1, data.total_ms), execs = execsOf(rows);
   const tree = el("div", "rtree");
   const hdr = el("div", "rhdr");
-  for (const h of ["observation", "value", "when · how long"]) hdr.append(el("span", null, h));
+  for (const h of ["Observation", "Value", "When · how long"]) hdr.append(el("span", null, h));
   tree.append(hdr);
   const els = [];
   rows.forEach((r, i) => {
@@ -2663,6 +2748,7 @@ async function showRunTree(run) {
     };
     if (r.kind === "record") {
       r.el = row;
+      row.classList.add("record");
       row.onclick = () => {
         for (const o of els) o.classList.remove("sel");
         row.classList.add("sel");
@@ -2672,10 +2758,14 @@ async function showRunTree(run) {
   });
   box.append(tree);
   state._tlrun = run;
+  renderFlowInfo();
 }
 
 async function renderExecPanel(run, e, execs) {
   const panel = $("#inspector");
+  // picking an execution is asking to read it: bring the panel forward
+  const ps = panelState();
+  if (!ps.on || ps.tab !== "inspect") showSide("inspect");
   panel.classList.remove("off");
   panel.textContent = "";
   const head = el("div", "phead");
@@ -2812,7 +2902,7 @@ async function showRunWorkflow(run) {
 
   const pick = el("select", "turnpick");
   pick.title = "which turn's values the cards show";
-  const whole = el("option", null, "whole run · last values");
+  const whole = el("option", null, "Whole run · last values");
   whole.value = "";
   pick.append(whole);
   for (const t of state.runTurns) {
@@ -2823,8 +2913,8 @@ async function showRunWorkflow(run) {
   pick.onchange = () => { state.runTurn = pick.value || null; render(); renderFlowInfo(); };
   const extras = [pick];
   if (data.errors) {
-    const eb = el("button", "cbad", "error →");
-    eb.title = "select the errored ops one by one";
+    const eb = el("button", "cbad small", "Next error");
+    eb.title = "Select the errored ops one by one";
     eb.onclick = walkErrors;
     extras.push(eb);
   }
@@ -2835,6 +2925,7 @@ async function showRunWorkflow(run) {
   stage.style.display = "";
   box.append(stage);
   state.workflowOn = true;
+  syncChrome();
   render();
   pushView();
   renderFlowInfo();
@@ -2863,6 +2954,7 @@ function walkErrors() {
 function leaveWorkflow() {
   if (!state.workflowOn) return;
   state.workflowOn = false;
+  syncChrome();
   const stage = $("#stage");
   $("#traces").classList.remove("workflow");
   const home = state._stageHome;
@@ -2894,7 +2986,10 @@ $("#btn-expand").onclick = () => {
   const anyOpen = state.expanded.size > 0;
   const count = expandAll(!anyOpen);
   if (!count) toast("no nested graphs here");
-  $("#btn-expand").textContent = anyOpen || !count ? "⊞" : "⊟";
+  const opened = !anyOpen && !!count;
+  Icons.set($("#btn-expand"), opened ? "fold" : "unfold");
+  $("#btn-expand").classList.toggle("active", opened);
+  $("#btn-expand").setAttribute("aria-label", opened ? "Close every nested graph" : "Open every nested graph");
 };
 
 $("#btn-find").onclick = () => openFind();
@@ -2904,8 +2999,10 @@ $("#btn-find").onclick = () => openFind();
 function switchTab(name, opts) {
   leaveWorkflow();
   state.tab = name;
-  for (const b of document.querySelectorAll(".tabs button"))
+  for (const b of document.querySelectorAll(".tabs button")) {
     b.classList.toggle("active", b.dataset.tab === name);
+    b.setAttribute("aria-selected", String(b.dataset.tab === name));
+  }
   $("#stage").style.display = name === "flow" ? "" : "none";
   $("#traces").hidden = name !== "traces";
   $("#jobs").hidden = name !== "jobs";
@@ -2914,21 +3011,58 @@ function switchTab(name, opts) {
   if (name === "traces" && !(opts && opts.quiet)) showTraces();
   if (name === "jobs") showJobs(state.jobSel);
   if (name === "resources") showResources();
+  // on a phone the sheet belongs to the screen it was opened on
+  if (MOBILE.matches && recall("sideTab", "inspect") === "inspect") store(panelKey(), false);
+  syncChrome();
+  applyPanels();
+  // the inspector speaks about what is on screen: a canvas selection
+  // does not follow the user into the Traces list
+  if (name !== "flow" && state.sel) { state.sel = null; refreshSelection(); }
+  renderFlowInfo();
   pushView();
+}
+
+/* The chrome follows what is on screen: the body carries the tab, and
+ * `data-stage` while the canvas shows (the Flow tab, or a run's workflow
+ * view) — the canvas toolbar appears only then. */
+function syncChrome() {
+  document.body.dataset.tab = state.tab;
+  const stageOn = state.tab === "flow" || !!state.workflowOn;
+  if (stageOn) document.body.dataset.stage = "";
+  else delete document.body.dataset.stage;
+  if (!stageOn) { $("#find").hidden = true; $("#legend").hidden = true; }
 }
 
 /* ── the side panel: one panel on the right, two tabs ──────────────
    Inspect is the project summary or the selected op; Assistant is the
    chat. The panel is optional; the tab is remembered. Selecting an op
-   brings the Inspect tab forward, the chat bubble brings Assistant. */
+   brings the Inspect tab forward, the chat bubble brings Assistant.
+   On a phone the panel is a bottom sheet over the canvas: closed by
+   default, opened by a selection, remembered on its own key so a
+   desktop preference never covers a phone screen. Where there is
+   nothing to inspect (Jobs, Resources) the panel is the assistant's or
+   nobody's — an inspector with nothing in it only costs width. */
+
+const MOBILE = window.matchMedia("(max-width: 760px)");
+const panelKey = () => (MOBILE.matches ? "panelRightM" : "panelRight");
+const panelWanted = () => recall(panelKey(), !MOBILE.matches);
+const inspectable = () => state.tab === "flow" || state.tab === "traces";
+
+function panelState() {
+  const tab = recall("sideTab", "inspect");
+  const on = panelWanted() && !(tab === "inspect" && !inspectable());
+  return {on, tab};
+}
 
 function applyPanels() {
-  const on = recall("panelRight", true);
-  const tab = recall("sideTab", "inspect");
+  const {on, tab} = panelState();
   $("#sidebar").classList.toggle("off", !on);
   $("#btn-right").classList.toggle("active", on);
-  for (const b of document.querySelectorAll("#sidetabs button"))
+  $("#btn-right").setAttribute("aria-pressed", String(on));
+  for (const b of document.querySelectorAll("#sidetabs button[data-side]")) {
     b.classList.toggle("active", b.dataset.side === tab);
+    b.setAttribute("aria-selected", String(b.dataset.side === tab));
+  }
   $("#inspector").hidden = tab !== "inspect";
   // `on`: the chat is showing; `panel`: the sidebar is open at all — the
   // floating bubble stays away whenever the panel is open, since the
@@ -2936,24 +3070,35 @@ function applyPanels() {
   document.dispatchEvent(new CustomEvent("oxdock", {detail: {on: on && tab === "assistant", panel: on}}));
 }
 function showSide(tab) {
-  store("panelRight", true);
+  store(panelKey(), true);
   store("sideTab", tab);
+  applyPanels();
+}
+function hideSide() {
+  store(panelKey(), false);
   applyPanels();
 }
 window.oxSide = {
   show: showSide,
-  toggle: () => { store("panelRight", !recall("panelRight", true)); applyPanels(); },
+  state: panelState,
+  toggle: () => {
+    const {on, tab} = panelState();
+    if (on) hideSide();
+    else showSide(tab === "inspect" && !inspectable() ? "assistant" : tab);
+  },
 };
 $("#btn-right").onclick = window.oxSide.toggle;
-for (const b of document.querySelectorAll("#sidetabs button"))
+$("#side-close").onclick = () => { hideSide(); if (state.sel) deselect(); };
+for (const b of document.querySelectorAll("#sidetabs button[data-side]"))
   b.onclick = () => showSide(b.dataset.side);
+MOBILE.addEventListener("change", applyPanels);
 
 /* ── the legend: the visual language, written down on screen ──────── */
 
 function legendSample(cls, dash) {
   const svg = document.createElementNS(SVGNS, "svg");
   svg.setAttribute("viewBox", "0 0 64 12");
-  svg.setAttribute("class", "lsample");
+  svg.setAttribute("class", "wires lsample");
   const d = "M 2 6 L 62 6";
   if (dash) {
     const p = document.createElementNS(SVGNS, "path");
@@ -2970,7 +3115,7 @@ function buildLegend() {
   const box = $("#legend");
   box.textContent = "";
   const title = el("div", "ltitle", "Reading the canvas");
-  const close = el("button", "chat-close", "✕");
+  const close = Icons.button("x", undefined, "chat-close", "Close");
   close.onclick = () => { box.hidden = true; };
   title.append(close);
   box.append(title);
@@ -3008,23 +3153,31 @@ $("#btn-legend").onclick = () => {
 
 $("#pname").onclick = async () => {
   const menu = $("#switcher");
-  if (!menu.hidden) { menu.hidden = true; return; }
+  if (!menu.hidden) { menu.hidden = true; $("#pname").setAttribute("aria-expanded", "false"); return; }
+  $("#pmenu").hidden = true;
   menu.textContent = "";
   try {
     const {projects} = await api("/api/projects");
     for (const p of projects.filter(x => x.exists)) {
       const item = el("button", "switchrow" + (p.id === PID ? " here" : ""));
+      item.setAttribute("role", "menuitem");
       item.append(el("span", "name", p.name));
       item.append(el("span", "path mono", p.root));
       item.onclick = () => { if (p.id !== PID) location.href = `/p/${p.id}`; };
       menu.append(item);
     }
+    const all = el("button", "switchrow switchall", "All projects");
+    all.onclick = () => { location.href = "/"; };
+    menu.append(all);
   } catch (e) { menu.append(el("div", "note", e.message)); }
   menu.hidden = false;
+  $("#pname").setAttribute("aria-expanded", "true");
 };
 document.addEventListener("click", (ev) => {
-  if (!ev.target.closest("#switcher") && !ev.target.closest("#pname"))
+  if (!ev.target.closest("#switcher") && !ev.target.closest("#pname")) {
     $("#switcher").hidden = true;
+    $("#pname").setAttribute("aria-expanded", "false");
+  }
 });
 for (const b of document.querySelectorAll(".tabs button"))
   b.onclick = () => switchTab(b.dataset.tab);
@@ -3200,11 +3353,13 @@ function centerOn(item) {
   });
 })();
 
+syncChrome();
 applyPanels();
 
 async function load(first) {
   const data = await api(`/api/p/${PID}/ir`);
-  $("#pname").textContent = data.name || "project";
+  $("#pname").textContent = "";
+  $("#pname").append(el("span", null, data.name || "project"));
   document.title = `${data.name} — operonx studio`;
   if (data.error) {
     $("#nodes").textContent = "";
@@ -3225,13 +3380,13 @@ async function load(first) {
     box.style.maxWidth = "700px";
     $("#stage").append(box);
     $("#live").classList.add("stale");
-    $("#live-text").textContent = "extraction failed";
+    $("#live-text").textContent = "Extraction failed";
     state.stamp = data.stamp;
     return;
   }
   for (const b of document.querySelectorAll("#stage .errbox")) b.remove();
   $("#live").classList.remove("stale");
-  $("#live-text").textContent = "live";
+  $("#live-text").textContent = "Live";
   state.ir = data;
   state.stamp = data.stamp;
 
@@ -3325,12 +3480,22 @@ function renderProjectMenu() {
 $("#btn-project").onclick = (ev) => {
   ev.stopPropagation();
   const box = $("#pmenu");
-  if (box.hidden) renderProjectMenu();
+  if (box.hidden) { renderProjectMenu(); $("#switcher").hidden = true; }
   box.hidden = !box.hidden;
+  $("#btn-project").setAttribute("aria-expanded", String(!box.hidden));
 };
 document.addEventListener("click", (ev) => {
   const box = $("#pmenu");
-  if (!box.hidden && !box.contains(ev.target)) box.hidden = true;
+  if (!box.hidden && !box.contains(ev.target)) {
+    box.hidden = true;
+    $("#btn-project").setAttribute("aria-expanded", "false");
+  }
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  for (const [menu, btn] of [["#pmenu", "#btn-project"], ["#switcher", "#pname"]]) {
+    if (!$(menu).hidden) { $(menu).hidden = true; $(btn).setAttribute("aria-expanded", "false"); $(btn).focus(); }
+  }
 });
 
 /* ── the Jobs tab: the records the jobs write, and Run / Resume ────────
@@ -3341,17 +3506,20 @@ document.addEventListener("click", (ev) => {
 
 let _jobsPoll = null;
 
+/* A status is a dot and a word — colour for the eye, the word for
+ * everyone else. */
 function statusChip(status) {
-  const cls = status === "ok" ? "cok" : status === "running" ? "crun"
-    : (status === "failed" || status === "stopped" || status === "timeout") ? "cbad" : "";
-  return el("span", "chip " + cls, status || "?");
+  const cls = status === "ok" ? "s-ok" : status === "running" ? "s-run"
+    : (status === "failed" || status === "stopped" || status === "timeout") ? "s-bad"
+    : status === "skipped" ? "s-skip" : "";
+  return el("span", "status " + cls, status || "unknown");
 }
 
 function countsChips(counts) {
   const wrap = el("span", "counts");
   for (const [k, v] of Object.entries(counts || {})) {
     if (!v && k !== "ok") continue;
-    wrap.append(el("span", "chip " + (k === "failed" || k === "timeout" ? "cbad" : k === "empty" ? "cwarn" : ""), `${k} ${v}`));
+    wrap.append(el("span", k === "failed" || k === "timeout" ? "bad" : k === "empty" ? "warn" : "", `${v} ${k}`));
   }
   return wrap;
 }
@@ -3359,19 +3527,22 @@ function countsChips(counts) {
 async function showJobs(sel, runId) {
   const box = $("#jobs");
   const mine = (state.jobsView = {});
+  if (!box.childNodes.length) box.append(el("div", "note", "Loading jobs…"));
   let data;
   try { data = await api(`/api/p/${PID}/jobs`); }
   catch (e) { box.textContent = ""; box.append(el("div", "errbox", e.message)); return; }
   if (state.jobsView !== mine) return;
   box.textContent = "";
   if (!data.jobs.length) {
-    box.append(el("div", "note",
-      'No [[job]] declared. Add one to operonx.toml:\n\n[[job]]\nname   = "score_calls"\ngraph  = "pipeline:score_call"\nsource = "data/calls.jsonl"\nsink   = "out/scores.jsonl"\nkey    = "call_id"'));
-    box.querySelector(".note").style.whiteSpace = "pre-wrap";
+    box.append(paneNote("No jobs declared",
+      "A job runs a graph over a batch of items — one run per item, a record per run. Declare one in the application, or in operonx.toml:",
+      '[[job]]\nname   = "score_calls"\ngraph  = "pipeline:score_call"\nsource = "data/calls.jsonl"\nsink   = "out/scores.jsonl"\nkey    = "call_id"'));
     return;
   }
   const cols = el("div", "jcols");
   const list = el("div", "jlist");
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", "Jobs");
   const detail = el("div", "jdetail");
   cols.append(list, detail);
   box.append(cols);
@@ -3380,79 +3551,112 @@ async function showJobs(sel, runId) {
   state.jobSel = picked.name;
   for (const j of data.jobs) {
     const r = el("div", "jrow" + (j.name === picked.name ? " sel" : ""));
+    r.tabIndex = 0;
+    r.setAttribute("role", "option");
+    r.setAttribute("aria-selected", String(j.name === picked.name));
     const head = el("div", "jhead");
-    head.append(el("span", "jn", j.name), el("span", "chip", j.kind === "runbook" ? "runbook" : j.session));
-    if (j.schedule) head.append(el("span", "chip", j.schedule));
+    head.append(el("span", "jn", j.name));
+    head.append(el("span", "jkind", (j.kind === "runbook" ? "runbook" : j.session) + (j.schedule ? ` · ${j.schedule}` : "")));
     r.append(head);
-    if (j.kind !== "runbook") r.append(el("div", "jio mono", `${j.source || "-"} → ${j.sink || "-"}`));
     if (j.description) r.append(el("div", "jdesc", j.description));
     const last = el("div", "jlast");
-    if (j.last) { last.append(statusChip(j.last.status), countsChips(j.last.counts), el("span", "jwhen", j.last.started || "")); }
-    else last.append(el("span", "jwhen", "never run"));
+    if (j.last) {
+      last.append(statusChip(j.last.status));
+      if (j.last.started) {
+        const w = el("span", "jwhen", fmtAgo(j.last.started));
+        w.title = fmtWhen(j.last.started);
+        last.append(w);
+      }
+    } else last.append(el("span", "jwhen", "Never run"));
     r.append(last);
     r.onclick = () => showJobs(j.name);
+    r.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); showJobs(j.name); } };
     list.append(r);
   }
   await renderJobDetail(detail, picked, runId, mine);
+  // keep the picked job in view on the phone's horizontal strip
+  const on = list.querySelector(".jrow.sel");
+  if (on && MOBILE.matches) on.scrollIntoView({block: "nearest", inline: "nearest"});
 }
 
 async function renderJobDetail(detail, job, runId, mine) {
   detail.textContent = "";
   const bar = el("div", "jbar");
-  bar.append(el("span", "jtitle", job.name));
-  const run = el("button", "primary", "▶ run");
-  run.title = `operonx-run ${job.name} — under the project's interpreter`;
-  run.onclick = () => startJob(job.name, false);
-  bar.append(run);
+  bar.append(el("h2", "jtitle", job.name));
+  const refresh = Icons.button("refresh", undefined, "", "Refresh");
+  refresh.onclick = () => showJobs(job.name, state.jobRun);
+  bar.append(refresh);
   if (job.kind !== "runbook" && job.session !== "stream") {
-    const resume = el("button", null, "↻ resume");
-    resume.title = "only the keys the last run did not finish";
+    const resume = Icons.button("resume", "Resume");
+    resume.title = "Run only the keys the last run did not finish";
     resume.onclick = () => startJob(job.name, true);
     bar.append(resume);
   }
-  const refresh = el("button", null, "⟳");
-  refresh.onclick = () => showJobs(job.name, state.jobRun);
-  bar.append(refresh);
-  bar.append(el("span", "jpath mono", job.record_dir || ""));
+  const run = Icons.button("play", "Run", "primary");
+  run.title = `operonx-run ${job.name} — under the project's interpreter`;
+  run.onclick = () => startJob(job.name, false);
+  bar.append(run);
   detail.append(bar);
+  if (job.description) detail.append(el("p", "jmeta", job.description));
+  const facts = [job.kind === "runbook" ? "Runbook" : `${job.session} job`];
+  if (job.schedule) facts.push(`schedule ${job.schedule}`);
+  if (job.kind !== "runbook") facts.push(`${job.source || "—"} → ${job.sink || "—"}`);
+  detail.append(el("p", "jpath", facts.join("  ·  ") + (job.record_dir ? `\nrecords in ${job.record_dir}` : "")));
+  detail.querySelector(".jpath").style.whiteSpace = "pre-line";
 
   let data;
   try { data = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs`); }
   catch (e) { detail.append(el("div", "errbox", e.message)); return; }
   if (state.jobsView !== mine) return;
-  if (!data.runs.length) { detail.append(el("div", "note", "No runs recorded yet.")); return; }
+  if (!data.runs.length) {
+    detail.append(paneNote("Not run yet", `Press Run to start ${job.name}; its runs and their items appear here.`));
+    return;
+  }
 
-  const table = el("table", "jruns");
+  detail.append(el("h3", "jsection", "Runs"));
+  const wrap = el("div", "tablewrap");
+  const table = el("table", "datatable jruns");
   const hr = el("tr");
-  for (const h of ["run", "status", "counts", "started", "ended"]) hr.append(el("th", null, h));
+  for (const [h, cls] of [["Started"], ["Status"], ["Items"], ["Took", "num"]]) hr.append(el("th", cls || null, h));
   const thead = el("thead"); thead.append(hr); table.append(thead);
   const tbody = el("tbody");
   const open = data.runs.find(r => r.run_id === runId) || data.runs[0];
   state.jobRun = open.run_id;
   for (const r of data.runs) {
-    const tr = el("tr", r.run_id === open.run_id ? "sel" : "");
-    tr.append(el("td", "mono", r.run_id));
+    const tr = el("tr", "clickable" + (r.run_id === open.run_id ? " sel" : ""));
+    const when = el("td");
+    when.append(el("div", "cellmain", r.started ? fmtWhen(r.started) : "—"));
+    when.append(el("div", "cellsub mono", r.run_id));
+    tr.append(when);
     const st = el("td"); st.append(statusChip(r.status)); tr.append(st);
     const ct = el("td");
     if (r.tree) { const c = countsOfTree(r.tree); ct.append(countsChips(c)); }
     else ct.append(countsChips(r.counts));
     tr.append(ct);
-    tr.append(el("td", null, r.started || ""), el("td", null, r.ended || (r.status === "running" ? "…" : "")));
+    tr.append(el("td", "num dim", r.ended ? fmtSpan(r.started, r.ended) : (r.status === "running" ? "running…" : "")));
     tr.onclick = () => showJobs(job.name, r.run_id);
     tbody.append(tr);
   }
   table.append(tbody);
-  detail.append(table);
+  wrap.append(table);
+  detail.append(wrap);
 
   let one;
   try { one = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs/${open.run_id}`); }
   catch (e) { detail.append(el("div", "errbox", e.message)); return; }
   if (state.jobsView !== mine) return;
+  if (one.run.error) detail.append(el("div", "errbox", one.run.error));
   if (one.run.tree) {
+    detail.append(el("h3", "jsection", "Jobs in this run"));
     if ((one.run.wires || []).length) detail.append(renderWires(one.run.wires));
     detail.append(renderRunbookTree(one.run.tree));
-  } else detail.append(renderItems(one.items, one.run));
-  if (one.run.error) detail.append(el("div", "errbox", one.run.error));
+  } else {
+    const n = (one.items || []).length;
+    const h = el("h3", "jsection", "Items");
+    if (n) h.append(el("span", "count", `  ${n}`));
+    detail.append(h);
+    detail.append(renderItems(one.items, one.run));
+  }
 
   // a running run: poll until it settles
   clearTimeout(_jobsPoll);
@@ -3471,15 +3675,15 @@ function countsOfTree(tree) {
 function renderRunbookTree(tree) {
   const box = el("div", "rtree");
   const walk = (n, depth) => {
-    const row = el("div", "rrow" + (n.status === "failed" ? " err" : ""));
-    row.style.paddingLeft = `${8 + depth * 18}px`;
+    const row = el("div", "rrow jobrow" + (n.status === "failed" ? " err" : ""));
+    row.style.paddingLeft = `${12 + depth * 18}px`;
     row.append(el("span", "rico", n.kind === "job" ? "⚙" : n.kind === "parallel" ? "⇉" : "→"));
     // a job and a runbook (operonx >= 1.8) by name; an old tree's
     // sequential / parallel nodes by kind
     row.append(el("span", "rn", n.kind === "job" || n.kind === "runbook" ? n.name : n.kind));
     row.append(statusChip(n.status));
     if (n.ms) row.append(el("span", "rval", `${(n.ms / 1000).toFixed(2)}s`));
-    if (n.error) row.append(el("span", "rval", n.error));
+    if (n.error) row.append(el("span", "rval bad", n.error));
     if (n.run_id) row.append(el("span", "rval mono", n.run_id));
     box.append(row);
     for (const c of n.children || []) walk(c, depth + 1);
@@ -3518,26 +3722,32 @@ function renderWires(wires) {
 function renderItems(items, run) {
   if (!items.length) {
     const c = run.counts || {};
-    return el("div", "note", "fed" in c ? `one run: fed ${c.fed} · sent ${c.sent}${run.trace_id ? " · trace " + run.trace_id : ""}` : "no items recorded");
+    return el("div", "note", "fed" in c ? `One run: fed ${c.fed} · sent ${c.sent}${run.trace_id ? " · trace " + run.trace_id : ""}` : "No items recorded.");
   }
-  const table = el("table", "jitems");
+  const wrap = el("div", "tablewrap");
+  const table = el("table", "datatable jitems");
   const hr = el("tr");
-  for (const h of ["key", "status", "ms", "sent", "attempts", "error", "trace"]) hr.append(el("th", null, h));
+  for (const [h, cls] of [["Key"], ["Status"], ["Took", "num"], ["Sent", "num hide-sm"], ["Attempts", "num hide-sm"], ["Error"], [""]])
+    hr.append(el("th", cls || null, h));
   const thead = el("thead"); thead.append(hr); table.append(thead);
   const tbody = el("tbody");
   for (const it of items) {
     const tr = el("tr", it.status === "failed" || it.status === "timeout" ? "err" : "");
     tr.append(el("td", "mono", it.key));
     const st = el("td"); st.append(statusChip(it.status)); tr.append(st);
-    tr.append(el("td", "num", it.ms ? it.ms.toFixed(0) : ""), el("td", "num", String(it.sent ?? "")),
-              el("td", "num", String(it.attempts ?? "")), el("td", "jerr", it.error || ""));
-    const tc = el("td");
+    tr.append(el("td", "num", it.ms ? fmtMs(it.ms) : ""), el("td", "num hide-sm", String(it.sent ?? "")),
+              el("td", "num hide-sm", String(it.attempts ?? "")));
+    const err = el("td", "jerr", it.error || "");
+    if (it.error) err.title = it.error;
+    tr.append(err);
+    const tc = el("td", "num");
     if (it.trace_id) {
-      const b = el("button", null, "trace");
-      b.title = it.trace_id;
+      const b = el("button", "linkbtn", "Trace");
+      b.append(Icons.svg("right"));
+      b.title = `Open trace ${it.trace_id}`;
       b.onclick = async () => {
         switchTab("traces", {quiet: true});
-        try { await showRunTree(it.trace_id); } catch (e) { toast(`trace ${it.trace_id} not in the traces dir`, true); }
+        try { await showRunTree(it.trace_id); } catch (e) { toast(`Trace ${it.trace_id} is not in the traces directory`, true); }
       };
       tc.append(b);
     }
@@ -3545,13 +3755,14 @@ function renderItems(items, run) {
     tbody.append(tr);
   }
   table.append(tbody);
-  return table;
+  wrap.append(table);
+  return wrap;
 }
 
 async function startJob(name, resume) {
   try {
     const r = await api(`/api/p/${PID}/jobs/${encodeURIComponent(name)}/run`, {resume});
-    toast(`${resume ? "resuming" : "running"} ${name} (pid ${r.pid})`);
+    toast(`${resume ? "Resuming" : "Running"} ${name} (pid ${r.pid})`);
     setTimeout(() => showJobs(name), 1200);
   } catch (e) { toast(e.message, true); }
 }

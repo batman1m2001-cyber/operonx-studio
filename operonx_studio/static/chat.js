@@ -69,17 +69,27 @@
   };
 
   /* ── furniture ── */
-  const fab = el("button", "chat-fab", "✦");
-  fab.title = "operonx assistant";
+  const icon = (name) => (window.Icons ? window.Icons.svg(name) : document.createTextNode(""));
+  const iconBtn = (name, cls, label) => {
+    const b = el("button", cls);
+    b.type = "button";
+    b.append(icon(name));
+    b.title = label;
+    b.setAttribute("aria-label", label);
+    return b;
+  };
+  const fab = iconBtn("spark", "chat-fab", "Ask the operonx assistant");
   const panel = el("div", "chat-panel");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-label", "Assistant");
   const head = el("div", "chat-head");
-  head.append(el("span", "chat-title", "✦ assistant"));
-  const maxi = el("button", "chat-new", "⤢");
-  maxi.title = "expand / shrink";
+  const title = el("span", "chat-title");
+  title.append(icon("spark"), "Assistant");
+  head.append(title);
+  const maxi = iconBtn("expand", "chat-new", "Expand / shrink");
   maxi.onclick = () => panel.classList.toggle("max");
-  const fresh = el("button", "chat-new", "⟳");
-  fresh.title = "new conversation";
-  const close = el("button", "chat-close", "✕");
+  const fresh = iconBtn("new", "chat-new", "New conversation");
+  const close = iconBtn("x", "chat-close", "Close");
   head.append(maxi, fresh, close);
 
   // the left edge drags: code blocks deserve more than 400px
@@ -105,8 +115,9 @@
   const log = el("div", "chat-log");
   const bar = el("form", "chat-bar");
   const input = el("input", "chat-input");
-  input.placeholder = pid ? "ask, or give me a task…" : "ask about your projects…";
-  const send = el("button", "chat-send", "➤");
+  input.placeholder = pid ? "Ask, or give me a task…" : "Ask about your projects…";
+  input.setAttribute("aria-label", "Message the assistant");
+  const send = iconBtn("send", "chat-send", "Send");
   send.type = "submit";
   bar.append(input, send);
   panel.append(head, log, bar);
@@ -129,7 +140,7 @@
   const bubble = (item) => {
     if (item.w === "tool") {
       const chip = el("div", "chat-tool");
-      chip.append(el("b", "", "⚙ " + (item.name || "tool")));
+      chip.append(el("b", "", item.name || "tool"));
       if (item.hint) {
         chip.append(el("span", "", shortHint(item.hint)));
         chip.title = item.hint;
@@ -151,11 +162,11 @@
       renderMd(body, item.text || "");
       msg.append(body);
       msg._body = body;
-      const copy = el("button", "chat-copy", "⧉");
-      copy.title = "copy this reply";
+      const copy = iconBtn("copy", "chat-copy", "Copy this reply");
+      const swap = (name) => { copy.textContent = ""; copy.append(icon(name)); };
       copy.onclick = () => {
         navigator.clipboard?.writeText(item.text || "").then(
-          () => { copy.textContent = "✓"; setTimeout(() => copy.textContent = "⧉", 1200); },
+          () => { swap("check"); setTimeout(() => swap("copy"), 1200); },
           () => {});
       };
       msg.append(copy);
@@ -183,8 +194,11 @@
   let running = null;   // {id, stop} while a turn is in flight
 
   const setBusy = (busy) => {
-    send.textContent = busy ? "■" : "➤";
-    send.title = busy ? "stop" : "send";
+    send.textContent = "";
+    send.append(icon(busy ? "stop" : "send"));
+    send.classList.toggle("busy", busy);
+    send.title = busy ? "Stop" : "Send";
+    send.setAttribute("aria-label", send.title);
     input.disabled = busy;
     fab.classList.toggle("busy", busy);   // panel closed ≠ task forgotten
   };
@@ -197,7 +211,9 @@
     const state = { id: turnId, stop: false };
     running = state;
     setBusy(true);
-    const thinking = el("div", "chat-think", "…");
+    const thinking = el("div", "chat-think");
+    thinking.setAttribute("aria-label", "Working…");
+    thinking.append(el("i"), el("i"), el("i"));
     log.append(thinking);
     scrolled();
 
@@ -361,10 +377,11 @@
     document.body.append(fab);
     // studio.js fires its panel event before this script loads — read
     // the stored preference directly for the initial state
-    const panelOn = store.get("panelRight", true);
-    const initialOn = panelOn && store.get("sideTab", "inspect") === "assistant";
-    dock.hidden = !initialOn;
-    fab.classList.toggle("hidden", panelOn);
+    const side = window.oxSide && window.oxSide.state
+      ? window.oxSide.state()
+      : {on: store.get("panelRight", true), tab: store.get("sideTab", "inspect")};
+    dock.hidden = !(side.on && side.tab === "assistant");
+    fab.classList.toggle("hidden", side.on);
     document.addEventListener("oxdock", (ev) => {
       dock.hidden = !ev.detail.on;
       fab.classList.toggle("hidden", ev.detail.panel ?? ev.detail.on);
