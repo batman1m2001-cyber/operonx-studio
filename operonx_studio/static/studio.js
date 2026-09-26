@@ -3448,8 +3448,10 @@ async function renderJobDetail(detail, job, runId, mine) {
   try { one = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs/${open.run_id}`); }
   catch (e) { detail.append(el("div", "errbox", e.message)); return; }
   if (state.jobsView !== mine) return;
-  if (one.run.tree) detail.append(renderRunbookTree(one.run.tree));
-  else detail.append(renderItems(one.items, one.run));
+  if (one.run.tree) {
+    if ((one.run.wires || []).length) detail.append(renderWires(one.run.wires));
+    detail.append(renderRunbookTree(one.run.tree));
+  } else detail.append(renderItems(one.items, one.run));
   if (one.run.error) detail.append(el("div", "errbox", one.run.error));
 
   // a running run: poll until it settles
@@ -3472,7 +3474,9 @@ function renderRunbookTree(tree) {
     const row = el("div", "rrow" + (n.status === "failed" ? " err" : ""));
     row.style.paddingLeft = `${8 + depth * 18}px`;
     row.append(el("span", "rico", n.kind === "job" ? "⚙" : n.kind === "parallel" ? "⇉" : "→"));
-    row.append(el("span", "rn", n.kind === "job" ? n.name : n.kind));
+    // a job and a runbook (operonx >= 1.8) by name; an old tree's
+    // sequential / parallel nodes by kind
+    row.append(el("span", "rn", n.kind === "job" || n.kind === "runbook" ? n.name : n.kind));
     row.append(statusChip(n.status));
     if (n.ms) row.append(el("span", "rval", `${(n.ms / 1000).toFixed(2)}s`));
     if (n.error) row.append(el("span", "rval", n.error));
@@ -3481,6 +3485,33 @@ function renderRunbookTree(tree) {
     for (const c of n.children || []) walk(c, depth + 1);
   };
   walk(tree, 0);
+  return box;
+}
+
+/* A runbook's wires as it was written: one `>>` line per source, sources
+ * feeding the same jobs on one line — `[a, b] >> c` — as `operonx-run
+ * --show` prints them. */
+function wireLines(wires) {
+  const order = [];
+  const into = new Map();
+  for (const [a, b] of wires) {
+    for (const n of [a, b]) if (!order.includes(n)) order.push(n);
+    if (!into.has(a)) into.set(a, []);
+    into.get(a).push(b);
+  }
+  const side = (xs) => (xs.length === 1 ? xs[0] : `[${xs.join(", ")}]`);
+  const groups = new Map();
+  for (const [src, dsts] of into) {
+    const key = side(dsts);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(src);
+  }
+  return [...groups].map(([dst, srcs]) => `${side(srcs)} >> ${dst}`);
+}
+
+function renderWires(wires) {
+  const box = el("div", "rwires mono");
+  for (const line of wireLines(wires)) box.append(el("div", null, line));
   return box;
 }
 
