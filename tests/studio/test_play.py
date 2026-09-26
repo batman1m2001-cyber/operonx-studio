@@ -266,3 +266,97 @@ def test_the_assistant_plays_and_reruns_through_its_tools(client, project):
     text, _ = _tool(studio, "rerun_op", run=run, op="scored", inputs={"call": {"id": "q", "text": "a b c"}})
     assert text.startswith(f"re-ran scored of {run} in the current code: then error") and "now ok" in text
     assert '"words": 3' in text
+
+
+# ── voice, conditions, the simulated user — P8 ───────────────────────────
+
+VOICE_MAIN = '''
+from operonx.core import END, START, graph, op
+from operonx.app.play import PcmCodec
+from operonx.app.serve import egress, ingress
+
+
+@op(bound="sync")
+def echo(item=None) -> dict:
+    return {"frame": item}
+
+
+@graph
+def voice_flow():
+    src = ingress()
+    e = echo(item=src["item"])
+    out = egress(item=e["frame"])
+    START >> src >> e >> out >> END
+
+
+VOICE = PcmCodec(rate=8000, frame_ms=40)
+'''
+
+
+@pytest.fixture()
+def voice_project(tmp_path: Path) -> Path:
+    root = tmp_path / "voice"
+    root.mkdir()
+    (root / "main.py").write_text(VOICE_MAIN, encoding="utf-8")
+    (root / "operonx.toml").write_text(textwrap.dedent('''
+        [project]
+        name = "voice-demo"
+
+        [[serve]]
+        name  = "voice"
+        kind  = "websocket"
+        path  = "/voice"
+        port  = 8933
+        max_inflight = 64
+        graph = "main:voice_flow"
+        playground = "main:VOICE"
+    '''), encoding="utf-8")
+    return root
+
+
+def _pcm(n, value=500):
+    import base64
+    import struct
+
+    return base64.b64encode(struct.pack(f"<{n}h", *([value] * n))).decode()
+
+
+def test_audio_goes_through_the_studio_and_conditions_ride_along(client, voice_project):
+    pid = _open(client, voice_project)
+    (door,) = client.get(f"/api/p/{pid}/play/doors").json()["doors"]
+    assert door["toys"] == ["voice"] and door["audio"] == {"rate": 8000, "encoding": "pcm16", "frame_ms": 40}
+    assert door["remote_trace"] == []
+
+    got = client.post(f"/api/p/{pid}/play/open", json={
+        "service": "voice", "toy": "voice", "wait": True, "end": True,
+        "send": [{"kind": "audio", "b64": _pcm(640), "rate": 8000}]}).json()
+    outs = [e["msg"] for e in got["events"] if e["t"] == "out"]
+    assert [o["kind"] for o in outs] == ["audio", "audio"]  # 80 ms in, two 40 ms frames back
+
+    # a live session takes audio through /send too
+    cursor = client.get(f"/api/p/{pid}/play/events").json()["cursor"]
+    sid = client.post(f"/api/p/{pid}/play/open", json={"service": "voice", "toy": "voice"}).json()["sid"]
+    _drain(client, pid, cursor, lambda e: e["t"] == "opened" and e["sid"] == sid)
+    assert client.post(f"/api/p/{pid}/play/send",
+                       json={"sid": sid, "msg": {"kind": "audio", "b64": _pcm(320), "rate": 8000}}).json()["ok"]
+    client.post(f"/api/p/{pid}/play/end", json={"sid": sid})
+    _drain(client, pid, cursor, lambda e: e["t"] == "ended" and e["sid"] == sid)
+
+    lost = client.post(f"/api/p/{pid}/play/open", json={
+        "service": "voice", "wait": True, "end": True, "conditions": {"drop": 1.0},
+        "send": [{"kind": "audio", "b64": _pcm(640), "rate": 8000}]}).json()
+    ended = lost["events"][-1]
+    assert ended["t"] == "ended" and ended["dropped"] == 2 and not [e for e in lost["events"] if e["t"] == "out"]
+
+
+def test_simulated_users_are_checked_and_refused_where_they_cannot_talk(client, voice_project):
+    pid = _open(client, voice_project)
+    assert client.post(f"/api/p/{pid}/play/simulate", json={"service": "voice", "llm": "llm:x"}).status_code == 400
+    cursor = client.get(f"/api/p/{pid}/play/events").json()["cursor"]
+    got = client.post(f"/api/p/{pid}/play/simulate", json={
+        "service": "voice", "persona": "someone", "llm": "llm:x", "count": 2}).json()
+    assert len(got["sids"]) == 2
+    events, _ = _drain(client, pid, cursor, lambda e: e["t"] == "refused" and e["sid"] == got["sids"][1])
+    refused = [e for e in events if e["t"] == "refused"]
+    assert {e["sid"] for e in refused} == set(got["sids"])
+    assert refused[0]["reason"] == "a simulated user speaks text, and this door takes voice"

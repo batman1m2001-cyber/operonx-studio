@@ -1740,6 +1740,49 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   .playside { padding-bottom: 40px; }
 }
 
+/* conditions, and where sessions are recorded */
+.playconds.on { border-color: var(--warn); background: color-mix(in srgb, var(--warn-soft) 55%, transparent); }
+.playconds.on summary { color: var(--warn); font-weight: 600; }
+.condgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 14px; margin: 10px 0 4px; }
+.condfield { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); min-width: 0; }
+.condfield.wide { grid-column: 1 / -1; }
+.condfield input, .condfield select { min-height: 32px; padding: 4px 9px; font-size: 12.5px; }
+.playremote { display: flex; gap: 8px; align-items: center; font-size: 12.5px; color: var(--text-2); }
+
+/* the voice toy */
+.playvoice { border: 1px solid var(--border); border-radius: var(--r-md); display: flex; flex-direction: column; min-height: 360px; }
+.voicetop { display: flex; align-items: center; gap: 16px; padding: 16px; border-bottom: 1px solid var(--border-soft); flex-wrap: wrap; }
+.voicemic { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 20px; border-radius: 999px;
+  font-weight: 600; background: var(--accent); border-color: var(--accent); color: #1c1603; }
+.voicemic .icon { width: 16px; height: 16px; }
+.voicemic:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.voicemic.live { background: var(--err); border-color: var(--err); color: #fff; }
+.voicemic.live .icon { display: none; }
+.voicemic.live::before { content: ""; width: 10px; height: 10px; border-radius: 2px; background: #fff; }
+.voicemeter { width: 140px; height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.voicemeter i { display: block; height: 100%; width: 0; background: var(--ok); transition: width 80ms linear; }
+.voiceinfo { font-size: 12.5px; color: var(--text-3); flex: 1; min-width: 200px; }
+.voiceinfo b { color: var(--text-2); }
+.voiceflow { padding: 10px 16px 0; font-size: 12.5px; color: var(--text-2); display: flex; gap: 6px; font-variant-numeric: tabular-nums; }
+.voiceflow .vsep { color: var(--text-3); }
+.voicestatus { padding: 8px 16px 0; font-size: 12.5px; color: var(--text-2); }
+.voicestatus:empty { display: none; }
+.voicelog { min-height: 240px; max-height: 440px; }
+
+/* the simulated user */
+.playsim { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px; }
+.simpersona { min-height: 84px; }
+.simruns { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.simconv { border: 1px solid var(--border); border-radius: var(--r-md); display: flex; flex-direction: column; min-width: 0; }
+.simhead { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
+.simhead b { margin-right: auto; white-space: nowrap; }
+.simstate { display: inline-flex; gap: 8px; align-items: center; color: var(--text-3); }
+.simlog { max-height: 380px; min-height: 120px; }
+@media (max-width: 760px) {
+  .voicemeter { flex: 1; }
+  .simruns { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* re-run one op, from the run view */
 .fielderr { color: var(--err); font-size: 12px; }
 .fielderr:empty { display: none; }

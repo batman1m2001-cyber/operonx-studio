@@ -7,9 +7,14 @@
  * real door ops, gate and trace consumers — so every session is a real
  * run, filed under origin=playground, that can be opened or replayed.
  *
- * Events (opened, out, ended, refused) are polled by cursor while the
- * pane is on screen; re-runs of one op (the run view's "Re-run") wait on
- * the same stream by request id.
+ * Voice captures the microphone, sends it at the door's rate and plays
+ * what comes back; a Simulated user lets an LLM persona hold the
+ * conversation; Conditions make the world worse on purpose (latency,
+ * drops, noise, a failing resource).
+ *
+ * Events (opened, out, said, ended, refused) are polled by cursor while
+ * the pane is on screen; re-runs of one op (the run view's "Re-run") wait
+ * on the same stream by request id.
  */
 
 "use strict";
@@ -25,6 +30,8 @@ const PlayView = (() => {
   const early = new Map();            // results that beat their waiter (a fast op answers
                                       // before the POST that asked for it has returned)
   const sessions = new Map();         // sid → {service, toy, t0, events, ended}
+  const orphans = new Map();          // events for a session not registered yet
+                                      // (a simulated user starts before the POST returns)
   let chatSid = null;                 // the chat session on screen
   let ui = null;                      // the rendered pane's live parts
 
@@ -57,7 +64,14 @@ const PlayView = (() => {
     }
     if (e.t === "bridge_restart" || e.t === "bridge_exit") { if (ui) ui.note(e); return; }
     const s = sessions.get(e.sid);
-    if (!s) return;
+    if (!s) {
+      if (e.sid) {
+        if (!orphans.has(e.sid)) orphans.set(e.sid, []);
+        orphans.get(e.sid).push(e);
+        if (orphans.size > 50) orphans.delete(orphans.keys().next().value);
+      }
+      return;
+    }
     s.events.push(e);
     if (e.t === "ended" || e.t === "refused") s.ended = e;
     if (ui) ui.event(e, s);
@@ -76,19 +90,33 @@ const PlayView = (() => {
   /* ── sessions ── */
   async function open(body) {
     if (cursor == null) cursor = (await api(`/api/p/${PID}/play/events`)).cursor;
-    const {sid} = await api(`/api/p/${PID}/play/open`, body);
-    sessions.set(sid, {service: body.service, toy: body.toy, t0: Date.now(), events: [], ended: null});
+    // every toy runs under the pane's conditions and trace choice
+    const {sid} = await api(`/api/p/${PID}/play/open`, {...(ui ? ui.extras() : {}), ...body});
+    adopt(sid, {service: body.service, toy: body.toy});
     startPolling();
     return sid;
   }
 
+  /* a session the page will show: register it, and hand it whatever
+   * arrived before it was registered */
+  function adopt(sid, info) {
+    const s = Object.assign({t0: Date.now(), events: [], ended: null}, info);
+    sessions.set(sid, s);
+    const early2 = orphans.get(sid) || [];
+    orphans.delete(sid);
+    for (const e of early2) dispatch(e);
+    return s;
+  }
+
+  /* the connection query: what the rows say, with `{uuid}` minted fresh */
   function queryOf() {
     const q = {};
     for (const row of (ui && ui.queryRows()) || []) if (row.k) q[row.k] = row.v;
     v.query = v.query || {};
     v.query[v.service] = q;
     save();
-    return q;
+    const fresh = Math.random().toString(16).slice(2, 10);
+    return Object.fromEntries(Object.entries(q).map(([k, x]) => [k, String(x).replaceAll("{uuid}", fresh)]));
   }
 
   /* ── rendering ── */
@@ -115,7 +143,8 @@ const PlayView = (() => {
     }
     if (!door()) v.service = (usable[0] || doors[0]).service;
     const d = door();
-    if (!d.toys.includes(v.toy)) v.toy = d.toys[0] || "";
+    const toyList = [...d.toys, ...(d.toys.includes("chat") ? ["simulated"] : [])];
+    if (!toyList.includes(v.toy)) v.toy = toyList[0] || "";
     save();
 
     const pick = el("select", "montarget");
@@ -128,13 +157,14 @@ const PlayView = (() => {
     }
     pick.onchange = () => { v.service = pick.value; chatSid = null; save(); show(); };
     const toys = el("span", "tlmodes");
-    for (const t of d.toys) {
-      const b = el("button", t === v.toy ? "on" : "", t === "chat" ? "Chat" : t === "form" ? "Form" : t);
+    const TOY = {chat: "Chat", form: "Form", voice: "Voice", simulated: "Simulated user"};
+    for (const t of toyList) {
+      const b = el("button", t === v.toy ? "on" : "", TOY[t] || t);
       b.type = "button";
       b.onclick = () => { v.toy = t; save(); show(); };
       toys.append(b);
     }
-    const state = el("span", "playstate");
+    const stateEl = el("span", "playstate");
     const restart = Icons.button("refresh", undefined, "", "Restart the playground (reloads the project's code)");
     restart.onclick = async () => {
       restart.disabled = true;
@@ -142,7 +172,7 @@ const PlayView = (() => {
       catch (err) { toast(err.message, true); }
       restart.disabled = false;
     };
-    head.append(pick, toys, state, restart);
+    head.append(pick, toys, stateEl, restart);
 
     const desc = el("div", "playdoor");
     desc.append(el("span", "mono", `${d.kind}${d.kind === "http" ? " POST" : ""} ${d.path || ""}`),
@@ -171,8 +201,8 @@ const PlayView = (() => {
     conn.append(el("summary", null, d.custom_hook ? "Connection — query the service's on_session hook reads"
                                                    : "Connection — the graph's inputs, as the query string"));
     const rows = el("div", "playrows");
-    const saved = (v.query && v.query[d.service]) || {};
-    const keys = [...new Set([...(d.custom_hook ? [] : d.inputs), ...Object.keys(saved)])];
+    const saved = (v.query && v.query[d.service]) || {...(d.query || {})};
+    const keys = [...new Set([...(d.custom_hook ? [] : d.inputs), ...Object.keys(d.query || {}), ...Object.keys(saved)])];
     const rowEls = [];
     const addRow = (k = "", val = "") => {
       const r = el("div", "playrow");
@@ -182,13 +212,68 @@ const PlayView = (() => {
       rows.append(r);
       rowEls.push([ki, vi]);
     };
-    for (const k of keys) addRow(k, saved[k] ?? "");
+    for (const k of keys) addRow(k, saved[k] ?? (d.query || {})[k] ?? "");
     if (!keys.length) addRow();
     const more = el("button", "linkbtn", "+ add a key");
     more.type = "button";
     more.onclick = () => addRow();
     conn.append(rows, more);
     main.append(conn);
+
+    // conditions: the world made worse on purpose, per service
+    const cv = Object.assign({}, (v.conds || {})[d.service] || {});
+    const cond = el("details", "playconn playconds");
+    const csum = el("summary");
+    cond.append(csum);
+    const cgrid = el("div", "condgrid");
+    const field = (key, label, hint, attrs) => {
+      const w = el("label", "condfield");
+      w.append(el("span", null, label));
+      const i = el("input", "mono");
+      Object.assign(i, {type: "number", ...(attrs || {})});
+      i.value = cv[key] ?? "";
+      i.placeholder = hint;
+      i.oninput = () => { cv[key] = i.value === "" ? undefined : Number(i.value); keep(); };
+      w.append(i);
+      cgrid.append(w);
+    };
+    field("latency_ms", "Latency before each message (ms)", "0", {min: 0, step: 50});
+    field("drop", "Messages lost (%)", "0", {min: 0, max: 100, step: 5});
+    if (d.audio) {
+      field("noise_dbfs", "Noise in the audio (dBFS)", "off, e.g. -35", {max: 0, step: 5});
+      field("silence_ms", "Silence before the first word (ms)", "0", {min: 0, step: 250});
+    }
+    const fw = el("label", "condfield wide");
+    fw.append(el("span", null, "Resources that fail"));
+    const fi = el("input", "mono");
+    fi.placeholder = "e.g. llm:inhouse, tts:default";
+    fi.setAttribute("list", "play-resources");
+    fi.value = (cv.fail || []).join(", ");
+    fi.oninput = () => { cv.fail = fi.value.split(",").map(x => x.trim()).filter(Boolean); keep(); };
+    const dl = el("datalist"); dl.id = "play-resources";
+    for (const [name, det] of Object.entries(((state.ir || {}).resources || {}).details || {})) {
+      const o = el("option"); o.value = `${det.category || "resource"}:${name}`; dl.append(o);
+    }
+    fw.append(fi, dl);
+    cgrid.append(fw);
+    cond.append(cgrid);
+    const paintCond = () => {
+      const on = Object.entries(cv).filter(([k, x]) => x !== undefined && x !== "" && !(Array.isArray(x) && !x.length) && x !== 0).length;
+      csum.textContent = on ? `Conditions — ${on} on` : "Conditions — latency, lost messages, noise, failing resources";
+      cond.classList.toggle("on", !!on);
+    };
+    function keep() { v.conds = v.conds || {}; v.conds[d.service] = cv; save(); paintCond(); }
+    paintCond();
+    main.append(cond);
+    let remoteBox = null;
+    if ((d.remote_trace || []).length) {
+      const lab = el("label", "playremote");
+      remoteBox = el("input"); remoteBox.type = "checkbox";
+      remoteBox.checked = !!(v.remote || {})[d.service];
+      remoteBox.onchange = () => { v.remote = v.remote || {}; v.remote[d.service] = remoteBox.checked; save(); };
+      lab.append(remoteBox, `Also send these sessions to ${d.remote_trace.join(", ")} (off: recorded here only)`);
+      main.append(lab);
+    }
 
     // the events column, and recent sessions under it
     const evHead = el("div", "stitle", "Events");
@@ -197,11 +282,17 @@ const PlayView = (() => {
     const recent = el("div", "playrecent");
     side.append(evHead, evList, el("div", "stitle", "Recent sessions"), recent);
 
+    let beats = null;
     ui = {
       queryRows: () => rowEls.map(([k, x]) => ({k: k.value.trim(), v: x.value})),
+      extras() {
+        const c = {};
+        for (const [k, x] of Object.entries(cv)) if (x !== undefined && x !== "") c[k] = k === "drop" ? x / 100 : x;
+        return {conditions: c, remote: !!(remoteBox && remoteBox.checked)};
+      },
       status(got) {
-        state.textContent = got.alive ? (got.live.length ? `${got.live.length} live` : "ready") : "stopped";
-        state.className = "playstate " + (got.alive ? "on" : "");
+        stateEl.textContent = got.alive ? (got.live.length ? `${got.live.length} live` : "ready") : "stopped";
+        stateEl.className = "playstate " + (got.alive ? "on" : "");
       },
       note(e) {
         evRow(e.t === "bridge_exit" ? "stopped" : "restart", e.t === "bridge_exit" ? `the bridge exited: ${e.text || ""}` : e.reason || "restarted", "", e.t === "bridge_exit");
@@ -212,7 +303,15 @@ const PlayView = (() => {
         const at = `+${Math.max(0, e.at - s.at0).toFixed(2)}s`;
         if (e.t === "opened") evRow("opened", `${s.toy || ""} session on ${s.service}`, at);
         else if (e.t === "refused") evRow("refused", e.reason, at, true);
-        else if (e.t === "out" && !(s.toy === "chat" && e.msg.kind === "text")) evRow(e.msg.kind, short(e.msg.value ?? e.msg.text ?? `${e.msg.size} bytes`), at);
+        else if (e.t === "out" && e.msg.kind === "json" && (e.msg.value || {}).event === "heartbeat") {
+          // a heartbeat says the line is alive: one row that counts them
+          if (!beats) { beats = evRow("heartbeat", "", at); beats.n = 0; }
+          beats.n += 1;
+          beats.querySelector(".evtext").textContent = `× ${beats.n}`;
+        }
+        else if (e.t === "out" && e.msg.kind !== "audio" && !((s.toy === "chat" || s.toy === "simulated") && e.msg.kind === "text"))
+          evRow((e.msg.value || {}).event || e.msg.kind, short(e.msg.value ?? e.msg.text ?? `${e.msg.size} bytes`), at);
+        else if (e.t === "said" && s.toy !== "simulated") evRow("said", short(e.text), at);
         else if (e.t === "ended") evEnded(e, at);
         if (s.render) s.render(e);
       },
@@ -319,6 +418,8 @@ const PlayView = (() => {
 
     let chatView = null;
     if (v.toy === "chat") chatView = chatToy(main, d);
+    else if (v.toy === "voice") voiceToy(main, d);
+    else if (v.toy === "simulated") simToy(main, d);
     else formToy(main, d);
     loadRecent();
     startPolling();
@@ -438,6 +539,298 @@ const PlayView = (() => {
         paintSess();
       },
     };
+  }
+
+  /* Voice: the microphone in, at the door's own rate; what comes back is
+   * played (a jitter buffer of ~120 ms) and its text written down. The
+   * capture runs in an AudioWorklet, is averaged down to the door's rate,
+   * and goes out in ~200 ms batches the codec cuts into the door's frames. */
+  const WORKLET = "class OxCap extends AudioWorkletProcessor { process(inputs) { const c = inputs[0] && inputs[0][0]; "
+    + "if (c) this.port.postMessage(c.slice(0)); return true; } } registerProcessor('ox-cap', OxCap);";
+  let audioCtx = null;
+  let workletReady = false;
+
+  function voiceToy(main, d) {
+    const rate = (d.audio || {}).rate || 16000;
+    const wrap = el("div", "playvoice");
+    const top = el("div", "voicetop");
+    const mic = el("button", "voicemic");
+    mic.type = "button";
+    const label = el("span", null, "Start the call");
+    mic.append(Icons.svg("play"), label);
+    const meter = el("div", "voicemeter");
+    meter.setAttribute("aria-hidden", "true");
+    const lvl = el("i");
+    meter.append(lvl);
+    const info = el("div", "voiceinfo");
+    info.append(el("b", null, `${rate / 1000} kHz`), el("span", null, " · headphones recommended — a speaker talks into the microphone"));
+    top.append(mic, meter, info);
+    const status = el("div", "voicestatus");
+    // how much went each way: the loop is closed when both move
+    const flow = el("div", "voiceflow");
+    const sentEl = el("span", null, "0.0 s spoken");
+    const heardEl = el("span", null, "0.0 s heard back");
+    flow.append(sentEl, el("span", "vsep", "·"), heardEl);
+    let sentS = 0, heardS = 0;
+    const log = el("div", "playlog voicelog");
+    log.append(el("div", "note playempty", "Start the call and speak. What the service says is played and written here."));
+    wrap.append(top, flow, status, log);
+    main.append(wrap);
+
+    let stream = null, node = null, sid = null, pending = [], sending = false, timer = null, nextAt = 0;
+    const playing = new Set();
+
+    async function start() {
+      mic.disabled = true;
+      status.textContent = "";
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true,
+                                                                    noiseSuppression: true, autoGainControl: true}});
+      } catch (err) { status.textContent = `The microphone is not available: ${err.message}`; mic.disabled = false; return; }
+      audioCtx = audioCtx || new AudioContext();
+      if (audioCtx.state === "suspended") await audioCtx.resume();
+      if (!workletReady) {
+        await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], {type: "application/javascript"})));
+        workletReady = true;
+      }
+      const src = audioCtx.createMediaStreamSource(stream);
+      node = new AudioWorkletNode(audioCtx, "ox-cap");
+      const mute = audioCtx.createGain();
+      mute.gain.value = 0;
+      src.connect(node); node.connect(mute); mute.connect(audioCtx.destination);
+      const ratio = audioCtx.sampleRate / rate;
+      let carry = new Float32Array(0);
+      node.port.onmessage = (ev) => {
+        const x = ev.data;
+        let sum = 0;
+        for (let i = 0; i < x.length; i++) sum += x[i] * x[i];
+        lvl.style.width = `${Math.min(100, Math.sqrt(sum / x.length) * 500).toFixed(0)}%`;
+        const buf = new Float32Array(carry.length + x.length);
+        buf.set(carry); buf.set(x, carry.length);
+        const n = Math.floor(buf.length / ratio);
+        const out = new Int16Array(n);
+        for (let j = 0; j < n; j++) {
+          const a = Math.floor(j * ratio), b = Math.max(a + 1, Math.floor((j + 1) * ratio));
+          let acc = 0;
+          for (let i = a; i < b; i++) acc += buf[i];
+          out[j] = Math.max(-32768, Math.min(32767, Math.round((acc / (b - a)) * 32767)));
+        }
+        carry = buf.slice(Math.floor(n * ratio));
+        pending.push(out);
+      };
+      try { sid = await open({service: d.service, toy: "voice", query: queryOf()}); }
+      catch (err) { status.textContent = err.message; stopCapture(); idle(); return; }
+      sessions.get(sid).render = render;
+      timer = setInterval(flush, 200);
+      label.textContent = "End the call";
+      sentS = heardS = 0;
+      sentEl.textContent = "0.0 s spoken"; heardEl.textContent = "0.0 s heard back";
+      mic.classList.add("live");
+      mic.disabled = false;
+      log.querySelector(".playempty")?.remove();
+    }
+
+    const b64 = (int16) => {
+      const bytes = new Uint8Array(int16.buffer);
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      return btoa(bin);
+    };
+
+    async function flush() {
+      if (box.hidden && sid) { end(); return; }   // the pane was left: the call ends with it
+      if (sending || !pending.length || !sid) return;
+      const total = pending.reduce((n, a) => n + a.length, 0);
+      const all = new Int16Array(total);
+      let o = 0;
+      for (const a of pending) { all.set(a, o); o += a.length; }
+      pending = [];
+      sending = true;
+      sentS += total / rate;
+      sentEl.textContent = `${sentS.toFixed(1)} s spoken`;
+      try { await api(`/api/p/${PID}/play/send`, {sid, msg: {kind: "audio", b64: b64(all), rate}}); }
+      catch { /* the session ended under us; its ended event says how */ }
+      sending = false;
+    }
+
+    function play(m) {
+      if (!audioCtx) return;
+      const raw = atob(m.b64 || "");
+      const n = raw.length >> 1;
+      if (!n) return;
+      const f = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        let x = raw.charCodeAt(2 * i) | (raw.charCodeAt(2 * i + 1) << 8);
+        if (x >= 0x8000) x -= 0x10000;
+        f[i] = x / 32768;
+      }
+      const buf = audioCtx.createBuffer(1, n, m.rate || rate);
+      buf.copyToChannel(f, 0);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(audioCtx.destination);
+      nextAt = Math.max(audioCtx.currentTime + 0.12, nextAt);
+      src.start(nextAt);
+      nextAt += buf.duration;
+      heardS += buf.duration;
+      heardEl.textContent = `${heardS.toFixed(1)} s heard back`;
+      playing.add(src);
+      src.onended = () => playing.delete(src);
+      wrap.dataset.played = String((Number(wrap.dataset.played) || 0) + 1);
+    }
+    function hush() {
+      for (const x of playing) { try { x.stop(); } catch { /* already done */ } }
+      playing.clear();
+      nextAt = 0;
+    }
+
+    function render(e) {
+      if (e.t === "out") {
+        const m = e.msg;
+        if (m.kind === "audio") {
+          play(m);
+          if (m.text) { log.append(el("div", "chat-msg from-bot", m.text)); log.scrollTop = log.scrollHeight; }
+        } else if (m.kind === "text") {
+          log.append(el("div", "chat-msg from-bot", m.text));
+        } else if (m.kind === "json" && (m.value || {}).event === "interrupt") {
+          hush();   // the caller spoke over it: stop what is queued
+          log.append(el("div", "note", "— interrupted —"));
+        }
+        if (m.end) { status.textContent = "The service ended the call."; end(); }
+      } else if (e.t === "refused") {
+        status.textContent = `Refused: ${e.reason}`;
+        stopCapture(); idle();
+      } else if (e.t === "ended") {
+        status.textContent = e.status === "error" ? `The call failed — ${e.error}` : `Call ended · ${fmtMs(e.ms)}`;
+        const o = el("button", "linkbtn", "Open run");
+        o.type = "button";
+        o.onclick = () => performUi("open_run", {run: e.trace_id, quiet: true});
+        status.append(" ", o);
+        stopCapture(); idle();
+      }
+    }
+
+    async function end() {
+      stopCapture();
+      await flush();
+      const was = sid;
+      sid = null;
+      if (was) api(`/api/p/${PID}/play/end`, {sid: was}).catch(() => {});
+    }
+    function stopCapture() {
+      clearInterval(timer);
+      timer = null;
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      stream = null;
+      if (node) { node.port.onmessage = null; node.disconnect(); node = null; }
+      lvl.style.width = "0";
+    }
+    function idle() {
+      label.textContent = "Start the call";
+      mic.classList.remove("live");
+      mic.disabled = false;
+      sid = null;
+    }
+    mic.onclick = () => (sid ? end() : start());
+  }
+
+  /* Simulated user: an LLM persona plays the other side, N at once. */
+  function simToy(main, d) {
+    const sv = Object.assign({persona: "", llm: "", turns: 6, count: 1, first: "user"}, (v.sim || {})[d.service] || {});
+    const keep = () => { v.sim = v.sim || {}; v.sim[d.service] = sv; save(); };
+    const card = el("div", "playsim");
+    const pl = el("label", "condfield wide");
+    pl.append(el("span", null, "Who the user is, and what they want"));
+    const persona = el("textarea", "playjson simpersona");
+    persona.placeholder = "A busy parent who wants to move tomorrow's class to Friday evening, and is short on patience.";
+    persona.value = sv.persona;
+    persona.oninput = () => { sv.persona = persona.value; keep(); };
+    pl.append(persona);
+    const row = el("div", "condgrid");
+    const llms = Object.entries(((state.ir || {}).resources || {}).details || {}).filter(([, det]) => det.category === "llm").map(([n]) => `llm:${n}`);
+    const lf = el("label", "condfield");
+    lf.append(el("span", null, "Played by"));
+    const li = el("input", "mono");
+    li.setAttribute("list", "sim-llms");
+    li.placeholder = llms[0] || "llm:…";
+    li.value = sv.llm || llms[0] || "";
+    li.oninput = () => { sv.llm = li.value.trim(); keep(); };
+    const ldl = el("datalist"); ldl.id = "sim-llms";
+    for (const n of llms) { const o = el("option"); o.value = n; ldl.append(o); }
+    lf.append(li, ldl);
+    const num = (key, text, min, max) => {
+      const f = el("label", "condfield");
+      f.append(el("span", null, text));
+      const i = el("input", "mono");
+      Object.assign(i, {type: "number", min, max});
+      i.value = sv[key];
+      i.oninput = () => { sv[key] = Math.max(min, Math.min(max, Number(i.value) || min)); keep(); };
+      f.append(i);
+      return f;
+    };
+    const ff = el("label", "condfield");
+    ff.append(el("span", null, "Who speaks first"));
+    const fs = el("select");
+    for (const [k, t] of [["user", "the user"], ["service", "the service"]]) { const o = el("option", null, t); o.value = k; o.selected = sv.first === k; fs.append(o); }
+    fs.onchange = () => { sv.first = fs.value; keep(); };
+    ff.append(fs);
+    row.append(lf, num("turns", "Turns, at most", 1, 20), num("count", "Conversations at once", 1, 10), ff);
+    const acts = el("div", "priceacts");
+    const go = el("button", "primary", "Start");
+    go.type = "button";
+    acts.append(go);
+    const err = el("div", "fielderr");
+    card.append(pl, row, acts, err);
+    const runs = el("div", "simruns");
+    main.append(card, runs);
+
+    go.onclick = async () => {
+      if (!persona.value.trim()) { err.textContent = "Describe the user first."; persona.focus(); return; }
+      if (!li.value.trim()) { err.textContent = "Name the LLM that plays them."; li.focus(); return; }
+      err.textContent = "";
+      go.disabled = true;
+      if (cursor == null) cursor = (await api(`/api/p/${PID}/play/events`)).cursor;
+      let got;
+      try {
+        got = await api(`/api/p/${PID}/play/simulate`, {service: d.service, persona: persona.value.trim(), llm: li.value.trim(),
+          turns: sv.turns, count: sv.count, first: sv.first, query: queryOf(), ...ui.extras()});
+      } catch (e2) { err.textContent = e2.message; go.disabled = false; return; }
+      runs.textContent = "";
+      got.sids.forEach((sid, i) => conversation(sid, i + 1));
+      startPolling();
+      go.disabled = false;
+    };
+
+    function conversation(sid, n) {
+      const c = el("div", "simconv");
+      const head = el("div", "simhead");
+      const st = el("span", "simstate", "starting…");
+      head.append(el("b", null, `Conversation ${n}`), st);
+      const log = el("div", "playlog simlog");
+      c.append(head, log);
+      runs.append(c);
+      let stream = null, failed = false;
+      adopt(sid, {service: d.service, toy: "simulated", render(e) {
+        if (e.t === "opened") st.textContent = "talking…";
+        else if (e.t === "said") { stream = null; log.append(el("div", "chat-msg from-me", e.text)); }
+        else if (e.t === "out" && e.msg.kind === "text") {
+          if (stream && e.at - stream.at < 0.4) { stream.at = e.at; stream.el.textContent += " " + e.msg.text; }
+          else { stream = {at: e.at, el: el("div", "chat-msg from-bot", e.msg.text)}; log.append(stream.el); }
+        } else if (e.t === "refused") { st.textContent = "refused"; log.append(el("div", "chat-msg from-err", e.reason)); }
+        else if (e.t === "error") { failed = true; log.append(el("div", "chat-msg from-err", e.text)); }
+        else if (e.t === "ended") {
+          // the persona failing is the conversation failing, however the run ended
+          const bad = failed || e.status === "error";
+          st.textContent = "";
+          st.append(el("span", "status " + (bad ? "s-bad" : "s-ok"), bad ? "failed" : `done · ${fmtMs(e.ms)}`));
+          const o = el("button", "linkbtn", "Open run"); o.type = "button";
+          o.onclick = () => performUi("open_run", {run: e.trace_id, quiet: true});
+          st.append(o);
+          if (e.error) log.append(el("div", "chat-msg from-err", e.error));
+        }
+        log.scrollTop = log.scrollHeight;
+      }});
+    }
   }
 
   /* Form: one JSON payload in, the reply shown. */

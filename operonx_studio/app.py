@@ -1869,6 +1869,10 @@ def build_studio_app(recents: Optional[Recents] = None):
         for key in ("service", "toy", "variant"):
             if body.get(key):
                 msg[key] = str(body[key])
+        if isinstance(body.get("conditions"), dict):
+            msg["conditions"] = body["conditions"]
+        if body.get("remote"):
+            msg["remote"] = True
         if isinstance(body.get("query"), dict):
             msg["query"] = {str(k): str(v) for k, v in body["query"].items()}
         if isinstance(body.get("send"), list):
@@ -1889,6 +1893,33 @@ def build_studio_app(recents: Optional[Recents] = None):
             out["events"] = [e for e in events if e.get("sid") == msg["sid"]]
         return JSONResponse(out)
 
+    @app.post("/api/p/{pid}/play/simulate")
+    async def play_simulate(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Simulated users: *count* conversations at once, each an LLM
+        persona holding a session for up to *turns* turns. Their messages
+        arrive as ``said`` events, the service's as ``out`` events."""
+        import uuid as _uuid
+
+        persona, llm = str(body.get("persona") or "").strip(), str(body.get("llm") or "").strip()
+        if not persona or not llm or not body.get("service"):
+            return JSONResponse({"error": "a simulated user needs a service, a persona and an llm"}, status_code=400)
+        count = max(1, min(int(body.get("count") or 1), 10))
+        bridge, err = await _play(pid)
+        if err is not None:
+            return err
+        cursor = bridge.base + len(bridge.events)
+        sids = []
+        for _ in range(count):
+            sid = _uuid.uuid4().hex[:12]
+            sids.append(sid)
+            await bridge.send({"op": "simulate", "sid": sid, "service": str(body["service"]), "persona": persona,
+                               "llm": llm, "turns": int(body.get("turns") or 6),
+                               "first": "service" if body.get("first") == "service" else "user",
+                               "query": body.get("query") if isinstance(body.get("query"), dict) else {},
+                               "conditions": body.get("conditions") if isinstance(body.get("conditions"), dict) else {},
+                               "remote": bool(body.get("remote")), "quiet_ms": body.get("quiet_ms") or 1200})
+        return JSONResponse({"sids": sids, "cursor": cursor})
+
     @app.post("/api/p/{pid}/play/send")
     async def play_send(pid: str, body: Dict[str, Any]) -> JSONResponse:
         bridge = play.peek(pid)
@@ -1896,8 +1927,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         if bridge is None or sid not in bridge.live:
             return JSONResponse({"error": "no such open session"}, status_code=404)
         msg = body.get("msg")
-        if not isinstance(msg, dict) or msg.get("kind") not in ("text", "json", "bytes"):
-            return JSONResponse({"error": "a message is {kind: text|json|bytes, …}"}, status_code=400)
+        if not isinstance(msg, dict) or msg.get("kind") not in ("text", "json", "bytes", "audio"):
+            return JSONResponse({"error": "a message is {kind: text|json|bytes|audio, …}"}, status_code=400)
         await bridge.send({"op": "send", "sid": sid, "msg": msg})
         return JSONResponse({"ok": True})
 
