@@ -1569,6 +1569,81 @@ def build_studio_app(recents: Optional[Recents] = None):
                                     env=env, start_new_session=True)
         return JSONResponse({"started": name, "pid": proc.pid, "resume": resume, "log": str(log)})
 
+    # ── services control: listeners, up or down, started from here ──────
+    from .services import ServiceProcs, listeners_of, probe_port
+
+    procs = ServiceProcs()
+    import atexit as _atexit
+
+    _atexit.register(procs.stop_all)  # what the studio started ends with it
+
+    def _listeners(watcher: ProjectWatcher):
+        result = watcher.refresh_swr()
+        services = [s for s in ((result.ir or {}).get("services") or []) if s.get("kind")]
+        return listeners_of(services)
+
+    def _health(host: str, port: int) -> Optional[Dict[str, Any]]:
+        """GET /health on a running listener — the admin route most apps mount."""
+        import urllib.error
+        import urllib.request
+
+        target = "127.0.0.1" if host in ("", "0.0.0.0", "::") else host
+        t0 = time.perf_counter()
+        try:
+            with urllib.request.urlopen(f"http://{target}:{port}/health", timeout=1.0) as res:
+                body = res.read(2000).decode("utf-8", "replace")
+                return {"status": res.status, "ms": round((time.perf_counter() - t0) * 1000, 1), "body": body[:300]}
+        except urllib.error.HTTPError as exc:
+            return {"status": exc.code, "ms": round((time.perf_counter() - t0) * 1000, 1)}
+        except Exception:  # noqa: BLE001 — a websocket-only port has no /health, and that is fine
+            return None
+
+    @app.get("/api/p/{pid}/services")
+    def services_list(pid: str) -> JSONResponse:
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        out = []
+        for lst in _listeners(watcher):
+            st = procs.state(pid, lst)
+            st["detail"] = lst.services
+            # only a listener with an http route can have /health; a 404 says it has none
+            web = any(x.get("kind") in ("http", "asgi") for x in lst.services)
+            health = _health(lst.host, lst.port) if st["running"] and web else None
+            st["health"] = health if health and health.get("status") != 404 else None
+            out.append(st)
+        return JSONResponse({"listeners": out})
+
+    def _listener(pid: str, key: str):
+        watcher = _watcher(pid)
+        if watcher is None:
+            return None, None
+        return watcher, next((x for x in _listeners(watcher) if x.key == key), None)
+
+    @app.post("/api/p/{pid}/services/start")
+    def services_start(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        watcher, lst = _listener(pid, str(body.get("key") or ""))
+        if lst is None:
+            return JSONResponse({"error": "no such listener"}, status_code=404)
+        try:
+            got = procs.start(pid, lst, interpreter=watcher.interpreter(), root=watcher.root,
+                              env=watcher._child_env())
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return JSONResponse(got)
+
+    @app.post("/api/p/{pid}/services/stop")
+    def services_stop(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        key = str(body.get("key") or "")
+        if not procs.stop(pid, key):
+            return JSONResponse({"error": "the studio did not start anything running there — stop it where "
+                                          "it was started"}, status_code=409)
+        return JSONResponse({"stopped": key})
+
+    @app.get("/api/p/{pid}/services/log")
+    def services_log(pid: str, key: str) -> JSONResponse:
+        return JSONResponse({"key": key, "log": procs.log_tail(pid, key)})
+
     # ── evals and datasets ───────────────────────────────────────────────
     # An eval is a job (operonx.app.evals): its records are job records
     # whose items carry verdicts and whose run.json carries the pass rate.
