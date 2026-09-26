@@ -26,6 +26,7 @@ import subprocess
 import re
 import os
 import asyncio
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -735,12 +736,43 @@ def build_studio_app(recents: Optional[Recents] = None):
         root = parent / name
         if root.exists():
             return JSONResponse({"error": f"{root} already exists"}, status_code=400)
+        template = str(body.get("template") or "")
+        if template and template != "blank":
+            from operonx_project.templates import TEMPLATES, TemplateError, create
+
+            try:
+                create(root, template, name=name)
+            except TemplateError as exc:
+                return JSONResponse({"error": str(exc)}, status_code=400)
+            ref = recents.touch(root)
+            # the first minutes: its eval and jobs run now, so Runs and Evals
+            # open on something green instead of an empty page
+            first = TEMPLATES[template].get("first_runs") or []
+            if first:
+                watcher = _watcher(ref.id)
+                py = watcher.interpreter() if watcher else sys.executable
+                logs = root / ".operonx" / "first-runs.log"
+                logs.parent.mkdir(parents=True, exist_ok=True)
+                script = " && ".join(f'"{py}" -m operonx.cli.run {n}' for n in first)
+                with logs.open("ab") as fh:
+                    subprocess.Popen(["/bin/sh", "-c", script], cwd=str(root), stdout=fh, stderr=subprocess.STDOUT,
+                                     env=watcher._child_env() if watcher else dict(os.environ), start_new_session=True)
+            return JSONResponse({"id": ref.id, "name": ref.name, "root": str(root), "template": template,
+                                 "first_runs": first})
         try:
             scaffold(root, name=name, with_llm=bool(body.get("with_llm")))
         except ScaffoldError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         ref = recents.touch(root)
         return JSONResponse({"id": ref.id, "name": ref.name, "root": str(root)})
+
+    @app.get("/api/templates")
+    def templates_list() -> JSONResponse:
+        from operonx_project.templates import describe
+
+        return JSONResponse({"templates": [{"id": "blank", "title": "A blank project",
+                                            "description": "One small graph behind an HTTP door — the smallest start."},
+                                           *describe()]})
 
     @app.get("/api/fs")
     def fs(path: str = "~") -> JSONResponse:

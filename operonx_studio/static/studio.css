@@ -1998,6 +1998,19 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .aledit .condfield { position: relative; }
 .linkbtn.danger { color: var(--err); }
 
+/* ── the template gallery (new project) ───────────────────────────── */
+.tplgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.tplcard { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; min-height: 0;
+  white-space: normal; height: auto;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); }
+.tplcard b { font-size: 13px; }
+.tplcard span { font-size: 12px; color: var(--text-3); font-weight: 400; line-height: 1.4; }
+.tplcard:hover { border-color: var(--border-strong); }
+/* with the gallery above it, the folder browser gives up height so the
+   buttons stay on screen */
+.modal:has(.tplgrid) .browser { height: 170px; max-height: 24vh; }
+.tplcard.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--accent-soft); }
+
 /* ── toast: one shared voice for action feedback ──────────────────── */
 #toast {
   position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 12px);

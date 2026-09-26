@@ -236,10 +236,37 @@ $("#btn-open").onclick = () => modal("Open project", (box, close) => {
   });
 });
 
-$("#btn-new").onclick = () => modal("New project", (box, close) => {
+$("#btn-new").onclick = () => modal("New project", async (box, close) => {
+  // start from something that already works: each template runs offline,
+  // with a service, a dataset, an eval and a job
+  const pickField = el("div", "field");
+  pickField.append(el("label", null, "Start from"));
+  const gallery = el("div", "tplgrid");
+  gallery.setAttribute("role", "radiogroup");
+  pickField.append(gallery);
+  box.append(pickField);
+  let chosen = "http-api";
+  try {
+    const {templates} = await api("/api/templates");
+    for (const t of templates) {
+      const card = el("button", "tplcard" + (t.id === chosen ? " sel" : ""));
+      card.type = "button";
+      card.setAttribute("role", "radio");
+      card.setAttribute("aria-checked", String(t.id === chosen));
+      card.append(el("b", null, t.title), el("span", null, t.description));
+      card.onclick = () => {
+        chosen = t.id;
+        for (const c of gallery.children) { c.classList.toggle("sel", c === card); c.setAttribute("aria-checked", String(c === card)); }
+        if (!name.value || name.dataset.auto) { name.value = t.id === "blank" ? "" : t.id.replace(/-/g, "_"); name.dataset.auto = "1"; }
+      };
+      gallery.append(card);
+    }
+  } catch { /* the blank project, then */ chosen = "blank"; }
   const nameField = el("div", "field");
   nameField.append(el("label", null, "Project name"));
   const name = el("input"); name.type = "text"; name.placeholder = "my_project";
+  name.value = "http_api"; name.dataset.auto = "1";
+  name.oninput = () => { delete name.dataset.auto; };
   name.setAttribute("aria-label", "Project name");
   nameField.append(name);
   box.append(nameField);
@@ -247,7 +274,7 @@ $("#btn-new").onclick = () => modal("New project", (box, close) => {
   browser(box, (p) => current = p);
   box.querySelector(".browser").previousElementSibling.querySelector("label").textContent = "Create inside";
   footer(box, close, "Create project", async () => {
-    const {id} = await api("/api/new", {path: current, name: name.value});
+    const {id} = await api("/api/new", {path: current, name: name.value, template: chosen});
     location.href = `/p/${id}`;
   });
 });
