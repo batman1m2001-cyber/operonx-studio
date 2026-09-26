@@ -643,7 +643,7 @@ Branches (nothing pushed, nothing released):
 | studio worktree `/home/thanglq/operonx-studio-redesign` | `feat/platform` (off `redesign/ui`) | P1 68a27e8 · P2 350a00a · P3 f13fad5 · P4 91e0776 · P5 a7581bc 0f0bd55 · P6 53356f4 · P7 0f8d0e8 · P8 705620a · P9 e31555a 8b062c1 a561b49 3ab88d8 cd8a294 76a06a3 + (this commit) |
 | callbot `/home/thanglq/educa-reminder-agent` | `feat/runs-by-origin` (checked out) | 7ce0a17 (runs by origin, $0 inhouse) · 8faad98 (key_ops) · 18cbf8c c297519 (playground TelcoCodec) |
 
-Done and tested (operonx 2229 tests, studio 464, callbot codec 4; screenshots desktop/tablet/phone):
+Done and tested (operonx 2223 passed + 15 Postgres tests run against a live DSN, studio 464, callbot codec 4; screenshots desktop/tablet/phone):
 
 - **P0** origin tags, application-level `trace=`, jobs always traced, git version, `.operonx/runs` origin layout.
 - **P1** `operonx.telemetry.runs` RunStore (files+sqlite index, sqlite, langfuse read-only), `run_store:` resource, retention; studio reads only through it; Settings page (retention, preview, save).
