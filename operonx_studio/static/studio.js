@@ -1073,6 +1073,9 @@ function deselect() {
  * graph is, its doors, and the painted run if any. */
 function renderFlowInfo() {
   if (state.sel) return;
+  // an execution is open in the run's tree: a code reload (the assistant
+  // editing, say) must not wipe the panel the user is working in
+  if (state.tab === "traces" && !state.workflowOn && state.execPanelRun && state.execPanelRun === state._tlrun) return;
   const panel = $("#inspector");
   panel.textContent = "";
   panel.scrollTop = 0;
@@ -2783,8 +2786,11 @@ async function showRunTree(run) {
   box.textContent = "";
   const mine = (state.tracesView = {});
   let data;
+  state.execPanelRun = null;
+  state.execSel = null;
   try { data = await loadRunTree(run); } catch (e) { box.append(el("div", "note", e.message)); return; }
   if (state.tracesView !== mine) return;
+  state.runSummary = data.summary || null;
   box.append(runHeader(run, data, "tree"));
   const rows = data.rows, total = Math.max(1, data.total_ms), execs = execsOf(rows);
   const tree = el("div", "rtree");
@@ -2861,6 +2867,7 @@ async function showRunTree(run) {
  * what it received, what it cost, its other runs, and what fed it. */
 async function renderExecPanel(run, e, execs) {
   state.execSel = `${e.op} @ ${e.ctx || "main"} (+${fmtMs(e.start_ms)})`;
+  state.execPanelRun = run;
   pushView();
   const panel = $("#inspector");
   // picking an execution is asking to read it: bring the panel forward
@@ -2979,6 +2986,11 @@ async function renderExecPanel(run, e, execs) {
     const priced = "cost_usd" in outs || "usage" in outs;
     valueZones(vbox, match.inputs, match.outputs, scratchKeyOf,
                {outputsFirst: true, hide: priced ? ["usage", "cost_usd", "model_used"] : []});
+    // the op again, with these inputs, in the current code
+    const sm = state.runSummary;
+    if (typeof PlayView !== "undefined" && sm && (sm.service || sm.job) && state._tlrun === run) {
+      panel.insertBefore(PlayView.rerunSection(run, e, match), costSec.nextSibling);
+    }
     if (priced) {
       costSec.append(el("div", "stitle", "Cost and usage"));
       const u = outs.usage || {};
@@ -3121,6 +3133,7 @@ function registerPane(name, pane) { PANES[name] = pane; }
 function switchTab(name, opts) {
   leaveWorkflow();
   state.tab = name;
+  if (name !== "traces") { state.execPanelRun = null; state.execSel = null; }
   for (const b of document.querySelectorAll(".tabs button, [data-tabbtn]")) {
     const on = (b.dataset.tab || b.dataset.tabbtn) === name;
     b.classList.toggle("active", on);
@@ -3592,7 +3605,7 @@ async function performUi(kind, args) {
     if (state.tab !== "traces") switchTab("traces", {quiet: true});
     if (args.lens) { state.lens = args.lens; store("lens", args.lens); }
     await (args.mode === "workflow" ? showRunWorkflow(args.run) : showRunTree(args.run));
-    toast(`Assistant opened run ${args.run}`);
+    if (!args.quiet) toast(`Assistant opened run ${args.run}`);
   } else if (kind === "open_monitor") {
     store(`monitor:${PID}`, {target: args.target || "", range: args.days >= 30 ? "30d" : args.days <= 1 ? "24h" : "7d"});
     switchTab("monitor");

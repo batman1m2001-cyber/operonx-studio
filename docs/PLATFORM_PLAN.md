@@ -639,11 +639,11 @@ Branches (nothing pushed, nothing released):
 
 | Repo | Branch | Commits |
 |---|---|---|
-| operonx `/home/thanglq/Operon` | `feat/runs-records` | P0 c32ee0c · P1 9b5d430 · P2 488193c · P4 fa32993 (key_ops) |
-| studio worktree `/home/thanglq/operonx-studio-redesign` | `feat/platform` (off `redesign/ui`) | P1 68a27e8 · P2 350a00a · P3 f13fad5 · P4 91e0776 · P5 a7581bc + (this commit) |
+| operonx `/home/thanglq/Operon` | `feat/runs-records` | P0 c32ee0c · P1 9b5d430 · P2 488193c · P4 fa32993 (key_ops) · P6 630e77f 31b43b4 8ecd986 7e291ae (playground bridge) |
+| studio worktree `/home/thanglq/operonx-studio-redesign` | `feat/platform` (off `redesign/ui`) | P1 68a27e8 · P2 350a00a · P3 f13fad5 · P4 91e0776 · P5 a7581bc 0f0bd55 · P6 (this commit) |
 | callbot `/home/thanglq/educa-reminder-agent` | `feat/runs-by-origin` (checked out) | 7ce0a17 (runs by origin, $0 inhouse) · 8faad98 (key_ops) |
 
-Done and tested (operonx 2168 tests, studio 437, screenshots desktop/tablet/phone):
+Done and tested (operonx 2180 tests, studio 442, screenshots desktop/tablet/phone):
 
 - **P0** origin tags, application-level `trace=`, jobs always traced, git version, `.operonx/runs` origin layout.
 - **P1** `operonx.telemetry.runs` RunStore (files+sqlite index, sqlite, langfuse read-only), `run_store:` resource, retention; studio reads only through it; Settings page (retention, preview, save).
@@ -653,6 +653,9 @@ Done and tested (operonx 2168 tests, studio 437, screenshots desktop/tablet/phon
 
 - **P5** the assistant's hands: `operonx_studio/mcp.py` (stdio MCP server — list_runs, open_run, op_values, monitor, compare_runs, select_op, run_job, set_llm_price; read-only chat mode gets only the read tools); per-turn git snapshot (`git stash create`) → `changes` event with only the agent's edits (the user's uncommitted work is in the snapshot, never attributed to the agent); chat renders it as a diff card (files ±, folded diff, Keep / Undo); "undo everything this conversation changed" (first snapshot + union of live cards' files; hidden once every card is undone); `studio:` links in replies are buttons (run / op — by node or function name / tab / monitor), http links open a new tab; the page follows what the agent opens (`/ui/actions`); ops whose code changed are tagged on the canvas. Verified end to end on a scratch git copy of ex17: Undo and Undo-all leave `git status` clean.
 
-Then P6 playground → P7 evals → P8 voice + simulated user → P9 (Postgres/Mongo stores, prompt workbench, review queue, services control, alerts, templates, left rail).
+- **P6** the playground. operonx: `operonx.app.play` — a bridge process (`python -m operonx.app.play`, `operonx-play`) in the project's own interpreter, JSON lines on stdio; a session is a `BoundedSession` through the service's real `ServeRunner` gate (`on_session`, variants, input contract; `session.meta["playground"]` is True), `serve_session`, door ops and trace consumers, tagged `origin=playground` + `toy`, carrying `playground_script` and `playground_query` for replay; codecs (`Codec.to_door/from_door`; built-in `JsonCodec` for http → Form, `TextCodec` for websocket → Chat + Form; `Service(playground=MyCodec)` for a door's own protocol; no codec, no toy); re-run one op of a service's or a job's graph with given inputs, recorded as its own run (`toy=rerun`, `rerun_of`); a door with no consumers still records locally; stdout protocol kept clean at the fd level. Studio: `operonx_studio/play.py` (one bridge per project, event buffer polled by cursor, restarts itself when the code changed and nothing is live, idle stop after 15 min), `/play/*` routes (doors, open/send/end, events, rerun-plan, rerun, restart), the Playground tab (door picker, Chat toy with streamed items merged into one reply that says how many items it holds, Form toy with JSON payload, connection query rows, Events column, Recent sessions with Open / Replay), "Re-run" in the run view's execution panel (recorded inputs editable; values the graph never kept — transient streams, media — are named and left to fill; Then / Now side by side; the panel survives a code reload), assistant tools `rerun_op` and `play` (not in read-only mode).
+  - Scope note: **replay covers playground runs**. A production service run cannot be replayed from its trace, because door items flow through transient ports that operonx deliberately never records (audio frames); replaying production traffic needs an opt-in recording of ingress items — a P9 candidate, not done here.
+
+Then P7 evals → P8 voice + simulated user → P9 (Postgres/Mongo stores, prompt workbench, review queue, services control, alerts, templates, left rail).
 
 Dev environment: studio on :8766 = `OPERONX_STUDIO_RETENTION=off PYTHONPATH=/home/thanglq/operonx-studio-redesign:/home/thanglq/Operon /home/thanglq/operonx-studio/.venv/bin/python -m operonx_studio.cli --no-open --host 127.0.0.1 --port 8766`; the lhr tunnel points at it. Screenshot scripts in the session scratchpad (`shot_p2.py` … `shot_p4.py`). Release order when asked: operonx 1.9.0 (PR from `feat/runs-records`, user merges), then bump pins in studio (`operonx>=1.9.0`) and callbot.

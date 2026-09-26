@@ -178,6 +178,66 @@ def t_price(s: Studio, a: Dict[str, Any]) -> str:
     return ("applied\n" if got.get("applied") else "preview (not written)\n") + (got.get("diff") or "no change")
 
 
+def t_rerun_op(s: Studio, a: Dict[str, Any]) -> str:
+    """Re-run one op of a recorded run in the current code, and say how it
+    compares with what it did in that run."""
+    run, op = str(a["run"]), str(a["op"])
+    plan = s.call("/play/rerun-plan", run=run, op=op)
+    ex = plan["executions"][0]
+    inputs = a.get("inputs")
+    if inputs is None:
+        if ex["missing"]:
+            return (f"{op}'s recorded inputs are missing {', '.join(ex['missing'])} (never kept: a transient "
+                    f"stream or too large). Recorded: {json.dumps(ex['inputs'], default=str)[:2000]}. "
+                    "Call again with `inputs` filled in.")
+        inputs = ex["inputs"]
+    got = s.call("/play/rerun", {"run": run, "op": op, "inputs": inputs, "wait": True})
+    then = f"{ex['status']} in {(ex.get('duration_ms') or 0):.1f} ms"
+    if ex["status"] == "error":
+        then += f" ({(str(ex.get('error') or '').strip().splitlines() or [''])[-1]})"
+    now = f"{got.get('status')} in {got.get('ms', 0):.1f} ms"
+    lines = [f"re-ran {op} of {run} in the current code: then {then}; now {now}"]
+    if got.get("error"):
+        lines.append(f"error now: {got['error']}")
+    lines.append("outputs now: " + json.dumps(got.get("outputs"), default=str)[:6000])
+    if ex["status"] != "error":
+        lines.append("outputs then: " + json.dumps(ex.get("outputs"), default=str)[:6000])
+    lines.append(f"(recorded as run {got.get('trace_id')}, origin playground)")
+    return "\n".join(lines)
+
+
+def t_play(s: Studio, a: Dict[str, Any]) -> str:
+    """Drive a service's door like a client: send messages, wait for the
+    session to end, report what came back."""
+    msgs = []
+    for m in a.get("messages") or []:
+        if isinstance(m, str):
+            msgs.append({"kind": "text", "text": m})
+        elif isinstance(m, dict) and m.get("kind") in ("text", "json"):
+            msgs.append(m)
+        else:
+            msgs.append({"kind": "json", "value": m})
+    body = {"service": a["service"], "toy": a.get("toy") or "chat", "query": a.get("query") or {},
+            "send": msgs, "end": True, "wait": True, "timeout": float(a.get("timeout") or 120)}
+    if a.get("replay_of"):
+        body = {"replay_of": a["replay_of"], "wait": True}
+    got = s.call("/play/open", body)
+    events = got.get("events") or []
+    out = []
+    for e in events:
+        if e.get("t") == "out":
+            m = e["msg"]
+            out.append("  ← " + (m.get("text") if m.get("kind") == "text" else json.dumps(m.get("value"), default=str))[:2000])
+        elif e.get("t") == "refused":
+            out.append(f"refused: {e.get('reason')}")
+        elif e.get("t") == "ended":
+            out.insert(0, f"session {e.get('status')} in {e.get('ms', 0):.0f} ms, run {e.get('trace_id')}"
+                          + (f" — {e['error']}" if e.get("error") else ""))
+    if not any(e.get("t") in ("ended", "refused") for e in events):
+        out.insert(0, "the session had not ended when the wait ran out")
+    return "\n".join(out) or "nothing came back"
+
+
 def _schema(props: Dict[str, Any], required: List[str] = ()) -> Dict[str, Any]:
     return {"type": "object", "properties": props, "required": list(required)}
 
@@ -214,6 +274,20 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "description": "Start one of the application's jobs (or runbooks); resume=true reruns only "
                                "what the last run did not finish.",
                 "schema": _schema({"name": _S, "resume": {"type": "boolean"}}, ["name"])},
+    "rerun_op": {"fn": t_rerun_op,
+                 "description": "Re-run one op of a recorded run in the CURRENT code, with the inputs it had "
+                                "(or `inputs` you give), and compare with what it did then. The way to check a fix "
+                                "to one op without making a call or running a job. The result is recorded as a "
+                                "playground run.",
+                 "schema": _schema({"run": _S, "op": _S, "inputs": {"type": "object"}}, ["run", "op"])},
+    "play": {"fn": t_play,
+             "description": "Drive one of the application's services like a client, in the playground: send "
+                            "`messages` (strings are text; objects are JSON items) through its real door, then "
+                            "report what came back. `query` is the connection's query string (what on_session "
+                            "reads). `replay_of` replays a recorded playground run instead. Each session is a "
+                            "recorded run.",
+             "schema": _schema({"service": _S, "messages": {"type": "array"}, "query": {"type": "object"},
+                                "toy": _S, "replay_of": _S, "timeout": _N}, ["service"])},
     "set_llm_price": {"fn": t_price,
                       "description": "Preview (apply=false) or write (apply=true) an LLM resource's prices in "
                                      "USD per 1M tokens, in the project's resources file. 0 declares a free "

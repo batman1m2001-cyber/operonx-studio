@@ -25,6 +25,7 @@ import json
 import subprocess
 import re
 import os
+import asyncio
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -1420,8 +1421,10 @@ def build_studio_app(recents: Optional[Recents] = None):
         lines.append(
             "\n## Working in the studio\n"
             "You have studio tools (mcp__studio__*): list_runs, open_run, op_values, monitor, "
-            "compare_runs, select_op, run_job, set_llm_price. Prefer them to reading run files: "
-            "they answer from the run store, and what you open appears on the user's screen.\n"
+            "compare_runs, select_op, run_job, rerun_op, play, set_llm_price. Prefer them to reading run "
+            "files: they answer from the run store, and what you open appears on the user's screen.\n"
+            "To check a change: rerun_op re-runs the op a recorded run failed or was slow in, in the "
+            "current code; play drives a service through its real door like a client would.\n"
             "In your replies, link to studio things with markdown links the page turns into buttons: "
             "[text](studio:run/<run id>), [text](studio:op/<op name>), [text](studio:tab/<flow|traces|"
             "monitor|jobs|resources|settings>), [text](studio:monitor/<service|job>/<name>). "
@@ -1600,6 +1603,206 @@ def build_studio_app(recents: Optional[Recents] = None):
         new_files = [str(f) for f in body.get("new_files") or [] if ".." not in str(f)]
         done = _chat.undo(watcher.root, sha, files, new_files)
         return JSONResponse({"restored": done})
+
+    # ── the playground: toys on a service's doors ───────────────────────
+    # A bridge process per project (operonx.app.play, in the project's own
+    # interpreter) runs the sessions; these routes relay to it and the
+    # page polls what it says by cursor, like the assistant.
+    from .play import BridgeError, Bridges
+
+    play = Bridges()
+
+    async def _play(pid: str):
+        watcher = _watcher(pid)
+        if watcher is None:
+            return None, JSONResponse({"error": "unknown project"}, status_code=404)
+        try:
+            return await play.get(pid, watcher), None
+        except BridgeError as exc:
+            bridge = play.peek(pid)
+            return None, JSONResponse({"error": str(exc), "log": bridge.status()["log"] if bridge else []},
+                                      status_code=503)
+
+    async def _wait_for(bridge: Any, cursor: int, pred, timeout: float) -> List[Dict[str, Any]]:
+        """Events from *cursor* until one matches *pred* (or the time is up)."""
+        seen: List[Dict[str, Any]] = []
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            got = await bridge.poll(cursor)
+            cursor = got["cursor"]
+            seen.extend(got["events"])
+            if any(pred(e) for e in got["events"]):
+                break
+        return seen
+
+    def _rerun_target(summary: Any) -> Optional[Dict[str, Any]]:
+        """Where a recorded run's graph lives: its service or its job."""
+        if summary.job:
+            return {"job": summary.job}
+        if summary.service:
+            return {"service": summary.service, "variant": summary.variant}
+        return None
+
+    @app.get("/api/p/{pid}/play/doors")
+    async def play_doors(pid: str) -> JSONResponse:
+        bridge, err = await _play(pid)
+        if err is not None:
+            return err
+        try:
+            got = await bridge.ask({"op": "describe"}, timeout=60)
+        except (BridgeError, asyncio.TimeoutError) as exc:
+            return JSONResponse({"error": str(exc) or "the bridge did not answer",
+                                 "log": bridge.status()["log"]}, status_code=503)
+        return JSONResponse({"doors": got.get("doors") or [], "bridge": bridge.status()})
+
+    @app.get("/api/p/{pid}/play/events")
+    async def play_events(pid: str, cursor: Optional[int] = None) -> JSONResponse:
+        """What the bridge said since *cursor*; without one, just the cursor."""
+        bridge = play.peek(pid)
+        if bridge is None:
+            return JSONResponse({"events": [], "cursor": 0, "alive": False, "live": []})
+        if cursor is None:
+            return JSONResponse({"events": [], "cursor": bridge.base + len(bridge.events),
+                                 "alive": bridge.alive, "live": sorted(bridge.live)})
+        return JSONResponse(await bridge.poll(max(0, int(cursor))))
+
+    @app.post("/api/p/{pid}/play/open")
+    async def play_open(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Open a session on a service's door. ``replay_of`` fills the
+        service, the connection query and the messages from a recorded
+        playground run; ``wait`` holds the answer until the session ends."""
+        import uuid as _uuid
+
+        msg: Dict[str, Any] = {"op": "open", "sid": _uuid.uuid4().hex[:12]}
+        replay = str(body.get("replay_of") or "")
+        if replay:
+            got = _record(pid, replay)
+            if isinstance(got, JSONResponse):
+                return got
+            md = got[1].summary.metadata or {}
+            if "playground_script" not in md or not got[1].summary.service:
+                return JSONResponse({"error": "only a playground run records what was sent; "
+                                              "this one can't be replayed"}, status_code=400)
+            msg.update({"service": got[1].summary.service, "toy": md.get("toy"),
+                        "query": md.get("playground_query") or {}, "variant": got[1].summary.variant,
+                        "send": [m for m in md["playground_script"] if m.get("kind") != "bytes"],
+                        "end": True, "replay_of": replay})
+        for key in ("service", "toy", "variant"):
+            if body.get(key):
+                msg[key] = str(body[key])
+        if isinstance(body.get("query"), dict):
+            msg["query"] = {str(k): str(v) for k, v in body["query"].items()}
+        if isinstance(body.get("send"), list):
+            msg["send"] = body["send"]
+        if "end" in body:
+            msg["end"] = bool(body["end"])
+        if not msg.get("service"):
+            return JSONResponse({"error": "which service?"}, status_code=400)
+        bridge, err = await _play(pid)
+        if err is not None:
+            return err
+        cursor = bridge.base + len(bridge.events)
+        await bridge.send(msg)
+        out: Dict[str, Any] = {"sid": msg["sid"], "cursor": cursor}
+        if body.get("wait"):
+            events = await _wait_for(bridge, cursor, lambda e: e.get("sid") == msg["sid"]
+                                     and e.get("t") in ("ended", "refused"), float(body.get("timeout") or 120))
+            out["events"] = [e for e in events if e.get("sid") == msg["sid"]]
+        return JSONResponse(out)
+
+    @app.post("/api/p/{pid}/play/send")
+    async def play_send(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        bridge = play.peek(pid)
+        sid = str(body.get("sid") or "")
+        if bridge is None or sid not in bridge.live:
+            return JSONResponse({"error": "no such open session"}, status_code=404)
+        msg = body.get("msg")
+        if not isinstance(msg, dict) or msg.get("kind") not in ("text", "json", "bytes"):
+            return JSONResponse({"error": "a message is {kind: text|json|bytes, …}"}, status_code=400)
+        await bridge.send({"op": "send", "sid": sid, "msg": msg})
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/p/{pid}/play/end")
+    async def play_end(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        bridge = play.peek(pid)
+        if bridge is not None and bridge.alive:
+            await bridge.send({"op": "end", "sid": str(body.get("sid") or "")})
+        return JSONResponse({"ok": True})
+
+    @app.get("/api/p/{pid}/play/rerun-plan")
+    def play_rerun_plan(pid: str, run: str, op: str) -> JSONResponse:
+        """What re-running *op* of *run* would use: where its graph lives,
+        each execution's recorded inputs (values the graph never kept are
+        named, so the page asks for them) and what it did then."""
+        got = _record(pid, run)
+        if isinstance(got, JSONResponse):
+            return got
+        target = _rerun_target(got[1].summary)
+        if target is None:
+            return JSONResponse({"error": "this run's graph is not a declared service or job, "
+                                          "so there is nothing to re-run it in"}, status_code=400)
+        execs = [r for r in got[0] if r.get("op_name") == op]
+        if not execs:
+            return JSONResponse({"error": f"no op {op!r} in this run"}, status_code=404)
+
+        def missing(value: Any) -> bool:
+            return (isinstance(value, str) and value.startswith("<") and "transient" in value) or \
+                (isinstance(value, dict) and ("$unserializable" in value or "$media_ref" in value))
+
+        return JSONResponse({"target": target, "op": op, "executions": [{
+            "ctx": r.get("ctx"), "inputs": r.get("inputs") or {},
+            "missing": sorted(k for k, v in (r.get("inputs") or {}).items() if missing(v)),
+            "outputs": r.get("outputs") or {}, "status": r.get("status") or "ok",
+            "error": r.get("error"), "duration_ms": r.get("duration_ms"),
+        } for r in execs[:50]]})
+
+    @app.post("/api/p/{pid}/play/rerun")
+    async def play_rerun(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Re-run one op with given (or recorded) inputs. ``wait`` returns the
+        result; otherwise it arrives as a ``rerun`` event with this ``rid``."""
+        import uuid as _uuid
+
+        run, op = str(body.get("run") or ""), str(body.get("op") or "")
+        target: Optional[Dict[str, Any]] = None
+        inputs = body.get("inputs")
+        if run:
+            got = _record(pid, run)
+            if isinstance(got, JSONResponse):
+                return got
+            target = _rerun_target(got[1].summary)
+            if inputs is None:
+                first = next((r for r in got[0] if r.get("op_name") == op), None)
+                inputs = (first or {}).get("inputs") or {}
+        for key in ("service", "job"):
+            if body.get(key):
+                target = {key: str(body[key])}
+        if target is None or not op:
+            return JSONResponse({"error": "re-run needs an op and a run (or a service or job)"}, status_code=400)
+        if not isinstance(inputs, dict):
+            return JSONResponse({"error": "inputs must be an object"}, status_code=400)
+        bridge, err = await _play(pid)
+        if err is not None:
+            return err
+        msg = {"op": "rerun", "id": _uuid.uuid4().hex[:12], "op_name": op, "inputs": inputs,
+               "of": run or None, **{k: v for k, v in target.items() if v is not None}}
+        if body.get("wait"):
+            try:
+                return JSONResponse(await bridge.ask(msg, timeout=float(body.get("timeout") or 180)))
+            except (BridgeError, asyncio.TimeoutError) as exc:
+                return JSONResponse({"error": str(exc) or "the re-run did not finish in time"}, status_code=504)
+        await bridge.send(msg)
+        return JSONResponse({"rid": msg["id"]})
+
+    @app.post("/api/p/{pid}/play/restart")
+    async def play_restart(pid: str) -> JSONResponse:
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        try:
+            bridge = await play.restart(pid, watcher)
+        except BridgeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
+        return JSONResponse({"bridge": bridge.status()})
 
     @app.post("/api/p/{pid}/chat")
     async def project_chat(pid: str, body: Dict[str, Any], request: Request) -> Any:
