@@ -338,6 +338,35 @@ header.bar {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #graph-pick { display: none !important; }
 
+/* ── the rail: screens by what they are for ─────────────────────────── */
+body { --rail-w: 196px; }
+body.railslim { --rail-w: 60px; }
+.rail { width: var(--rail-w); flex: none; display: flex; flex-direction: column; gap: 4px;
+  background: var(--surface); border-right: 1px solid var(--border); padding: 10px 8px 10px;
+  overflow-y: auto; overflow-x: hidden; z-index: 20; }
+.rail .tabs { display: flex; flex-direction: column; gap: 2px; margin: 0; align-self: stretch; }
+.rail .railgroup { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-3); padding: 14px 10px 4px; white-space: nowrap; }
+.rail .railgroup:first-child { padding-top: 4px; }
+.rail .tabs button, .railtoggle { display: flex; align-items: center; justify-content: flex-start; gap: 11px;
+  width: 100%; min-height: 36px; padding: 0 10px; border: none; border-radius: var(--r-sm);
+  background: none; color: var(--text-2); font-weight: 500; white-space: nowrap; }
+.rail .tabs button .icon, .railtoggle .icon { width: 18px; height: 18px; flex: none; }
+.rail .tabs button::after { display: none; }
+.rail .tabs button:hover, .railtoggle:hover { background: var(--surface-2); color: var(--text); }
+.rail .tabs button.active { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.rail .tabs button.active .icon { color: var(--accent-strong); }
+.railtoggle { margin-top: auto; color: var(--text-3); font-size: var(--fs-sm); }
+body.railslim .rail .tabs button span, body.railslim .railtoggle span { display: none; }
+body.railslim .rail .tabs button, body.railslim .railtoggle { justify-content: center; padding: 0; }
+body.railslim .rail .railgroup { font-size: 0; padding: 8px 0 4px; }
+body.railslim .rail .railgroup::before { content: ""; display: block; height: 1px; background: var(--border-soft); margin: 0 10px; }
+body.railslim .rail .railgroup:first-child::before { display: none; }
+body.railslim .railtoggle .icon { transform: rotate(180deg); }
+.screenbtn { display: none; }
+#railshade { position: fixed; inset: 0; z-index: 79; background: rgba(31, 27, 19, .32); }
+#railshade[hidden] { display: none; }
+
 /* tabs: text with an underline — the one place gold marks "you are here" */
 .tabs { display: flex; align-self: stretch; gap: 4px; margin-left: 14px; }
 .tabs button {
@@ -407,7 +436,7 @@ header.bar {
 /* the canvas toolbar floats over the canvas, bottom-left — only where
    the canvas is showing */
 .canvasbar {
-  position: absolute; left: 16px; bottom: 16px; z-index: 25;
+  position: absolute; left: calc(var(--rail-w) + 16px); bottom: 16px; z-index: 25;
   display: flex; align-items: center; gap: 2px; padding: 4px;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 12px; box-shadow: var(--sh-2);
@@ -421,13 +450,13 @@ body:not([data-stage]) .canvasbar { display: none; }
 .canvasbar #btn-expand.active { color: var(--accent-strong); background: var(--accent-soft); }
 
 .findbox {
-  left: 16px; bottom: 68px; width: 340px; max-width: calc(100% - 32px);
+  left: calc(var(--rail-w) + 16px); bottom: 68px; width: 340px; max-width: calc(100% - 32px);
   display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 12px; color: var(--text-3);
 }
 .findbox input[type=text] { border: none; box-shadow: none !important; padding: 6px 0; min-height: 34px; background: none; }
 #find:not([hidden]) ~ .canvasbar #btn-find { color: var(--accent-strong); }
 
-#legend { left: 16px; bottom: 68px; width: 400px; max-width: calc(100% - 32px);
+#legend { left: calc(var(--rail-w) + 16px); bottom: 68px; width: 400px; max-width: calc(100% - 32px);
   max-height: calc(100% - 96px); overflow-y: auto; padding: 14px 16px 16px; }
 #legend .ltitle { font-weight: 600; font-size: var(--fs-base); display: flex; align-items: center;
   margin-bottom: 8px; }
@@ -1905,13 +1934,27 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   header.bar .brand-name { display: none; }
   .jitems td.mono { white-space: nowrap; }
   .crumbs { flex: 1 1 0; }
-  .crumbbtn { max-width: 42vw; padding: 0 4px 0 6px; }
+  .crumbbtn { max-width: 30vw; padding: 0 4px 0 6px; }
   header.bar > .spacer { display: none; }
   .live #live-text { display: none; }
-  .tabs { order: 10; flex: 1 0 100%; margin: 0 -8px 0 -12px; padding: 0 6px; height: 42px;
-    border-top: 1px solid var(--border-soft); overflow-x: auto; scrollbar-width: none; }
-  .tabs::-webkit-scrollbar { display: none; }
-  .tabs button { flex: 1; padding: 0 8px; }
+  /* the rail becomes a drawer from the left, opened by the screen button */
+  body { --rail-w: 0px; }
+  .rail { position: fixed; left: 0; top: 0; bottom: 0; width: min(280px, 82vw); z-index: 80;
+    transform: translateX(-104%); transition: transform .2s ease; box-shadow: var(--sh-3);
+    padding-top: calc(12px + env(safe-area-inset-top)); }
+  body.railopen .rail { transform: none; }
+  .railtoggle { display: none; }
+  /* the screen menu leads, then where you are, then the icons */
+  header.bar > .brand { order: 0; }
+  .screenbtn { display: inline-flex; align-items: center; gap: 6px; order: 1; flex: none;
+    max-width: 34vw; font-weight: 600; padding: 0 8px 0 6px; }
+  header.bar > .crumbs { order: 2; }
+  header.bar > .live { order: 3; }
+  header.bar > #btn-settings { order: 4; }
+  header.bar > #btn-right { order: 5; }
+  .crumbs .sep:first-child { display: none; }
+  .screenbtn .icon { width: 18px; height: 18px; flex: none; color: var(--text-2); }
+  .screenbtn::after { display: none; }
 
   #switcher, #pmenu { left: 8px; right: 8px; min-width: 0; max-width: none; }
   #pmenu { flex-direction: column; }

@@ -3134,7 +3134,8 @@ function switchTab(name, opts) {
   leaveWorkflow();
   state.tab = name;
   if (name !== "traces") { state.execPanelRun = null; state.execSel = null; }
-  for (const b of document.querySelectorAll(".tabs button, [data-tabbtn]")) {
+  if (window.oxRailLabel) window.oxRailLabel(name);
+  for (const b of document.querySelectorAll(".tabs button[data-tab], [data-tabbtn]")) {
     const on = (b.dataset.tab || b.dataset.tabbtn) === name;
     b.classList.toggle("active", on);
     b.setAttribute(b.dataset.tab ? "aria-selected" : "aria-pressed", String(on));
@@ -3317,8 +3318,40 @@ document.addEventListener("click", (ev) => {
     $("#pname").setAttribute("aria-expanded", "false");
   }
 });
-for (const b of document.querySelectorAll(".tabs button"))
+for (const b of document.querySelectorAll(".tabs button[data-tab]"))
   b.onclick = () => switchTab(b.dataset.tab);
+
+/* The rail: the screens grouped by what they are for. Slim (icons) below
+ * 1200px unless the user chose; on a phone a drawer the header's screen
+ * button opens, which closes again once a screen is picked. */
+(function rail() {
+  const r = $("#rail"), shade = $("#railshade"), btn = $("#btn-screen");
+  const SLIM = window.matchMedia("(max-width: 1199px)");
+  const apply = () => {
+    const pref = recall("railSlim", null);
+    document.body.classList.toggle("railslim", !MOBILE.matches && (pref ?? SLIM.matches));
+    const slim = document.body.classList.contains("railslim");
+    $("#rail-slim").title = slim ? "Expand the menu" : "Collapse the menu";
+    $("#rail-slim").setAttribute("aria-label", $("#rail-slim").title);
+  };
+  $("#rail-slim").onclick = () => { store("railSlim", !document.body.classList.contains("railslim")); apply(); };
+  SLIM.addEventListener("change", apply);
+  MOBILE.addEventListener("change", apply);
+  apply();
+  const close = () => { document.body.classList.remove("railopen"); shade.hidden = true; btn.setAttribute("aria-expanded", "false"); };
+  btn.onclick = () => {
+    const open = !document.body.classList.contains("railopen");
+    document.body.classList.toggle("railopen", open);
+    shade.hidden = !open;
+    btn.setAttribute("aria-expanded", String(open));
+  };
+  shade.onclick = close;
+  for (const b of r.querySelectorAll(".tabs button[data-tab]")) b.addEventListener("click", close);
+  window.oxRailLabel = (name) => {
+    const b = r.querySelector(`.tabs button[data-tab="${name}"] span`);
+    $("#screen-label").textContent = b ? b.textContent : name === "settings" ? "Settings" : name;
+  };
+})();
 
 $("#graph-pick").onchange = (ev) => {
   state.graph = state.ir.graphs.find(g => g.name === ev.target.value);

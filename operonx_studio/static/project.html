@@ -24,15 +24,7 @@
       <div id="pmenu" class="popover" role="menu" hidden></div>
       <select id="graph-pick" title="graph" hidden></select>
     </nav>
-    <nav class="tabs" role="tablist" aria-label="Views">
-      <button data-tab="flow" class="active" role="tab">Flow</button>
-      <button data-tab="traces" role="tab">Runs</button>
-      <button data-tab="playground" role="tab">Playground</button>
-      <button data-tab="evals" role="tab">Evals</button>
-      <button data-tab="monitor" role="tab">Monitor</button>
-      <button data-tab="jobs" role="tab">Jobs</button>
-      <button data-tab="resources" role="tab">Resources</button>
-    </nav>
+    <button id="btn-screen" class="crumbbtn screenbtn" aria-haspopup="true" aria-controls="rail" title="Screens"><i data-icon="menu"></i><span id="screen-label">Flow</span></button>
     <div class="spacer"></div>
     <span class="live" id="live" title="The studio re-extracts and redraws whenever the project's code changes"><span class="dot"></span><span id="live-text">live</span></span>
     <button id="btn-settings" class="iconbtn" data-tabbtn="settings" aria-label="Settings" title="Settings — retention, where runs are kept"><i data-icon="settings"></i></button>
@@ -40,6 +32,24 @@
   </header>
 
   <div class="main">
+    <!-- the screens, by what they are for: slim on a tablet, a drawer on a phone -->
+    <aside class="rail" id="rail" aria-label="Screens">
+      <nav class="tabs" role="tablist" aria-label="Views">
+        <div class="railgroup">Build</div>
+        <button data-tab="flow" class="active" role="tab" title="Flow"><i data-icon="graph"></i><span>Flow</span></button>
+        <button data-tab="playground" role="tab" title="Playground"><i data-icon="play"></i><span>Playground</span></button>
+        <button data-tab="resources" role="tab" title="Resources"><i data-icon="box"></i><span>Resources</span></button>
+        <div class="railgroup">Observe</div>
+        <button data-tab="traces" role="tab" title="Runs"><i data-icon="list"></i><span>Runs</span></button>
+        <button data-tab="monitor" role="tab" title="Monitor"><i data-icon="chart"></i><span>Monitor</span></button>
+        <div class="railgroup">Improve</div>
+        <button data-tab="evals" role="tab" title="Evals"><i data-icon="evals"></i><span>Evals</span></button>
+        <div class="railgroup">Operate</div>
+        <button data-tab="jobs" role="tab" title="Jobs"><i data-icon="clock"></i><span>Jobs</span></button>
+      </nav>
+      <button id="rail-slim" class="railtoggle" type="button" title="Collapse the menu" aria-label="Collapse the menu"><i data-icon="collapse"></i><span>Collapse</span></button>
+    </aside>
+    <div id="railshade" hidden></div>
     <div id="stage">
       <div id="world">
         <div id="plane">
