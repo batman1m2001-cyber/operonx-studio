@@ -21,6 +21,7 @@ Event shapes:
     {"t": "start", "session": "..."}          the session to resume with
     {"t": "delta", "text": "..."}             streamed answer text
     {"t": "tool",  "name": "Edit", "hint": "app.py"}
+    {"t": "changes", "sha": "...", "files": [...], "diff": "..."}   what the turn edited
     {"t": "done",  "session": "...", "cost": 0.12}
     {"t": "error", "text": "..."}
 
@@ -51,7 +52,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-__all__ = ["find_claude", "knowledge", "start_turn", "poll_turn", "stop_turn"]
+__all__ = ["find_claude", "knowledge", "start_turn", "poll_turn", "stop_turn",
+           "snapshot", "changes_since", "undo"]
 
 KNOWLEDGE = Path(__file__).parent / "knowledge.md"
 
@@ -92,21 +94,110 @@ def knowledge() -> str:
         return ""
 
 
+#: The studio's own tools (operonx_studio.mcp) a read-only agent may use.
+STUDIO_READ_TOOLS = ["mcp__studio__list_runs", "mcp__studio__open_run", "mcp__studio__op_values",
+                     "mcp__studio__monitor", "mcp__studio__compare_runs", "mcp__studio__select_op"]
+
+
 def _mode_args() -> List[str]:
     """Permission flags for the chosen reach.
 
     Headless sessions cannot prompt, so anything not pre-approved is
-    simply denied — the flags below ARE the approval.
+    simply denied — the flags below ARE the approval. The studio's own
+    tools follow the same reach: reading runs is always allowed, starting
+    a job or writing a price only where edits are.
     """
     mode = os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full").strip().lower()
     read_tools = ["Read", "Grep", "Glob", "LS", "Task",
                   "WebFetch", "WebSearch"]
     if mode == "read":
-        return ["--allowedTools", *read_tools]
+        return ["--allowedTools", *read_tools, *STUDIO_READ_TOOLS]
     if mode == "edit":
-        return ["--allowedTools", *read_tools, "Edit", "Write", "NotebookEdit"]
+        return ["--allowedTools", *read_tools, "Edit", "Write", "NotebookEdit", "mcp__studio"]
     return ["--permission-mode", "acceptEdits",
-            "--allowedTools", "Bash", "WebFetch", "WebSearch"]
+            "--allowedTools", "Bash", "WebFetch", "WebSearch", "mcp__studio"]
+
+
+# ── what a turn changed ───────────────────────────────────────────────────
+# Before a turn the working tree is snapshotted (`git stash create` makes a
+# commit of it without touching anything; a clean tree snapshots as HEAD).
+# After, the diff against that snapshot is exactly what the turn did — the
+# user's own uncommitted work was in the snapshot, so it never shows as the
+# agent's. Undo checks the snapshot's version of those files back out.
+
+
+def _git(repo: Path, *args: str) -> Optional[str]:
+    import subprocess
+
+    try:
+        out = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout if out.returncode == 0 else None
+
+
+def _ignored(path: str) -> bool:
+    return path.startswith(".operonx/") or "/.operonx/" in path or path.startswith("out/")
+
+
+def snapshot(repo: Optional[Path]) -> Optional[Dict[str, Any]]:
+    """The working tree as it is now, or None when *repo* is not a git checkout."""
+    if repo is None or _git(repo, "rev-parse", "--is-inside-work-tree") is None:
+        return None
+    sha = (_git(repo, "stash", "create") or "").strip() or (_git(repo, "rev-parse", "HEAD") or "").strip()
+    if not sha:
+        return None
+    untracked = [p for p in (_git(repo, "ls-files", "--others", "--exclude-standard") or "").splitlines() if p]
+    return {"sha": sha, "untracked": untracked}
+
+
+def changes_since(repo: Path, snap: Dict[str, Any], limit: int = 200_000) -> Dict[str, Any]:
+    """What changed in *repo* since *snap*: files, line counts, one diff."""
+    files: List[Dict[str, Any]] = []
+    for line in (_git(repo, "diff", "--numstat", snap["sha"]) or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3 and not _ignored(parts[2]):
+            added, removed = (int(x) if x.isdigit() else 0 for x in parts[:2])
+            files.append({"path": parts[2], "added": added, "removed": removed, "new": False})
+    paths = [f["path"] for f in files]
+    diff = _git(repo, "diff", "--no-color", snap["sha"], "--", *paths) if paths else ""
+    before = set(snap.get("untracked") or [])
+    for path in (_git(repo, "ls-files", "--others", "--exclude-standard") or "").splitlines():
+        if not path or path in before or _ignored(path):
+            continue
+        try:
+            text = (repo / path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = ""
+        n = text.count("\n") + (0 if text.endswith("\n") or not text else 1)
+        files.append({"path": path, "added": n, "removed": 0, "new": True})
+        diff = (diff or "") + f"--- /dev/null\n+++ b/{path}\n" + "".join(f"+{ln}\n" for ln in text.splitlines())
+    diff = diff or ""
+    return {"sha": snap["sha"], "files": files,
+            "diff": diff[:limit] + ("\n… (diff cut)" if len(diff) > limit else "")}
+
+
+def undo(repo: Path, sha: str, files: List[str], new_files: List[str]) -> List[str]:
+    """Put *files* back as they were in snapshot *sha*; remove *new_files*.
+    Only paths inside the repo; returns what was restored or removed."""
+    root = repo.resolve()
+    done: List[str] = []
+    for path in files:
+        target = (root / path).resolve()
+        if root not in target.parents:
+            continue
+        if _git(repo, "cat-file", "-e", f"{sha}:{path}") is not None:
+            if _git(repo, "checkout", sha, "--", path) is not None:
+                done.append(path)
+        elif target.is_file():  # tracked since, absent in the snapshot
+            target.unlink()
+            done.append(path)
+    for path in new_files:
+        target = (root / path).resolve()
+        if root in target.parents and target.is_file():
+            target.unlink()
+            done.append(path)
+    return done
 
 
 def _spawn_env() -> Dict[str, str]:
@@ -166,7 +257,7 @@ def _sweep() -> None:
 
 
 async def _run(turn: Turn, message: str, *, cwd: Optional[Path],
-               context: str, session: Optional[str]) -> None:
+               context: str, session: Optional[str], mcp: Optional[Dict[str, Any]] = None) -> None:
     binary = find_claude()
     if binary is None:
         _push(turn, {"t": "error", "text":
@@ -187,7 +278,10 @@ async def _run(turn: Turn, message: str, *, cwd: Optional[Path],
     model = os.environ.get("OPERONX_STUDIO_CHAT_MODEL")
     if model:
         cmd += ["--model", model]
+    if mcp:
+        cmd += ["--mcp-config", json.dumps({"mcpServers": {"studio": mcp}})]
     cmd += _mode_args()
+    snap = snapshot(cwd) if cwd is not None else None
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -229,6 +323,13 @@ async def _run(turn: Turn, message: str, *, cwd: Optional[Path],
                                      "hint": _tool_hint(block)})
             elif kind == "result":
                 got_result = True
+                if snap is not None:
+                    try:
+                        changed = changes_since(cwd, snap)
+                    except Exception:  # noqa: BLE001 — the answer still stands
+                        changed = None
+                    if changed and changed["files"]:
+                        _push(turn, {"t": "changes", **changed})
                 done: Dict[str, Any] = {"t": "done",
                                         "session": event.get("session_id")}
                 if event.get("total_cost_usd") is not None:
@@ -256,13 +357,14 @@ async def _run(turn: Turn, message: str, *, cwd: Optional[Path],
 
 
 def start_turn(message: str, *, cwd: Optional[Path] = None, context: str = "",
-               session: Optional[str] = None) -> str:
-    """Begin a turn; returns its id immediately. Call from a running loop."""
+               session: Optional[str] = None, mcp: Optional[Dict[str, Any]] = None) -> str:
+    """Begin a turn; returns its id immediately. Call from a running loop.
+    ``mcp`` is the studio tool server's stdio config (operonx_studio.mcp)."""
     _sweep()
     turn = Turn(id=uuid.uuid4().hex[:16])
     _turns[turn.id] = turn
     asyncio.get_running_loop().create_task(
-        _run(turn, message, cwd=cwd, context=context, session=session))
+        _run(turn, message, cwd=cwd, context=context, session=session, mcp=mcp))
     return turn.id
 
 

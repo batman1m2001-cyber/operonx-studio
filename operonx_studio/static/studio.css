@@ -1390,6 +1390,10 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   margin-top: 2px; font-variant-numeric: tabular-nums; }
 #traces.workflow .tlstrip { padding-right: 4px; }
 
+/* ops an edit just changed */
+.node.changed { box-shadow: 0 0 0 3px var(--accent), 0 0 0 7px var(--accent-ring) !important; }
+.badge.changedbadge { background: var(--accent); color: #1c1603; border-color: var(--accent); font-weight: 700; }
+
 /* the canvas under a lens */
 .node.quiet { opacity: .28; filter: saturate(.3); }
 .node.quiet:hover { opacity: .8; filter: none; }

@@ -630,3 +630,30 @@ Each phase ships alone and is useful alone. **Up** is work in operonx;
 ## 13. Still open
 
 Nothing blocks P0. Questions will be added here as the phases raise them.
+
+---
+
+## 14. Progress (updated 2026-09-27)
+
+Branches (nothing pushed, nothing released):
+
+| Repo | Branch | Commits |
+|---|---|---|
+| operonx `/home/thanglq/Operon` | `feat/runs-records` | P0 c32ee0c · P1 9b5d430 · P2 488193c · P4 fa32993 (key_ops) |
+| studio worktree `/home/thanglq/operonx-studio-redesign` | `feat/platform` (off `redesign/ui`) | P1 68a27e8 · P2 350a00a · P3 f13fad5 · P4 91e0776 · P5 WIP (this commit) |
+| callbot `/home/thanglq/educa-reminder-agent` | `feat/runs-by-origin` (checked out) | 7ce0a17 (runs by origin, $0 inhouse) · 8faad98 (key_ops) |
+
+Done and tested (operonx 2168 tests, studio 419, screenshots desktop/tablet/phone):
+
+- **P0** origin tags, application-level `trace=`, jobs always traced, git version, `.operonx/runs` origin layout.
+- **P1** `operonx.telemetry.runs` RunStore (files+sqlite index, sqlite, langfuse read-only), `run_store:` resource, retention; studio reads only through it; Settings page (retention, preview, save).
+- **P2** Runs screen by origin (tree, filters, search, job/runbook strips, links both ways), `RunStore.groups()`, batched indexing (8.9 s → 0.54 s). Fixes found on the way: all-defaults resource `{}` resolved as missing; `trace_local:` key needed an earlier telemetry import.
+- **P3** run view: verdict header, lenses (Path/Time/Errors/Cost/Values), timeline strip, exec panel in reading order, anomaly flags, compare two runs. Session-long ops (heartbeat) never count as "slowest".
+- **P4** Monitor tab (tiles vs previous period, runs + p95 charts with version marks, per-op table, cost, grouped errors), `Service(key_ops=)`, LLM price editor in Resources (text YAML edit, diff first).
+
+**P5 in progress** — done: `operonx_studio/mcp.py` (stdio MCP server: list_runs, open_run, op_values, monitor, compare_runs, select_op, run_job, set_llm_price), chat passes `--mcp-config` + allows `mcp__studio`, per-turn git snapshot → `changes` event, `/chat/undo`, `/ui/action(s)` queue, page follows agent UI actions, `studio:` link handler (`window.oxStudioLink`), changed-op outline after code edits, richer view context + briefing.
+**P5 remaining:** chat.js — render `studio:` markdown links as buttons, `changes` event as a diff card (Keep / Undo → POST `/api/p/{pid}/chat/undo` with sha, files, new_files), conversation-wide "undo everything" (first sha + union of files in localStorage, cleared by New conversation); tests for mcp.handle, snapshot/changes/undo (git tmp repo), ui actions; screenshots; commit.
+
+Then P6 playground → P7 evals → P8 voice + simulated user → P9 (Postgres/Mongo stores, prompt workbench, review queue, services control, alerts, templates, left rail).
+
+Dev environment: studio on :8766 = `OPERONX_STUDIO_RETENTION=off PYTHONPATH=/home/thanglq/operonx-studio-redesign:/home/thanglq/Operon /home/thanglq/operonx-studio/.venv/bin/python -m operonx_studio.cli --no-open --host 127.0.0.1 --port 8766`; the lhr tunnel points at it. Screenshot scripts in the session scratchpad (`shot_p2.py` … `shot_p4.py`). Release order when asked: operonx 1.9.0 (PR from `feat/runs-records`, user merges), then bump pins in studio (`operonx>=1.9.0`) and callbot.

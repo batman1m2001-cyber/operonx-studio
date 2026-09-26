@@ -34,6 +34,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover — 3.10
     import tomli as _toml  # type: ignore[no-redef]
 
+try:  # a module-level name: FastAPI resolves route annotations from here
+    from fastapi import Request
+except ImportError:  # pragma: no cover — fastapi is a dependency
+    Request = Any  # type: ignore[misc,assignment]
+
 from operonx_studio.daemon import ProjectWatcher
 from operonx_studio.layout import layout_graph
 from operonx_studio.registry import MANIFEST, ProjectRef, Recents
@@ -1412,6 +1417,18 @@ def build_studio_app(recents: Optional[Recents] = None):
         pr = project_runs(watcher.root, sweep=False)
         lines.append(f"Runs are kept in: {pr.source} "
                      "(operonx.telemetry.runs.open_run_store; run directories hold nodes.jsonl)")
+        lines.append(
+            "\n## Working in the studio\n"
+            "You have studio tools (mcp__studio__*): list_runs, open_run, op_values, monitor, "
+            "compare_runs, select_op, run_job, set_llm_price. Prefer them to reading run files: "
+            "they answer from the run store, and what you open appears on the user's screen.\n"
+            "In your replies, link to studio things with markdown links the page turns into buttons: "
+            "[text](studio:run/<run id>), [text](studio:op/<op name>), [text](studio:tab/<flow|traces|"
+            "monitor|jobs|resources|settings>), [text](studio:monitor/<service|job>/<name>). "
+            "Name runs and ops by link rather than pasting ids.\n"
+            "Code edits you make are shown to the user as a diff with Keep / Undo; keep each turn's "
+            "change focused. After changing code, check it (tests, a job run, or the relevant run) and "
+            "report the numbers before and after.")
         result = watcher.refresh_swr()
         if result.ok and result.ir:
             import tempfile
@@ -1545,8 +1562,47 @@ def build_studio_app(recents: Optional[Recents] = None):
                                     env=env, start_new_session=True)
         return JSONResponse({"started": name, "pid": proc.pid, "resume": resume, "log": str(log)})
 
+    # ── the assistant's hands: UI actions and undo ──────────────────────
+    # The studio tool server (operonx_studio.mcp) posts what it opened;
+    # the page polls and shows it, so the user watches the agent work.
+    ui_actions: Dict[str, List[Dict[str, Any]]] = {}
+
+    @app.post("/api/p/{pid}/ui/action")
+    def ui_action(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        kind = str(body.get("kind") or "")
+        if kind not in ("open_run", "open_monitor", "compare", "select_op", "open_jobs", "open_tab"):
+            return JSONResponse({"error": f"unknown action {kind!r}"}, status_code=400)
+        queue = ui_actions.setdefault(pid, [])
+        seq = (queue[-1]["seq"] + 1) if queue else 1
+        queue.append({"seq": seq, "kind": kind, "args": dict(body.get("args") or {}), "at": time.time()})
+        del queue[:-50]
+        return JSONResponse({"seq": seq})
+
+    @app.get("/api/p/{pid}/ui/actions")
+    def ui_actions_since(pid: str, after: int = 0) -> JSONResponse:
+        queue = ui_actions.get(pid, [])
+        return JSONResponse({"actions": [a for a in queue if a["seq"] > after],
+                             "last": queue[-1]["seq"] if queue else 0})
+
+    @app.post("/api/p/{pid}/chat/undo")
+    def chat_undo(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Put back what an assistant turn (or the whole conversation)
+        changed: the files as they were in that turn's snapshot."""
+        from . import chat as _chat
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        sha = str(body.get("sha") or "")
+        if not re.fullmatch(r"[0-9a-f]{7,40}", sha):
+            return JSONResponse({"error": "bad snapshot"}, status_code=400)
+        files = [str(f) for f in body.get("files") or [] if ".." not in str(f)]
+        new_files = [str(f) for f in body.get("new_files") or [] if ".." not in str(f)]
+        done = _chat.undo(watcher.root, sha, files, new_files)
+        return JSONResponse({"restored": done})
+
     @app.post("/api/p/{pid}/chat")
-    async def project_chat(pid: str, body: Dict[str, Any]) -> Any:
+    async def project_chat(pid: str, body: Dict[str, Any], request: Request) -> Any:
         from . import chat as _chat
 
         cwd, context = _chat_briefing(pid)
@@ -1567,11 +1623,28 @@ def build_studio_app(recents: Optional[Recents] = None):
                 lines.append(f"- run painted on the canvas: `{str(view['run'])[:120]}`")
             if view.get("tab"):
                 lines.append(f"- open tab: {str(view['tab'])[:20]}")
+            if view.get("lens") and view.get("run"):
+                lines.append(f"- the run is painted with the {str(view['lens'])[:12]} lens")
+            if view.get("exec"):
+                lines.append(f"- selected execution in the run: `{str(view['exec'])[:120]}`")
+            if view.get("runs_filter"):
+                lines.append(f"- Runs screen filter: {str(view['runs_filter'])[:200]}")
+            if view.get("monitor"):
+                lines.append(f"- Monitor showing: {str(view['monitor'])[:120]}")
             if lines:
                 context += ("\n\n## What the user is looking at right now\n"
                             + "\n".join(lines))
+        import sys as _sys
+
+        server = request.scope.get("server") or ("127.0.0.1", 8765)
+        host = "127.0.0.1" if server[0] in ("0.0.0.0", "::", None) else server[0]
+        env = {"OPERONX_STUDIO_URL": f"http://{host}:{server[1]}", "OPERONX_STUDIO_PID": pid,
+               "OPERONX_STUDIO_TOKEN": auth["token"] if auth else ""}
+        if os.environ.get("PYTHONPATH"):
+            env["PYTHONPATH"] = os.environ["PYTHONPATH"]
+        mcp = {"type": "stdio", "command": _sys.executable, "args": ["-m", "operonx_studio.mcp"], "env": env}
         turn = _chat.start_turn(message, cwd=cwd, context=context,
-                                session=str(body.get("session") or "") or None)
+                                session=str(body.get("session") or "") or None, mcp=mcp)
         return JSONResponse({"turn": turn})
 
     @app.post("/api/chat")

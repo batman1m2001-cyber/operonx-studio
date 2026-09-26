@@ -50,8 +50,12 @@ function pushView() {
   window.__oxview = {
     node: it ? it.node.name : null,
     kind: it ? it.node.kind : null,
-    run: state.run ? state.run.run : null,
+    run: state.run ? state.run.run : (state._tlrun || null),
     tab: state.tab,
+    lens: state.run ? (state.lens || "path") : null,
+    exec: state.execSel || null,
+    runs_filter: state.tab === "traces" ? (recall(`runsView:${PID}`, null) ? JSON.stringify(recall(`runsView:${PID}`, null)) : null) : null,
+    monitor: state.tab === "monitor" ? JSON.stringify(recall(`monitor:${PID}`, {})) : null,
   };
 }
 
@@ -1441,6 +1445,12 @@ function opCard(it) {
 
   if (state.run && !ranInRun(n)) card.classList.add("dormant");
   if (state.run) lensBadge(card, badges, n);
+  if (state.changedOps && state.changedOps.has(n.name)) {
+    card.classList.add("changed");
+    const b = el("span", "badge changedbadge", "changed");
+    b.title = "Its code changed in the last edit";
+    badges.append(b);
+  }
   card.append(badges);
   card.append(el("span", "port in"));
   // a router's exits are its condition rows — no anonymous base port
@@ -2850,6 +2860,8 @@ async function showRunTree(run) {
  * it ranks among this op's runs, what stands out), what it produced,
  * what it received, what it cost, its other runs, and what fed it. */
 async function renderExecPanel(run, e, execs) {
+  state.execSel = `${e.op} @ ${e.ctx || "main"} (+${fmtMs(e.start_ms)})`;
+  pushView();
   const panel = $("#inspector");
   // picking an execution is asking to read it: bring the panel forward
   const ps = panelState();
@@ -3500,6 +3512,26 @@ async function load(first) {
   for (const b of document.querySelectorAll("#stage .errbox")) b.remove();
   $("#live").classList.remove("stale");
   $("#live-text").textContent = "Live";
+  // which ops' code changed since the last extraction — the canvas
+  // outlines them for a while, so an edit (the assistant's or anyone's)
+  // shows where it landed
+  if (state.ir && !first) {
+    const codeOf = (ir) => {
+      const m = new Map();
+      for (const g of ir.graphs || []) (function walk(gr) {
+        for (const n of (gr && gr.nodes) || []) { m.set(n.name, n.code || ""); if (n.graph) walk(n.graph); }
+      })(g);
+      return m;
+    };
+    const before = codeOf(state.ir), after = codeOf(data);
+    const changed = [...after].filter(([k, c]) => before.has(k) ? before.get(k) !== c : true).map(([k]) => k);
+    if (changed.length && changed.length < 40) {
+      state.changedOps = new Set(changed);
+      clearTimeout(state._changedTimer);
+      state._changedTimer = setTimeout(() => { state.changedOps = null; render(); }, 60000);
+      toast(`${changed.length} op${changed.length > 1 ? "s" : ""} changed: ${changed.slice(0, 3).join(", ")}${changed.length > 3 ? "…" : ""}`);
+    }
+  }
   state.ir = data;
   state.stamp = data.stamp;
 
@@ -3531,6 +3563,7 @@ async function poll() {
   try {
     const {stamp} = await api(`/api/p/${PID}/stamp`);
     if (stamp !== state.stamp) await load(false);
+    await uiActions();
     // follow-latest, throttled — a directory scan every 6s, never the
     // remote Langfuse API
     if (state.follow && pollN % 4 === 0) {
@@ -3541,6 +3574,56 @@ async function poll() {
   } catch { /* daemon briefly away; the next poll answers */ }
   setTimeout(poll, 1500);
 }
+
+/* What the assistant opened (operonx_studio.mcp posts it): the page
+ * follows along, so the user watches the agent work. */
+state.uiSeq = null;
+async function uiActions() {
+  const got = await api(`/api/p/${PID}/ui/actions?after=${state.uiSeq || 0}`);
+  if (state.uiSeq == null) { state.uiSeq = got.last; return; }   // only what happens from now on
+  for (const a of got.actions) {
+    state.uiSeq = a.seq;
+    try { await performUi(a.kind, a.args || {}); } catch { /* a stale action is not an error */ }
+  }
+}
+
+async function performUi(kind, args) {
+  if (kind === "open_run") {
+    if (state.tab !== "traces") switchTab("traces", {quiet: true});
+    if (args.lens) { state.lens = args.lens; store("lens", args.lens); }
+    await (args.mode === "workflow" ? showRunWorkflow(args.run) : showRunTree(args.run));
+    toast(`Assistant opened run ${args.run}`);
+  } else if (kind === "open_monitor") {
+    store(`monitor:${PID}`, {target: args.target || "", range: args.days >= 30 ? "30d" : args.days <= 1 ? "24h" : "7d"});
+    switchTab("monitor");
+  } else if (kind === "compare") {
+    if (state.tab !== "traces") switchTab("traces", {quiet: true});
+    await RunView.compare(args.a, args.b);
+  } else if (kind === "select_op") {
+    if (state.tab !== "flow") switchTab("flow");
+    let it = [...state.rendered.values()].find(x => x.node.name === args.op);
+    if (!it) { expandAll(true); it = [...state.rendered.values()].find(x => x.node.name === args.op); }
+    if (it) { if (state.sel !== it.key) select(it.key); centerOn(it); }
+  } else if (kind === "open_jobs") {
+    state.jobSel = args.job; switchTab("jobs");
+  } else if (kind === "open_tab") {
+    switchTab(args.tab);
+  }
+}
+
+/* `studio:` links in the assistant's replies (chat.js turns them into
+ * buttons): studio:run/<id>, studio:op/<name>, studio:tab/<name>,
+ * studio:monitor/<origin>/<name>. */
+window.oxStudioLink = (href) => {
+  const path = String(href).replace(/^studio:/, "");
+  const [kind, ...rest] = path.split("/");
+  const arg = decodeURIComponent(rest.join("/"));
+  if (kind === "run") return performUi("open_run", {run: arg});
+  if (kind === "op") return performUi("select_op", {op: arg});
+  if (kind === "tab") return performUi("open_tab", {tab: arg === "runs" ? "traces" : arg});
+  if (kind === "monitor") return performUi("open_monitor", {target: rest.length > 1 ? `${rest[0]}:${decodeURIComponent(rest.slice(1).join("/"))}` : ""});
+  return null;
+};
 
 state.follow = recall("follow", false);
 load(true).then(() => setTimeout(poll, 1500));
