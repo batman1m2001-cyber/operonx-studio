@@ -1248,6 +1248,95 @@ function nameChips(n) {
   return box.childNodes.length ? box : null;
 }
 
+/* With a run painted, a card says ONE thing — the lens decides which.
+ * path: nothing but lit / faded. time: the op's total time in the run,
+ * the three slowest ranked, the border warmer with its share. errors:
+ * only failures, with their error. cost: only ops that cost money.
+ * values: executions and average, and the show-key values. */
+/* An op's numbers in the painted run — a nested graph's are its members'
+ * summed (a container never executes under its own name). */
+function runNumbers(n) {
+  const rolls = state.runRollups || new Map();
+  if (!n.graph) {
+    const info = state.run && state.run.ops[n.name];
+    return info ? {info, roll: rolls.get(n.name) || null} : null;
+  }
+  const acc = {runs: 0, total_ms: 0, max_ms: 0, errors: 0, last_error: null};
+  const roll = {count: 0, total_ms: 0, cost_usd: null, unpriced: 0, tokens_in: 0, tokens_out: 0};
+  let any = false;
+  (function walk(g) {
+    for (const m of (g && g.nodes) || []) {
+      if (m.graph) { walk(m.graph); continue; }
+      const i = state.run.ops[m.name];
+      if (!i) continue;
+      any = true;
+      acc.runs += i.runs; acc.total_ms += i.total_ms; acc.max_ms = Math.max(acc.max_ms, i.max_ms);
+      acc.errors += i.errors; acc.last_error = i.last_error || acc.last_error;
+      const r = rolls.get(m.name);
+      if (r) {
+        roll.count += r.count; roll.total_ms += r.total_ms; roll.unpriced += r.unpriced;
+        roll.tokens_in += r.tokens_in; roll.tokens_out += r.tokens_out;
+        if (r.cost_usd != null) roll.cost_usd = (roll.cost_usd || 0) + r.cost_usd;
+      }
+    }
+  })(n.graph);
+  return any ? {info: acc, roll} : null;
+}
+
+function lensBadge(card, badges, n) {
+  const lens = state.lens || "path";
+  const got = runNumbers(n);
+  const runinfo = got && got.info;
+  const roll = got && got.roll;
+  if (!runinfo) {
+    if (lens !== "path" && lens !== "values") card.classList.add("quiet");
+    return;
+  }
+  if (lens === "time") {
+    const runMs = (state.run.wall_s || 0) * 1000;
+    if (roll && RunView.background(roll, runMs)) {
+      const chip = el("span", "badge run", "whole run");
+      chip.title = `Spans the session (${fmtMs(runinfo.total_ms)}) — its time is the call's length, not work`;
+      badges.append(chip);
+      return;
+    }
+    const ranked = [...(state.runRollups || new Map()).values()]
+      .filter(r => !RunView.background(r, runMs)).slice(0, 3).map(r => r.op);
+    const place = ranked.indexOf(n.name);
+    const chip = el("span", "badge run", fmtMs(runinfo.total_ms));
+    chip.title = `${runinfo.runs} execution${runinfo.runs > 1 ? "s" : ""} · max ${fmtMs(runinfo.max_ms)}`;
+    if (place >= 0) {
+      const r = el("span", "badge rank", `#${place + 1}`);
+      r.title = `${["Slowest", "Second slowest", "Third slowest"][place]} op in this run`;
+      badges.append(r);
+    }
+    badges.append(chip);
+    const top = Math.max(1, ...[...(state.runRollups || new Map()).values()]
+      .filter(r => !RunView.background(r, runMs)).map(r => r.total_ms));
+    card.style.setProperty("--heat", Math.min(1, runinfo.total_ms / top).toFixed(2));
+    card.classList.add("heated");
+  } else if (lens === "errors") {
+    if (!runinfo.errors) { card.classList.add("quiet"); return; }
+    const last = String(runinfo.last_error || "failed").trim().split("\n").pop();
+    const chip = el("span", "badge err errline", `${runinfo.errors}✗ ${last}`);
+    chip.title = String(runinfo.last_error || "");
+    badges.append(chip);
+    card.classList.add("errorlit");
+  } else if (lens === "cost") {
+    if (!roll || (roll.cost_usd == null && !roll.unpriced)) { card.classList.add("quiet"); return; }
+    const chip = el("span", "badge run cost", RunView.money(roll.cost_usd, roll.unpriced));
+    chip.title = `${roll.tokens_in} in / ${roll.tokens_out} out tokens`;
+    badges.append(chip);
+  } else if (lens === "values") {
+    const avg = runinfo.runs ? (runinfo.total_ms / runinfo.runs) : 0;
+    const chip = el("span", "badge run",
+      `${runinfo.runs}× ${avg < 10 ? avg.toFixed(1) : Math.round(avg)}ms`
+      + (runinfo.errors ? ` · ${runinfo.errors}✗` : ""));
+    if (runinfo.errors) chip.classList.add("err");
+    badges.append(chip);
+  }
+}
+
 function opCard(it) {
   const n = it.node;
   if (n.kind === "__boundary__") return boundaryCard(it);
@@ -1279,7 +1368,7 @@ function opCard(it) {
     const line = el("div", "nname nline");
     line.append(el("span", "nicon", kindIcon(n)));
     line.append(el("span", "ntext", n.name));
-    const chips = nameChips(n);
+    const chips = state.run ? null : nameChips(n);
     if (chips) line.append(chips);
     card.append(line);
     card.title = n.kind + (n.bound ? ` · ${n.bound}` : "");
@@ -1302,7 +1391,7 @@ function opCard(it) {
     card.append(el("span", "iconband", kindIcon(n)));
     const line = el("div", "nname nline");
     line.append(el("span", "ntext", n.name));
-    const chips = nameChips(n);
+    const chips = state.run ? null : nameChips(n);
     if (chips) line.append(chips);
     card.append(line);
     // the kind line was card noise at fit-zoom; it lives in the
@@ -1316,7 +1405,7 @@ function opCard(it) {
     // or two outputs that stand for it. With a run painted the same
     // line carries the last execution's value, cut to a card's width.
     const det = el("div", "detail");
-    const keys = (n.show_keys || []).slice(0, 2);
+    const keys = (state.run && (state.lens || "path") !== "values") ? [] : (n.show_keys || []).slice(0, 2);
     const turnExec = state.run && state.runTurn && state.runByOpTurn
       && state.runByOpTurn.get(n.name) && state.runByOpTurn.get(n.name).get(state.runTurn);
     const vals = turnExec ? turnExec.outputs
@@ -1351,20 +1440,7 @@ function opCard(it) {
   }
 
   if (state.run && !ranInRun(n)) card.classList.add("dormant");
-  const runinfo = state.run && state.run.ops[n.name];
-  if (runinfo) {
-    const avg = runinfo.runs ? (runinfo.total_ms / runinfo.runs) : 0;
-    const chip = el("span", "badge run",
-      `${runinfo.runs}× ${avg < 10 ? avg.toFixed(1) : Math.round(avg)}ms`
-      + (runinfo.errors ? ` · ${runinfo.errors}✗` : ""));
-    if (runinfo.errors) { chip.classList.add("err"); card.classList.add("errorlit"); }
-    badges.append(chip);
-    // heat: the slow op should be findable without reading a number
-    if (!runinfo.errors && state.heatMax > 0) {
-      card.style.setProperty("--heat", Math.min(1, avg / state.heatMax).toFixed(2));
-      card.classList.add("heated");
-    }
-  }
+  if (state.run) lensBadge(card, badges, n);
   card.append(badges);
   card.append(el("span", "port in"));
   // a router's exits are its condition rows — no anonymous base port
@@ -1520,6 +1596,20 @@ function select(key) {
   if (state.run && !ranInRun(n)) {
     panel.append(el("div", "rolenote dormnote",
       `— did not execute in ${state.run.run}. The values below are its wiring, not a recording.`));
+  }
+  // with a run painted, the op's verdict in that run comes first
+  const inRun = state.run && state.run.ops[n.name];
+  if (inRun) {
+    const roll = state.runRollups ? state.runRollups.get(n.name) : null;
+    const total = Math.max(1, (state.run.wall_s || 0) * 1000);
+    const v = el("div", "execverdict");
+    v.append(el("span", "status " + (inRun.errors ? "s-bad" : "s-ok"), inRun.errors ? `${inRun.errors} failed` : "ok"));
+    v.append(el("span", "vsep", "·"), el("span", "strong", fmtMs(inRun.total_ms)));
+    v.append(el("span", "vsep", "·"), el("span", null, `${inRun.runs} run${inRun.runs > 1 ? "s" : ""}`));
+    if (state.run.wall_s) v.append(el("span", "vsep", "·"), el("span", null, `${Math.round(100 * inRun.total_ms / total)}% of the run`));
+    const cost = roll ? RunView.money(roll.cost_usd, roll.unpriced) : null;
+    if (cost) v.append(el("span", "vsep", "·"), el("span", null, cost));
+    panel.append(v);
   }
   if (n.serve_role) {
     panel.append(el("div", "rolenote",
@@ -2142,12 +2232,12 @@ function traceValue(v, depth = 0) {
 
 /* the run's inputs and outputs as the two familiar port zones — blue
  * in, warm out — every variable a labelled block, every value open */
-function valueZones(box, inputs, outputs, scratchKeyOf = {}) {
+function valueZones(box, inputs, outputs, scratchKeyOf = {}, opts = {}) {
   const zone = (label, values, cls) => {
     const z = el("div", `pzone ${cls}`);
     z.append(el("div", "tvhead", label));
     const entries = values && typeof values === "object"
-      ? Object.entries(values) : [];
+      ? Object.entries(values).filter(([k]) => !(opts.hide || []).includes(k)) : [];
     if (!entries.length) z.append(el("div", "tvempty", "none recorded"));
     for (const [k, v] of entries) {
       const varbox = el("div", "tvvar");
@@ -2163,8 +2253,13 @@ function valueZones(box, inputs, outputs, scratchKeyOf = {}) {
     }
     box.append(z);
   };
-  zone("inputs", inputs, "pzin");
-  zone("outputs", outputs, "pzout");
+  if (opts.outputsFirst) {
+    zone("output", outputs, "pzout");
+    zone("input", inputs, "pzin");
+  } else {
+    zone("inputs", inputs, "pzin");
+    zone("outputs", outputs, "pzout");
+  }
 }
 
 function executionsSection(n, execP) {
@@ -2550,29 +2645,7 @@ function execValues(node, outputs, max) {
 const execsOf = (rows) => rows.filter(r => r.kind === "record");
 
 function runHeader(run, data, mode, extras) {
-  const head = el("div", "tlhead");
-  const back = Icons.button("back", "Runs", "small ghost", "Back to all runs");
-  back.onclick = () => showTraces();
-  head.append(back, el("span", "tltitle", run));
-  const modes = el("span", "tlmodes");
-  modes.setAttribute("role", "tablist");
-  const bt = el("button", mode === "tree" ? "on" : "", "Tree");
-  bt.title = "The run as a tree: what ran for what, in order";
-  bt.onclick = () => showRunTree(run);
-  const bf = el("button", mode === "workflow" ? "on" : "", "Workflow");
-  bf.title = "The flow with this run's values on every card; pick a turn to read one exchange";
-  bf.onclick = () => showRunWorkflow(run);
-  modes.append(bt, bf);
-  head.append(modes);
-  for (const x of extras || []) head.append(x);
-  const recs = execsOf(data.rows);
-  const stats = el("span", "tlstats", `${recs.length} executions · ${fmtMs(data.total_ms)}`);
-  const errs = recs.filter(r => r.status === "error").length;
-  if (errs) { stats.append(" · "); stats.append(el("span", "bad", `${errs} error${errs > 1 ? "s" : ""}`)); }
-  head.append(stats);
-  const origin = originLine(data.summary);
-  if (origin) head.append(origin);
-  return head;
+  return RunView.header(run, data, mode, extras);
 }
 
 /* Where a run came from, as links back: the job run and item it was, the
@@ -2684,6 +2757,7 @@ async function showRunTree(run) {
     if (r.kind === "record") {
       r.el = row;
       row.classList.add("record");
+      row.dataset.op = r.op || "";
       row.onclick = () => {
         for (const o of els) o.classList.remove("sel");
         row.classList.add("sel");
@@ -2696,6 +2770,9 @@ async function showRunTree(run) {
   renderFlowInfo();
 }
 
+/* One execution, in the order it is read: the verdict (how it went, how
+ * it ranks among this op's runs, what stands out), what it produced,
+ * what it received, what it cost, its other runs, and what fed it. */
 async function renderExecPanel(run, e, execs) {
   const panel = $("#inspector");
   // picking an execution is asking to read it: bring the panel forward
@@ -2703,45 +2780,70 @@ async function renderExecPanel(run, e, execs) {
   if (!ps.on || ps.tab !== "inspect") showSide("inspect");
   panel.classList.remove("off");
   panel.textContent = "";
+  panel.scrollTop = 0;
+  const mine = execs.filter(x => x.op === e.op);
+
+  // ── verdict ──
   const head = el("div", "phead");
   head.append(el("h3", null, e.op));
-  const chips = el("div", "chips");
-  chips.append(el("span", "chip", e.ctx || "main"));
-  chips.append(el("span", `chip ${e.status === "error" ? "cbad" : ""}`, e.status));
-  chips.append(el("span", "chip", `+${fmtMs(e.start_ms)}`));
-  chips.append(el("span", "chip", fmtMs(e.dur_ms)));
+  const verdict = el("div", "execverdict");
+  verdict.append(el("span", "status " + (e.status === "error" ? "s-bad" : "s-ok"), e.status === "error" ? "failed" : "ok"));
+  verdict.append(el("span", "vsep", "·"), el("span", "strong", fmtMs(e.dur_ms)));
+  const rank = RunView.rank(e, mine);
+  if (rank) verdict.append(el("span", "vsep", "·"), el("span", null, rank));
+  head.append(verdict);
+  const when = el("div", "execwhen");
+  when.append(`at +${fmtMs(e.start_ms)}`);
   if (e.wall_start) {
     // the recorder's wall clock, so a card can be matched to a log line
     const at = new Date(e.wall_start * 1000);
-    const c = el("span", "chip mono", at.toLocaleTimeString([], {hour12: false}) + "." + String(at.getMilliseconds()).padStart(3, "0"));
-    c.title = at.toISOString();
-    chips.append(c);
+    const t = el("span", "mono", " · " + at.toLocaleTimeString([], {hour12: false}) + "." + String(at.getMilliseconds()).padStart(3, "0"));
+    t.title = at.toISOString();
+    when.append(t);
   }
-  head.append(chips);
+  if (e.ctx && e.ctx !== "main") when.append(el("span", "mono", ` · ${e.ctx}`));
+  head.append(when);
   panel.append(head);
-  if (e.error) panel.append(el("div", "rolenote dormnote", e.error));
 
-  // every run of THIS op, the selected one marked — a generator's fan
-  const mine = execs.filter(x => x.op === e.op);
+  const flags = RunView.anomalies(e, mine);
+  if (e.error) {
+    const err = el("div", "errcard");
+    const lines = String(e.error).trim().split("\n");
+    err.append(el("div", "errcard-head", lines[lines.length - 1]));
+    if (lines.length > 1) {
+      const fold = el("details");
+      fold.append(el("summary", null, "Traceback"), el("pre", "mono", String(e.error)));
+      err.append(fold);
+    }
+    panel.append(err);
+  }
+  const notes = flags.filter(([k]) => k !== "bad");
+  if (notes.length) {
+    const box = el("div", "flags");
+    for (const [kind, text] of notes) box.append(el("div", `flag ${kind}`, text));
+    panel.append(box);
+  }
+
+  // ── output, input, cost ── fetched per op, matched to this execution
+  const vsec = el("section");
+  const vbox = el("div", null, "Loading values…");
+  vsec.append(vbox);
+  panel.append(vsec);
+  const costSec = el("section");
+  panel.append(costSec);
+
+  // ── its other runs ──
   if (mine.length > 1) {
     const sec = el("section");
-    sec.append(el("div", "stitle", `Runs · ${mine.length}`));
-    for (const x of mine.slice(0, 60)) {
-      const row = el("button", "runrow" + (x === e ? " on" : "")
-        + (x.status === "error" ? " bad" : ""));
-      row.append(el("span", "mono", `+${fmtMs(x.start_ms)}`));
-      row.append(el("span", null, fmtMs(x.dur_ms)));
-      row.append(el("span", "mono", x.ctx || ""));
-      row.onclick = () => {
-        x.el?.scrollIntoView({block: "center", behavior: "smooth"});
-        x.el?.click();
-      };
-      sec.append(row);
-    }
+    sec.append(el("div", "stitle", `This op's ${mine.length} runs`));
+    sec.append(RunView.dots(e, mine, (x) => {
+      x.el?.scrollIntoView({block: "center", behavior: "smooth"});
+      x.el?.click();
+    }));
     panel.append(sec);
   }
 
-  // provenance: which executions fed this one
+  // ── what fed it ──
   if ((e.upstreams || []).length) {
     const sec = el("section");
     sec.append(el("div", "stitle", "Fed by"));
@@ -2762,12 +2864,6 @@ async function renderExecPanel(run, e, execs) {
     panel.append(sec);
   }
 
-  // the values — fetched per op, matched to this execution by start
-  const sec = el("section");
-  sec.append(el("div", "stitle", "Values"));
-  const vbox = el("div", null, "…");
-  sec.append(vbox);
-  panel.append(sec);
   try {
     const got = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`
       + `/op/${encodeURIComponent(e.op)}?limit=200`);
@@ -2777,15 +2873,11 @@ async function renderExecPanel(run, e, execs) {
           || String(Array.isArray(x.ctx) ? x.ctx.join(".") : x.ctx) === String(e.ctx)))
       || (got.executions || [])[0];
     vbox.textContent = "";
-    if (!match) { vbox.append(el("div", "note", "values were not kept for this execution")); return; }
-    // which inputs came out of SCRATCH cells — the IR knows the
-    // binding, the record knows the value: together they are the
-    // OBSERVED state reads of this step. (Full state-per-step needs
-    // recorder events — see TRACES_REFACTOR_PLAN P0: imperative
-    // writes exist, replay alone would lie.)
+    if (!match) { vbox.append(el("div", "note", "Values were not kept for this execution.")); return; }
+    // which inputs came out of SCRATCH cells — the IR knows the binding
     const scratchKeyOf = {};
     (function walk(g) {
-      for (const nn of g.nodes || []) {
+      for (const nn of (g && g.nodes) || []) {
         if (nn.name === e.op) {
           for (const inp of nn.inputs || []) {
             if (inp.binding && inp.binding.kind === "scratch")
@@ -2795,7 +2887,21 @@ async function renderExecPanel(run, e, execs) {
         if (nn.graph) walk(nn.graph);
       }
     })(state.graph);
-    valueZones(vbox, match.inputs, match.outputs, scratchKeyOf);
+    const outs = match.outputs && typeof match.outputs === "object" ? match.outputs : {};
+    const priced = "cost_usd" in outs || "usage" in outs;
+    valueZones(vbox, match.inputs, match.outputs, scratchKeyOf,
+               {outputsFirst: true, hide: priced ? ["usage", "cost_usd", "model_used"] : []});
+    if (priced) {
+      costSec.append(el("div", "stitle", "Cost and usage"));
+      const u = outs.usage || {};
+      const facts = el("div", "facts compact");
+      const fact = (k, v) => { const r = el("div", "factrow"); r.append(el("div", "factkey", k), el("div", "factval", v)); facts.append(r); };
+      if (outs.model_used) fact("Model", String(outs.model_used));
+      fact("Tokens in", String(u.prompt_tokens ?? "—") + (u.cached_tokens ? ` (${u.cached_tokens} cached)` : ""));
+      fact("Tokens out", String(u.completion_tokens ?? "—"));
+      fact("Cost", RunView.money(outs.cost_usd, outs.cost_usd == null ? 1 : 0) || "—");
+      costSec.append(facts);
+    }
   } catch (err) {
     vbox.textContent = "";
     vbox.append(el("div", "note", err.message));
@@ -2835,25 +2941,12 @@ async function showRunWorkflow(run) {
   state.heatMax = Math.max(0, ...Object.values(data.ops || {})
     .map(o => o.runs ? o.total_ms / o.runs : 0));
 
-  const pick = el("select", "turnpick");
-  pick.title = "which turn's values the cards show";
-  const whole = el("option", null, "Whole run · last values");
-  whole.value = "";
-  pick.append(whole);
-  for (const t of state.runTurns) {
-    const o = el("option", null, `${t.label} · ${t.count}`);
-    o.value = t.key;
-    pick.append(o);
-  }
-  pick.onchange = () => { state.runTurn = pick.value || null; render(); renderFlowInfo(); };
-  const extras = [pick];
-  if (data.errors) {
-    const eb = el("button", "cbad small", "Next error");
-    eb.title = "Select the errored ops one by one";
-    eb.onclick = walkErrors;
-    extras.push(eb);
-  }
+  state.runRollups = new Map((tree.rollups || []).map(r => [r.op, r]));
+  const extras = [RunView.lensBar()];
   box.append(runHeader(run, tree, "workflow", extras));
+  box.append(RunView.timeline(state.runTurns, tree.total_ms, (key) => {
+    state.runTurn = key; render(); renderFlowInfo();
+  }));
   box.classList.add("workflow");
   const stage = $("#stage");
   if (!state._stageHome) state._stageHome = {parent: stage.parentNode, next: stage.nextSibling};
@@ -2898,6 +2991,7 @@ function leaveWorkflow() {
   state.run = null;
   state.runTurn = null;
   state.runByOpTurn = null;
+  state.runRollups = null;
   state.heatMax = 0;
   render();
   renderFlowInfo();

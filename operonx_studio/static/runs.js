@@ -28,6 +28,7 @@ const RunsView = (() => {
   let origins = null;
   let token = 0;
   let cursor = null;
+  const picked = new Set();   // runs ticked for "Compare"
 
   const save = () => store(`runsView:${PID}`, {folder: v.folder, range: v.range, status: v.status, order: v.order});
   const since = () => {
@@ -184,12 +185,28 @@ const RunsView = (() => {
     }
   }
 
+  function syncCompare() {
+    const btn = document.querySelector("#traces .comparebtn");
+    if (!btn) return;
+    btn.hidden = picked.size !== 2;
+    for (const cb of document.querySelectorAll("#traces .runpick")) {
+      cb.disabled = picked.size >= 2 && !cb.checked;
+    }
+  }
+
   function row(r) {
     const tr = el("tr", "clickable" + (r.status === "error" ? " failed" : ""));
     const st = el("td", "stcell");
     const dot = el("span", "stdot " + (r.status === "error" ? "bad" : "ok"));
     dot.title = r.status;
-    st.append(dot);
+    const cb = el("input", "runpick");
+    cb.type = "checkbox";
+    cb.checked = picked.has(r.run);
+    cb.setAttribute("aria-label", `Pick ${r.run} to compare`);
+    cb.title = "Pick two runs to compare";
+    cb.onclick = (ev) => ev.stopPropagation();
+    cb.onchange = () => { if (cb.checked) picked.add(r.run); else picked.delete(r.run); syncCompare(); };
+    st.append(dot, cb);
     tr.append(st);
     const main = el("td");
     main.append(el("div", "runname", r.source === "langfuse" ? (r.name || r.run) : r.run));
@@ -326,7 +343,10 @@ const RunsView = (() => {
     follow.append(pin, "Follow newest");
     follow.title = "Open the newest run as it arrives";
     bar.append(search, range, status, order);
-    tools.append(follow, refresh);
+    const compare = Icons.button("right", "Compare", "small comparebtn primary", "Compare the two picked runs op by op");
+    compare.hidden = picked.size !== 2;
+    compare.onclick = () => { const [a, b] = [...picked]; RunView.compare(a, b); };
+    tools.append(compare, follow, refresh);
     main.append(bar);
 
     const strip = el("div", "runstrip");

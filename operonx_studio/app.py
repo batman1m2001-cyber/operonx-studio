@@ -1145,15 +1145,57 @@ def build_studio_app(recents: Optional[Recents] = None):
         got = _record(pid, run)
         return got if isinstance(got, JSONResponse) else JSONResponse(_flow_records(got[0], run))
 
+    def _rollups_of(rows, rec) -> List[Dict[str, Any]]:
+        """Per-op numbers for one run — operonx's own `summarize`, so the
+        run view and the store's rollups can never disagree."""
+        from operonx.telemetry.runs import summarize
+
+        _, rolls = summarize(rec.summary.trace_id, rows, rec.meta)
+        out = []
+        for r in sorted(rolls, key=lambda r: -r.total_ms):
+            d = r.to_dict()
+            d.pop("samples", None)
+            out.append(d)
+        return out
+
     @app.get("/api/p/{pid}/trace/{run}/tree")
     def trace_tree(pid: str, run: str) -> JSONResponse:
-        """The run as a tree (operonx's ctx rules)."""
+        """The run as a tree (operonx's ctx rules), with its summary and
+        per-op rollups — what the run header and the lenses read."""
         got = _record(pid, run)
         if isinstance(got, JSONResponse):
             return got
         out = _tree_records(got[0], run)
         out["summary"] = got[1].summary.to_dict()
+        out["rollups"] = _rollups_of(got[0], got[1])
         return JSONResponse(out)
+
+    @app.get("/api/p/{pid}/compare")
+    def compare_runs(pid: str, a: str, b: str) -> JSONResponse:
+        """Two runs side by side: each summary, and per op the time and
+        cost in each and the difference — ops that ran in only one show
+        with the other side empty."""
+        sides = []
+        for run in (a, b):
+            got = _record(pid, run)
+            if isinstance(got, JSONResponse):
+                return got
+            sides.append((got[1].summary.to_dict(), {r["op"]: r for r in _rollups_of(*got)}))
+        (sa, ra), (sb, rb) = sides
+        ops = []
+        for op in sorted(set(ra) | set(rb), key=lambda o: -max(ra.get(o, {}).get("total_ms", 0),
+                                                              rb.get(o, {}).get("total_ms", 0))):
+            x, y = ra.get(op), rb.get(op)
+            row: Dict[str, Any] = {"op": op, "a": x, "b": y}
+            if x and y:
+                row["d_ms"] = y["total_ms"] - x["total_ms"]
+                row["d_count"] = y["count"] - x["count"]
+                # a cost change needs both prices: unpriced is unknown, not $0
+                if x.get("cost_usd") is not None and y.get("cost_usd") is not None:
+                    row["d_cost"] = y["cost_usd"] - x["cost_usd"]
+            ops.append(row)
+        return JSONResponse({"a": sa, "b": sb, "ops": ops,
+                             "d_ms": (sb["duration_ms"] or 0) - (sa["duration_ms"] or 0)})
 
     @app.get("/api/p/{pid}/trace/{run}/timeline")
     def trace_timeline(pid: str, run: str) -> JSONResponse:

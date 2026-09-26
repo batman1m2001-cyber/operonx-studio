@@ -320,3 +320,47 @@ def test_a_trace_carries_the_summary_the_origin_line_links_from(client, tmp_path
     s = client.get(f"/api/p/{pid}/trace/i2/tree").json()["summary"]
     assert (s["origin"], s["job"], s["job_run"], s["key"], s["runbook"], s["runbook_run"]) == (
         "job", "qc", "J2", "k2", "nightly", "RB2")
+
+
+# -- P3: one run's numbers, and two runs compared ---------------------------------------
+
+
+def _llm_trace(tid, cost, *, slow=1.0):
+    nodes = []
+    t = 100.0
+    for op, ms, outs in (("stt", 40 * slow, {"text": "alo"}),
+                         ("reply", 300 * slow, {"content": "hi", "cost_usd": cost,
+                                                "usage": {"prompt_tokens": 10, "completion_tokens": 5}}),
+                         ("tts", 80, {"audio": "x"})):
+        nodes.append(OpExecution(op_id=f"g.{op}#{tid}", op_name=op, op_full_name=f"g.{op}", ctx=("main",),
+                                 start_time=t, end_time=t + ms / 1000, inputs={}, outputs=outs, upstreams=[],
+                                 status="ok", op_type="llm" if op == "reply" else "code"))
+        t += ms / 1000
+    return WorkflowTrace(trace_id=tid, workflow_name="flow", started_at=100.0, ended_at=t, nodes=nodes,
+                         metadata={"origin": "service", "service": "call"}, wall_started_at=NOW)
+
+
+def test_a_runs_tree_carries_its_rollups_slowest_first(client, project):
+    store = FilesRunStore(root=project / ".operonx" / "runs", refresh_every=0)
+    store.consume(_llm_trace("r-a", 0.002))
+    pid = _open(client, project)
+    tree = client.get(f"/api/p/{pid}/trace/r-a/tree").json()
+    assert [r["op"] for r in tree["rollups"]] == ["reply", "tts", "stt"]
+    reply = tree["rollups"][0]
+    assert reply["cost_usd"] == pytest.approx(0.002) and reply["tokens_in"] == 10 and "samples" not in reply
+    assert tree["summary"]["llm_calls"] == 1 and tree["summary"]["cost_usd"] == pytest.approx(0.002)
+
+
+def test_compare_two_runs_op_by_op(client, project):
+    store = FilesRunStore(root=project / ".operonx" / "runs", refresh_every=0)
+    store.consume(_llm_trace("r-a", 0.002))
+    store.consume(_llm_trace("r-b", None, slow=2.0))
+    pid = _open(client, project)
+    data = client.get(f"/api/p/{pid}/compare", params={"a": "r-a", "b": "r-b"}).json()
+    assert data["a"]["trace_id"] == "r-a" and data["b"]["trace_id"] == "r-b"
+    ops = {o["op"]: o for o in data["ops"]}
+    assert ops["reply"]["d_ms"] == pytest.approx(300.0, abs=0.5)
+    assert ops["stt"]["d_ms"] == pytest.approx(40.0, abs=0.5) and ops["tts"]["d_ms"] == pytest.approx(0.0, abs=0.5)
+    assert "d_cost" not in ops["reply"]  # B's call went unpriced: no change is computed from $0
+    assert data["d_ms"] == pytest.approx(340.0, abs=1.0)
+    assert client.get(f"/api/p/{pid}/compare", params={"a": "r-a", "b": "nope"}).status_code == 404
