@@ -77,6 +77,8 @@ eval, without leaving one tool, will not go back.
 | 3 | Editing | **No drag and drop, ever.** The assistant is the editor, and it gets the investment a canvas editor would have had (§6). |
 | 4 | Where it runs | **Personal first, shared-ready.** Nothing personal-only goes into the contracts; a team server is a backend swap, not a rewrite (§9). |
 | 5 | Playground | **A general simulator with toys.** The toys follow what a service's doors carry, not which project it is. Voice (mic and headphones) is one toy among several (§7). |
+| 6 | Cost of an in-house LLM | **Priced at $0 by default**, editable later in the Resources hub (§5.3). |
+| 7 | Retention | **Services 30 days, jobs and evals forever, playground 7 days** by default, editable in Settings (§4.4). |
 
 ---
 
@@ -203,6 +205,23 @@ rollups. They are exact where the backend can compute them (Postgres
 5. `langfuse`: read-only, for runs that live only there. This replaces
    the studio's own Langfuse reading code.
 
+### 4.4 Retention
+
+Each origin has a default keep period, and `delete_runs` enforces it
+(a sweep when the studio starts, then daily):
+
+| Origin | Default |
+|---|---|
+| Services | 30 days |
+| Jobs and evals | forever |
+| Playground | 7 days |
+| Ad hoc | 30 days |
+
+These are **editable in Settings**, per project, and saved in the
+project (`[studio.retention]` in `operonx.toml`) so a team server
+applies the same policy. Settings shows how many runs, and how much
+disk, each policy would free before you save.
+
 **Job records** (`run.json`, `items.jsonl`) move behind the same store
 later, so a team server sees a job's runs without a shared disk. Until
 then the studio reads them as it does today.
@@ -304,9 +323,18 @@ range. It reads `op_rollups`.
 - **Unpriced is never zero.** An unpriced op shows **"unpriced"**, never
   `$0`, and totals read "$1.24 + 3 unpriced ops". That keeps "we did not
   measure it" apart from "it cost nothing".
-- **Setting prices comes first.** The Resources pane gets a "set prices"
-  control on LLM resources. Today none are priced, so this is step one
-  of the dashboard, not an afterthought.
+- **In-house models are priced at $0 by default.** An LLM resource that
+  points at your own gateway (callbot's `llm:inhouse`) gets explicit
+  prices of `0`. That is a *declared* zero ("it costs us nothing per
+  token"), which is different from *unpriced* ("we don't know"): the
+  first sums as $0, the second shows as "unpriced". External providers
+  with no prices stay unpriced.
+- **Prices are edited in the Resources hub.** Each LLM resource shows its
+  input and output price per 1M tokens, with an Edit control. A change
+  is written to `resources.yaml` as a diff card (§6.2), the same path as
+  every other edit, so prices stay in the project's code. Only calls
+  made after the change are priced at the new rate; past runs keep the
+  cost recorded at the time.
 
 **Key ops.** A service can pin a few ops, declared in code the way
 `show_keys` is, so the table's first rows are always the ones the team
@@ -544,6 +572,8 @@ Build     Flow · Prompts · Resources
 Run       Playground · Services · Jobs
 Observe   Runs · Monitor · Alerts
 Improve   Datasets · Evals · Review
+          ─────────────
+          Settings        (retention, prices overview, trace store, members later)
 ```
 
 - **The assistant** is present on every screen, in the side panel beside
@@ -562,11 +592,11 @@ Each phase ships alone and is useful alone. **Up** is work in operonx;
 
 | Phase | Content | Up | Studio |
 |---|---|---|---|
-| **P0 — records you can trust** | §3: origin tags, application-level default consumers, version tag, templated layout under `.operonx/runs/`. callbot: prices on its LLM resource, `trace=` on the app. | ● 1.9.0 | reads both layouts |
-| **P1 — RunStore** | §4: contract, `RunStoreConsumer`, `files` + `sqlite` backends, `langfuse` read-only; the studio reads runs only through it | ● | switch readers |
+| **P0 — records you can trust** | §3: origin tags, application-level default consumers, version tag, templated layout under `.operonx/runs/`. callbot: `llm:inhouse` priced at 0, `trace=` on the app. | ● 1.9.0 | reads both layouts |
+| **P1 — RunStore** | §4: contract, `RunStoreConsumer`, `files` + `sqlite` backends, `langfuse` read-only, retention sweep; the studio reads runs only through it, and gains a Settings page for retention | ● | switch readers, Settings |
 | **P2 — Runs by origin** | §5.1: origin tree, filters, search, job ↔ trace links, runbook groups | | ● |
 | **P3 — the run view** | §5.2: header, lenses, timeline, reordered side panel, anomalies, compare | | ● |
-| **P4 — Monitor** | §5.3: per-origin dashboard from `op_rollups`, cost with "unpriced", key ops, set-prices control | key ops | ● |
+| **P4 — Monitor** | §5.3: per-origin dashboard from `op_rollups`, cost with "unpriced", key ops, price editing in the Resources hub | key ops | ● |
 | **P5 — assistant tools** | §6 items 1, 2, 4, 5: studio actions over MCP, diff cards on a scratch branch, rich replies, context | | ● |
 | **P6 — playground** | §7: `operonx-play` bridge, studio protocol, Form + Chat + Events toys, built-in codecs, replay, re-run one op | ● bridge | ● |
 | **P7 — evals** | §8.1 on jobs + playground; §6 item 3 (the assistant verifies its work) | evaluator helpers | ● |
@@ -599,11 +629,4 @@ Each phase ships alone and is useful alone. **Up** is work in operonx;
 
 ## 13. Still open
 
-1. **What an in-house LLM costs.** callbot's `llm:inhouse` runs on your
-   own gateway, and a per-token dollar price may not be the right unit.
-   Should its cost be a price you set (amortised GPU cost), or tokens and
-   GPU-seconds only? This decides what the cost lens shows for callbot on
-   day one.
-2. **Retention.** How long runs are kept per origin by default. A
-   suggestion: services 30 days, jobs and evals forever, playground 7
-   days. `delete_runs` enforces whatever you pick.
+Nothing blocks P0. Questions will be added here as the phases raise them.
