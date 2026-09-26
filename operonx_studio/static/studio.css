@@ -1983,6 +1983,21 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   .pwpair { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr); }
 }
 
+/* ── alerts ───────────────────────────────────────────────────────── */
+.alcard { border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px 16px; margin-bottom: 12px;
+  display: flex; flex-direction: column; gap: 6px; }
+.alcard.firing { border-color: color-mix(in srgb, var(--err) 45%, var(--border)); background: color-mix(in srgb, var(--err-soft) 40%, transparent); }
+.alcard.off { opacity: .7; }
+.altop { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.alrule { font-size: 13px; color: var(--text-2); }
+.alnow { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.alval { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.alval.bad { color: var(--err); }
+.alsent { font-size: 12px; }
+.aledit { background: var(--surface); box-shadow: var(--sh-1); }
+.aledit .condfield { position: relative; }
+.linkbtn.danger { color: var(--err); }
+
 /* ── toast: one shared voice for action feedback ──────────────────── */
 #toast {
   position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 12px);

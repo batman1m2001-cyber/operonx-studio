@@ -1849,6 +1849,170 @@ def build_studio_app(recents: Optional[Recents] = None):
             path.write_text(new, encoding="utf-8")
         return JSONResponse({"file": rel, "diff": diff, "applied": bool(body.get("apply"))})
 
+    # ── alerts: thresholds per service or job, checked in the background ──
+    # The rules live in the project (.operonx/alerts.json) and their last
+    # state beside them; operonx.telemetry.runs.alerts does the judging from
+    # the run store's summaries. Webhooks are only ever called by a rule the
+    # user wrote, or by the Test button.
+    from operonx.telemetry.runs.alerts import METRICS, Alert, AlertState, deliver, evaluate, message, step
+
+    def _alerts_file(root: Path) -> Path:
+        return root / ".operonx" / "alerts.json"
+
+    def _alerts(root: Path) -> List[Alert]:
+        f = _alerts_file(root)
+        if not f.is_file():
+            return []
+        try:
+            return [Alert.from_dict(d) for d in json.loads(f.read_text(encoding="utf-8")).get("alerts") or []]
+        except (ValueError, TypeError):
+            return []
+
+    def _save_alerts(root: Path, alerts: List[Alert]) -> None:
+        f = _alerts_file(root)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({"alerts": [a.to_dict() for a in alerts]}, indent=2), encoding="utf-8")
+
+    def _states(root: Path) -> Dict[str, AlertState]:
+        f = root / ".operonx" / "alerts-state.json"
+        try:
+            raw = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+            return {k: AlertState(**v) for k, v in raw.items()}
+        except (ValueError, TypeError):
+            return {}
+
+    def _save_states(root: Path, states: Dict[str, AlertState]) -> None:
+        import dataclasses
+
+        f = root / ".operonx" / "alerts-state.json"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({k: dataclasses.asdict(v) for k, v in states.items()}, indent=2), encoding="utf-8")
+
+    def _project_name(pid: str, watcher: ProjectWatcher) -> str:
+        ref = recents.get(pid)
+        return ref.name if ref is not None and ref.name else watcher.root.name
+
+    def _check_project(pid: str, now: Optional[float] = None) -> List[Dict[str, Any]]:
+        """Evaluate every enabled rule, send what changed, keep the state."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return []
+        rules = [a for a in _alerts(watcher.root) if a.enabled]
+        if not rules:
+            return []
+        store = project_runs(watcher.root, sweep=False).store
+        states = _states(watcher.root)
+        base = os.environ.get("OPERONX_STUDIO_URL", "").rstrip("/")
+        sent = []
+        for a in rules:
+            cur = evaluate(store, a, now)
+            kind = step(a, states.get(a.name), cur)
+            states[a.name] = cur
+            if kind and a.webhook:
+                link = f"{base}/p/{pid}" if base else ""
+                try:
+                    code = deliver(a.webhook, message(a, cur, kind, project=_project_name(pid, watcher), link=link))
+                    sent.append({"alert": a.name, "kind": kind, "status": code})
+                except Exception as exc:  # noqa: BLE001 — a dead webhook is reported, the check goes on
+                    cur.extra["delivery_error"] = f"{type(exc).__name__}: {exc}"
+                    sent.append({"alert": a.name, "kind": kind, "error": str(exc)})
+        _save_states(watcher.root, states)
+        return sent
+
+    if os.environ.get("OPERONX_STUDIO_ALERTS", "on").lower() != "off":
+        import threading as _threading
+
+        def _alert_loop() -> None:
+            while True:
+                time.sleep(60)
+                for ref in list(recents.ordered()):
+                    try:
+                        _check_project(ref.id)
+                    except Exception:  # noqa: BLE001 — one project's trouble never stops the others
+                        pass
+
+        _threading.Thread(target=_alert_loop, name="studio-alerts", daemon=True).start()
+
+    @app.get("/api/p/{pid}/alerts")
+    def alerts_list(pid: str) -> JSONResponse:
+        """Every rule with its number right now and what was last sent."""
+        import dataclasses
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        store = project_runs(watcher.root, sweep=False).store
+        states = _states(watcher.root)
+        out = []
+        for a in _alerts(watcher.root):
+            now = dataclasses.asdict(evaluate(store, a))
+            last = states.get(a.name)
+            out.append({**a.to_dict(), "webhook_set": bool(a.webhook), "webhook": _mask(a.webhook), "now": now,
+                        "last": dataclasses.asdict(last) if last else None})
+        return JSONResponse({"alerts": out, "metrics": list(METRICS)})
+
+    def _mask(url: str) -> str:
+        """A webhook URL is a secret: show where it goes, not its token."""
+        if not url:
+            return ""
+        from urllib.parse import urlsplit
+
+        u = urlsplit(url)
+        return f"{u.scheme}://{u.netloc}/…" if u.path.strip("/") else f"{u.scheme}://{u.netloc}"
+
+    @app.post("/api/p/{pid}/alerts")
+    def alerts_save(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Create or replace a rule by name; ``webhook`` left out keeps the one it had."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        name = str(body.get("name") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_. -]{1,60}", name):
+            return JSONResponse({"error": "an alert's name is letters, digits, spaces, _ . -"}, status_code=400)
+        rules = _alerts(watcher.root)
+        old = next((a for a in rules if a.name == name), None)
+        data = {k: v for k, v in body.items() if k != "webhook" or v}
+        if old is not None and not data.get("webhook"):
+            data["webhook"] = old.webhook
+        if data.get("webhook") and not str(data["webhook"]).startswith(("http://", "https://")):
+            return JSONResponse({"error": "a webhook is an http(s) URL"}, status_code=400)
+        if not data.get("op"):
+            data["op"] = None
+        try:
+            rule = Alert.from_dict(data)
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        rules = [a for a in rules if a.name != name] + [rule]
+        _save_alerts(watcher.root, rules)
+        return JSONResponse({"saved": name})
+
+    @app.delete("/api/p/{pid}/alerts/{name}")
+    def alerts_delete(pid: str, name: str) -> JSONResponse:
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        rules = _alerts(watcher.root)
+        _save_alerts(watcher.root, [a for a in rules if a.name != name])
+        return JSONResponse({"deleted": name})
+
+    @app.post("/api/p/{pid}/alerts/{name}/test")
+    def alerts_test(pid: str, name: str) -> JSONResponse:
+        """Send a TEST message to the rule's webhook — the user asked to."""
+        watcher = _watcher(pid)
+        rule = next((a for a in _alerts(watcher.root) if a.name == name), None) if watcher else None
+        if rule is None or not rule.webhook:
+            return JSONResponse({"error": "no such alert, or it has no webhook"}, status_code=404)
+        st = evaluate(project_runs(watcher.root, sweep=False).store, rule)
+        try:
+            code = deliver(rule.webhook, message(rule, st, "test", project=_project_name(pid, watcher)))
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=502)
+        return JSONResponse({"status": code})
+
+    @app.post("/api/p/{pid}/alerts/check")
+    def alerts_check(pid: str) -> JSONResponse:
+        return JSONResponse({"sent": _check_project(pid)})
+
     # ── evals and datasets ───────────────────────────────────────────────
     # An eval is a job (operonx.app.evals): its records are job records
     # whose items carry verdicts and whose run.json carries the pass rate.
