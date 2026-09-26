@@ -465,6 +465,22 @@ def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]
             "truncated": count >= limit}
 
 
+def _studio_manifest(root: Path) -> Dict[str, Any]:
+    """The whole operonx.toml, or nothing."""
+    try:
+        return _toml.loads((root / MANIFEST).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _per_token(per_million: float) -> Any:
+    """USD per 1M tokens as the per-token number resources files hold —
+    0 stays the integer 0 (a declared zero), the rest a plain decimal."""
+    if per_million == 0:
+        return 0
+    return float(f"{per_million / 1_000_000:.12g}")
+
+
 def _dir_size(path: Path) -> int:
     """Bytes under *path* (a run directory), best-effort."""
     total = 0
@@ -1116,6 +1132,31 @@ def build_studio_app(recents: Optional[Recents] = None):
             "source": pr.source,
         })
 
+    @app.get("/api/p/{pid}/monitor")
+    def monitor_view(pid: str, origin: str = "", name: str = "", since: str = "", until: str = "",
+                     buckets: int = 24) -> JSONResponse:
+        """One service's or job's health over a range (see monitor.py)."""
+        from operonx_studio.monitor import monitor
+
+        watcher = _watcher(pid)
+        pr = _runs(pid)
+        if pr is None or watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        key_ops: List[str] = []
+        if origin == "service" and name:
+            result = watcher.refresh_swr()
+            for sv in ((result.ir or {}) if result.ok else {}).get("services") or []:
+                if sv.get("name") == name:
+                    key_ops = list(sv.get("key_ops") or [])
+        try:
+            data = monitor(pr.store, origin=origin or None, name=name or None,
+                           since=float(since) if since else None, until=float(until) if until else None,
+                           buckets=buckets, key_ops=key_ops)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        data["key_ops"] = key_ops
+        return JSONResponse(data)
+
     @app.get("/api/p/{pid}/trace/{run}")
     def trace(pid: str, run: str) -> JSONResponse:
         got = _record(pid, run)
@@ -1230,6 +1271,48 @@ def build_studio_app(recents: Optional[Recents] = None):
         if isinstance(got, JSONResponse):
             return got
         return JSONResponse(_op_executions(got[0], run, op_name, limit=max(1, min(limit, 200))))
+
+    # ── resources: prices ────────────────────────────────────────────────
+
+    @app.post("/api/p/{pid}/resources/price")
+    def resource_price(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Set an LLM resource's prices (USD per 1M tokens in / out) in the
+        project's resources file. ``apply`` false (the default) returns the
+        diff only — the page shows it before anything is written."""
+        import difflib
+
+        from operonx_studio.yamledit import YamlEditError, set_fields
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        name = str(body.get("resource") or "")
+        try:
+            per_in = float(body.get("input_per_1m"))
+            per_out = float(body.get("output_per_1m"))
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "prices must be numbers (USD per 1M tokens)"}, status_code=400)
+        if per_in < 0 or per_out < 0:
+            return JSONResponse({"error": "prices cannot be negative"}, status_code=400)
+        overlay = ((_studio_manifest(watcher.root).get("resources") or {}).get("overlay")
+                   or "resources.yaml")
+        path = watcher.root / str(overlay)
+        if not path.is_file():
+            return JSONResponse({"error": f"no resources file at {path}"}, status_code=404)
+        text = path.read_text(encoding="utf-8")
+        fields = {"cost_per_input_token": _per_token(per_in), "cost_per_output_token": _per_token(per_out)}
+        try:
+            new = set_fields(text, "llm", name, fields)
+        except YamlEditError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        diff = "".join(difflib.unified_diff(text.splitlines(keepends=True), new.splitlines(keepends=True),
+                                            fromfile=str(overlay), tofile=str(overlay), n=2))
+        applied = False
+        if body.get("apply") and new != text:
+            path.write_text(new, encoding="utf-8")
+            applied = True
+        return JSONResponse({"file": str(path), "diff": diff, "changed": new != text, "applied": applied,
+                             "fields": fields})
 
     # ── settings: retention ──────────────────────────────────────────────
 

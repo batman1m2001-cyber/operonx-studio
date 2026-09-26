@@ -2469,8 +2469,9 @@ async function showResources() {
           `${LLM_PROVIDERS[provider].icon} ${LLM_PROVIDERS[provider].label}`));
         card.append(row);
       }
+      if (det.category === "llm") card.append(priceRow(name, det));
       for (const [k, v] of Object.entries(det)) {
-        if (k === "category") continue;
+        if (k === "category" || k === "cost_per_input_token" || k === "cost_per_output_token") continue;
         const row = el("div", "resrow");
         row.append(el("span", "reskey", k));
         row.append(envValue(v));
@@ -2531,6 +2532,81 @@ async function showResources() {
   } catch {
     envBox.append(el("div", "envrow note", "Environment status is unavailable."));
   }
+}
+
+/* An LLM resource's prices, and an editor that writes them to the
+ * resources file — shown as a diff first, applied on confirm. A price of
+ * 0 is a declared zero (an in-house model); no price is "unpriced". */
+function priceRow(name, det) {
+  const wrap = el("div", "pricerow");
+  const perM = (v) => (v == null || v === "" ? null : Number(v) * 1e6);
+  const fmt = (v) => (v === 0 ? "$0" : `$${Number(v.toPrecision(6))}`);
+  const pin = perM(det.cost_per_input_token), pout = perM(det.cost_per_output_token);
+  const line = el("div", "resrow");
+  line.append(el("span", "reskey", "price"));
+  const val = el("span", "resval priceval");
+  if (pin == null && pout == null) {
+    val.append(el("span", "unpriced", "Not priced"), " — calls show as unpriced in Runs and Monitor");
+  } else {
+    val.textContent = `${fmt(pin || 0)} in · ${fmt(pout || 0)} out per 1M tokens`;
+  }
+  const edit = el("button", "linkbtn", pin == null && pout == null ? "Set prices" : "Edit");
+  edit.type = "button";
+  line.append(val, edit);
+  wrap.append(line);
+
+  const form = el("div", "priceform");
+  form.hidden = true;
+  const field = (label, value) => {
+    const f = el("label", "pricefield");
+    f.append(el("span", null, label));
+    const i = el("input");
+    i.type = "number"; i.min = "0"; i.step = "0.01"; i.inputMode = "decimal";
+    i.value = value == null ? "" : String(Number(value.toPrecision(6)));
+    i.placeholder = "0";
+    f.append(i, el("span", "priceunit", "USD / 1M tokens"));
+    return [f, i];
+  };
+  const [fIn, iIn] = field("Input", pin);
+  const [fOut, iOut] = field("Output", pout);
+  const diff = el("pre", "diffbox");
+  diff.hidden = true;
+  const err = el("div", "err");
+  const acts = el("div", "priceacts");
+  const cancel = el("button", "small", "Cancel");
+  cancel.type = "button";
+  const preview = el("button", "small", "Preview change");
+  preview.type = "button";
+  const apply = el("button", "small primary", "Save to resources file");
+  apply.type = "button";
+  apply.hidden = true;
+  acts.append(cancel, preview, apply);
+  form.append(fIn, fOut, el("p", "note pricehint", "For an in-house model, 0 declares it free — different from leaving it unpriced."), diff, err, acts);
+  wrap.append(form);
+
+  const body = () => ({resource: name, input_per_1m: iIn.value || 0, output_per_1m: iOut.value || 0});
+  edit.onclick = () => { form.hidden = !form.hidden; };
+  cancel.onclick = () => { form.hidden = true; diff.hidden = true; apply.hidden = true; err.textContent = ""; };
+  preview.onclick = async () => {
+    err.textContent = "";
+    try {
+      const r = await api(`/api/p/${PID}/resources/price`, body());
+      diff.textContent = "";
+      for (const ln of (r.diff || "No change.").split("\n")) {
+        diff.append(el("div", ln.startsWith("+") && !ln.startsWith("+++") ? "add" : ln.startsWith("-") && !ln.startsWith("---") ? "del" : null, ln));
+      }
+      diff.hidden = false;
+      apply.hidden = !r.changed;
+    } catch (e) { err.textContent = e.message; }
+  };
+  apply.onclick = async () => {
+    try {
+      await api(`/api/p/${PID}/resources/price`, {...body(), apply: true});
+      toast("Prices saved — new calls are priced from now on");
+      form.hidden = true;
+    } catch (e) { err.textContent = e.message; }
+  };
+  return wrap;
 }
 
 function jumpToOp(graph, node) {

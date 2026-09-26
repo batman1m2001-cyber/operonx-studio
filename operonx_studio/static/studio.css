@@ -1442,6 +1442,75 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   .tlbody { flex-basis: 100%; }
 }
 
+/* ── Monitor ─────────────────────────────────────────────────────── */
+
+.monhead { gap: 10px; }
+.monhead h2 { margin-right: auto; }
+.montarget { min-width: 180px; font-weight: 600; }
+.stattiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stattiles.small { margin-bottom: 12px; }
+.stattile { border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; min-width: 0; }
+.statlabel { font-size: var(--fs-sm); color: var(--text-2); }
+.statvalue { font-size: 26px; font-weight: 650; letter-spacing: -.02em; margin-top: 2px; }
+.stattiles.small .statvalue { font-size: 20px; }
+.statsub { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.delta { font-weight: 600; }
+.delta.good { color: #006300; }
+.delta.bad { color: var(--err); }
+.vizgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.vizcard { border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px 8px; margin-bottom: 16px; min-width: 0; }
+.vizgrid .vizcard { margin-bottom: 0; }
+.vizcardhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.vizcardhead h3 { margin: 0; font-size: var(--fs-base); font-weight: 600; margin-right: auto; }
+.vizcard .tablewrap { margin-bottom: 6px; }
+.vizsvg { width: 100%; height: auto; display: block; overflow: visible; }
+.vizaxis { font: 10.5px var(--font); fill: #898781; font-variant-numeric: tabular-nums; }
+.vizver { font: 600 10px var(--mono); fill: var(--text-2); }
+.vizlegend { display: flex; gap: 14px; font-size: 12px; color: var(--text-2); }
+.vizlegend-item { display: inline-flex; align-items: center; gap: 6px; }
+.vizswatch { width: 10px; height: 10px; border-radius: 3px; }
+.viztip { position: fixed; z-index: 200; pointer-events: none; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: var(--sh-2);
+  padding: 7px 10px; font-size: 12px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.viztip-head { color: var(--text-3); font-size: 11px; }
+.optable .bgop td { color: var(--text-3); }
+.keytag, .errtag { display: inline-block; margin-left: 8px; font-size: 10.5px; font-weight: 600; padding: 0 6px;
+  border-radius: 4px; vertical-align: 1px; }
+.keytag { background: var(--accent-soft); color: var(--accent-strong); }
+.errtag { background: var(--err-soft); color: var(--err); }
+.sharecell { min-width: 150px; }
+.sharebar { display: inline-block; width: 90px; height: 6px; border-radius: 3px; background: var(--surface-2);
+  vertical-align: middle; margin-right: 8px; overflow: hidden; }
+.sharebar i { display: block; height: 100%; background: #2a78d6; border-radius: 3px; }
+.sharepct { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.strongnum { font-weight: 600; }
+.worse { color: var(--err); font-weight: 600; }
+.better { color: #006300; font-weight: 600; }
+.errmsg { font-weight: 500; overflow-wrap: anywhere; }
+@media (max-width: 1100px) { .vizgrid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 760px) {
+  .stattiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .monhead h2 { flex-basis: 100%; }
+  .montarget { flex: 1 0 100%; min-width: 0; }
+  .statvalue { font-size: 22px; }
+}
+
+/* prices on an LLM resource */
+.pricerow { margin: 2px 0 4px; }
+.pricerow .resrow { align-items: center; }
+.priceval { font-family: var(--font); font-size: 12.5px; color: var(--text); }
+.priceval .unpriced { color: var(--warn); font-weight: 600; }
+.pricerow .linkbtn { margin-left: auto; }
+.priceform { background: var(--surface-2); border-radius: var(--r-sm); padding: 10px 12px; margin: 6px 0 4px;
+  display: flex; flex-direction: column; gap: 8px; }
+.pricefield { display: flex; align-items: center; gap: 8px; font-size: var(--fs-md); }
+.pricefield > span:first-child { width: 56px; color: var(--text-2); }
+.pricefield input { width: 120px !important; min-height: 32px; }
+.priceunit { color: var(--text-3); font-size: 12px; }
+.pricehint { margin: 0; font-size: 12px; }
+.priceform .diffbox { max-height: 320px; }
+.priceacts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
 /* ── Settings ─────────────────────────────────────────────────────── */
 
 .setsection { max-width: 820px; margin-bottom: 28px; }
