@@ -401,24 +401,248 @@ into the place where the product gets built.
 
 ---
 
-## 7. Decisions that are yours
+## 7. Decisions — round 2 (2026-09-27)
 
-1. **Trace layout owned by operonx (recommended) or by the studio
-   alone.** Upstream tagging and layout make every consumer (Langfuse,
-   CLI, `ls`) see the same structure. A studio-only index is faster to
-   ship but leaves the disk flat and the job traces unrecorded.
-2. **Storage for the index: SQLite (recommended) or DuckDB.** SQLite is
-   in the standard library and plenty for tens of thousands of runs.
-   DuckDB is faster for analytics but adds a dependency. We can switch
-   later without changing the UI.
-3. **Editing stance.** It stays code-first (the standing decision:
-   structure is edited as code, through the agent or by hand), with safe
-   in-place edits for params and prompts. Should drag-to-wire editing
-   ever be on the table? I recommend no: it is the one thing that would
-   make us a second-rate n8n instead of a first-rate code platform.
-4. **Where it runs.** Today it is local plus a tunnel. A shared team
-   server (P7+, teams) changes auth, storage and multi-project
-   assumptions. Decide before "Later", not now.
-5. **Scope of P4's streaming playground.** A text channel for the voice
-   service is straightforward. Real audio in the browser (WebRTC or mic
-   to the websocket) is a larger, separate piece. Worth it for callbot?
+The first round's open questions, answered, and what each answer
+changes. Section 8 turns them into designs.
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Who owns the trace structure | **operonx.** The changes are additive (§8.1); the engine's trace capture is not touched. |
+| 2 | Where the run records live | **A `RunStore` contract in operonx, with pluggable backends**: files and SQLite first, then Postgres and Mongo. It is built on operonx's existing consumer and registry machinery, not beside it (§8.2). |
+| 3 | Editing | **No drag and drop, ever.** The assistant is the editor. It gets the investment drag and drop would have had (§8.3). |
+| 4 | Where it runs | **Personal first, shared-ready.** Nothing personal-only goes into the contracts: the run store, auth and project registry are all written so a team server is a backend swap, not a rewrite (§8.4). |
+| 5 | Playground | **A general simulator with toys.** It isn't callbot-specific: the toys are chosen by what a service's doors carry, and voice (mic and headphones) is one toy among several (§8.5). |
+
+---
+
+## 8. Designs for the round-2 decisions
+
+### 8.1 operonx owns the trace structure — what changes, and what doesn't
+
+The engine already builds a `WorkflowTrace` (one `OpExecution` per
+execution, with timings, ctx, values and upstreams) and hands it to each
+configured `Consumer` when the run ends. **None of that changes.** What
+changes is the metadata the trace carries and where the local consumer
+puts it: four small, additive pieces.
+
+| Change | Where in operonx | What it does |
+|---|---|---|
+| **Origin tags** | `operonx/app/serve/runner.py` already merges `metadata` onto the trace; the transports and job runner pass it | Every run carries `origin` (`service` / `job` / `adhoc` / `playground` / `eval`) and its name: `service`, `transport`, `variant`, or `job`, `job_run`, `key` (jobs do this today). A runbook run adds `runbook` and `runbook_run` to its jobs' runs. |
+| **Default consumers** | `Application` + `Job` | The application declares its trace consumers once (`Application(trace=[...])`). Services and jobs inherit them unless they override. A job with no `trace=` stops silently recording nothing. |
+| **Version** | `Application` boot | The git commit and a dirty flag, read once at boot and merged into every run's metadata. |
+| **Layout** | `operonx/telemetry/consumers/local.py` | The directory is templated from metadata, `{origin}/{name}/{day}/{trace_id}` by default, with the root under the project (`.operonx/runs/`). The old flat layout stays available as a setting, so nothing already written breaks. |
+
+LangfuseConsumer needs no change: tags already become Langfuse tags and
+metadata, so Langfuse filters by service and job for free. The studio
+reads old flat directories and the new layout alike, sorting by tags,
+not by path.
+
+**Cost of doing it in operonx:** one minor release (1.9.0), with tests
+covering all four pieces.
+
+**Payoff:** the CLI, Langfuse, `ls` and the studio all see the same
+structure, and callbot's job traces are recorded without anyone having
+to remember a flag.
+
+### 8.2 The RunStore — what the "index" is for, and how it stays backend-neutral
+
+**What it is for.** A trace is written once and read in two ways:
+
+- **One run, fully.** Every execution with its values. This is what the
+  local directory is good at: one folder, open it.
+- **Many runs, summarised.** "All `call` runs in the last 24 h, p95 per
+  op, total cost, top errors." Answered from folders, that means opening
+  and parsing every `nodes.jsonl`. callbot's are about 185 KB per call,
+  so a busy day is gigabytes read for four numbers.
+
+The "index" is the second shape: a small **summary** per run (origin,
+status, duration, cost, tokens, errors, version, key metadata) plus a
+**per-op rollup** per run (op, count, total, max and p95 duration,
+errors, cost). Dashboards, filters and search read the summaries; opening
+a run reads its full record.
+
+**Why not just an index in the studio:** you are right that it should
+not be one database welded to one tool. A team will want Postgres, or
+the Mongo they already run. And operonx already has the pieces this
+needs, so the studio must not grow a parallel set:
+
+| Already in operonx | Reused for runs as |
+|---|---|
+| `Consumer` (telemetry/consumer.py): pluggable writers of a finished trace, with `sanitize`, `offload_media` and `truncate` | **The write path.** A `RunStoreConsumer` writes a trace into any store. There is no second capture path. |
+| The registry and resource categories (`trace_langfuse:`, `doc_store:`…), plus lazy factories with `operonx[extra]` install hints | **Configuration.** A store is a resource (`run_store:default`) in `resources.yaml`, like everything else. |
+| The Postgres client deps (`psycopg`, `psycopg-pool`) used by doc stores and pgvector | **The Postgres backend**, with no new dependency. |
+| `LocalConsumer`'s directory layout and media offload | **The files backend.** The run directories are the full record; the summary lives in a SQLite file beside them. |
+| The studio's `LayeredCache` (memory → Redis → disk) | **Stays a cache** of derived views, never the store of record. |
+
+Not reused, on purpose: the doc-store contract (it forbids writes, a
+line its authors drew to stop it growing into an ORM), and the
+checkpointer (it records state deltas within a run, not runs).
+
+**The contract** is deliberately narrow, in the doc stores' spirit:
+
+```python
+class RunStore(ABC):
+    # write — called by RunStoreConsumer at run end
+    async def put_run(self, summary: RunSummary, record: RunRecord) -> None
+    # read
+    async def list_runs(self, where: RunFilter, order, limit, cursor) -> Page[RunSummary]
+    async def get_run(self, trace_id) -> RunRecord            # every execution + values
+    async def op_rollups(self, where: RunFilter) -> list[OpRollup]
+    # housekeeping
+    async def delete_runs(self, where: RunFilter) -> int      # retention
+```
+
+`RunFilter` is a small data object (origin, name, time range, status,
+version, metadata equals) and never a query language, so every backend
+can implement it natively. Percentiles over many runs come from the
+per-run rollups: exactly, where the backend can compute them (Postgres
+`percentile_cont`), and approximately otherwise. The UI states which.
+
+**Backends, in order:** `files` (the default: directories plus a SQLite
+summary, zero setup) → `sqlite` (single file) → `postgres` (team) →
+`mongodb` → `langfuse` (read-only, for runs that live only there; this
+replaces the studio's own Langfuse code).
+
+**Job records** (`run.json`, `items.jsonl`) move behind the same store
+later, so a team server sees a job's runs without a shared disk. Until
+then the studio reads them as it does today.
+
+### 8.3 Assistant-first: the editor is a conversation
+
+With drag and drop off the table, the assistant is how structure
+changes. It is already a real Claude Code session with the project
+briefing and what the user is looking at. What turns it from a chat
+window into the editor:
+
+1. **Studio actions as tools.** Open a run, filter runs, run the
+   playground, run a job or an eval, read a dashboard, add runs to a
+   dataset, set a resource price. It can do what the user can do, and
+   every action shows up on screen as it happens: the canvas and panes
+   move, so the user watches rather than reads.
+2. **Changes as reviewable diffs.** Every code edit is proposed as a
+   diff card (file, hunk, reason) with Apply and Discard buttons. The
+   studio re-extracts on apply, and the canvas redraws the new graph
+   with the changed ops highlighted. Edits happen on a scratch branch or
+   worktree, so "undo everything this conversation did" is one click.
+3. **It verifies its own work.** After an edit it runs the relevant
+   check (the playground case the user was looking at, the eval
+   dataset, the tests) and reports the numbers before and after. "I
+   changed the prompt; pass rate 111/129 → 119/129, cost per case
+   +4%."
+4. **Rich answers, not walls of text.** Replies can hold a run card, a
+   mini chart, a table of ops, or a link that selects a node. It speaks
+   in the studio's own components.
+5. **Context without typing.** The selection, painted run, lens, time
+   range, open dataset and failing cases ride along. "Why did this
+   fail?" needs no ids.
+6. **Starting from nothing.** "A RAG bot over these PDFs with a daily
+   eval" produces a graph, resources, a dataset and a job from the
+   templates (§3.8), and opens the playground on the result.
+7. **Proactive, not noisy.** When a run fails or an alert fires, an
+   offer appears ("look into it?") and it never acts unasked.
+
+All of this is **studio work plus a small tool bridge**. The agent
+itself stays Claude Code, and the studio exposes its actions as tools
+(MCP) that the session can call.
+
+### 8.4 Personal first, shared-ready
+
+What "shared-ready" means concretely, so personal mode never paints
+itself into a corner:
+
+- **Runs:** personal uses the `files` store. A team points every service
+  and the studio at one Postgres store. Same contract, same UI.
+- **Auth:** today it's one login. The auth check sits behind one
+  function that returns a *user*. Personal mode returns the single
+  local user; a team server returns real accounts (OIDC later). Stored
+  things (labels, datasets, comments) record the user from day one.
+- **Projects:** personal mode is a folder on this machine. The team
+  shape is the same project at a git remote, checked out on the server.
+  The registry keeps a `source` field now so the team shape fits later.
+- **Not built until teams are real:** permissions, sharing, comments,
+  audit.
+
+### 8.5 The simulator playground — toys on doors
+
+**The idea.** Every service already declares its doors: `ingress` ops
+where data enters, `egress` ops where it leaves, and a transport
+(websocket, http, asgi). The playground puts a **toy** on each door: a
+widget that produces what the ingress expects and renders what the
+egress emits. Which toys a service gets follows from what its doors
+carry, never from which project it is.
+
+**The toys:**
+
+| Toy | Speaks | Good for |
+|---|---|---|
+| **Form** | Typed inputs from the graph's signature (the door contract operonx already checks) | Any request/response graph, jobs' single items |
+| **Chat** | Text in, streamed text and events out | Chat agents; voice agents in text mode |
+| **Voice** | Browser mic in, speaker out (headphones advised to avoid echo), a live transcript beside it | Voice agents: callbot, and any audio door |
+| **Files** | Drop a PDF, image or audio file; it becomes the door's payload | RAG, document and vision pipelines, audio-file tests |
+| **Events** | A timeline of everything egress emitted that isn't content (hangup, transfer, tool calls, sync) | Seeing what the product *did*, not only what it said |
+| **Simulated user** | An LLM persona that plays the other side, following a script ("a busy parent who wants to reschedule"), for N conversations in parallel | Stress and regression for conversational products; every conversation becomes a dataset row |
+| **Conditions** | Inject latency, silence, noise, an error from a resource | How the product behaves when the world misbehaves |
+
+The **simulated user** is the one competitors mostly don't have, and it
+makes voice and chat agents testable at scale. It is also just a graph
+(an `LLMOp` with a persona prompt) wired to the other side of the door,
+so it is operonx all the way down.
+
+**How it stays general.** A toy speaks a small **studio protocol**
+(content chunks: text, audio frames, files, json; plus events). A
+service's door speaks its own protocol, and callbot's ingress parses
+telco packets, because door ops stay fat by design. Between them sits a
+**codec**: a small adapter that translates toy messages to the
+service's protocol and back.
+
+- **Built-in codecs** cover plain transports: http JSON ↔ form,
+  websocket text ↔ chat, websocket binary PCM ↔ voice.
+- **A project ships its own codec** when its protocol is its own. For
+  callbot, that's mic PCM ↔ telco audio packets and `play_frame` ↔
+  speaker, the same translation `mock_chat` and the telco perform today.
+  The codec lives in the project next to the doors it adapts, declared
+  on the service (`Service(..., playground=codec)`).
+- A service with no codec for a toy simply doesn't offer that toy.
+
+**Where the run happens.** The playground runs the service's graph in
+the **project's own interpreter** (the studio never imports a project,
+the same rule as extraction), through a small `operonx-play` bridge
+process. The browser connects to the studio, the studio to the bridge,
+the bridge to the graph through the real door ops. Runs are tagged
+`origin=playground`, so they land in their own folder, and every
+session is a real trace that can be opened, replayed, or added to a
+dataset.
+
+**Voice specifics.** The browser captures audio with `getUserMedia` and
+an AudioWorklet that resamples to the door's rate (8 kHz for callbot,
+declared on the codec). It plays egress audio through the same worklet
+with a jitter buffer. Mic access needs HTTPS or localhost; both the
+local studio and the tunnel qualify. Echo cancellation is the browser's,
+and headphones are recommended in the UI.
+
+**Order within the playground:** Form and Chat first (most products),
+then Events, then Files, then Voice with the callbot codec as its proof,
+then Simulated user, then Conditions.
+
+---
+
+## 9. Revised phases
+
+| Phase | Content | Up | Studio |
+|---|---|---|---|
+| **P0 — records you can trust** | §8.1: origin tags, application-level default consumers, version tag, templated layout under `.operonx/runs/`. callbot: set LLM prices, declare `trace=` on the app. | ● 1.9.0 | reads both layouts |
+| **P1 — RunStore** | §8.2: contract, `RunStoreConsumer`, `files` + `sqlite` backends, `langfuse` read-only; the studio reads runs only through it | ● | switch readers |
+| **P2 — Runs by origin** | §2.1 screen: origin tree, filters, search, job ↔ trace links, runbook groups | | ● |
+| **P3 — the run view** | §2.2: header, lenses, timeline, side panel order, anomalies, compare | | ● |
+| **P4 — Monitor** | §2.3: per-origin dashboard from `op_rollups`, cost with "unpriced", pinned key ops | small | ● |
+| **P5 — assistant tools** | §8.3 items 1, 2, 5: studio actions as MCP tools, diff cards with apply/discard on a scratch branch, richer context | | ● |
+| **P6 — playground** | §8.5: `operonx-play` bridge, studio protocol, Form + Chat + Events toys, built-in codecs, `origin=playground` | ● bridge | ● |
+| **P7 — evals** | §3.2 on top of jobs + playground; assistant item 3 (verifies its own changes) | small | ● |
+| **P8 — voice + simulated user** | Voice toy with the callbot codec; the simulated user; conditions | small | ● |
+| **P9 — Postgres/Mongo stores, prompts, review, alerts, templates** | as in §3 and §8.2 | ● | ● |
+| **Teams** | §8.4's deferred list | | ● |
+
+Gates are unchanged from §6: callbot is the acceptance project, numbers
+are recomputed from the raw records in tests, and every screen is
+screenshotted at three widths.
