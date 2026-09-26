@@ -116,7 +116,7 @@ class ProjectWatcher:
         # bump the prefix when the EXTRACTOR changes shape — the cached
         # entry is validated by project-file fingerprints only, so a new
         # extractor field would otherwise be masked by warm caches
-        return f"ir9:{digest}"
+        return f"ir10:{digest}"
 
     def _load_cache(self) -> None:
         raw = self.cache.get_json(self._cache_key())

@@ -300,10 +300,19 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
     # them as ordinary ops invites the reader to look for business logic
     # inside a door.
     code_fn = _slot(op, "code_fn")
-    if (getattr(code_fn, "__module__", None) in ("operonx.app.serve.ops", "operonx.core.serve.ops")
-            and getattr(code_fn, "__name__", "") in ("ingress", "egress")):
+    # An op that says it is a door (`@op(door="egress")`, operonx >= 1.8)
+    # draws as one. A project's own door op keeps its code below; the
+    # built-in ingress/egress are recognised by identity on older operonx.
+    door = _slot(op, "door")
+    builtin_door = (
+        getattr(code_fn, "__module__", None) in ("operonx.app.serve.ops", "operonx.core.serve.ops")
+        and getattr(code_fn, "__name__", "") in ("ingress", "egress")
+    )
+    if door in ("ingress", "egress"):
+        node["serve_role"] = door
+    elif builtin_door:
         node["serve_role"] = code_fn.__name__
-    elif code_fn is not None:
+    if code_fn is not None and not builtin_door:
         # A FuncOp's body IS its documentation — the inspector shows it as
         # a collapsed code block. Bounded so one giant function cannot
         # bloat the IR; the source location is always there for the rest.

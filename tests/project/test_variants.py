@@ -131,8 +131,7 @@ def door(style):
 APP = Application(
     "declared",
     services=[Service("greet", http("POST", "/greet"), graph=door,
-                      variants={"loud": dict(style=str.upper), "quiet": dict(style=str.lower)},
-                      ingress=["src"], egress=["out"])],
+                      variants={"loud": dict(style=str.upper), "quiet": dict(style=str.lower)})],
 )
 '''
 
@@ -158,4 +157,6 @@ def test_the_graphs_and_doors_come_from_the_application(declared):
     assert [g["name"] for g in ir["graphs"]] == ["door[loud]", "door[quiet]"]
     greet = ir["services"][0]
     assert greet["variants"] == ["loud", "quiet"]
-    assert greet["ingress"] == ["src"] and greet["egress"] == ["out"]
+    # the doors are the graph's own ops, which say what they are
+    roles = {n["name"]: n.get("serve_role") for n in ir["graphs"][0]["nodes"]}
+    assert roles["src"] == "ingress" and roles["out"] == "egress" and roles["loud"] is None
