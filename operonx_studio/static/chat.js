@@ -37,13 +37,40 @@
     drop(key) { try { localStorage.removeItem(key); } catch {} },
   };
 
+  /* A link in a reply. `studio:` links (studio:run/<id>, studio:op/<name>,
+   * studio:tab/<name>, studio:monitor/<origin>/<name>) become buttons that
+   * drive the page; http(s) opens in a new tab; anything else stays text. */
+  const link = (label, href) => {
+    if (href.startsWith("studio:")) {
+      const b = el("button", "chat-link", label);
+      b.type = "button";
+      b.title = href;
+      b.onclick = () => {
+        if (window.oxStudioLink) window.oxStudioLink(href);
+        else if (pid) location.href = `/p/${pid}`;
+      };
+      return b;
+    }
+    if (/^https?:\/\//i.test(href)) {
+      const a = el("a", "chat-href", label);
+      a.href = href;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      return a;
+    }
+    return document.createTextNode(label);
+  };
+
   /* Tiny markdown: fences → <pre>, then inline code / bold / links /
    * list bullets. textContent everywhere — nothing the model says is
    * ever parsed as HTML. */
   const inline = (parent, text) => {
-    const parts = text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/);
+    const parts = text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\([^)\s]+\))/);
     for (const part of parts) {
-      if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      const ln = part.match(/^\[([^\]\n]+)\]\(([^)\s]+)\)$/);
+      if (ln) {
+        parent.append(link(ln[1], ln[2]));
+      } else if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
         parent.append(el("code", "", part.slice(1, -1)));
       } else if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
         parent.append(el("b", "", part.slice(2, -2)));
@@ -137,10 +164,144 @@
     return hint.length > 44 ? hint.slice(0, 44) + "…" : hint;
   };
 
+  /* ── what a turn changed: a diff card with Keep / Undo ──
+   * The server snapshots the tree before each turn (chat.snapshot), so
+   * the card is exactly the agent's edits. Undo puts those files back as
+   * they were in that snapshot; the card's state lives in the history. */
+  const diffLines = (text) => {
+    const box = el("div", "diffbox chat-diff");
+    // git's per-file header (diff/index/mode/---/+++) folds into one
+    // filename line; the rest is the hunks, unwrapped
+    for (const ln of text.split("\n")) {
+      if (/^(diff --git |index |new file mode|deleted file mode|similarity |rename |--- )/.test(ln)) continue;
+      if (ln.startsWith("+++ ")) {
+        box.append(el("span", "file", ln.replace(/^\+\+\+ (b\/)?/, "") + "\n"));
+        continue;
+      }
+      const cls = ln.startsWith("@@") ? "hunk" : ln.startsWith("+") ? "add" : ln.startsWith("-") ? "del" : "";
+      box.append(el("span", cls, ln + "\n"));
+    }
+    return box;
+  };
+
+  const postUndo = async (payload) => {
+    const res = await fetch(`/api/p/${pid}/chat/undo`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    return body.restored || [];
+  };
+
+  const changesCard = (item) => {
+    const card = el("div", "chat-changes");
+    const files = item.files || [];
+    const plus = files.reduce((s, f) => s + (f.added || 0), 0);
+    const minus = files.reduce((s, f) => s + (f.removed || 0), 0);
+    const top = el("div", "cc-head");
+    const count = (cls, sign, n) => el("span", n ? cls : `${cls} zero`, `${sign}${n}`);
+    top.append(el("b", "", `Changed ${files.length} file${files.length === 1 ? "" : "s"}`),
+               count("cc-add", "+", plus), count("cc-del", "−", minus));
+    const list = el("div", "cc-files");
+    for (const f of files) {
+      const row = el("div", "cc-file");
+      const name = el("span", "cc-path", f.path);
+      name.title = f.path;
+      row.append(name);
+      if (f.new) row.append(el("span", "cc-new", "new"));
+      row.append(count("cc-add", "+", f.added || 0), count("cc-del", "−", f.removed || 0));
+      list.append(row);
+    }
+    const fold = el("details", "cc-fold");
+    fold.append(el("summary", "", "Show diff"));
+    fold.addEventListener("toggle", () => {
+      if (fold.open && !fold._filled) { fold._filled = true; fold.append(diffLines(item.diff || "(no diff)")); }
+    }, { once: false });
+    const acts = el("div", "cc-acts");
+    const status = el("span", "cc-status");
+    const paint = () => {
+      card.dataset.state = item.state || "pending";
+      acts.hidden = !!item.state;
+      status.textContent = item.state === "kept" ? "Kept"
+        : item.state === "undone" ? `Undone — ${item.restored ?? files.length} file${(item.restored ?? files.length) === 1 ? "" : "s"} put back`
+        : "";
+    };
+    const keep = el("button", "cc-keep", "Keep");
+    keep.type = "button";
+    keep.onclick = () => { item.state = "kept"; store.set(K_LOG, history); paint(); };
+    const undoBtn = el("button", "cc-undo", "Undo");
+    undoBtn.type = "button";
+    undoBtn.title = "Put these files back as they were before this turn";
+    undoBtn.onclick = async () => {
+      undoBtn.disabled = keep.disabled = true;
+      try {
+        const done = await postUndo({
+          sha: item.sha,
+          files: files.filter((f) => !f.new).map((f) => f.path),
+          new_files: files.filter((f) => f.new).map((f) => f.path),
+        });
+        item.state = "undone"; item.restored = done.length;
+        store.set(K_LOG, history); paint(); settleConv();
+      } catch (err) {
+        status.textContent = `Undo failed: ${err.message || err}`;
+        undoBtn.disabled = keep.disabled = false;
+      }
+    };
+    acts.append(keep, undoBtn);
+    card.append(top, list, fold, acts, status);
+    card._paint = paint;
+    paint();
+    return card;
+  };
+
+  // Everything this conversation changed: the first snapshot plus every
+  // file any turn touched. "Undo all" puts the whole set back at once.
+  const K_CONV = `oxchat:${scope}:changes`;
+  const conv = () => store.get(K_CONV, null);
+  const undoAll = iconBtn("resume", "chat-new chat-undoall", "Undo everything this conversation changed");
+  const paintUndoAll = () => {
+    const c = conv();
+    const n = c ? c.files.length + c.new_files.length : 0;
+    undoAll.hidden = !pid || n === 0;
+    undoAll.title = n ? `Undo everything this conversation changed (${n} file${n === 1 ? "" : "s"})` : "";
+  };
+  const noteFiles = (c, files) => {
+    for (const f of files || []) {
+      if (c.files.includes(f.path) || c.new_files.includes(f.path)) continue;
+      (f.new ? c.new_files : c.files).push(f.path);
+    }
+  };
+  const noteChanges = (event) => {
+    const c = conv() || { sha: event.sha, files: [], new_files: [] };
+    noteFiles(c, event.files);
+    store.set(K_CONV, c);
+    paintUndoAll();
+  };
+  // after a turn is undone, "undo all" covers only the turns still standing
+  const settleConv = () => {
+    const c = conv();
+    if (!c) return;
+    const live = history.filter((it) => it.w === "changes" && it.state !== "undone");
+    c.files = []; c.new_files = [];
+    for (const it of live) noteFiles(c, it.files);
+    if (c.files.length + c.new_files.length) store.set(K_CONV, c); else store.drop(K_CONV);
+    paintUndoAll();
+  };
+  head.insertBefore(undoAll, fresh);
+  paintUndoAll();
+
   const bubble = (item) => {
+    if (item.w === "changes") {
+      const card = changesCard(item);
+      log.append(card);
+      return card;
+    }
     if (item.w === "tool") {
       const chip = el("div", "chat-tool");
-      chip.append(el("b", "", item.name || "tool"));
+      // the studio's own tools read as what they do: "Studio · open run"
+      const studio = /^mcp__studio__(.+)$/.exec(item.name || "");
+      chip.append(el("b", "", studio ? `Studio · ${studio[1].replace(/_/g, " ")}` : item.name || "tool"));
       if (item.hint) {
         chip.append(el("span", "", shortHint(item.hint)));
         chip.title = item.hint;
@@ -255,6 +416,12 @@
         if (botItem) { remember(botItem); botItem = null; botEl = null; }
         const item = { w: "tool", name: event.name, hint: event.hint };
         bubble(item); remember(item); scrolled();
+      } else if (event.t === "changes") {
+        flush();
+        if (botItem) { remember(botItem); botItem = null; botEl = null; }
+        const item = { w: "changes", sha: event.sha, files: event.files || [],
+                       diff: String(event.diff || "").slice(0, 60000) };
+        bubble(item); remember(item); noteChanges(event); scrolled();
       } else if (event.t === "start" && event.session) {
         store.set(K_SESSION, event.session);
       } else if (event.t === "done") {
@@ -354,9 +521,32 @@
     turn(text);
   };
 
+  undoAll.onclick = async () => {
+    const c = conv();
+    if (!c) return;
+    const n = c.files.length + c.new_files.length;
+    if (!confirm(`Put back all ${n} file${n === 1 ? "" : "s"} this conversation changed, `
+                 + "as they were before its first edit?")) return;
+    try {
+      const done = await postUndo(c);
+      for (const item of history) {
+        if (item.w === "changes" && !item.state) { item.state = "undone"; item.restored = item.files.length; }
+      }
+      store.set(K_LOG, history);
+      for (const card of log.querySelectorAll(".chat-changes")) card._paint && card._paint();
+      store.drop(K_CONV); paintUndoAll();
+      const note = { w: "meta", text: `Undid this conversation's changes — ${done.length} file${done.length === 1 ? "" : "s"} put back` };
+      bubble(note); remember(note); scrolled();
+    } catch (err) {
+      const item = { w: "err", text: `Undo failed: ${err.message || err}` };
+      bubble(item); remember(item); scrolled();
+    }
+  };
+
   fresh.onclick = () => {
     if (running) running.stop = true;
-    store.drop(K_LOG); store.drop(K_SESSION); store.drop(K_TURN);
+    store.drop(K_LOG); store.drop(K_SESSION); store.drop(K_TURN); store.drop(K_CONV);
+    paintUndoAll();
     history.length = 0;
     log.textContent = "";
     bubble({ w: "bot", text: "Fresh start — what shall we do?" });

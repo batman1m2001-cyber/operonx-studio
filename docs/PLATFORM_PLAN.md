@@ -640,10 +640,10 @@ Branches (nothing pushed, nothing released):
 | Repo | Branch | Commits |
 |---|---|---|
 | operonx `/home/thanglq/Operon` | `feat/runs-records` | P0 c32ee0c · P1 9b5d430 · P2 488193c · P4 fa32993 (key_ops) |
-| studio worktree `/home/thanglq/operonx-studio-redesign` | `feat/platform` (off `redesign/ui`) | P1 68a27e8 · P2 350a00a · P3 f13fad5 · P4 91e0776 · P5 WIP (this commit) |
+| studio worktree `/home/thanglq/operonx-studio-redesign` | `feat/platform` (off `redesign/ui`) | P1 68a27e8 · P2 350a00a · P3 f13fad5 · P4 91e0776 · P5 a7581bc + (this commit) |
 | callbot `/home/thanglq/educa-reminder-agent` | `feat/runs-by-origin` (checked out) | 7ce0a17 (runs by origin, $0 inhouse) · 8faad98 (key_ops) |
 
-Done and tested (operonx 2168 tests, studio 419, screenshots desktop/tablet/phone):
+Done and tested (operonx 2168 tests, studio 437, screenshots desktop/tablet/phone):
 
 - **P0** origin tags, application-level `trace=`, jobs always traced, git version, `.operonx/runs` origin layout.
 - **P1** `operonx.telemetry.runs` RunStore (files+sqlite index, sqlite, langfuse read-only), `run_store:` resource, retention; studio reads only through it; Settings page (retention, preview, save).
@@ -651,8 +651,7 @@ Done and tested (operonx 2168 tests, studio 419, screenshots desktop/tablet/phon
 - **P3** run view: verdict header, lenses (Path/Time/Errors/Cost/Values), timeline strip, exec panel in reading order, anomaly flags, compare two runs. Session-long ops (heartbeat) never count as "slowest".
 - **P4** Monitor tab (tiles vs previous period, runs + p95 charts with version marks, per-op table, cost, grouped errors), `Service(key_ops=)`, LLM price editor in Resources (text YAML edit, diff first).
 
-**P5 in progress** — done: `operonx_studio/mcp.py` (stdio MCP server: list_runs, open_run, op_values, monitor, compare_runs, select_op, run_job, set_llm_price), chat passes `--mcp-config` + allows `mcp__studio`, per-turn git snapshot → `changes` event, `/chat/undo`, `/ui/action(s)` queue, page follows agent UI actions, `studio:` link handler (`window.oxStudioLink`), changed-op outline after code edits, richer view context + briefing.
-**P5 remaining:** chat.js — render `studio:` markdown links as buttons, `changes` event as a diff card (Keep / Undo → POST `/api/p/{pid}/chat/undo` with sha, files, new_files), conversation-wide "undo everything" (first sha + union of files in localStorage, cleared by New conversation); tests for mcp.handle, snapshot/changes/undo (git tmp repo), ui actions; screenshots; commit.
+- **P5** the assistant's hands: `operonx_studio/mcp.py` (stdio MCP server — list_runs, open_run, op_values, monitor, compare_runs, select_op, run_job, set_llm_price; read-only chat mode gets only the read tools); per-turn git snapshot (`git stash create`) → `changes` event with only the agent's edits (the user's uncommitted work is in the snapshot, never attributed to the agent); chat renders it as a diff card (files ±, folded diff, Keep / Undo); "undo everything this conversation changed" (first snapshot + union of live cards' files; hidden once every card is undone); `studio:` links in replies are buttons (run / op — by node or function name / tab / monitor), http links open a new tab; the page follows what the agent opens (`/ui/actions`); ops whose code changed are tagged on the canvas. Verified end to end on a scratch git copy of ex17: Undo and Undo-all leave `git status` clean.
 
 Then P6 playground → P7 evals → P8 voice + simulated user → P9 (Postgres/Mongo stores, prompt workbench, review queue, services control, alerts, templates, left rail).
 

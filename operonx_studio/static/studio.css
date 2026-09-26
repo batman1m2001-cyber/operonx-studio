@@ -1623,6 +1623,41 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .chat-msg.from-bot:hover .chat-copy, .chat-copy:focus-visible { opacity: 1; }
 .chat-empty { color: var(--text-2); font-size: var(--fs-md); }
 
+/* links in replies: studio: links drive the page, http opens a tab */
+.chat-link { display: inline; min-height: 0; padding: 0 6px; margin: 0 1px; font: inherit; font-size: 0.95em;
+  color: var(--accent-strong); background: var(--accent-soft);
+  border: 1px solid var(--accent-ring); border-radius: 6px; cursor: pointer; line-height: 1.5; }
+.chat-link:hover { border-color: var(--accent); }
+.chat-href { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+
+/* what a turn changed: files, the diff folded, Keep / Undo */
+.chat-changes { align-self: stretch; border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 10px 12px; background: var(--surface); font-size: 12.5px; display: flex; flex-direction: column; gap: 6px; }
+.chat-changes[data-state="undone"] { background: var(--surface-2); }
+.chat-changes[data-state="undone"] .cc-files { text-decoration: line-through; color: var(--text-3); }
+.cc-head { display: flex; align-items: baseline; gap: 8px; }
+.cc-head b { margin-right: auto; font-weight: 600; }
+.cc-add { color: var(--ok); font: 11.5px var(--mono); }
+.cc-del { color: var(--err); font: 11.5px var(--mono); }
+.cc-files { display: flex; flex-direction: column; gap: 2px; }
+.cc-file { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.cc-path { font: 11.5px var(--mono); color: var(--text-2); margin-right: auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.cc-new { font-size: 10.5px; color: var(--text-3); border: 1px solid var(--border-soft); border-radius: 4px; padding: 0 4px; }
+.cc-fold summary { cursor: pointer; color: var(--text-3); font-size: 12px; }
+.cc-fold summary:hover { color: var(--text); }
+.chat-diff { max-height: 320px; white-space: pre; overflow: auto; }
+.chat-diff .hunk { color: var(--text-3); }
+.chat-diff .file { color: var(--text); font-weight: 600; display: block; margin-top: 8px; }
+.chat-diff .file:first-child { margin-top: 0; }
+.cc-acts { display: flex; gap: 8px; }
+.cc-acts button { min-height: 30px; padding: 0 14px; font-size: 12.5px; }
+.cc-keep { background: var(--accent); border-color: var(--accent); color: #1c1603; }
+.cc-keep:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.cc-status { color: var(--text-3); font-size: 12px; }
+.cc-add.zero, .cc-del.zero { color: var(--text-3); }
+.cc-status:empty { display: none; }
+
 /* docked: the chat is the side panel's Assistant tab */
 #chatdock { flex: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
 #chatdock[hidden] { display: none; }

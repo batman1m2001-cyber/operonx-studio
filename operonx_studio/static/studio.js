@@ -3601,9 +3601,16 @@ async function performUi(kind, args) {
     await RunView.compare(args.a, args.b);
   } else if (kind === "select_op") {
     if (state.tab !== "flow") switchTab("flow");
-    let it = [...state.rendered.values()].find(x => x.node.name === args.op);
-    if (!it) { expandAll(true); it = [...state.rendered.values()].find(x => x.node.name === args.op); }
+    // an op is named by its node, or by the function behind it
+    const def = new RegExp(`\\bdef ${String(args.op).replace(/[^\w]/g, "")}\\(`);
+    const find = () => {
+      const all = [...state.rendered.values()];
+      return all.find(x => x.node.name === args.op) || all.find(x => def.test(x.node.code || ""));
+    };
+    let it = find();
+    if (!it) { expandAll(true); it = find(); }
     if (it) { if (state.sel !== it.key) select(it.key); centerOn(it); }
+    else toast(`No op named ${args.op} in this graph`);
   } else if (kind === "open_jobs") {
     state.jobSel = args.job; switchTab("jobs");
   } else if (kind === "open_tab") {
