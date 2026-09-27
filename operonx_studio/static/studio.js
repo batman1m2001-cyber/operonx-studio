@@ -3251,7 +3251,10 @@ function syncChrome() {
 
 const MOBILE = window.matchMedia("(max-width: 760px)");
 const panelKey = () => (MOBILE.matches ? "panelRightM" : "panelRight");
-const panelWanted = () => recall(panelKey(), !MOBILE.matches);
+// open by default only where it fits beside the content (a tablet gets
+// it as an overlay, opened from the Ask bar)
+const WIDE = window.matchMedia("(min-width: 1100px)");
+const panelWanted = () => recall(panelKey(), WIDE.matches);
 const inspectable = () => state.tab === "flow" || state.tab === "traces";
 
 function panelState() {

@@ -1,6 +1,6 @@
 # operonx studio — refactor phase 2: assistant-first
 
-Status: **plan written 2026-09-27, not started.** Branch
+Status: **done 2026-09-27 — R0–R6, see §10.** Branch
 `feat/assistant-first`, off `feat/platform` (P0–P9 of
 [PLATFORM_PLAN.md](PLATFORM_PLAN.md), all done).
 
@@ -516,7 +516,46 @@ model does not matter.
 | R3 | done — see below | |
 | R4 | done — see below | |
 | R5 | done — see below | |
-| R6 | not started | |
+| R6 | done — see below | |
+
+**R6 — verification**, on the finished build:
+
+- **Major flows** (`scripts/perf/flows.py`, no model spend): **21/21** —
+  home with health and the assistant first; a project opening on its
+  flow; select an op, Ask about it (the op lands on the composer); Runs
+  → a run → Workflow → Replay; Monitor; an eval run; Jobs with runs and
+  items on one screen; a playground form; Review; Settings' preview;
+  Alerts; Services; nested graphs opening in place; find with `/`; no
+  page errors.
+- **The assistant, live** (`live_assistant.py`, real haiku turns):
+  **23/23** again after R4–R5. **The home assistant** created a working
+  project from the RAG template in 9.7 s through its `new_project` tool,
+  and its link opened the project on its flow.
+- **The Flow view:** replay and live-session following on real runs and
+  a real WebSocket session (R4); the 302-op graph within budget.
+- **Responsive:** 1440 desktop, 1024 and 768 tablets, 390 phone. Found
+  and fixed: at 768 px the docked assistant squeezed the Runs table to
+  ~150 px — between 761 and 1099 px the side panel now floats over the
+  content, starts closed, and the Ask bar opens it.
+- **Performance, again through the tunnel** (same two projects):
+
+| Measure | R0 baseline | Final |
+|---|---|---|
+| Home to a full list | 1.8 s | **1.1 s**, 0 API calls |
+| Project open, first visit | 3.9 s, 19 requests | **2.8 s**, 3 requests (1.8 s of it the 130 KB bundle at ~150 KB/s) |
+| Project open, repeat | 2.4 s | **1.7 s**, 0 API calls |
+| Any screen | 0.8–2.3 s | **0.77–0.99 s**, one hop (Resources 1.2 s: a fresh tunnel connection — the endpoint answers in 6 ms) |
+| Playground, cold | 1.6–2.0 s | 1.3–3.6 s, one hop; the rest is the project's interpreter starting (P9) |
+| Idle requests | ≈ 1.2/s | **≈ 0.1/s** (one held pulse) |
+
+Small fixes from the pass: Claude Code loading its deferred tool
+definitions (`ToolSearch`) now reads "Loaded the studio's tools" and no
+longer counts as work in an activity summary.
+
+**Left as they are, on purpose:** minification (≈0.25 s once per deploy,
+not worth a dependency), a dark theme (semantic tints need their own
+pass), culling for huge graphs (302 ops is within budget), prewarming
+the playground bridge (a project interpreter per open page).
 
 **R5 — visual system and states.**
 - The graphite tokens (R3) now reach the last warm leftovers: the modal

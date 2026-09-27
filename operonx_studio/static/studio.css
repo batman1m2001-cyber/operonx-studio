@@ -1922,7 +1922,7 @@ body.ax-sheet #axstage { position: fixed; inset: 0; z-index: 90; padding: env(sa
 @media (max-width: 1000px) {
   .homegrid { grid-template-columns: minmax(0, 1fr); }
 }
-@media (max-width: 760px) {
+@media (max-width: 1099px) {
   .ax-askbar { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 60;
     display: flex; align-items: center; justify-content: flex-start; gap: 10px; height: 48px; min-height: 0; padding: 0 16px;
     border: 1px solid var(--border); border-radius: 999px; background: var(--surface); box-shadow: var(--sh-3);
@@ -1930,7 +1930,17 @@ body.ax-sheet #axstage { position: fixed; inset: 0; z-index: 90; padding: env(sa
   .ax-askbar .icon { width: 18px; height: 18px; color: var(--accent); }
   .ax-askbar.busy { color: var(--text-2); }
   .ax-askbar.busy .icon { color: var(--signal); animation: axfade .9s ease-in-out infinite alternate; }
-  body.ax-sheet .ax-askbar, body:has(#sidebar:not(.off)) .ax-askbar { display: none; }
+  body.ax-sheet .ax-askbar, body:has(#sidebar:not(.off)) .ax-askbar, body.ax-focus .ax-askbar,
+  body.page .ax-askbar { display: none; }
+}
+/* a tablet: the side panel floats over the content instead of taking its
+   width (at 768px it left the Runs table ~150px), and the Ask bar opens it */
+@media (min-width: 761px) and (max-width: 1099px) {
+  #sidebar { position: absolute; top: 0; right: 0; bottom: 0; z-index: 60; box-shadow: var(--sh-3); }
+  #dragbar { display: none !important; }
+  .ax-askbar { left: auto; right: 16px; width: 360px; }
+}
+@media (max-width: 760px) {
   body .canvasbar { bottom: calc(72px + env(safe-area-inset-bottom)); }
   body .findbox, body #legend { bottom: calc(124px + env(safe-area-inset-bottom)); }
   #traces, #jobs, #resources, .pane { padding-bottom: 96px; }

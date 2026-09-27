@@ -218,6 +218,7 @@ def test_a_turn_becomes_items_that_persist_and_restore(client, project, fake):
     from operonx_studio.assistant import _tool_label
     deep = "/very/long/" + "x" * 90 + "/proj"
     assert _tool_label("Read", {"file_path": deep + "/app/main.py"}, deep) == "Read app/main.py"
+    assert _tool_label("ToolSearch", {"query": "select:mcp__studio__new_project"}) == "Loaded the studio's tools"
     assert "from operonx.core import op" in tool["output"] and tool["ms"] >= 0
     assert end["state"] == "done" and end["cost"] == 0.0125 and end["context"] == 1250
 

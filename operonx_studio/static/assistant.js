@@ -470,6 +470,7 @@
     for (const s of steps) {
       if (s.kind === "thinking") { thought += s.ms || 0; continue; }
       const n = s.name || "";
+      if (n === "ToolSearch") continue;        // loading tools is plumbing, not work
       const key = /^mcp__studio__/.test(n) ? "studio" : n === "Read" ? "read" : /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(n)
         ? "edit" : n === "Bash" ? "run" : /^(Grep|Glob|LS)$/.test(n) ? "search" : /^Web/.test(n) ? "web" : "tool";
       count[key] = (count[key] || 0) + 1;
@@ -1674,7 +1675,8 @@
     else if (W.oxSide) W.oxSide.show("inspect");
   };
   bNew.onclick = () => { newSession(); input.focus(); };
-  askbar.onclick = () => placement.openSheet();
+  // a phone opens the full sheet; a tablet, the side panel over the content
+  askbar.onclick = () => (PHONE.matches || !W.oxSide ? placement.openSheet() : W.oxSide.show("assistant"));
 
   document.addEventListener("keydown", (ev) => {
     if ((ev.ctrlKey || ev.metaKey) && (ev.key === "j" || ev.key === "J")) {

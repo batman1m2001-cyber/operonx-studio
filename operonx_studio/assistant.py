@@ -354,6 +354,9 @@ def _tool_label(name: str, inputs: Dict[str, Any], cwd: Optional[str] = None) ->
     studio = re.match(r"^mcp__studio__(.+)$", name or "")
     if studio:
         return "Studio · " + studio.group(1).replace("_", " ")
+    if name == "ToolSearch":
+        # Claude Code loading deferred tool definitions: plumbing, not work
+        return "Loaded the studio's tools" if "mcp__studio" in str(inputs.get("query") or "") else "Loaded tools"
     if cwd:
         # relative BEFORE the hint is cut to length: a long project path
         # would otherwise never match
