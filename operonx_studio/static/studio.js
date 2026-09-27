@@ -503,17 +503,117 @@ function routeAvoiding(a, b, obstacles) {
     ?? bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
 }
 
-function returnPath(a, b) {
-  // A loop's return edge: out of the source's right flank, bowing up
-  // the right margin, back into the target's right flank. Drawn
-  // differently from a forward edge on purpose — this is the arrow that
-  // makes an agent while-loop look like what the author wrote instead of
-  // one opaque compiler box.
-  const x1 = a.x + a.w, y1 = a.y + a.h / 2;
+function returnPath(a, b, from) {
+  // A loop's return edge: out of the source's right flank (or, from a
+  // decision card, out of its own row's dot: `from`), bowing up the right
+  // margin, back into the target's right flank. Drawn differently from a
+  // forward edge on purpose — this is the arrow that makes an agent
+  // while-loop look like what the author wrote instead of one opaque
+  // compiler box.
+  const x1 = from ? from.x : a.x + a.w, y1 = from ? from.y : a.y + a.h / 2;
   const x2 = b.x + b.w, y2 = b.y + b.h / 2;
   const bulge = Math.max(x1, x2) + 56 + Math.abs(y1 - y2) * 0.08;
   return `M ${x1} ${y1} C ${bulge} ${y1}, ${bulge} ${y2}, ${x2} ${y2}`;
 }
+
+// where a decision card's condition row puts its wire: the row's dot,
+// in canvas coordinates
+function rowDot(A, port) {
+  return {x: A.x + (port.x != null ? port.x : (port.side > 0 ? A.w : 0)), y: A.y + port.y};
+}
+
+/* A wire out of a decision card's condition row to a port at (x2, y2):
+ * it departs AT the row's dot, horizontal tangent out, vertical tangent
+ * in; control distances scale with the actual gap, so a near neighbour
+ * gets a tight elbow, not a balloon. */
+function rowWirePath(A, port, x2, y2) {
+  const side = port.side;
+  const {x: x1, y: y1} = rowDot(A, port);
+  const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5));
+  const c2 = Math.max(26, Math.min(72, Math.max(1, y2 - y1) * 0.5));
+  // tangent tilts slightly toward the target, so the wire reads
+  // "leaving this row, heading there" instead of bowing sideways
+  const dip = Math.max(4, Math.min(22, (y2 - y1) * 0.15));
+  const bottom = A.y + A.h;
+  if (y2 > bottom && x2 > A.x - 12 && x2 < A.x + A.w + 12) {
+    // the target lies under the card: one curve from the dot to it
+    // bent back through the card's own lower rows. Step out beside
+    // the card and below its bottom first, then drop into the
+    // target — every point of the second half is under the card.
+    const lx = side > 0 ? A.x + A.w + 14 : A.x - 14;
+    const yb = bottom + Math.min(18, Math.max(6, (y2 - bottom) * 0.3));
+    const k = (y2 - yb) / 2;
+    return `M ${x1} ${y1} C ${lx} ${y1}, ${lx} ${y1}, ${lx} ${yb}`
+      + ` C ${lx} ${yb + k}, ${x2} ${y2 - k}, ${x2} ${y2}`;
+  }
+  return `M ${x1} ${y1} C ${x1 + side * c1} ${y1 + dip}, ${x2} ${y2 - c2}, ${x2} ${y2}`;
+}
+
+/* A wire that starts at a row's dot starts INSIDE its card — but edges
+ * paint beneath the cards. Repaint exactly the over-card stretch above
+ * the card, masked to its rect: identical paths, so there is no seam and
+ * dashed elses stay in phase. The mask also cuts a hole under every
+ * condition dot: the repaint sits ABOVE the card, so without the hole a
+ * 12px glow starting at the dot's centre painted right over it. */
+function overCard(A, made) {
+  const top = $("#edgetop");
+  const cid = "rowmask-" + A.key.replace(/[^A-Za-z0-9_-]/g, "_");
+  if (!top.querySelector(`#${cid}`)) {
+    const mk = document.createElementNS(SVGNS, "mask");
+    mk.setAttribute("id", cid);
+    mk.setAttribute("maskUnits", "userSpaceOnUse");
+    mk.setAttribute("x", A.x - 4); mk.setAttribute("y", A.y - 4);
+    mk.setAttribute("width", A.w + 8); mk.setAttribute("height", A.h + 8);
+    const r = document.createElementNS(SVGNS, "rect");
+    r.setAttribute("x", A.x - 4); r.setAttribute("y", A.y - 4);
+    r.setAttribute("width", A.w + 8); r.setAttribute("height", A.h + 8);
+    r.setAttribute("fill", "#fff");
+    mk.append(r);
+    for (const d of (A.condDots || [])) {
+      const hole = document.createElementNS(SVGNS, "circle");
+      hole.setAttribute("cx", A.x + d.x); hole.setAttribute("cy", A.y + d.y);
+      hole.setAttribute("r", 7.5);
+      hole.setAttribute("fill", "#000");
+      mk.append(hole);
+    }
+    top.append(mk);
+  }
+  const g2 = document.createElementNS(SVGNS, "g");
+  g2.setAttribute("mask", `url(#${cid})`);
+  const over = made.map(m => m.cloneNode(false));
+  for (const m of over) g2.append(m);
+  top.append(g2);
+  made.push(...over);
+}
+
+/* A tie out of a decision card's row into END: out of the row's dot,
+ * down a clear lane beside the card, along above END and down into its
+ * port, like every wire. It stays off the cards between: a straight fall
+ * ran under the op beneath the router, and the router's bow swung 250 px
+ * wide. The lane steps outward past anything in its way; if none is
+ * clear, the tie routes like any other. */
+function rowTiePath(A, port, b, obstacles) {
+  const {x: x0, y: y0} = rowDot(A, port);
+  const rects = _rects(obstacles, A, b);
+  const x2 = portCX(b), y2 = b.y;
+  const clear = (l, r, t, bt) => !rects.some(q => q.l < r && q.r > l && q.t < bt && q.b > t);
+  for (let step = 0; step < 6; step++) {
+    const lx = port.side > 0 ? A.x + A.w + 14 + 24 * step : A.x - 14 - 24 * step;
+    const dir = x2 >= lx ? 1 : -1, r = Math.min(14, Math.abs(x2 - lx) / 2);
+    const yh = y2 - r - 6;
+    if (r < 4 || yh - r < y0 + 14) break;
+    if (!clear(lx - 2, lx + 2, y0 + 14, yh) || !clear(Math.min(lx, x2), Math.max(lx, x2), yh - 2, yh + 2)) continue;
+    return `M ${x0} ${y0} C ${lx} ${y0}, ${lx} ${y0}, ${lx} ${y0 + 14} L ${lx} ${yh - r}`
+      + ` C ${lx} ${yh - r * 0.45}, ${lx + dir * r * 0.45} ${yh}, ${lx + dir * r} ${yh} L ${x2 - dir * r} ${yh}`
+      + ` C ${x2 - dir * r * 0.45} ${yh}, ${x2} ${yh + r * 0.45}, ${x2} ${yh + r} L ${x2} ${y2}`;
+  }
+  const v = {x: (port.side > 0 ? A.x + A.w + 14 : A.x - 14) - 1, y: y0 + 14, w: 2, h: 0, node: {}};
+  const rest = routeAvoiding(v, b, obstacles).replace(/^M\s*-?[\d.]+[\s,]+-?[\d.]+/, "");
+  return `M ${x0} ${y0} C ${v.x + 1} ${y0}, ${v.x + 1} ${y0}, ${v.x + 1} ${y0 + 14}${rest}`;
+}
+
+// a decision card's row for a route into END: its tie leaves that row
+const exitRow = (it) => (it && it.node.routes && it.condPorts ? it.condPorts.__END__ || null : null);
 
 function consumeOf(edge, a, b) {
   // `.parallel()` / `.collect()` live on the CONSUMER's binding: find the
@@ -552,17 +652,86 @@ function bouton(svg, x, y, cls) {
 /* An edge is a beam of energy: a wide soft glow, a bright core, and
  * spark particles frozen mid-flight — each with a smaller trailing dot
  * behind it, so the comet shape says which way the energy flows without
- * a frame of animation. */
-/* A wire: one stroke. (It was a halo, a core and a white filament with
- * static spark dots — decoration that said "flowing" when nothing was;
- * the canvas now moves only when something runs: liveCanvas below.) */
+ * a frame of animation. Nothing here moves: a run in progress is the
+ * only motion (liveCanvas, which lights the core and sends particles). */
 function energyEdge(svg, d, cls, made) {
+  const glow = document.createElementNS(SVGNS, "path");
+  glow.setAttribute("d", d);
+  glow.setAttribute("class", ("eglow " + cls).trim());
+  svg.append(glow);
   const core = document.createElementNS(SVGNS, "path");
   core.setAttribute("d", d);
   core.setAttribute("class", ("ecore " + cls).trim());
   svg.append(core);
-  if (made) made.push(core);
+  // the laser filament: a white-hot hairline down the beam's center
+  const ray = document.createElementNS(SVGNS, "path");
+  ray.setAttribute("d", d);
+  ray.setAttribute("class", ("eray " + cls).trim());
+  svg.append(ray);
+  if (made) made.push(glow, core, ray);
   return core;
+}
+
+/* Points along a wire without asking the browser. The router draws with
+ * absolute M, L and C only, so a wire's length and points are sampled
+ * here: getTotalLength/getPointAtLength cost ~0.2 ms a call, 58 of the
+ * 224 ms a 302-op render took (measured, docs/ASSISTANT_NEXT_PLAN.md §8).
+ * Any other command returns null, and the caller asks the DOM. */
+function pathSampler(d) {
+  const tok = String(d).match(/[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g);
+  if (!tok) return null;
+  const pts = [];
+  let i = 0, x = 0, y = 0, cmd = null;
+  const num = () => parseFloat(tok[i++]);
+  while (i < tok.length) {
+    if (/[A-Za-z]/.test(tok[i])) cmd = tok[i++];
+    if (cmd === "M" || cmd === "L") {
+      x = num(); y = num();
+      pts.push(x, y);
+      if (cmd === "M") cmd = "L";          // pairs after a moveto are linetos
+    } else if (cmd === "C") {
+      const x1 = num(), y1 = num(), x2 = num(), y2 = num(), x3 = num(), y3 = num();
+      for (let k = 1; k <= 16; k++) {
+        const t = k / 16, u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, e = t * t * t;
+        pts.push(a * x + b * x1 + c * x2 + e * x3, a * y + b * y1 + c * y2 + e * y3);
+      }
+      x = x3; y = y3;
+    } else return null;
+  }
+  if (pts.length < 4 || pts.some(Number.isNaN)) return null;
+  const cum = [0];
+  for (let k = 2; k < pts.length; k += 2) cum.push(cum[cum.length - 1] + Math.hypot(pts[k] - pts[k - 2], pts[k + 1] - pts[k - 1]));
+  const len = cum[cum.length - 1];
+  const at = (v) => {
+    let k = 1;
+    while (k < cum.length - 1 && cum[k] < v) k += 1;
+    const seg = cum[k] - cum[k - 1] || 1, f = Math.max(0, Math.min(1, (v - cum[k - 1]) / seg));
+    return {x: pts[2 * k - 2] + (pts[2 * k] - pts[2 * k - 2]) * f, y: pts[2 * k - 1] + (pts[2 * k + 1] - pts[2 * k - 1]) * f};
+  };
+  return {len, at};
+}
+
+function energySparks(svg, path, cls) {
+  let s = pathSampler(path.getAttribute("d") || "");
+  if (!s) {
+    try { s = {len: path.getTotalLength(), at: (v) => path.getPointAtLength(v)}; } catch { return; }
+  }
+  const len = s.len;
+  if (!len || len < 130) return;
+  const count = Math.max(1, Math.min(3, Math.round(len / 240)));
+  for (let i = 0; i < count; i++) {
+    const at = ((i + 0.5) / count) * len;
+    const pt = s.at(at);
+    const tail = s.at(Math.max(0, at - 7));
+    const t = document.createElementNS(SVGNS, "circle");
+    t.setAttribute("cx", tail.x); t.setAttribute("cy", tail.y); t.setAttribute("r", 1.6);
+    t.setAttribute("class", ("espark tailspark " + cls).trim());
+    svg.append(t);
+    const c = document.createElementNS(SVGNS, "circle");
+    c.setAttribute("cx", pt.x); c.setAttribute("cy", pt.y); c.setAttribute("r", 2.8);
+    c.setAttribute("class", ("espark " + cls).trim());
+    svg.append(c);
+  }
 }
 
 
@@ -763,11 +932,16 @@ function render() {
       // exactly at the dot, never from the blind side of the card
       it.condPorts = {};
       it.condDots = [];
+      // a route that is the loop's return leaves on the right, where
+      // returns bow up the margin
+      const backTo = new Set(flat.edges.filter(fe => fe.a === it && fe.e.back).map(fe => fe.b.node.name));
       for (const rrow of card.querySelectorAll(".brrow")) {
         const t = rrow.dataset.target;
         const tgt = flat.nodes.find(o => o.depth === it.depth
           && o.node.name === t && o !== it);
-        const side = tgt && portCX(tgt) < it.x + it.w / 2 ? -1 : 1;
+        // a route into END leaves on the left: the right margin is where
+        // loop returns bow
+        const side = t === "__END__" ? -1 : !backTo.has(t) && tgt && portCX(tgt) < it.x + it.w / 2 ? -1 : 1;
         sides.push([rrow, side < 0]);
         const left = rrow.offsetLeft, top = rrow.offsetTop, w = rrow.offsetWidth, h = rrow.offsetHeight;
         // a row that is not laid out has no port: its wire leaves the
@@ -905,6 +1079,8 @@ function render() {
     const x = over(exitTies);
     endIt = pill("end", x, clearOf(x, Math.max(...exitTies.map(it => it.y + it.h)) + 96, 1));
   }
+  // where the flow begins: a view that cannot show it all lands here
+  state.startAt = startIt ? {x: startIt.x + startIt.w / 2, y: startIt.y} : null;
   let minY = gatesIn.length
     ? Math.min(...gatesIn.map(x => x.y)) - 70
     : -NODE_H - 140;
@@ -975,9 +1151,12 @@ function render() {
     // straight through the ops beneath it)
     const tie = (a, b) => {
       const p = document.createElementNS(SVGNS, "path");
-      p.setAttribute("d", routeAvoiding(a, b, flat.nodes));
+      // a decision card's route into END leaves that route's row
+      const row = exitRow(a);
+      p.setAttribute("d", row ? rowTiePath(a, row, b, flat.nodes) : routeAvoiding(a, b, flat.nodes));
       p.setAttribute("class", "bedge");
       svg.append(p);
+      if (row) overCard(a, [p]);
     };
     if (startIt) {
       nodesBox.append(boundaryCard(startIt));
@@ -1023,11 +1202,16 @@ function render() {
       const bp = document.createElementNS(SVGNS, "path");
       // around the members in its way, not through them (ex05: a loop's
       // router ties to END straight through the op beneath it); an opened
-      // member ties from its own END knob, like every other wire
-      bp.setAttribute("d", routeAvoiding(a.bOut || a, b.bIn || b, obstacles));
+      // member ties from its own END knob, like every other wire; a
+      // decision card's route into END leaves that route's row
+      const row = !a.bOut && exitRow(a);
+      const tb = b.bIn || b;
+      bp.setAttribute("d", row ? rowTiePath(a, row, tb, obstacles) : routeAvoiding(a.bOut || a, tb, obstacles));
       bp.setAttribute("class", "bedge");
       svg.append(bp);
-      state.edgeEls.push({a: a.key, b: b.key, els: [bp]});
+      const els = [bp];
+      if (row) overCard(a, els);
+      state.edgeEls.push({a: a.key, b: b.key, els});
       continue;
     }
     // an expanded container's pills stand in for its rim: edges from
@@ -1048,47 +1232,23 @@ function render() {
       isElse = condLabels.length > 0 && condLabels.every(c => c === "else");
     }
     if (e.back) {
-      p.setAttribute("d", returnPath(A, B));
+      // a router's route that is the return leaves from its own row's dot
+      const backRow = a.node.routes && A.condPorts ? A.condPorts[b.node.name] : null;
+      const from = backRow ? rowDot(A, backRow) : null;
+      p.setAttribute("d", returnPath(A, B, from));
+      if (from) p.dataset.fromRow = "1";
       cls += " back";
       if (!e.soft) sheath = "back";
-      const bulge = Math.max(A.x + A.w, B.x + B.w) + 56
-        + Math.abs((A.y + A.h / 2) - (B.y + B.h / 2)) * 0.08;
-      addGlyph(bulge + 4, (A.y + A.h / 2 + B.y + B.h / 2) / 2, "↺ loop", "back-label");
+      const fx = from ? from.x : A.x + A.w, fy = from ? from.y : A.y + A.h / 2;
+      const bulge = Math.max(fx, B.x + B.w) + 56 + Math.abs(fy - (B.y + B.h / 2)) * 0.08;
+      addGlyph(bulge + 4, (fy + B.y + B.h / 2) / 2, "↺ loop", "back-label");
     } else {
       // a condition edge leaves ITS OWN ROW on the decision card — the
       // wire starts beside the condition that fires it
       const rowPort = condLabels.length && A.condPorts
         ? A.condPorts[b.node.name] : null;
       if (rowPort != null) {
-        // departs AT the row's dot, horizontal tangent out, vertical
-        // tangent in — control distances scale with the actual gap so
-        // a near neighbour gets a tight elbow, not a balloon
-        const side = rowPort.side;
-        const x1 = A.x + (rowPort.x != null ? rowPort.x
-                                            : (side > 0 ? A.w : 0));
-        const y1 = A.y + rowPort.y;
-        const x2 = portCX(B), y2 = B.y;
-        const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5));
-        const c2 = Math.max(26, Math.min(72, Math.max(1, y2 - y1) * 0.5));
-        // tangent tilts slightly toward the target, so the wire reads
-        // "leaving this row, heading there" instead of bowing sideways
-        const dip = Math.max(4, Math.min(22, (y2 - y1) * 0.15));
-        const bottom = A.y + A.h;
-        if (y2 > bottom && x2 > A.x - 12 && x2 < A.x + A.w + 12) {
-          // the target lies under the card: one curve from the dot to it
-          // bent back through the card's own lower rows. Step out beside
-          // the card and below its bottom first, then drop into the
-          // target — every point of the second half is under the card.
-          const lx = side > 0 ? A.x + A.w + 14 : A.x - 14;
-          const yb = bottom + Math.min(18, Math.max(6, (y2 - bottom) * 0.3));
-          const k = (y2 - yb) / 2;
-          p.setAttribute("d",
-            `M ${x1} ${y1} C ${lx} ${y1}, ${lx} ${y1}, ${lx} ${yb}`
-            + ` C ${lx} ${yb + k}, ${x2} ${y2 - k}, ${x2} ${y2}`);
-        } else {
-          p.setAttribute("d",
-            `M ${x1} ${y1} C ${x1 + side * c1} ${y1 + dip}, ${x2} ${y2 - c2}, ${x2} ${y2}`);
-        }
+        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y));
         p.dataset.fromRow = "1";
       } else {
         p.setAttribute("d", routeAvoiding(A, B, obstacles));
@@ -1100,48 +1260,15 @@ function render() {
     const faded = state.run && (!ranInRun(a.node) || !ranInRun(b.node));
     if (sheath !== null) {
       drawn = energyEdge(svg, p.getAttribute("d"), sheath.trim(), made);
+      // no sparks on an else-fallback, nor into an op that never ran
+      if (!sheath.includes("relse") && !faded) energySparks(svg, drawn, sheath.trim());
     } else {
       p.setAttribute("class", cls.trim());
       svg.append(p);
       made.push(p);
     }
-    // a decision wire starts INSIDE the card, at its condition row's
-    // dot — but edges paint beneath the cards. Repaint exactly the
-    // over-card stretch above the card, masked to its rect: identical
-    // paths, so there is no seam and dashed elses stay in phase. The
-    // mask also cuts a hole under every condition dot: the repaint
-    // sits ABOVE the card, so without the hole a 12px glow starting at
-    // the dot's centre painted right over it.
-    if (p.dataset.fromRow === "1") {
-      const top = $("#edgetop");
-      const cid = "rowmask-" + A.key.replace(/[^A-Za-z0-9_-]/g, "_");
-      if (!top.querySelector(`#${cid}`)) {
-        const mk = document.createElementNS(SVGNS, "mask");
-        mk.setAttribute("id", cid);
-        mk.setAttribute("maskUnits", "userSpaceOnUse");
-        mk.setAttribute("x", A.x - 4); mk.setAttribute("y", A.y - 4);
-        mk.setAttribute("width", A.w + 8); mk.setAttribute("height", A.h + 8);
-        const r = document.createElementNS(SVGNS, "rect");
-        r.setAttribute("x", A.x - 4); r.setAttribute("y", A.y - 4);
-        r.setAttribute("width", A.w + 8); r.setAttribute("height", A.h + 8);
-        r.setAttribute("fill", "#fff");
-        mk.append(r);
-        for (const d of (A.condDots || [])) {
-          const hole = document.createElementNS(SVGNS, "circle");
-          hole.setAttribute("cx", A.x + d.x); hole.setAttribute("cy", A.y + d.y);
-          hole.setAttribute("r", 7.5);
-          hole.setAttribute("fill", "#000");
-          mk.append(hole);
-        }
-        top.append(mk);
-      }
-      const g2 = document.createElementNS(SVGNS, "g");
-      g2.setAttribute("mask", `url(#${cid})`);
-      const over = made.map(m => m.cloneNode(false));
-      for (const m of over) g2.append(m);
-      top.append(g2);
-      made.push(...over);
-    }
+    // a decision wire starts INSIDE the card, at its condition row's dot
+    if (p.dataset.fromRow === "1") overCard(A, made);
     if (faded) for (const el2 of made) el2.classList.add("dorm");
     // selection highlights and ←/→ walking work off this ledger, so a
     // click never needs to redraw the whole canvas
@@ -1215,6 +1342,11 @@ function render() {
     }
   } catch { /* nothing drawn */ }
 
+  // a very big graph keeps its membranes but not their soft blurred
+  // shadows: a zoom re-rasters every visible cell each frame, and on the
+  // 302-op graph the blur cost 26 ms a frame against 19 without
+  // (measured, docs/ASSISTANT_NEXT_PLAN.md §8). Graphs of real size keep all of it.
+  $("#world").classList.toggle("big", state.cardEls.size >= BIG_GRAPH_CELLS);
   refreshSelection();
   applyView();
   if (liveCanvas) liveCanvas.reindex();
@@ -1639,6 +1771,8 @@ function opCard(it) {
 
 const VIEW_PAD = 36;
 
+const BIG_GRAPH_CELLS = 120;
+
 function applyView() {
   const s = state.view.scale, ex = state.extent;
   if (!ex) return;
@@ -1715,7 +1849,13 @@ function initView(fresh) {
   const all = Math.min(room(r.width) / w, room(r.height) / h);
   state.view.scale = all >= 0.7 ? Math.min(1, all) : Math.min(1, Math.max(0.7, room(r.width) / w));
   applyView();
-  stage.scrollLeft = Math.max(0, (w * state.view.scale + VIEW_PAD * 2 - r.width) / 2);
+  const wide = w * state.view.scale + VIEW_PAD * 2;
+  // a flow wider than the box lands on its START, where reading begins
+  // (a phone at the readable 70% used to open on the middle, sides cut)
+  const start = state.startAt;
+  const x = start && wide > r.width ? (start.x - ex.minX) * state.view.scale + VIEW_PAD - r.width / 2
+    : (wide - r.width) / 2;
+  stage.scrollLeft = Math.max(0, Math.min(wide - r.width, x));
   stage.scrollTop = 0;
 }
 // the user's own view, remembered once they stop moving it
@@ -3253,6 +3393,29 @@ async function renderExecPanel(run, e, execs) {
  * values, a turn picker to read one exchange. The paint lives only
  * here: leaving the view moves the canvas home and clears it, so the
  * Flow tab is always the clean flow. */
+/* The graph a run ran. A run records its engine's name ("engine",
+ * "params"), not the graph's, so it is matched on evidence: the project
+ * graph whose ops (nested ones included) cover the ops the run executed.
+ * Ties go to the graph with fewer ops the run never touched, then to the
+ * one on screen. Null when no graph covers half of them. */
+function graphForRun(data) {
+  const ran = Object.keys((data && data.ops) || {});
+  if (!ran.length) return state.graph;
+  const opsOf = (g, out = new Set()) => {
+    for (const n of (g && g.nodes) || []) { out.add(n.name); if (n.graph) opsOf(n.graph, out); }
+    return out;
+  };
+  let best = null;
+  for (const g of state.ir.graphs || []) {
+    const names = opsOf(g);
+    const hits = ran.filter(o => names.has(o)).length;
+    const cand = {g, score: hits / ran.length, extra: names.size - hits, here: g === state.graph ? 0 : 1};
+    if (!best || cand.score > best.score
+        || (cand.score === best.score && (cand.extra < best.extra || (cand.extra === best.extra && cand.here < best.here)))) best = cand;
+  }
+  return best && best.score >= 0.5 ? best.g : null;
+}
+
 async function showRunWorkflow(run) {
   if (state.tab !== "traces") switchTab("traces", {quiet: true});
   leaveWorkflow();
@@ -3282,8 +3445,48 @@ async function showRunWorkflow(run) {
     .map(o => o.runs ? o.total_ms / o.runs : 0));
 
   state.runRollups = new Map((tree.rollups || []).map(r => [r.op, r]));
+
+  // the canvas shows the graph this run ran: another of the project's
+  // graphs is switched to (and said so); one the studio does not draw
+  // gets a note and the tree, never a canvas of unrelated faded cards
+  const ranGraph = graphForRun(data);
+  const workflowName = ((data.summary || tree.summary || {}).workflow) || "?";
+  if (!ranGraph) {
+    box.append(runHeader(run, tree, "workflow", []));
+    const note = el("div", "wfnote wfmissing");
+    const said = el("span");
+    said.append("This run's graph (", el("code", null, workflowName), ") isn't drawn here.");
+    const ops = Object.keys(data.ops || {});
+    if (ops.length) said.append(el("span", "wfops", ` It ran ${ops.slice(0, 6).join(", ")}${ops.length > 6 ? "…" : ""}.`));
+    note.append(said);
+    const tb = el("button", "small", "Open as tree");
+    tb.type = "button";
+    tb.onclick = () => showRunTree(run);
+    note.append(tb);
+    box.append(note);
+    state.run = null;
+    pushView();
+    return;
+  }
+  let switched = null;
+  if (ranGraph !== state.graph) {
+    switched = state.graph ? state.graph.name : null;
+    state.graph = ranGraph;
+    $("#graph-pick").value = ranGraph.name;
+    state.sel = null;
+    state.expanded.clear();
+    state.flowView = null;      // the Flow tab's remembered view was another graph's
+  }
   const extras = [RunView.lensBar(), replayControl(run)];
   box.append(runHeader(run, tree, "workflow", extras));
+  if (switched) {
+    const note = el("div", "wfnote");
+    const said = el("span");
+    said.append("Showing ", el("code", null, ranGraph.name), ", the graph this run ran",
+      el("span", "wfops", switched ? ` (the canvas had ${switched})` : ""));
+    note.append(said);
+    box.append(note);
+  }
   box.append(RunView.timeline(state.runTurns, tree.total_ms, (key) => {
     state.runTurn = key; render(); renderFlowInfo();
   }));
@@ -3531,7 +3734,7 @@ function buildLegend() {
   row(legendSample("cond"), "if/else route — the condition sits in its own row on the router card, and the wire leaves that row");
   row(legendSample("ecore cond relse", true), "else — fires only when no condition matched");
   row(legendSample("soft", true), "soft merge — may not fire at all");
-  row(el("span", "lglyph", "↺"), "a loop returns underneath, back to where the author's cycle begins");
+  row(el("span", "lglyph", "↺"), "a loop returns up the right margin, back to where the author's cycle begins — from its router's row when the route itself is the return");
   row(el("span", "lglyph", "⚡"), "generator: one call, many yields — consumers run per yield");
   row(el("span", "lglyph", "≋ ∥ ⧉"), "streaming edge · parallel fan-out · collect-into-list");
   row(el("span", "lglyph", "▣"), "a nested graph — click its badge (or double-click) to open it in place");
@@ -4022,10 +4225,12 @@ liveCanvas = (() => {
     }
     const out = new Map();   // key → paths of the wires leaving it
     for (const e of state.edgeEls) {
-      const path = (e.els || []).find(x => x.getAttribute && x.getAttribute("d"));
+      // a beam is a glow, a core and a filament: the particle rides the core
+      const els = (e.els || []).filter(x => x.getAttribute && x.getAttribute("d"));
+      const path = els.find(x => x.classList.contains("ecore")) || els[0];
       if (!path) continue;
       if (!out.has(e.a)) out.set(e.a, []);
-      out.get(e.a).push({path, to: e.b});
+      out.get(e.a).push({path, glow: els.find(x => x.classList.contains("eglow")), to: e.b});
     }
     return {names, out};
   }
@@ -4053,8 +4258,9 @@ liveCanvas = (() => {
     if (!quiet) paintBar();
   }
 
-  function particle(path, failed, dur) {
+  function particle(path, failed, dur, glow) {
     if (particles + 2 > MAX_PARTICLES || !path || !path.ownerSVGElement) return;
+    if (glow) glow.classList.add("flowing");
     const d = path.getAttribute("d");
     for (const trail of [false, true]) {
       const p = document.createElementNS(SVGNS, "path");
@@ -4090,7 +4296,7 @@ liveCanvas = (() => {
       card.classList.remove("live-active");
       card.classList.add(bad ? "live-failed" : "live-done");
       for (const w of run.out.get(key) || []) {
-        particle(w.path, bad, dur);
+        particle(w.path, bad, dur, w.glow);
         // the consumer lights as the data reaches it, until it finishes
         const target = state.cardEls.get(w.to);
         if (!target || target.classList.contains("bnode")) continue;

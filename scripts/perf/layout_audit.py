@@ -11,7 +11,8 @@ layout's own model, so a model that drifted from its cards is caught):
   hidden      a card that is not laid out (zero size)
   overlap     two cards that are not nested overlap (tight: closer than 8 px)
   contain     a member outside its container, a knob off its border
-  ends        a wire that does not start at its source's port or end at its target's
+  ends        a wire that does not start at its source's port (a decision row's dot for
+              its routes, returns and ties into END) or end at its target's
   cross       a wire through a card that is not one of its ends (warn)
   owncross    a decision wire back through its own card
   escape      a wire between a container's members that leaves the container
@@ -22,6 +23,8 @@ layout's own model, so a model that drifted from its cards is caught):
   stable      a second render with nothing changed moves something
   moved       a live replay moved a card
   view        nothing on screen after the step, or a centred node off screen
+  landing     a fresh page does not land with the flow's START in view
+  b5          a run of a graph the studio does not draw shown with a canvas beside its note
 
 usage: layout_audit.py <base> <outdir> [pid ...]    (no pids: the default matrix)
        --quick        the landing and expand-all steps only
@@ -38,6 +41,11 @@ import sys
 import time
 
 from playwright.async_api import async_playwright
+
+
+class _Skip(Exception):
+    """A case with nothing to check here (not a failure)."""
+
 
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 FLAGS = {a for a in sys.argv[1:] if a.startswith("--")}
@@ -109,7 +117,13 @@ AUDIT_JS = r"""
       if (!firstRow.has(`${b.key}|${t}`)) firstRow.set(`${b.key}|${t}`, dot);
       const tgt = boxes.find(o => o !== b && o.it && o.it.depth === it.depth && o.name === t
                                   && parentKey(o.key) === parentKey(b.key));
-      if (tgt) {
+      // a route that is the loop's return keeps its dot on the right,
+      // where returns bow (render: backTo)
+      const backRow = tgt && state.edgeEls.some(E => E.a === b.key && E.b === tgt.key
+        && E.els[0] && E.els[0].classList.contains('back'));
+      if (backRow && dot.left)
+        add('side', `${b.name}: the row to ${t} is the loop's return, but its dot is on the left`, {key: b.key});
+      else if (tgt && !backRow) {
         const tcx = tgt.x + tgt.w / 2, bcx = b.x + b.w / 2;
         if (Math.abs(tcx - bcx) > 20 && (tcx < bcx) !== dot.left)
           add('side', `${b.name}: the row to ${t} has its dot on the ${dot.left ? 'left' : 'right'}, its target lies ${tcx < bcx ? 'left' : 'right'}`, {key: b.key});
@@ -164,6 +178,17 @@ AUDIT_JS = r"""
   };
   const near = (p, q, tol) => Math.abs(p.x - q.x) <= tol && Math.abs(p.y - q.y) <= tol;
   const ex = state.extent;
+  // the main graph's ties to END are not in the ledger: a router's route
+  // into END must still leave its row's dot (B4)
+  const tieStarts = [...document.querySelectorAll('#edges path.bedge')].map(p => {
+    try { const q = p.getPointAtLength(0); return {x: q.x, y: q.y}; } catch { return null; } }).filter(Boolean);
+  for (const b of boxes) {
+    const it = b.it;
+    if (!it || it.depth !== 0 || !(it.node.routes || []).some(r => r.target === '__END__')) continue;
+    const dot = firstRow.get(`${b.key}|__END__`);
+    if (dot && !tieStarts.some(q => Math.abs(q.x - dot.x) <= 6 && Math.abs(q.y - dot.y) <= 6))
+      add('ends', `${b.name} → END: no tie leaves its row's dot at ${r2(dot.x)},${r2(dot.y)}`, {key: b.key});
+  }
   const allPts = [];
   for (const E of state.edgeEls) {
     const path = E.els[0];
@@ -179,11 +204,15 @@ AUDIT_JS = r"""
     allPts.push(...pts);
     const s = pts[0], t = pts[pts.length - 1];
     const label = `${a.node.name} → ${bb.node.name}`;
-    // a route's wire leaves its condition row (render: condLabels + condPorts)
-    const rowWire = !back && !!firstRow.get(`${Akey}|${bb.node.name}`)
-      && (a.node.routes || []).some(r => r.target === bb.node.name);
+    // a route's wire leaves its condition row (render: condLabels +
+    // condPorts) — a route that is the loop's return too, and a route
+    // into END ties from its row (docs/ASSISTANT_NEXT_PLAN.md B4)
+    const toEnd = bb.node.kind === '__boundary__' && /end/i.test(bb.node.boundary || bb.node.name || '');
+    const rowKey = `${Akey}|${toEnd ? '__END__' : bb.node.name}`;
+    const rowWire = !!firstRow.get(rowKey)
+      && (a.node.routes || []).some(r => r.target === (toEnd ? '__END__' : bb.node.name));
     let want;
-    if (rowWire) want = firstRow.get(`${Akey}|${bb.node.name}`);
+    if (rowWire) want = firstRow.get(rowKey);
     else if (back) want = {x: A.x + A.w, y: A.y + A.h / 2};
     else want = {x: A.x + A.w / 2, y: A.y + A.h};
     if (!near(s, want, 6))
@@ -450,11 +479,25 @@ async def project_desktop(b, pid):
             await tab(pg, "flow")
             VIEW = "(() => { const st = document.querySelector('#stage'); return [+state.view.scale.toFixed(3), Math.round(st.scrollLeft), Math.round(st.scrollTop)]; })()"
             flow_view = await pg.evaluate(VIEW)
-            run = await pg.evaluate(f"""() => fetch('/api/p/{pid}/runs').then(r => r.json()).then(j => {{
-                const runs = j.runs || []; const r = runs.find(x => x.workflow === state.graph.name) || runs[0];
-                return r.trace_id || r.run; }})""")
-            await pg.evaluate("(r) => showRunWorkflow(r)", run)
-            await pg.wait_for_selector(".replayctl", timeout=15000)
+            # a run whose graph the studio draws: one of a graph it does not
+            # (a job's params) gets a note instead of a canvas (B5) — checked,
+            # then the next run is tried
+            runs = await pg.evaluate(f"""() => fetch('/api/p/{pid}/runs?limit=40').then(r => r.json()).then(j =>
+                (j.runs || []).map(r => r.trace_id || r.run))""")
+            shown = False
+            for run in runs[:12]:
+                await pg.evaluate("(r) => showRunWorkflow(r)", run)
+                await pg.wait_for_selector(".replayctl, .wfmissing", timeout=15000)
+                if await pg.locator(".wfmissing").count():
+                    if await pg.evaluate("!!document.querySelector('#traces #stage')"):
+                        REPORT["cases"].append({"pid": pid, "project": project, "step": "07_workflow_missing", "shot": None,
+                                                "findings": [{"check": "b5", "msg": f"run {run}: an undrawn graph's note with a canvas beside it"}]})
+                    continue
+                shown = True
+                break
+            if not shown:
+                print(f"skipped: {project} workflow: no recent run of a graph it draws")
+                raise _Skip()
             await pg.evaluate(FRAMES)
             meta = {"pid": pid, "project": project, "graph": ""}
             await audit(pg, dict(meta, step="07_workflow_path"))
@@ -480,6 +523,8 @@ async def project_desktop(b, pid):
             if back_view != flow_view:
                 extra.append({"check": "view", "msg": f"the Flow view came back as {back_view}, it was {flow_view} (scale, scroll)"})
             await audit(pg, dict(meta, step="07b_workflow_then_flow"), extra=extra)
+        except _Skip:
+            pass
         except Exception as exc:  # noqa: BLE001
             REPORT["cases"].append({"pid": pid, "project": project, "step": "07_workflow", "shot": None,
                                     "findings": [{"check": "harness", "msg": f"{type(exc).__name__}: {str(exc)[:200]}"}]})
@@ -535,7 +580,15 @@ async def project_width(b, pid, width):
     await pg.wait_for_timeout(600)
     project = await pg.evaluate("state.ir.name")
     meta = {"pid": pid, "project": project, "graph": "", "width": width}
-    await audit(pg, dict(meta, step="09_landing"))
+    # a flow wider than the view lands on its START (B6)
+    landed = await pg.evaluate("""() => { const st = document.querySelector('#stage').getBoundingClientRect();
+        const s = document.querySelector('#nodes .node.bnode.b-start:not(.knob)');
+        if (!s) return 'ok';
+        const r = s.getBoundingClientRect();
+        return r.right > st.left && r.left < st.right && r.bottom > st.top && r.top < st.bottom ? 'ok'
+          : `START at ${Math.round(r.left - st.left)},${Math.round(r.top - st.top)} is off the ${Math.round(st.width)}x${Math.round(st.height)} view`; }""")
+    await audit(pg, dict(meta, step="09_landing"),
+                extra=[] if landed == "ok" else [{"check": "landing", "msg": landed}])
     if await pg.evaluate("state.graph.nodes.some(n => n.graph)"):
         await expand(pg)
         await centre_on_decision(pg)

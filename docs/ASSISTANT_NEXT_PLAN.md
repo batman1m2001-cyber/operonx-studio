@@ -331,7 +331,8 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
 
 | # | Phase | Commit | Checked with |
 |---|---|---|---|
-| 1 | **A1** Composer | see git log (`assistant A1`) | `scripts/perf/composer.py` 42/42 with `--live` (one Haiku turn); `live_assistant.py` 23/23; `flows.py` 21/21; layout audit 0 errors in 328 cases; 480 studio tests (3 skipped); 39 JS tests |
+| 1 | **A1** Composer | e00ca94 | `scripts/perf/composer.py` 42/42 with `--live` (one Haiku turn); `live_assistant.py` 23/23; `flows.py` 21/21; layout audit 0 errors in 328 cases; 480 studio tests (3 skipped); 39 JS tests |
+| 2 | **C1** Canvas | see git log (`canvas C1`) | layout audit 0 errors in 328 cases (with new checks for B4, B5 and B6); `flows.py` 21/21; 480 studio tests; B5 14/14 and B6 12/12 on desktop and phone; before and after screenshots; render and zoom measured below |
 
 **A1 notes.**
 - **A JSON paste becomes a card from 200 characters, even on one line.**
@@ -347,3 +348,67 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
   - editing and resending an earlier message used to leave its text in
     the box;
   - a click on the side panel's drag bar used to store a width of 340 px.
+
+**C1 notes.**
+- **B2, the brain-cell look, is back.**
+  - It is the canvas CSS from before R4 (`ac251bb^`): cells, beams with
+    their glow and filament, glowing ports, and the cyan light-up on
+    selection.
+  - What R4 added for function stays: the run states, the measuring
+    pass, and names that grow when zoomed out.
+  - The run states now read as light on a cell: the op at work glows
+    cyan, a finished one turns green, a failed one red. A wire's glow
+    brightens with its core while data runs through it.
+- **The sparks were the only real cost, and they are fixed.**
+  - They asked the browser for lengths and points on every wire: 58 of
+    the 224 ms a 302-op render took.
+  - They are now computed in JS from the path data (`pathSampler`):
+    3 ms. They match the browser within 0.18% on length and 0.6 px on
+    position, on all 1,102 paths of three projects.
+- **Measured before and after C1, same harness, same moment:**
+
+  | Graph | render() | zoom frames, p50 / p95 |
+  |---|---|---|
+  | callbot (34 ops) | 47–51 → 54–59 ms | 16.7 / 17–21 → 16.7 / 17 ms |
+  | educa agent (27 ops) | 35–40 → 41–44 ms | 16.7 / 17–18 → 17 / 29–34 ms |
+  | synthetic (302 ops) | 133–141 → 170–188 ms (budget 200) | 16.7 / 17–18 → 19–20 / 23 ms settled (25–28 / 45 right after the page loads) |
+
+  - **What that means on real graphs:** zooming stays at 60 fps at the
+    median, and a continuous zoom drops about one frame in twenty. Every
+    blurred shadow on a cell causes it (only a flat ring avoids it); it is
+    the same trade the look had on `main`.
+  - **Graphs of 120 cells or more** keep the membrane ring but drop the
+    blurred shadows (`#world.big`). On the 302-op graph that took zoom
+    frames from 26 to 19 ms at the median.
+  - **Rejected:** dropping the shadows only during a zoom. Its first
+    switch cost one 224 ms frame.
+- **The callbot's render was already over budget.** It measured 47–51 ms
+  against the 40 ms budget before C1: the graph has grown to 34 ops since
+  R4 recorded 36–40 ms. C1 adds 5–7 ms. It isn't fixed here.
+- **B4, rows without a wire.**
+  - A route that is the loop's return now leaves its own row's dot on
+    the right, where returns bow.
+  - A route into END ties from its row: its dot is on the left, and the
+    tie runs down a clear lane, along above END, and into END's top port.
+    The lane steps outward past cards in its way, and the tie falls back
+    to normal routing if none is clear.
+  - The legend says so. The layout audit checks all of it, including the
+    main graph's END ties, which it didn't see before.
+- **B5, runs of other graphs.**
+  - A run records its engine's name, not its graph's, so the graph is
+    matched on evidence: whichever project graph's ops cover the ops the
+    run executed.
+  - If that graph isn't on screen, the canvas switches to it and a line
+    says "Showing `score_call`, the graph this run ran (the canvas had
+    `passthrough`)".
+  - If no graph covers the run (for example a job's `params`), a note
+    says so, lists the ops, and offers *Open as tree*, never a canvas of
+    faded cards.
+  - The audit's workflow case now picks a run whose graph is drawn.
+- **B6, the phone landing.** A flow wider than the view lands with START
+  in the middle, at the readable 70%. The audit checks START is in view
+  on every fresh landing.
+- **Fixed on the way:** the inspector's close × was drawn over its "Ask"
+  button.
+- **Added to the scratch `layout-edges` project:** a `looprow` graph,
+  where the router's own route is the loop's return.
