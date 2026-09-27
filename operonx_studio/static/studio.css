@@ -48,6 +48,13 @@
   --sel: #eaf2fe;
   --sel-line: #3b86e0;
 
+  /* inks that sit on a fill, not on the page: they follow the fill */
+  --on-accent: #1c1603;          /* on the gold (primary buttons) */
+  --on-strong: #ffffff;          /* on the inverted surface (var(--text): Send, the toast) */
+  --on-fill: #ffffff;            /* on a status or kind colour */
+  --mark-bg: var(--text);        /* the dark squares that carry a mark */
+  --strong-hover: #28313c;       /* the inverted surface, hovered */
+
   /* legacy names — the canvas and the inspector are written in these */
   --panel: var(--surface);
   --panel-2: var(--surface-2);
@@ -72,6 +79,13 @@
   --wire: #7b9ec8;
   --wire-deep: #3f6592;
   --wire-glow: rgba(123, 158, 200, .14);
+  /* the monitor's charts (monitor.js reads these) */
+  --chart-ok: #2a78d6;
+  --chart-failed: #d03b3b;
+  --chart-grid: #ecebe6;
+  --chart-axis: #c3c2b7;
+  --chart-ink: #52514e;
+  --chart-muted: #898781;
 
   /* shape and motion */
   --r-xs: 6px;
@@ -149,7 +163,7 @@ button:hover, .btn:hover { background: var(--surface-2); border-color: var(--bor
 button:active { background: var(--surface-3); }
 button:disabled { opacity: .55; cursor: default; }
 button.primary, .btn.primary {
-  background: var(--accent); border-color: var(--accent); color: #1c1603; font-weight: 600;
+  background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600;
 }
 button.primary:hover, .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 button.ghost, .btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
@@ -164,14 +178,16 @@ button.danger:hover { background: var(--err-soft); border-color: rgba(201, 54, 4
 .iconbtn:hover, button.iconbtn:hover { background: var(--surface-2); color: var(--text); border-color: transparent; }
 .iconbtn.active { color: var(--accent-strong); background: var(--accent-soft); }
 
-input[type=text], input[type=password], select, textarea {
+/* an input written without a type is a text field too; :where() keeps it
+   (and number) at an element's specificity, so a component's class wins */
+input[type=text], input[type=password], input:where(:not([type]), [type=number]), select, textarea {
   background: var(--surface); color: var(--text);
   border: 1px solid var(--border-strong); border-radius: var(--r-sm);
   min-height: 36px; padding: 7px 11px; font: var(--fs-base) var(--font); width: 100%;
   transition: border-color var(--tr), box-shadow var(--tr);
 }
-input[type=text]:hover, input[type=password]:hover, select:hover { border-color: #bfb8a8; }
-input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus {
+input[type=text]:hover, input[type=password]:hover, input:where(:not([type]), [type=number]):hover, select:hover { border-color: #bfb8a8; }
+input[type=text]:focus, input[type=password]:focus, input:where(:not([type]), [type=number]):focus, select:focus, textarea:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
 }
 input.mono { font-family: var(--mono); font-size: var(--fs-md); }
@@ -763,7 +779,7 @@ body:not([data-stage]) .canvasbar { display: none; }
 }
 .node.container .collapse:hover { color: var(--text); box-shadow: none; }
 .badge.expand { cursor: pointer; }
-.badge.expand:hover { background: var(--k-graph); color: #fff; border-color: var(--k-graph); }
+.badge.expand:hover { background: var(--k-graph); color: var(--on-fill); border-color: var(--k-graph); }
 
 /* wrap seam — where a long chain breaks to the next band, like a
    newline. A layout artifact, not uncertainty: thin, faint, SOLID —
@@ -1538,7 +1554,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 /* the canvas under a lens */
 .node.quiet { opacity: .28; filter: saturate(.3); }
 .node.quiet:hover { opacity: .8; filter: none; }
-.badge.rank { background: var(--text); color: #fff; border-color: var(--text); font-weight: 700; }
+.badge.rank { background: var(--text); color: var(--on-strong); border-color: var(--text); font-weight: 700; }
 .badge.errline { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge.cost { color: #6d36a3; border-color: #ddcdf0; background: #faf7fe; font-weight: 600; }
 
@@ -1572,7 +1588,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .cmpcardhead { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .cmpcardhead .linkbtn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; padding: 0 4px; }
 .cmpbadge { flex: none; width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center;
-  justify-content: center; background: var(--text); color: #fff; font-weight: 700; font-size: 12px; }
+  justify-content: center; background: var(--text); color: var(--on-strong); font-weight: 700; font-size: 12px; }
 .cmpfacts { color: var(--text-2); font-size: var(--fs-md); margin-top: 6px; }
 .cmpsum { color: var(--text); font-weight: 500; margin: 6px 0 14px; }
 .cmptable .worse { color: var(--err); font-weight: 600; }
@@ -1734,8 +1750,8 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .chat-input:focus { outline: none; border-color: var(--signal); box-shadow: 0 0 0 3px var(--signal-ring); }
 .chat-input:disabled { background: var(--surface-2); }
 .chat-send { width: 38px; min-width: 38px; height: 38px; padding: 0; border-radius: var(--r-md);
-  background: var(--text); border-color: var(--text); color: #fff; }
-.chat-send:hover { background: #2a323c; border-color: #2a323c; }
+  background: var(--text); border-color: var(--text); color: var(--on-strong); }
+.chat-send:hover { background: var(--strong-hover); border-color: var(--strong-hover); }
 
 /* ── the assistant ─────────────────────────────────────────────────────
    One component in four placements (assistant.js): the project page's
@@ -1986,7 +2002,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-hello h2 { font-size: 19px; font-weight: 650; letter-spacing: -.01em; margin: 12px 0 6px; }
 .ax-hello p { color: var(--text-2); margin: 0; line-height: 1.55; font-size: var(--fs-md); max-width: 520px; }
 .ax-mark { width: 34px; height: 34px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
-  background: var(--text); color: var(--accent); }
+  background: var(--mark-bg); color: var(--accent); }
 .ax-mark .icon { width: 18px; height: 18px; }
 .ax-starts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .ax.focus .ax-starts, .ax.hero .ax-starts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2045,9 +2061,9 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-b-expand { width: 30px; min-width: 30px; height: 30px; }
 .ax-b-expand .icon { width: 16px; height: 16px; }
 .ax-send { width: 32px; min-width: 32px; height: 32px; min-height: 0; margin-left: 4px; padding: 0; border: none;
-  border-radius: 10px; background: var(--text); color: #fff; transition: background var(--tr), transform var(--tr); }
-.ax-send:hover { background: #28313c; border: none; }
-.ax-send:active { transform: scale(.94); background: #28313c; }
+  border-radius: 10px; background: var(--text); color: var(--on-strong); transition: background var(--tr), transform var(--tr); }
+.ax-send:hover { background: var(--strong-hover); border: none; }
+.ax-send:active { transform: scale(.94); background: var(--strong-hover); }
 .ax-send .icon { width: 17px; height: 17px; }
 .ax-send.stop { background: var(--surface-3); color: var(--text); }
 .ax-model { min-height: 0; height: 28px; max-width: 60%; padding: 0 8px 0 6px; border: none; background: none; gap: 6px;
@@ -2223,7 +2239,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   box-shadow: var(--sh-1); padding: 14px 14px 12px; animation: axrise .2s var(--ease-out); }
 .ax-signin[hidden] { display: none; }
 .ax-signin-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-size: var(--fs-base); }
-.ax-signin-mark { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; background: var(--text); color: var(--accent); }
+.ax-signin-mark { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; background: var(--mark-bg); color: var(--accent); }
 .ax-signin-mark .icon { width: 14px; height: 14px; }
 .ax-signin-body p { margin: 4px 0 10px; color: var(--text-2); font-size: var(--fs-md); line-height: 1.5; }
 .ax-signin-body a { color: var(--signal-strong); }
@@ -2451,7 +2467,7 @@ body.ax-sheet #axstage { position: fixed; inset: 0; z-index: 90; padding: env(sa
   font-weight: 600; background: var(--accent); border-color: var(--accent); color: #1c1603; }
 .voicemic .icon { width: 16px; height: 16px; }
 .voicemic:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-.voicemic.live { background: var(--err); border-color: var(--err); color: #fff; }
+.voicemic.live { background: var(--err); border-color: var(--err); color: var(--on-fill); }
 .voicemic.live .icon { display: none; }
 .voicemic.live::before { content: ""; width: 10px; height: 10px; border-radius: 2px; background: #fff; }
 .voicemeter { width: 140px; height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
@@ -2607,8 +2623,8 @@ body.ax-sheet #axstage { position: fixed; inset: 0; z-index: 90; padding: env(sa
 .revform { display: flex; flex-direction: column; gap: 8px; }
 .revverdict { display: flex; gap: 8px; }
 .revverdict button { min-width: 88px; min-height: 36px; font-weight: 600; }
-.revgood.on { background: var(--ok); border-color: var(--ok); color: #fff; }
-.revbad.on { background: var(--err); border-color: var(--err); color: #fff; }
+.revgood.on { background: var(--ok); border-color: var(--ok); color: var(--on-fill); }
+.revbad.on { background: var(--err); border-color: var(--err); color: var(--on-fill); }
 .revform input { min-height: 34px; font-size: 12.5px; }
 .revnote { min-height: 70px; }
 @media (max-width: 1100px) { .revgrid { grid-template-columns: 260px minmax(0, 1fr); } }
@@ -2677,10 +2693,24 @@ body.ax-sheet #axstage { position: fixed; inset: 0; z-index: 90; padding: env(sa
 .modal:has(.tplgrid) .browser { height: 170px; max-height: 24vh; }
 .tplcard.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--accent-soft); }
 
+/* ── the theme: System, Light or Dark (theme.js) ──────────────────── */
+.themebtn-wrap { position: relative; display: inline-flex; }
+.themebtn .icon { width: 17px; height: 17px; }
+.thememenu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 80; min-width: 220px; padding: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--sh-3); }
+.thememenu[hidden] { display: none; }
+.thememenu-title { margin: 0 0 8px 2px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-3); }
+.themepick { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--surface-3); }
+.themepick button { min-height: 0; height: 28px; padding: 0 12px; border: none; border-radius: 999px; background: none;
+  color: var(--text-2); font-size: var(--fs-sm); font-weight: 500; }
+.themepick button:hover { color: var(--text); background: none; border: none; }
+.themepick button.on { background: var(--surface); color: var(--text); box-shadow: var(--sh-1); }
+
 /* ── toast: one shared voice for action feedback ──────────────────── */
 #toast {
   position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 12px);
-  background: var(--text); color: #fff; padding: 10px 16px; max-width: calc(100vw - 32px);
+  background: var(--text); color: var(--on-strong); padding: 10px 16px; max-width: calc(100vw - 32px);
   border-radius: var(--r-md); font-size: var(--fs-md); box-shadow: var(--sh-3);
   opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 120;
 }

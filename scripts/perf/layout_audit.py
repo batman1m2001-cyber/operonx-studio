@@ -32,6 +32,7 @@ usage: layout_audit.py <base> <outdir> [pid ...]    (no pids: the default matrix
        --touch        the code-change step, on scratch projects only (writes a probe file into the project)
        --touch-all    the code-change step on every project
        --sheets       contact sheets of every screenshot, for review by eye
+       --dark         the whole run in the dark theme
 Exits 1 when any error-severity finding is left (a gate before canvas changes).
 """
 import asyncio
@@ -385,8 +386,15 @@ def diff_sig(a, b):
     return out
 
 
+async def themed(ctx):
+    """--dark: every page of the context wears the dark theme from its first paint."""
+    if "--dark" in FLAGS:
+        await ctx.add_init_script("try { localStorage.setItem('ox:theme', 'dark') } catch (e) {}")
+    return ctx
+
+
 async def project_desktop(b, pid):
-    ctx = await b.new_context(viewport={"width": 1440, "height": 900})
+    ctx = await themed(await b.new_context(viewport={"width": 1440, "height": 900}))
     pg = await ctx.new_page()
     errors = []
     pg.on("pageerror", lambda e: errors.append(str(e)))
@@ -571,8 +579,8 @@ async def project_desktop(b, pid):
 
 async def project_width(b, pid, width):
     phone = width < 700
-    ctx = await b.new_context(viewport={"width": width, "height": 844 if phone else 1000},
-                              is_mobile=phone, has_touch=phone, device_scale_factor=2 if phone else 1)
+    ctx = await themed(await b.new_context(viewport={"width": width, "height": 844 if phone else 1000},
+                                           is_mobile=phone, has_touch=phone, device_scale_factor=2 if phone else 1))
     pg = await ctx.new_page()
     await login(pg)
     await pg.goto(f"{BASE}/p/{pid}")

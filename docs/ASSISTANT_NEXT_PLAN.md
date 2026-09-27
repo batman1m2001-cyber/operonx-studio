@@ -338,6 +338,7 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
 | 5 | **A4** Usage | 0784444 | `scripts/perf/usage.py` 18/18 with `--live` (a Haiku turn: tokens in its footer, the card's numbers match the store, real plan limits "as of just now"); 2 new server tests (491 studio tests); `composer.py` 35/35; `attachments.py` 16/16; `models.py` 13/13; `live_assistant.py` 23/23; `flows.py` 21/21 |
 | 6 | **A5** Sign-in | 2ba96e5 | `scripts/perf/signin.py` 14/14 (up to the sign-in link, then Cancel: plan §4); the CLI probes below; 3 new server tests against a fake CLI that signs in and out (494 studio tests); `composer.py`, `attachments.py`, `models.py`, `usage.py`; `live_assistant.py` 23/23; `flows.py` 21/21. **Still yours to do: one real sign-in** (paste the code once) |
 | 7 | **N2, N4, N3** | see git log (`N2 N4 N3`) | bytes, revisit and first-open times before and after (below); the served bundles token-for-token identical to their sources (acorn); 7 new tests (500 studio tests); layout audit 0 errors in 328 cases; `flows.py` 21/21; `live_assistant.py` 23/23; every UI check above |
+| 8 | **N1** Dark mode | see git log (`N1`) | the palette validator on the dark node kinds (all pairs: every check passes); WCAG contrast of every text token on every dark surface; layout audit in dark (`--dark`) 0 errors in 328 cases; every element's computed colours identical between the two generators, on 32 screens; 20 new tests (520 tests, 3 skipped); `flows.py` 21/21; `composer.py` 35/35; `attachments.py` 16/16; `models.py` 13/13; `usage.py` 15/15; `signin.py` 14/14; every screen in both themes, desktop and phone |
 
 **A1 notes.**
 - **A JSON paste becomes a card from 200 characters, even on one line.**
@@ -625,3 +626,50 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
   | callbot | 2,882 ms | 83 ms | — |
   | jobs demo | 654 ms | 28 ms | 66 ms |
   | playground demo | 696 ms | 29 ms | 121 ms |
+
+**N1 notes.**
+- **The choice is System, Light or Dark,** in Settings (Appearance) and
+  in the header's menu. It is kept per viewer (this browser), and the page
+  wears it before its first paint. While it is System, the page follows
+  the system when it switches.
+- **How the dark is made.**
+  - Every colour token has a hand-tuned dark value (`studio-dark.css`).
+  - The ~300 colours written in place in `studio.css` get a generated
+    dark twin (`operonx_studio/theme.py`), placed right after its rule
+    with the same specificity, so the same rule wins in both themes.
+  - The rules: neutrals flip their lightness; a pale wash keeps its hue
+    (a warning's cream stays warm); a strong hue is lightened to read on
+    dark; a mid-light fill inverts, so a hover still steps out; shadows
+    deepen; an inline SVG's ink (the header's chevrons) turns light.
+    Masks, keyframes and the tokens are left alone.
+  - The Monitor's charts read the tokens and redraw on a switch.
+- **Size: the dark adds 3.2 KB** (stylesheet 28.2 → 31.3 KB gzipped).
+  - The first version appended all twins at the end. Holding the cascade
+    that way meant re-stating 772 colour-free rules: +10.9 KB.
+  - **Checked identical:** every element's computed colours under both
+    versions, on 32 screens (desktop and phone): 0 differences. The same
+    comparison sees light against dark on 568 of 568 boxes.
+- **Contrast.** Every text token is at least 4.5:1 on every dark surface
+  (the faintest, `--text-3`, is 4.81 on the highlight). Inks on fills are
+  at least 5.97.
+- **The node kinds, re-stepped for dark with the palette validator.**
+  - The six kinds pass every check on all pairs: colour-blind ΔE ≥ 8.1,
+    normal vision ≥ 15.1, lightness band, chroma and contrast. As text
+    (the kind chip) each is at least 4.5:1.
+  - The frontier is tight: the search found no set with more margin
+    inside the families. Branch moved slightly redder (hue 61 → 48); it
+    stays 9.1 from the error red, and errors always carry an icon and a
+    label.
+  - The default ("an op the studio has never seen") is the light grey of
+    `--text-2`, at least 9.5 from every hue, colour-blind or not.
+  - Serve is the brand's gold, not a kind: at least 11 from every kind.
+- **Yours to decide: the light kinds fail the validator** (unchanged from
+  before N1). Blue and violet are 1.2 apart for deuteranopes, and teal
+  and green 5.3 for everyone. A passing light set exists only with an
+  olive green and a brown branch, right at the floor. Kinds always carry
+  an icon and a label, so this stays as it is until you say otherwise.
+- **Fixed on the way, both themes:** number fields and fields written
+  without a type (Review's labels, the alert form, the Playground's query
+  keys) had the browser's own look; they now match the other fields. A
+  component's own style still wins.
+- **The layout audit takes `--dark`.**

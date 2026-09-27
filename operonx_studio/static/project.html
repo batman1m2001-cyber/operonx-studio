@@ -3,9 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1115" media="(prefers-color-scheme: dark)">
 <title>operonx studio</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%23c9940f'/%3E%3Ccircle cx='12' cy='12' r='5.2' fill='none' stroke='white' stroke-width='2.4'/%3E%3Ccircle cx='18.3' cy='5.7' r='1.7' fill='white'/%3E%3C/svg%3E">
+<script>/* the theme before the first paint (theme.js keeps it in step) */try{var t=localStorage.getItem("ox:theme")||"system";if(t==="system")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="stylesheet" href="/static/studio.css">
 </head>
 <body data-tab="flow">
@@ -27,6 +29,7 @@
     <button id="btn-screen" class="crumbbtn screenbtn" aria-haspopup="true" aria-controls="rail" title="Screens"><i data-icon="menu"></i><span id="screen-label">Flow</span></button>
     <div class="spacer"></div>
     <span class="live" id="live" title="The studio re-extracts and redraws whenever the project's code changes"><span class="dot"></span><span id="live-text">live</span></span>
+    <span id="themeslot"></span>
     <button id="btn-settings" class="iconbtn" data-tabbtn="settings" aria-label="Settings" title="Settings — retention, where runs are kept"><i data-icon="settings"></i></button>
     <button id="btn-right" class="iconbtn paneltoggle" aria-label="Toggle the side panel" title="Side panel — inspect · assistant"><i data-icon="panel"></i></button>
   </header>
@@ -112,6 +115,7 @@
   </div>
 </div>
 <script src="/static/icons.js"></script>
+<script src="/static/theme.js"></script>
 <script src="/static/values.js"></script>
 <script src="/static/providers.js"></script>
 <script src="/static/timeline.js"></script>

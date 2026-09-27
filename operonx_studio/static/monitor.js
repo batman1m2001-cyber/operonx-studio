@@ -17,7 +17,16 @@
 
 (() => {
   const box = $("#monitor");
-  const C = {ok: "#2a78d6", failed: "#d03b3b", line: "#2a78d6", grid: "#ecebe6", axis: "#c3c2b7", ink2: "#52514e", muted: "#898781"};
+  // the charts' colours are the theme's tokens, read when a chart is drawn
+  const C = {};
+  const paletteNow = () => Object.assign(C, {
+    ok: Theme.token("--chart-ok", "#2a78d6"), failed: Theme.token("--chart-failed", "#d03b3b"),
+    line: Theme.token("--chart-ok", "#2a78d6"), grid: Theme.token("--chart-grid", "#ecebe6"),
+    axis: Theme.token("--chart-axis", "#c3c2b7"), ink2: Theme.token("--chart-ink", "#52514e"),
+    muted: Theme.token("--chart-muted", "#898781"), surface: Theme.token("--surface", "#fff")});
+  paletteNow();
+  // a new theme redraws what is on screen
+  document.addEventListener("oxtheme", () => { paletteNow(); if (state.tab === "monitor") show(); });
   const RANGES = [["24h", "24 hours", 86400, 24], ["7d", "7 days", 7 * 86400, 28], ["30d", "30 days", 30 * 86400, 30]];
   const v = Object.assign({target: "", range: "7d"}, recall(`monitor:${PID}`, {}));
   let tip = null;
@@ -170,7 +179,7 @@
     vals.forEach((val, i) => {
       if (val == null) return;
       const y = f.T + f.ph - f.ph * val / (max * 1.1);
-      const dot = svgEl("circle", {cx: f.x(i), cy: y, r: 3, fill: C.line, stroke: "#fff", "stroke-width": 2});
+      const dot = svgEl("circle", {cx: f.x(i), cy: y, r: 3, fill: C.line, stroke: C.surface, "stroke-width": 2});
       svg.append(dot);
     });
     const cross = svgEl("line", {x1: 0, x2: 0, y1: f.T, y2: f.T + f.ph, stroke: C.axis, "stroke-width": 1, visibility: "hidden"});
@@ -336,6 +345,7 @@
 
   async function show() {
     hideTip();
+    paletteNow();
     const mine = ++token;
     box.textContent = "";
     const head = el("div", "panehead monhead");

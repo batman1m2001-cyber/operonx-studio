@@ -533,6 +533,11 @@ def build_studio_app(recents: Optional[Recents] = None):
         for f in sorted(STATIC.glob("*")):
             stat = f.stat()
             digest.update(f"{f.name}:{stat.st_mtime_ns}:{stat.st_size};".encode())
+        # what is served is also what these make of the files: a new
+        # minifier or dark-theme rule is a new version too
+        for f in (Path(__file__).parent / "minify.py", Path(__file__).parent / "theme.py"):
+            if f.is_file():
+                digest.update(f"{f.name}:{f.stat().st_mtime_ns};".encode())
         return digest.hexdigest()[:10]
 
     # One script per page. Through the tunnel every extra request is
@@ -602,6 +607,15 @@ def build_studio_app(recents: Optional[Recents] = None):
         got = styles.get(name)
         if got is None or got[0] != version:
             text = path.read_text(encoding="utf-8")
+            if name == "studio":
+                # the dark theme: every colour-setting rule's dark twin, in
+                # place (operonx_studio/theme.py), then the hand-tuned part
+                from .theme import with_dark
+
+                text = with_dark(text)
+                dark = STATIC / "studio-dark.css"
+                if dark.is_file():
+                    text += "\n" + dark.read_text(encoding="utf-8")
             if minify:
                 try:
                     from .minify import strip_css

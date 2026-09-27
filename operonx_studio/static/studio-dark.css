@@ -1,0 +1,98 @@
+/* operonx studio — the dark theme's hand-tuned part.
+
+   Served after studio.css and the dark twins generated from it
+   (operonx_studio/theme.py): the tokens' dark values, then the few rules
+   where arithmetic on the light colours was not enough. Contrast checked:
+   text tokens against their surfaces (WCAG), the node-kind palette with the
+   palette validator against the canvas (docs/ASSISTANT_NEXT_PLAN.md §8). */
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* surfaces — deep graphite, never pure black */
+  --bg: #0e1115;
+  --surface: #161a20;
+  --surface-2: #1b2027;
+  --surface-3: #242a33;
+  --border: #2b323c;
+  --border-soft: #222831;
+  --border-strong: #3b4451;
+  /* text */
+  --text: #e6e9ee;
+  --text-2: #b4bdc8;
+  --text-3: #8f99a6;
+  /* brand */
+  --accent: #d9a526;
+  --accent-hover: #e6b43a;
+  --accent-strong: #f0c862;
+  --accent-soft: #2b2413;
+  --accent-ring: rgba(217, 165, 38, .36);
+  /* signal */
+  --signal: #4d8eff;
+  --signal-strong: #85b3ff;
+  --signal-soft: #16233a;
+  --signal-ring: rgba(77, 142, 255, .36);
+  /* status */
+  --ok: #45bd80;
+  --ok-soft: #10261b;
+  --warn: #e3a54b;
+  --warn-soft: #2d2110;
+  --err: #f26a5f;
+  --err-soft: #2f1715;
+  --info: #6aa2ff;
+  --sel: #16233a;
+  --sel-line: #5e9cf2;
+  /* node kinds — the same six families, re-stepped for the dark canvas
+     with the palette validator (all pairs, against --surface: lightness
+     band, chroma, CVD ΔE ≥ 8.1, normal-vision ΔE ≥ 15.1, contrast) and
+     ≥ 4.5:1 as text (the kind chip). The default is the neutral "other":
+     a light grey that stays apart from every hue, colour-blind or not
+     (CVD ΔE ≥ 9.5). Serve is the brand's gold (the accent), not a kind */
+  --k-func: #318aff;
+  --k-llm: #a665d2;
+  --k-graph: #00964a;
+  --k-branch: #d45f06;
+  --k-io: #ee518a;
+  --k-audio: #ee518a;
+  --k-res: #0ba7b6;
+  --k-default: #b4bdc8;
+  --k-serve: #d9a526;
+  /* the energy */
+  --wire: #6f96c6;
+  --wire-deep: #a0c2ea;
+  --wire-glow: rgba(111, 150, 198, .2);
+  /* depth: shadows are darkness, not grey */
+  --sh-1: 0 1px 2px rgba(0, 0, 0, .45);
+  --sh-2: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .5);
+  --sh-3: 0 2px 6px rgba(0, 0, 0, .45), 0 24px 56px rgba(0, 0, 0, .65);
+  /* inks on fills: they follow the fill (a bright gold, a light "inverted"
+     surface, the lit status colours all take dark ink here) */
+  --on-accent: #1c1603;
+  --on-strong: #0e1115;
+  --on-fill: #0e1115;
+  --mark-bg: #262d37;
+  --strong-hover: #c9d0d9;
+  /* the monitor's charts (monitor.js reads these) */
+  --chart-ok: #5d9cf2;
+  --chart-failed: #f26a5f;
+  --chart-grid: #262c35;
+  --chart-axis: #4a5360;
+  --chart-ink: #b4bdc8;
+  --chart-muted: #8f99a6;
+}
+
+/* the page itself */
+:root[data-theme="dark"] body { background: var(--bg); color: var(--text); }
+
+/* a timeline's bars: the light's pale blues flip to near-grey by the
+   arithmetic, too close to the surface; a steel blue that still steps up
+   on the alternate bar and on hover */
+:root[data-theme="dark"] .tlseg { background: #2f3a48; }
+:root[data-theme="dark"] .tlseg.alt { background: #37475a; }
+:root[data-theme="dark"] .tlseg:hover { background: #45586f; }
+:root[data-theme="dark"] .tlseg.on { background: var(--accent); }
+
+/* a field the stylesheet does not dress (a native control left to the
+   browser) still sits on the studio's surface, not the system's grey */
+:where(:root[data-theme="dark"]) :where(input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea) {
+  background-color: var(--surface); color: var(--text);
+}

@@ -180,6 +180,13 @@
     }
     box.append(ret);
 
+    // how the studio looks, in this browser
+    const look = el("section", "setsection");
+    look.append(el("h3", "setsectitle", "Appearance"));
+    look.append(el("p", "setintro", "Light, dark, or as this device's system says. Kept in this browser."));
+    look.append(Theme.picker());
+    box.append(look);
+
     // the Claude account the assistant works as (assistant.js draws it)
     const asst = el("section", "setsection");
     asst.append(el("h3", "setsectitle", "Assistant"));
