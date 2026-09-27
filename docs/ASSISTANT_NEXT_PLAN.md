@@ -1,7 +1,7 @@
 # Assistant: the next improvements (plan)
 
-Status: **plan only, 2026-09-27; nothing is built yet.** Branch
-`feat/assistant-first`.
+Status: **plan, with your decisions taken on 2026-09-27 (§3, §6); nothing
+is built yet.** The build order is in §7. Branch `feat/assistant-first`.
 
 It covers five asks:
 1. choosing the model, as in Claude Code;
@@ -181,26 +181,30 @@ It covers five asks:
   - A turn failing with 401, "Please run /login" or "Invalid API key"
     becomes an `auth` error item, which brings up the sign-in card.
 
-## 3. Decision needed: where the assistant's Claude sign-in lives
+## 3. Decided: the assistant's Claude sign-in
 
-This is a security and infrastructure choice, so it's yours.
+Decided 2026-09-27. You chose the browser flow; where the sign-in lives
+was left to me.
 
-- **A (recommended): the studio's own sign-in** in `~/.operonx/claude`,
-  through `CLAUDE_CONFIG_DIR`.
-  - Signing in or out in the studio never touches this machine's own
-    Claude Code (your VS Code).
-  - Until someone signs in there, the studio keeps using the machine's
-    login and says so ("Using this machine's login (you@…)").
-  - *Cost:* a Claude session can't be resumed under a different sign-in.
-    After a switch, the next turn starts a fresh Claude session seeded
-    with a summary of the transcript. The studio's own transcript stays
-    complete either way.
-- **B: share the machine's `~/.claude`.** This is the simplest. But
-  *Sign out* in the studio signs out VS Code and every `claude` on the
-  server.
-- **C: one sign-in per studio user.** This is right once the studio has
-  several users; today it has one (root). A moves to C without
-  redesign.
+- **The flow is the VS Code extension's.**
+  1. *Sign in with Claude* opens claude.ai's sign-in page in a new tab.
+  2. You sign in there with your own account.
+  3. The page then shows a code. You paste it back into the studio, and
+     you're done.
+
+  The code step is how the `claude` CLI completes a sign-in from a
+  browser on another machine; it's the same in VS Code's remote mode.
+- **The sign-in lives in the studio's own place,** `~/.operonx/claude`
+  (`CLAUDE_CONFIG_DIR`). Signing in or out there never touches this
+  machine's own Claude Code (your VS Code).
+- **Until you sign in there,** the studio keeps using the machine's login
+  and says so ("Using this machine's login (you@…)").
+- **Switching accounts:** a Claude session can't be resumed under a
+  different sign-in. So after a switch, the next turn starts a fresh
+  Claude session seeded with a summary. The studio's transcript stays
+  whole.
+- **Later:** the team version (B9) moves this to one sign-in per studio
+  user, without a redesign.
 
 ## 4. Phases
 
@@ -216,10 +220,9 @@ Each phase ships with:
 | **A2 Input and images** | T1 (probe first), T2, the image tray, paste and drop, file cards | A 200 KB paste goes through (fails today); an image turn gets a description; retry keeps the attachments |
 | **A3 Model and effort** | T4, the menu, `/effort`, the switch divider, the window warning | Switch mid-conversation: the next turn's `init` shows the new model; effort reaches the CLI |
 | **A4 Usage** | The ring always shown, the usage card, reset times, nudges, tokens per answer | Values match the stored usage; the nudge appears at a forced 85% |
-| **A5 Sign-in** | T6 and the account UI, after the §3 decision | Automated up to the URL, then cancel. The first full sign-in needs you to paste the code once. |
+| **A5 Sign-in** | T6 and the account UI, as decided in §3 | Automated up to the URL, then cancel. The first full sign-in needs you to paste the code once. |
 
-Suggested order: A1, A2, A3, A4, A5. A1 is what you feel most. A5
-waits on §3.
+The full build order, with the backlog items folded in, is in §7.
 
 ## 5. Risks
 
@@ -246,31 +249,35 @@ Collected on 2026-09-27 from:
 Nothing here is decided. Each item needs your call. Where I lean one
 way, it says so.
 
-### 6.1 Decisions waiting on you
+### 6.1 Decided on 2026-09-27
 
-| # | Problem | Options, and my lean |
+B1 and B2 are your calls; B3 to B9 you left to me.
+
+| # | Question | Decision |
 |---|---|---|
-| B1 | **Where the assistant's Claude sign-in lives** (§3 above) | *Its own sign-in* (lean), *shared with this machine*, or *one per studio user* |
-| B2 | **The canvas look.** Phase 2 replaced the organic "brain cell" canvas you had chosen with plain, precise cards, and removed the always-on glow. The phase-2 brief asked for no glow. | Keep the precise cards (lean), or bring the cells back. The old look can be restored. |
-| B3 | **The assistant loads only the studio's own tools.** This skips your personal connectors (Gmail, Drive, Calendar), which is intended. But it *also skips tool servers a project declares for itself*. In return, each answer starts about 1.3 s sooner. | Keep this, but let a project's own servers through (lean); or switch it off (`OPERONX_STUDIO_CHAT_STRICT_MCP=off`) |
-| B4 | **Decision rows without a wire.** A row whose route loops back, or exits the graph, shows its port dot with no wire from it; the loop return leaves from the card's side instead. | Draw the loop return from its own row (lean), hide the dot, or leave it |
-| B5 | **A run of a graph that isn't on the canvas.** For example, a job's `params` graph: its Workflow view paints the *current* graph with every card faded, which misleads. | Say so and offer the Tree view (lean), or draw the run's own graph when the studio knows it |
-| B6 | **Phone landing view.** The flow opens at 70%, centred, with its sides cut off (the "readable over whole" rule). | Keep it (lean), or fit the whole flow on phones |
-| B7 | **Where playground runs are recorded.** They go only to the service's local stores unless a session asks for `remote: true`, so a test never reaches production Langfuse. This was decided in P8 and flagged for you. | Confirm (lean), or record everywhere |
-| B8 | **Production runs can't be replayed.** Only playground runs can: production traffic flows through ports operonx deliberately never records (audio frames). | Opt-in recording of incoming items per service. This has storage and privacy weight (call audio), so it's yours to decide. |
-| B9 | **When to build the shared-team version.** The studio is personal-first: one login, no per-user conversations or sign-ins, no permissions. | Decide when teams are real. It relates to B1's third option. |
+| B1 | Where the sign-in lives | See §3: the studio's own, with the browser flow you described |
+| B2 | The canvas look | **Bring the brain-cell look back** (your taste). Measured on `main` (callbot): it runs *no* animation at rest, and idle frames hold 16.8 ms p95. Its costs are about 5 SVG elements per wire (glow, core, filament and sparks) and 98 blurred or shadowed elements, which weigh on very big graphs. Its 101 ms render was mostly the old unbatched layout step, which is fixed and stays fixed. The restore keeps every layout fix, and motion only while something runs. |
+| B3 | Tool servers | **Let a project's own servers in.** A turn's tool config becomes the studio's server plus the servers in the project's `.mcp.json`. `--strict-mcp-config` stays on, so your personal connectors stay out. |
+| B4 | Decision rows without a wire | **The loop return leaves from its own row's dot**, and an exit route's tie to END leaves from its row too |
+| B5 | A run of a graph that isn't on the canvas | **If it's one of the project's graphs,** the canvas switches to it and says so. **If the studio doesn't draw that graph,** a note says "This run's graph (`params`) isn't drawn here", with *Open as tree*. |
+| B6 | Phone landing view | **Keep the readable 70%**, but land on the flow's START (its entry) rather than its middle |
+| B7 | Where playground runs are recorded | **Confirmed:** local only. A session opts in with `remote: true`. |
+| B8 | Replaying production runs | **Opt-in per service, for text and JSON doors only.** Audio and other media are never stored. Retention is 7 days, and it's off by default. It needs an operonx change (a door records its incoming items when its service opts in), so it ships with an operonx release. |
+| B9 | The shared-team version | **Not now.** It comes next after this plan ships, or as soon as a second person needs access. Its first step is per-user accounts with their own conversations and their own Claude sign-in (B1's third option); then viewer and editor roles. |
 
-### 6.2 Not done: go or no-go
+### 6.2 Not done: all approved
 
-| # | Item | Status |
+You approved all five on 2026-09-27.
+
+| # | Item | How |
 |---|---|---|
-| N1 | Dark mode | The colour tokens are ready; no dark theme is defined or checked |
-| N2 | Minifying the scripts | Parked: it saves about 0.25 s once per update and needs a new dependency |
-| N3 | Prewarming the playground bridge | Parked: it costs a project interpreter per open page; the screen says it is starting instead |
-| N4 | Showing a revisited screen's last data at once | Deferred until after one-hop loads, then measure whether the wait is still felt |
-| N5 | A live callbot voice session through the playground | Never run. It drives the shared STT/LLM/TTS and the Redis TTS cache from the callbot's `.env`. The callbot's environment needs operonx 1.9 first. |
+| N1 | Dark mode | A System, Light or Dark choice (in Settings and the header menu), remembered per viewer. Every colour token gets a dark value, the canvas included (the brain-cell palette, wires, door frames, live states). Contrast is checked with the palette validator. Every screen is screenshotted in both themes, and the layout audit runs in dark too. It comes after B2, so it darkens the final look. |
+| N2 | Shrinking the scripts (minifying: comments, spaces and line breaks removed before sending; same behaviour, fewer bytes) | At bundle time, with `rjsmin` and `rcssmin`: small pure-Python packages, no node. Measured on the real bundle: JS 129 → 93 KB gzipped (−36 KB), CSS 31 → 24 KB (−6 KB), in 12 ms once at startup, and the minified bundle parses. `OPERONX_STUDIO_MINIFY=off` serves it readable for debugging. Licences to confirm (Apache-2.0 expected). |
+| N3 | Starting the playground bridge early | Start a project's bridge on intent: the pointer or focus on Playground, or a project with doors after 3 s idle. One bridge per project, at most 2 warm at once, stopped after 15 idle minutes (already the case). Measure the first open (1.3–3.6 s cold today) and each bridge's memory. |
+| N4 | A revisited screen's last data at once | Each screen keeps its last data for the life of the page. A revisit paints it at once, refreshes it in place, and quietly marks what changed. Measure revisit time before and after. |
+| N5 | A live callbot voice session | After S1 (the callbot needs operonx 1.9), recorded locally only (B7). First with Chrome's fake microphone playing a call recording (automated), then you, with headphones. Check the ops lighting up on the canvas, the Monitor's latency and the run's trace. It uses the shared STT/LLM/TTS from the callbot's `.env`, and never the telco gateways (9922 production, 9926 staging). |
 
-### 6.3 Shipping: waiting on you
+### 6.3 Shipping: still to discuss
 
 | # | Item | State |
 |---|---|---|
@@ -280,10 +287,42 @@ way, it says so.
 | S4 | **Callbot refactor into `staging`** for a real deploy | You asked on 2026-09-18 and said not yet. `staging` has moved since (2b85dc4) and needs a re-sync plan. `staging` is never touched without you. |
 | S5 | **A permanent tunnel** | A Cloudflare account for a named tunnel, or a localhost.run key. The quick-tunnel URL changes on every restart. |
 
-### 6.4 Before a real callbot deploy (last measured; may be out of date)
+### 6.4 Before a real callbot deploy: still to discuss (last measured; may be out of date)
 
 | # | Problem | Note |
 |---|---|---|
 | D1 | **Capacity** | Fine at the 5-call target, with headroom to about 8, and collapsing at 10 or more (1.7 s late at 10 calls, 3.5 s at 12). Measured on 2026-08-28, *before* the application-layer refactor; re-measure on the current build. |
 | D2 | **Queues between ops are unbounded** | The old channel capped at 4,000 items and counted drops; today a queue grows silently under overload |
 | D3 | **Call store configuration** | `call/_store.py` reads its settings from the environment. Candidate: make it a `call_store:` resource like the others. |
+
+## 7. Build order
+
+Every phase is committed separately. Each is checked with:
+- the studio's tests;
+- `flows.py` (and `live_assistant.py` for the assistant phases);
+- the layout audit (`scripts/perf/layout_audit.py`, 0 errors) for
+  anything that touches the canvas;
+- desktop and phone screenshots.
+
+| # | Phase | Contents | Extra gate |
+|---|---|---|---|
+| 1 | **A1** Composer | §1.1 and paste cards | A 30-line prompt, pasted JSON, the phone sheet |
+| 2 | **C1** Canvas | B2 brain-cell look, B4 loops from their row, B5 runs of other graphs, B6 phone landing | Before and after screenshots; the 302-op graph within its render budget |
+| 3 | **A2** Input and images | T1 (probe first), T2, image tray, file cards | A 200 KB paste; an image turn |
+| 4 | **A3** Model and effort | T4, the menu, `/effort`; also B3, a project's own tool servers | The next turn's `init` shows the new model; a project's server is loaded, and personal connectors are not |
+| 5 | **A4** Usage | The ring, the usage card, reset times, nudges | Values match the stored usage |
+| 6 | **A5** Sign-in | T6, as decided in §3 | Automated up to the sign-in URL; then one real sign-in by you |
+| 7 | **N2, N4, N3** | Minify, last data at once, early bridge start | Bytes and times measured before and after |
+| 8 | **N1** Dark mode | Both themes on every screen | The palette validator; the layout audit in dark |
+| 9 | **S1 → N5, B8** | Release operonx 1.9.0 (you merge), then the live voice session and opt-in replay recording | A real spoken turn; a replayed production JSON session |
+
+The order:
+- **A1 first,** because the input box is what you feel most.
+- **The canvas look before dark mode,** because dark mode themes the
+  final look.
+- **Sign-in after the other assistant work,** because the studio keeps
+  working on this machine's login meanwhile.
+- **The operonx release gates the voice session and replay recording.**
+
+Still to discuss after this: shipping S2–S5 (§6.3) and the callbot's
+pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
