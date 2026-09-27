@@ -193,6 +193,16 @@ def test_a_turn_becomes_items_that_persist_and_restore(client, project, fake):
     turn, events = _say(client, sess["id"], "Why is shout slow?", view={"node": "shout", "tab": "flow"})
     assert [e["i"] for e in events] == list(range(len(events)))       # the cursor is the index
     assert events[-1]["t"] == "done" and events[-1]["state"] == "done"
+    # a reader that is behind rebuilds exactly the text: an item event is a
+    # snapshot, its deltas add the rest (a live reference once doubled the
+    # first delta: "HelHello")
+    rebuilt = {}
+    for e in events:
+        if e["t"] == "item" and e["item"]["kind"] == "text":
+            rebuilt[e["item"]["seq"]] = e["item"].get("text") or ""
+        elif e["t"] == "delta" and e["seq"] in rebuilt:
+            rebuilt[e["seq"]] += e["text"]
+    assert list(rebuilt.values()) == ["Hello", " world"]
     states = [e["state"] for e in events if e["t"] == "state"]
     assert states[:2] == ["starting", "thinking"] and "writing" in states and "tool" in states
 
@@ -224,6 +234,7 @@ def test_a_turn_becomes_items_that_persist_and_restore(client, project, fake):
     assert "Project briefing: chatty-demo" in prompt and "selected op: `shout`" in prompt
     mcp = json.loads(call["argv"][call["argv"].index("--mcp-config") + 1])
     assert mcp["mcpServers"]["studio"]["env"]["OPERONX_STUDIO_PID"] == pid
+    assert "--strict-mcp-config" in call["argv"]       # the studio's tools, not the host's connectors
 
     # a new studio process, the same store: the conversation is all there
     app2 = build_studio_app(Recents(state_file=project.parent / "state" / "studio.json"))

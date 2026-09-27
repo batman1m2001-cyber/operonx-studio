@@ -401,12 +401,15 @@ class Relay:
         turn.next_seq += 1
         turn.items[item["seq"]] = item
         turn.dirty.add(item["seq"])
-        self._emit(turn, {"t": "item", "item": item})
+        # a snapshot, never the live dict: deltas keep growing the item, and
+        # an event read later must not already hold the text its deltas add
+        # (seen live: "TheThe scored op…" on a reader a moment behind)
+        self._emit(turn, {"t": "item", "item": dict(item)})
         return item
 
     def _replace(self, turn: Turn, item: Dict[str, Any]) -> None:
         turn.dirty.add(item["seq"])
-        self._emit(turn, {"t": "item", "item": item})
+        self._emit(turn, {"t": "item", "item": dict(item)})
 
     def _delta(self, turn: Turn, seq: int, text: str) -> None:
         item = turn.items[seq]
@@ -514,6 +517,12 @@ class Relay:
                 cmd += ["--model", model]
             if mcp:
                 cmd += ["--mcp-config", json.dumps({"mcpServers": {"studio": mcp}})]
+                # Only the studio's own tools: not the host's personal
+                # connectors (mail, drive, calendar), which the studio's agent
+                # has no business in, and each turn starts ~1.3 s sooner
+                # (measured on 2.1.283: init 1.7-1.9 s vs 3.0-3.2 s).
+                if os.environ.get("OPERONX_STUDIO_CHAT_STRICT_MCP", "on").lower() not in ("off", "0", "false"):
+                    cmd.append("--strict-mcp-config")
             cmd += _chat._mode_args()
             snap = _chat.snapshot(cwd) if (cwd is not None and turn.kind == "message") else None
             try:

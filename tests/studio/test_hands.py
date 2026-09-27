@@ -5,7 +5,7 @@ tools/call, errors as answers, notifications unanswered); its tools read
 the project through the studio's own API and put what they open on the
 user's screen (/ui/actions); every turn is snapshotted, so the diff it
 reports is only the agent's edits — never the user's own uncommitted work
-— and Undo puts exactly those files back; the chat turn hands the agent
+— and Undo puts exactly those files back; an assistant turn hands the agent
 the tool server and reports a ``changes`` event before ``done``; and the
 reach of the studio tools follows the chat mode.
 """
@@ -302,17 +302,19 @@ def test_a_turn_gets_the_studio_tools_and_reports_its_changes(tmp_path, repo, mo
     monkeypatch.setenv("OX_FAKE_OUT", str(report))
     with TestClient(build_studio_app(Recents(state_file=tmp_path / "s.json"))) as client:
         pid = client.post("/api/open", json={"path": str(repo)}).json()["id"]
-        turn = client.post(f"/api/p/{pid}/chat", json={"message": "tune it"}).json()["turn"]
+        sid = client.post("/api/assistant/sessions", json={"scope": pid}).json()["session"]["id"]
+        turn = client.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "tune it"}).json()["turn"]
         events, cursor = [], 0
         for _ in range(50):
-            batch = client.get(f"/api/chat/turn/{turn}?cursor={cursor}").json()
+            batch = client.get(f"/api/assistant/turns/{turn}?cursor={cursor}").json()
             events += batch["events"]
             cursor = batch["cursor"]
             if not batch["alive"]:
                 break
-    kinds = [e["t"] for e in events]
-    assert kinds.index("changes") == kinds.index("done") - 1
-    change = events[kinds.index("changes")]
+        items = [e["item"] for e in events if e["t"] == "item"]
+    kinds = [i["kind"] for i in items]
+    assert kinds[-2:] == ["changes", "turn_end"] and events[-1]["t"] == "done"
+    change = items[kinds.index("changes")]
     assert [(f["path"], f["added"]) for f in change["files"]] == [("main.py", 1)]
     assert "+# tuned" in change["diff"]
 
@@ -332,15 +334,17 @@ def test_a_turn_that_changes_nothing_reports_no_changes(tmp_path, repo, monkeypa
     monkeypatch.setenv("OX_FAKE_OUT", str(tmp_path / "argv.json"))
     with TestClient(build_studio_app(Recents(state_file=tmp_path / "s.json"))) as client:
         pid = client.post("/api/open", json={"path": str(repo)}).json()["id"]
-        turn = client.post(f"/api/p/{pid}/chat", json={"message": "look"}).json()["turn"]
+        sid = client.post("/api/assistant/sessions", json={"scope": pid}).json()["session"]["id"]
+        turn = client.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "look"}).json()["turn"]
         events, cursor = [], 0
         for _ in range(50):
-            batch = client.get(f"/api/chat/turn/{turn}?cursor={cursor}").json()
+            batch = client.get(f"/api/assistant/turns/{turn}?cursor={cursor}").json()
             events += batch["events"]
             cursor = batch["cursor"]
             if not batch["alive"]:
                 break
-    assert "changes" not in [e["t"] for e in events] and events[-1]["t"] == "done"
+        items = [e["item"] for e in events if e["t"] == "item"]
+    assert "changes" not in [i["kind"] for i in items] and events[-1]["t"] == "done"
 
 
 @pytest.mark.parametrize("mode, allowed, denied", [

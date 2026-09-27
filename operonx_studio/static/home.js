@@ -122,7 +122,33 @@ async function loadProjects() {
     box.append(row);
   }
   paintHealth(boot && boot.health);
+  if (boot) paintRecent(boot.sessions);
 }
+
+/* The conversations people had with the assistant, newest first: one
+ * click reopens one where it was (a project's, on its own page). */
+function paintRecent(sessions) {
+  const box = $("#recent");
+  const wrap = document.querySelector(".homerecent");
+  if (!box || !wrap) return;
+  box.textContent = "";
+  wrap.hidden = !sessions || !sessions.length;
+  for (const s of sessions || []) {
+    const row = el("a", "recentrow" + (s.running ? " running" : ""));
+    row.href = s.scope === "home" ? `/#assistant=${s.id}` : `/p/${s.scope}#assistant=${s.id}`;
+    if (s.scope === "home") row.onclick = (ev) => { ev.preventDefault(); window.oxAssistant && window.oxAssistant.open(s.id, true); };
+    const top = el("div", "recenttop");
+    top.append(el("span", "recenttitle", s.title || "New conversation"));
+    const meta = el("div", "recentmeta");
+    meta.append(el("span", "recentscope", s.scope_name), document.createTextNode(` · ${s.running ? "working…" : ago(s.updated)}`));
+    row.append(top, meta);
+    if (s.preview) row.append(el("div", "recentpreview", s.preview));
+    box.append(row);
+  }
+}
+document.addEventListener("oxassistant-list", async () => {
+  try { paintRecent((await api("/api/assistant/sessions?limit=6")).sessions); } catch { /* keep what is there */ }
+});
 
 /* Signal arrives after the rows: the list must never wait on it. */
 async function paintHealth(given) {

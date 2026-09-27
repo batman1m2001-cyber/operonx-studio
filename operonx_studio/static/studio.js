@@ -57,6 +57,7 @@ function pushView() {
     runs_filter: state.tab === "traces" ? (recall(`runsView:${PID}`, null) ? JSON.stringify(recall(`runsView:${PID}`, null)) : null) : null,
     monitor: state.tab === "monitor" ? JSON.stringify(recall(`monitor:${PID}`, {})) : null,
   };
+  document.dispatchEvent(new CustomEvent("oxview"));
 }
 
 /* One shared voice for action feedback: applied, painted, copied. */
@@ -1583,7 +1584,7 @@ function select(key) {
   const n = it.node;
   // an op was picked on the canvas: its detail is the point, bring the tab forward
   // (on a phone the panel is a sheet that only a selection opens)
-  if (MOBILE.matches || (panelWanted() && recall("sideTab", "inspect") !== "inspect")) showSide("inspect");
+  if (MOBILE.matches || (panelWanted() && recall("sideTab", "assistant") !== "inspect")) showSide("inspect");
   panel.textContent = "";
   panel.scrollTop = 0;
 
@@ -1601,7 +1602,14 @@ function select(key) {
       .join(" › ");
     head.append(el("div", "crumbpath mono", trail + " ›"));
   }
-  head.append(el("h3", null, n.name));
+  const titleRow = el("div", "ptitle-row");
+  titleRow.append(el("h3", null, n.name));
+  if (window.oxAssistant) {
+    const ask = Icons.button("spark", "Ask", "askbtn", `Ask the assistant about ${n.name}`);
+    ask.onclick = () => window.oxAssistant.focus();
+    titleRow.append(ask);
+  }
+  head.append(titleRow);
   const chips = el("div", "chips");
   const kindChip = el("span", "chip kindchip", n.kind);
   kindChip.style.setProperty("--kind", kindColor(n));
@@ -2434,7 +2442,7 @@ function inspectServe(serve) {
   const panel = $("#inspector");
   panel.classList.add("open");
   // (on a phone the panel is a sheet that only a selection opens)
-  if (MOBILE.matches || (panelWanted() && recall("sideTab", "inspect") !== "inspect")) showSide("inspect");
+  if (MOBILE.matches || (panelWanted() && recall("sideTab", "assistant") !== "inspect")) showSide("inspect");
   panel.textContent = "";
   panel.append(el("h3", null, `serve · ${serve.kind}`));
   panel.append(el("div", "kind mono", serve.path || ""));
@@ -3174,7 +3182,7 @@ function switchTab(name, opts) {
   if (name === "jobs") showJobs(state.jobSel);
   if (name === "resources") showResources();
   // on a phone the sheet belongs to the screen it was opened on
-  if (MOBILE.matches && recall("sideTab", "inspect") === "inspect") store(panelKey(), false);
+  if (MOBILE.matches && recall("sideTab", "assistant") === "inspect") store(panelKey(), false);
   syncChrome();
   applyPanels();
   // the inspector speaks about what is on screen: a canvas selection
@@ -3211,7 +3219,7 @@ const panelWanted = () => recall(panelKey(), !MOBILE.matches);
 const inspectable = () => state.tab === "flow" || state.tab === "traces";
 
 function panelState() {
-  const tab = recall("sideTab", "inspect");
+  const tab = recall("sideTab", "assistant");
   const on = panelWanted() && !(tab === "inspect" && !inspectable());
   return {on, tab};
 }
@@ -3242,6 +3250,7 @@ function hideSide() {
 }
 window.oxSide = {
   show: showSide,
+  hide: (tab) => { if (tab) store("sideTab", tab); hideSide(); },
   state: panelState,
   toggle: () => {
     const {on, tab} = panelState();
@@ -3601,6 +3610,7 @@ async function load(first) {
     };
     const before = codeOf(state.ir), after = codeOf(data);
     const changed = [...after].filter(([k, c]) => before.has(k) ? before.get(k) !== c : true).map(([k]) => k);
+    if (changed.length) document.dispatchEvent(new CustomEvent("oxflowchanged", {detail: {ops: changed}}));
     if (changed.length && changed.length < 40) {
       state.changedOps = new Set(changed);
       clearTimeout(state._changedTimer);
@@ -3637,17 +3647,23 @@ async function load(first) {
  * code changes, the assistant opens something, or — when following —
  * a newer run lands. It replaced two polls every 1.5 s. */
 state.uiSeq = -1;
+state.chatSeq = -1;
 let pulseMiss = 0;
 async function pulse() {
   for (;;) {
     try {
-      const q = new URLSearchParams({stamp: String(state.stamp || 0), ui: String(state.uiSeq)});
+      const q = new URLSearchParams({stamp: String(state.stamp || 0), ui: String(state.uiSeq),
+                                     chat: String(state.chatSeq)});
       if (state.follow) q.set("follow", (state.run && state.run.run) || "-");
       const got = await api(`/api/p/${PID}/pulse?${q}`);
       pulseMiss = 0;
       setLinkState(true);
       if (got.stamp !== state.stamp) await load(!state.ir);
       if (state.uiSeq < 0) state.uiSeq = got.ui_last;   // only what happens from now on
+      if (state.chatSeq >= 0 && (got.chat_ended || []).length) {
+        document.dispatchEvent(new CustomEvent("oxturnended", {detail: {ended: got.chat_ended}}));
+      }
+      state.chatSeq = got.chat_last ?? state.chatSeq;
       for (const a of got.actions || []) {
         state.uiSeq = a.seq;
         try { await performUi(a.kind, a.args || {}); } catch { /* a stale action is not an error */ }

@@ -702,7 +702,9 @@ def build_studio_app(recents: Optional[Recents] = None):
         # the list and its signal ride in the page: two tunnel round trips
         # (~1.5 s) traded for ~0.2 s of server time (measured, 25 projects)
         boot = json.dumps({"projects": [r.as_dict() for r in recents.ordered()],
-                           "health": _projects_health()}, separators=(",", ":"))
+                           "health": _projects_health(),
+                           "sessions": [_session_out(x) for x in chat_store.sessions(None, limit=6)]},
+                          separators=(",", ":"), default=str)
         return _page("home.html", '<script id="home-boot" type="application/json">'
                      + boot.replace("</", "<\\/") + "</script>")
 
@@ -2756,51 +2758,6 @@ def build_studio_app(recents: Optional[Recents] = None):
                 + "; ".join(f"{t['id']} — {t['title']}: {t['description']}" for t in _templates())
                 + "\nLink a project for the user as [name](studio:project/<id>); the page opens it.")
 
-    @app.post("/api/p/{pid}/chat")
-    async def project_chat(pid: str, body: Dict[str, Any], request: Request) -> Any:
-        from . import chat as _chat
-
-        cwd, context = _chat_briefing(pid)
-        if cwd is None:
-            return JSONResponse({"error": "unknown project"}, status_code=404)
-        message = str(body.get("message") or "").strip()
-        if not message:
-            return JSONResponse({"error": "empty message"}, status_code=400)
-        context += _view_lines(body.get("view") or {})
-        turn = _chat.start_turn(message, cwd=cwd, context=context,
-                                session=str(body.get("session") or "") or None, mcp=_studio_mcp(pid, request))
-        return JSONResponse({"turn": turn})
-
-    @app.post("/api/chat")
-    async def home_chat(body: Dict[str, Any]) -> Any:
-        """The assistant on the home page — no project selected, so the
-        briefing is the roster: every project the studio knows about."""
-        from . import chat as _chat
-
-        message = str(body.get("message") or "").strip()
-        if not message:
-            return JSONResponse({"error": "empty message"}, status_code=400)
-        turn = _chat.start_turn(message, cwd=Path.home(), context=_home_briefing(),
-                                session=str(body.get("session") or "") or None)
-        return JSONResponse({"turn": turn})
-
-    @app.get("/api/chat/turn/{turn_id}")
-    async def chat_turn_events(turn_id: str, cursor: int = 0) -> JSONResponse:
-        from . import chat as _chat
-
-        got = await _chat.poll_turn(turn_id, max(0, cursor))
-        if got is None:
-            return JSONResponse({"error": "unknown turn"}, status_code=404)
-        return JSONResponse(got)
-
-    @app.post("/api/chat/turn/{turn_id}/stop")
-    async def chat_turn_stop(turn_id: str) -> JSONResponse:
-        from . import chat as _chat
-
-        if not _chat.stop_turn(turn_id):
-            return JSONResponse({"error": "unknown turn"}, status_code=404)
-        return JSONResponse({"ok": True})
-
     # ── the assistant: sessions and turns (operonx_studio.assistant) ─────
     # Conversations persist server-side (SQLite beside studio.json), so a
     # reload, another device or a studio restart finds them as they were.
@@ -2863,8 +2820,16 @@ def build_studio_app(recents: Optional[Recents] = None):
         running = relay.running_items(sid)
         if running is not None:
             items = [it for it in items if it.get("turn") != running["id"]] + running.pop("items")
+        mode = os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full").strip().lower() or "full"
+        if sess["scope"] == "home":
+            where = str(Path.home())
+        else:
+            owner = _watcher(sess["scope"])
+            where = str(owner.root) if owner is not None else ""
         return JSONResponse({"session": _session_out(sess), "items": items, "running": running,
-                             "models": list(MODELS)})
+                             "models": list(MODELS),
+                             "agent": {"reach": mode, "cwd": where,
+                                       "model": os.environ.get("OPERONX_STUDIO_CHAT_MODEL") or None}})
 
     @app.patch("/api/assistant/sessions/{sid}")
     def assistant_patch(sid: str, body: Dict[str, Any]) -> JSONResponse:

@@ -19,27 +19,36 @@
 </header>
 
 <main class="home">
-  <div class="homehead">
-    <div>
-      <h1>Projects</h1>
-      <p class="sub">Open a project to see its flows, runs and jobs. Everything runs on this machine.</p>
-    </div>
-    <div class="actions">
-      <button id="btn-new" type="button"><i data-icon="plus"></i><span>New project</span></button>
-      <button class="primary" id="btn-open" type="button"><i data-icon="folder"></i><span>Open project</span></button>
-    </div>
+  <section class="homehero" aria-label="Assistant">
+    <div id="axhero"></div>
+  </section>
+
+  <div class="homegrid">
+    <section class="homeprojects" aria-labelledby="projects-title">
+      <div class="homehead">
+        <h2 id="projects-title">Projects</h2>
+        <div class="actions">
+          <button id="btn-new" type="button"><i data-icon="plus"></i><span>New project</span></button>
+          <button id="btn-open" type="button"><i data-icon="folder"></i><span>Open project</span></button>
+        </div>
+      </div>
+      <label class="searchfield" id="filterwrap" hidden>
+        <i data-icon="search"></i>
+        <input id="filter" type="text" placeholder="Filter by name or path" autocomplete="off" aria-label="Filter projects">
+      </label>
+      <div class="projlist" id="projects" aria-live="polite"></div>
+    </section>
+    <section class="homerecent" aria-labelledby="recent-title" hidden>
+      <div class="homehead"><h2 id="recent-title">Recent conversations</h2></div>
+      <div class="recentlist" id="recent"></div>
+    </section>
   </div>
-  <label class="searchfield" id="filterwrap" hidden>
-    <i data-icon="search"></i>
-    <input id="filter" type="text" placeholder="Filter by name or path" autocomplete="off" aria-label="Filter projects">
-  </label>
-  <div class="projlist" id="projects" aria-live="polite"></div>
 </main>
 
 <div id="modal-root"></div>
 
 <script src="/static/icons.js"></script>
 <script src="/static/home.js"></script>
-<script src="/static/chat.js"></script>
+<script src="/static/assistant.js"></script>
 </body>
 </html>

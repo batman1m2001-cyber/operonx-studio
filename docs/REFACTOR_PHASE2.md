@@ -513,7 +513,48 @@ model does not matter.
 | R0 | done — plan and harness (5f5a562) | baseline in §0 |
 | R1 | done — see below | |
 | R2 | done — see below | |
-| R3–R6 | not started | |
+| R3 | done — see below | |
+| R4–R6 | not started | |
+
+**R3** — `static/assistant.js` replaces `chat.js`: one component placed
+as the project page's right column (the default tab now), the whole
+stage (focus, Ctrl J), a phone's full screen (from an Ask bar on every
+screen), and the home page's opening question, with Recent
+conversations beside the projects. Sessions (search, rename, archive,
+delete), turns grouped with a collapsible activity block per run of
+steps (each step's input and result a click away), streamed text
+rendered once per frame, Stop, Regenerate, edit-and-resend (it offers
+to put back files a replaced answer changed), `/` commands, context
+chips for what rides along, the context meter past 50%, a details
+popover (model, context, tokens, cost, plan usage, reach, session id,
+compact, export), cross-tab "finished" notices through the pulse, and
+old browser transcripts imported once. The old `/chat` routes are gone;
+their tests now cover the new routes.
+
+Two changes to the plan: the new token palette (§6) landed at the
+start of R3 rather than in R5, so the assistant was built in its final
+look; and **turns load only the studio's own MCP server**
+(`--strict-mcp-config`, `OPERONX_STUDIO_CHAT_STRICT_MCP=off` to undo):
+measured init 1.7–1.9 s against 3.0–3.2 s, and the host's personal
+connectors (mail, drive, calendar) stay out of the studio agent's reach.
+
+The live gate (`scripts/perf/live_assistant.py`, real haiku turns through
+the page): **23/23** — a streamed answer (first text 13.7 s on a
+read-the-code question, 4–5 s on a plain one), an edit arriving as a
+card and Undo restoring the file on disk, Stop keeping the partial
+answer, Regenerate replacing rather than adding, an edit forking to one
+turn, `/compact` (24k → 2.0k), a reload mid-turn reattaching, sessions
+new/search/archive/delete, the phone sheet; no page errors.
+
+Found by it, and fixed:
+- **Doubled first words** ("TheThe `scored` op…"): an item event held
+  the live dict its deltas kept growing, so a reader a moment behind got
+  the text twice. Events carry snapshots now; a test rebuilds the text
+  from the events and failed ("HelloHello") before the fix.
+- The title stayed "New conversation" until the turn ended; it is set
+  from the first message as it is sent.
+- A step that failed and was recovered from marked the whole activity
+  red; the group now keeps its check and counts the failures.
 
 **R2** — `operonx_studio/assistant.py` (ChatStore + Relay), the
 `/api/assistant/*` routes, `suggest`, the pulse's `chat` field, and the
