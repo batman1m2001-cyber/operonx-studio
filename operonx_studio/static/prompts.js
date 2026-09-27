@@ -44,7 +44,9 @@ const PromptsView = (() => {
     box.append(head);
     const ops = llmOps();
     if (!ops.length) {
-      box.append(paneNote("No LLM ops here", "The workbench opens an LLMOp's prompt and tries edits on the inputs it really had. This project's graphs have none."));
+      box.append(paneNote("No LLM ops here", "The workbench opens an LLMOp's prompt and tries edits on the inputs it really had. This project's graphs have none yet.",
+        null, {ask: {label: "Add an LLM step", prompt: "Look at this project's flow and suggest one place an LLM step would "
+          + "clearly help. Describe it first; if I agree, add it with an LLMOp and a prompt I can tune here."}}));
       return;
     }
     if (!ops.find(o => o.name === v.op)) v.op = ops[0].name;

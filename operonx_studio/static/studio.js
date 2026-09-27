@@ -2673,11 +2673,50 @@ function jumpToOp(graph, node) {
 
 /* A pane's "nothing here yet" — what is missing and the exact lines
  * that fix it, instead of a grey sentence. */
-function paneNote(title, text, code) {
+/* A screen that could not load: what went wrong in one line, and a way
+ * to try again — a dropped tunnel is the usual reason, and it passes. */
+function loadError(err, retry) {
+  const box = el("div", "errbox loaderr");
+  box.append(el("div", "errhead", "This could not load"),
+    el("div", "note", err && err.message ? err.message : String(err)));
+  if (retry) {
+    const b = Icons.button("refresh", "Try again", "small");
+    b.onclick = retry;
+    box.append(b);
+  }
+  return box;
+}
+
+/* An empty or stuck screen: what is (not) here, and the ONE action that
+ * fixes it — usually the assistant doing it — before any manual recipe.
+ * opts.ask = {label, prompt}: a button that hands the assistant the task.
+ * opts.actions = [{label, icon, run}]: plain buttons beside it. A code
+ * recipe, when given, folds under "Or do it by hand". */
+function paneNote(title, text, code, opts) {
+  opts = opts || {};
   const box = el("div", "panenote");
   box.append(el("h3", null, title));
   box.append(el("div", null, text));
-  if (code) box.append(el("pre", null, code));
+  const acts = el("div", "noteacts");
+  if (opts.ask && window.oxAsk) {
+    const b = Icons.button("spark", opts.ask.label, "primary noteask");
+    b.title = "The assistant does it, and shows you what it changed";
+    b.onclick = () => window.oxAsk(opts.ask.prompt);
+    acts.append(b);
+  }
+  for (const a of opts.actions || []) {
+    const b = Icons.button(a.icon || "right", a.label, opts.ask ? "" : "primary");
+    b.onclick = a.run;
+    acts.append(b);
+  }
+  if (acts.childNodes.length) box.append(acts);
+  if (code) {
+    if (acts.childNodes.length) {
+      const fold = el("details", "notehand");
+      fold.append(el("summary", null, "Or do it by hand"), el("pre", null, code));
+      box.append(fold);
+    } else box.append(el("pre", null, code));
+  }
   return box;
 }
 
@@ -3631,6 +3670,8 @@ async function load(first) {
   // choice that does not exist. The picker returns if a project ever
   // declares extra unserved [[graph]] entries.
   pick.hidden = data.graphs.length <= 1;
+  // one graph: on a phone the header gives its room to the project's name
+  document.body.classList.toggle("onegraph", data.graphs.length <= 1);
   state.graph = data.graphs.find(g => g.name === current) || data.graphs[0];
   if (state.graph) pick.value = state.graph.name;
   $("#btn-project").title = `${data.graphs.length} operons · ${(data.services || []).length} services · ${(data.jobs || []).length} jobs`;
@@ -4121,13 +4162,16 @@ async function showJobs(sel, runId) {
   // one round trip: the list carries the opened job's runs and run
   const q = new URLSearchParams({open: sel || "", run: runId || ""});
   try { data = await api(`/api/p/${PID}/jobs?${q}`); }
-  catch (e) { box.textContent = ""; box.append(el("div", "errbox", e.message)); return; }
+  catch (e) { box.textContent = ""; box.append(loadError(e, () => showJobs(sel, runId))); return; }
   if (state.jobsView !== mine) return;
   box.textContent = "";
   if (!data.jobs.length) {
     box.append(paneNote("No jobs declared",
-      "A job runs a graph over a batch of items — one run per item, a record per run. Declare one in the application, or in operonx.toml:",
-      '[[job]]\nname   = "score_calls"\ngraph  = "pipeline:score_call"\nsource = "data/calls.jsonl"\nsink   = "out/scores.jsonl"\nkey    = "call_id"'));
+      "A job runs a graph over a batch of items — one run per item, a record per run.",
+      '[[job]]\nname   = "score_calls"\ngraph  = "pipeline:score_call"\nsource = "data/calls.jsonl"\nsink   = "out/scores.jsonl"\nkey    = "call_id"',
+      {ask: {label: "Add a job", prompt: "Add a job to this project that runs its main graph over a batch of items "
+        + "(a small JSONL of realistic examples if there is none) and records each result. Declare it, run it once, "
+        + "and tell me how it went."}}));
     return;
   }
   const cols = el("div", "jcols");

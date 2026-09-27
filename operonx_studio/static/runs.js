@@ -254,11 +254,16 @@ const RunsView = (() => {
 
   function emptyFor(folder) {
     const f = folder;
+    const wider = v.range !== "all" && v.range !== "30d"
+      ? [{label: "Show the last 30 days", icon: "clock", run: () => { v.range = "30d"; save(); render(); }}] : [];
     if (f.kind === "service") return paneNote("No runs in this range",
-      `Every ${f.name} session is recorded here as it ends. Widen the range, or open the Playground to make one.`);
+      `Every ${f.name} session is recorded here as it ends.`, null,
+      {actions: [{label: "Try it in the Playground", icon: "play", run: () => switchTab("playground")}, ...wider]});
     if (f.kind === "job" || f.kind === "runbook") return paneNote("No runs in this range",
-      `Run ${f.name} from the Jobs tab, or widen the range.`);
-    return paneNote("No runs in this range", "Widen the time range, or clear the filters.");
+      `${f.name}'s runs appear here as it runs.`, null,
+      {actions: [{label: `Run ${f.name}`, icon: "play", run: () => { state.jobSel = f.name; switchTab("jobs"); }}, ...wider]});
+    return paneNote("No runs in this range", "Nothing was recorded in this range with these filters.", null,
+      {actions: wider});
   }
 
   const firstPage = () => `/api/p/${PID}/runs?${qs({...filterParams(), limit: 100, cursor: ""})}`;
@@ -300,7 +305,7 @@ const RunsView = (() => {
     early.got = api(`${early.url}&with_origins=1`);
     early.got.catch(() => {});      // awaited below, or dropped
     try { origins = (await early.got).origins || null; }
-    catch (e) { origins = null; main.append(el("div", "errbox", e.message)); }
+    catch (e) { origins = null; main.append(loadError(e, () => render())); }
     if (mine !== token) return;
     // a folder that no longer exists falls back to all runs
     if (origins && v.folder.kind !== "all") {

@@ -140,7 +140,10 @@ const PlayView = (() => {
     const head = el("div", "panehead playhead");
     head.append(el("h2", null, "Playground"));
     box.append(head);
-    const loading = el("div", "note", "Starting the playground…");
+    // the first open starts the project's own interpreter (seconds on a big
+    // project): say so, instead of a bare "loading"
+    const loading = el("div", "loadnote");
+    loading.append(el("span", "spin"), el("span", null, "Starting the playground — the project's interpreter loads its services the first time…"));
     box.append(loading);
     let got;
     try {
@@ -151,7 +154,13 @@ const PlayView = (() => {
       if (cursor == null && got.cursor != null) cursor = got.cursor;
       preRecent = got.recent || null;
     } catch (err) {
-      loading.replaceWith(paneNote("The playground could not start", err.message));
+      loading.replaceWith(paneNote("The playground could not start", err.message, null, {
+        ask: {label: "Ask the assistant why", prompt: `The playground could not start for this project: "${err.message}". `
+          + "Find out why (the bridge runs the project's services in its own interpreter) and fix what is ours to fix."},
+        actions: [{label: "Try again", icon: "refresh", run: async () => {
+          try { await api(`/api/p/${PID}/play/restart`, {}); } catch { /* shown again below */ }
+          show();
+        }}]}));
       return;
     }
     loading.remove();

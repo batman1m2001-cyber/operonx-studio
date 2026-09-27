@@ -22,7 +22,7 @@ const AlertsView = (() => {
     const mine = ++token;
     let got;
     try { got = await api(`/api/p/${PID}/alerts`); }
-    catch (err) { box.textContent = ""; box.append(el("div", "errbox", err.message)); return; }
+    catch (err) { box.textContent = ""; box.append(loadError(err, () => show())); return; }
     if (mine !== token) return;
     box.textContent = "";
     const head = el("div", "panehead");

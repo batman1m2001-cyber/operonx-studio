@@ -515,7 +515,30 @@ model does not matter.
 | R2 | done — see below | |
 | R3 | done — see below | |
 | R4 | done — see below | |
-| R5–R6 | not started | |
+| R5 | done — see below | |
+| R6 | not started | |
+
+**R5 — visual system and states.**
+- The graphite tokens (R3) now reach the last warm leftovers: the modal
+  and drawer backdrops, the phone sheet's shadow, the "scratch" chip.
+  What stays hard-coded is meaningful colour (syntax, values, the
+  inspector's amber outputs), not the old palette.
+- Empty screens lead with the action that fixes them — the assistant
+  doing it (Set up an eval, Add a job, Serve this graph, Add an LLM
+  step), or a plain button (Try it in the Playground, Show the last 30
+  days, Run the job); a manual recipe folds under "Or do it by hand".
+- Screens that could not load say so in one line with **Try again**
+  (Evals, Alerts, Services, Review, Settings, Jobs, Monitor, Runs); a
+  playground that could not start offers Try again and "Ask the
+  assistant why"; its cold start says what it is doing.
+- Home: short paths (the full one on hover); two projects with one name
+  carry their parent folder.
+- The phone header gives a one-graph project's name the room ("Flow ·
+  educa_reminder", was "ed… / ws_ca…").
+- Screens settle in with a 180 ms transform/opacity transition.
+- **Dark mode is not shipped.** The remaining hard-coded colours are
+  semantic tints that would each need a dark counterpart; the plan kept
+  it out of the gates.
 
 **R4 — the Flow view**, measured with `scripts/perf/render_cost.py`
 (and a layout-geometry dump compared byte for byte before and after):

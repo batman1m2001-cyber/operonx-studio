@@ -27,7 +27,7 @@ const ReviewView = (() => {
         api(`/api/p/${PID}/review/queue?verdict=${v.verdict}&origin=${origin}&name=${encodeURIComponent(name || "")}&limit=200&open=${encodeURIComponent(v.run || "")}`),
         api(`/api/p/${PID}/runs/groups`).catch(() => ({groups: []})),
       ]);
-    } catch (err) { box.textContent = ""; box.append(el("div", "errbox", err.message)); return; }
+    } catch (err) { box.textContent = ""; box.append(loadError(err, () => show())); return; }
     if (mine !== token) return;
     queue = got.runs;
     box.textContent = "";

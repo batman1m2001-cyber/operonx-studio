@@ -83,6 +83,10 @@ async function loadProjects() {
   }
   box.classList.remove("empty");
   $("#filterwrap").hidden = projects.length < 6;
+  // two projects with one name are told apart by the folder they sit in
+  const seen = {};
+  for (const p of projects) seen[p.name] = (seen[p.name] || 0) + 1;
+  const parts = (root) => String(root).split("/").filter(Boolean);
   for (const p of projects) {
     const row = el("div", "projrow");
     row.dataset.hay = `${p.name} ${p.root}`.toLowerCase();
@@ -92,8 +96,13 @@ async function loadProjects() {
     const main = el("div", "projmain");
     const top = el("div", "projtop");
     top.append(el("span", "name", p.name));
+    const segs = parts(p.root);
+    if (seen[p.name] > 1 && segs.length > 1) top.append(el("span", "twin", segs[segs.length - 2]));
     main.append(top);
-    main.append(el("div", "path mono", p.root));
+    // the folder's last two steps; the whole path on hover
+    const path = el("div", "path mono", segs.length > 2 ? `…/${segs.slice(-2).join("/")}` : p.root);
+    path.title = p.root;
+    main.append(path);
     const sig = el("div", "sig");
     main.append(sig);
     if (!p.exists) {

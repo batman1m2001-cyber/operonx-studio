@@ -376,12 +376,15 @@
     box.append(loading);
     let m;
     try { m = await api(`/api/p/${PID}/monitor?${q}`); }
-    catch (e) { if (mine === token) loading.replaceWith(el("div", "errbox", e.message)); return; }
+    catch (e) { if (mine === token) loading.replaceWith(loadError(e, () => show())); return; }
     if (mine !== token) return;
     loading.remove();
     if (!m.tiles.runs) {
       box.append(paneNote("No runs in this range",
-        "The Monitor summarises the runs this service or job recorded. Widen the range, or pick another target."));
+        "The Monitor summarises the runs this service or job recorded.", null,
+        {actions: [...(v.range !== "30d" ? [{label: "Show 30 days", icon: "clock",
+          run: () => { v.range = "30d"; store(`monitor:${PID}`, v); show(); }}] : []),
+          {label: "Try a service in the Playground", icon: "play", run: () => switchTab("playground")}]}));
       return;
     }
     const t = m.tiles, p = m.previous;

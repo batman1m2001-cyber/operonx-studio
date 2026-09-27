@@ -70,7 +70,7 @@ const EvalsView = (() => {
     // one round trip: the list carries the run the screen opens
     const q = new URLSearchParams({name: v.name || "", run: v.run || "", against: v.against || ""});
     try { data = await api(`/api/p/${PID}/evals?${q}`); }
-    catch (err) { box.textContent = ""; box.append(el("div", "errbox", err.message)); return; }
+    catch (err) { box.textContent = ""; box.append(loadError(err, () => show())); return; }
     if (mine !== token) return;
     box.textContent = "";
     const head = el("div", "panehead evhead");
@@ -78,8 +78,11 @@ const EvalsView = (() => {
     box.append(head);
     if (!data.evals.length && !data.datasets.length) {
       box.append(paneNote("No evals yet",
-        "An eval runs a dataset of cases through a graph and judges each output. Declare one in operonx.toml — or ask the assistant to set one up:",
-        '[[job]]\nname       = "replies"\ngraph      = "bot:reply_flow"\ndataset    = "dataset:replies"     # datasets/replies.jsonl\nevaluators = ["evals:polite", "evals:correct"]\nthreshold  = 0.9'));
+        "An eval runs a dataset of cases through a graph and judges each output — the way to know a change made things better.",
+        '[[job]]\nname       = "replies"\ngraph      = "bot:reply_flow"\ndataset    = "dataset:replies"     # datasets/replies.jsonl\nevaluators = ["evals:polite", "evals:correct"]\nthreshold  = 0.9',
+        {ask: {label: "Set up an eval", prompt: "Set up an eval for this project: pick the main service's graph, "
+          + "build a small dataset from its recorded runs (or realistic examples if there are none), write evaluators "
+          + "that check what matters, declare it, run it once, and report the pass rate."}}));
       return;
     }
     if (!data.evals.find(e => e.name === v.name) && !v.dataset) v.name = (data.evals[0] || {}).name || "";

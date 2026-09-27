@@ -274,7 +274,7 @@ select { width: auto; min-height: 30px; padding: 4px 28px 4px 10px; font-size: v
 
 /* modal (open / new project) */
 .modal-back {
-  position: fixed; inset: 0; z-index: 100; background: rgba(28, 24, 16, .38);
+  position: fixed; inset: 0; z-index: 100; background: rgba(15, 20, 25, .38);
   display: flex; align-items: center; justify-content: center; padding: 16px;
   animation: fadein .12s ease-out;
 }
@@ -373,7 +373,7 @@ body.railslim .rail .railgroup::before { content: ""; display: block; height: 1p
 body.railslim .rail .railgroup:first-child::before { display: none; }
 body.railslim .railtoggle .icon { transform: rotate(180deg); }
 .screenbtn { display: none; }
-#railshade { position: fixed; inset: 0; z-index: 79; background: rgba(31, 27, 19, .32); }
+#railshade { position: fixed; inset: 0; z-index: 79; background: rgba(15, 20, 25, .32); }
 #railshade[hidden] { display: none; }
 
 /* tabs: text with an underline — the one place gold marks "you are here" */
@@ -885,7 +885,7 @@ body.resizing { user-select: none; cursor: col-resize; }
 button.pchip { cursor: pointer; }
 button.pchip:hover { border-color: var(--border-strong); background: var(--surface-2); }
 .pchip.pref { color: #2f5f8e; border-color: #d3e0ee; background: #f7fafd; }
-.pchip.pscratch { color: #6e6450; border-color: #e7e1d2; background: #fbfaf6; }
+.pchip.pscratch { color: var(--text-3); border-color: var(--border); background: var(--surface-2); }
 .pchip.pcell { color: #6d47a0; border-color: #e3d9f0; background: #fbf9fe; }
 .pchip.plit { color: #22704f; border-color: #d1e6db; background: #f5fbf8; }
 .pchip.peditable { cursor: pointer; }
@@ -1465,6 +1465,34 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   .setfoot { flex-direction: column; align-items: stretch; }
   .factkey { width: 90px; }
 }
+
+/* a screen that could not load: one line, the reason, Try again */
+.errbox.loaderr { font-family: var(--font); white-space: normal; max-width: 620px; display: flex; flex-direction: column;
+  align-items: flex-start; gap: 6px; }
+.errbox.loaderr .note { font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.errbox.loaderr button { margin-top: 4px; }
+
+/* moving between screens: the new one settles in (transform and opacity
+   only; display:none -> shown restarts the animation) */
+.pane:not([hidden]), #traces:not([hidden]), #jobs:not([hidden]), #resources:not([hidden]) {
+  animation: panein .18s var(--ease-out); }
+@keyframes panein { from { opacity: 0; transform: translateY(4px); } }
+
+/* home: the parent folder, when two projects share a name */
+.projtop .twin { font-size: var(--fs-xs); color: var(--text-3); border: 1px solid var(--border); border-radius: 4px;
+  padding: 0 5px; margin-left: 8px; font-weight: 500; vertical-align: 1px; }
+
+/* empty and stuck screens: the one action that fixes it, first */
+.panenote .noteacts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.panenote .noteacts button { min-height: 34px; }
+.panenote .noteask .icon { color: #1c1603; }
+.panenote .notehand { margin-top: 12px; }
+.panenote .notehand summary { cursor: pointer; color: var(--text-3); font-size: var(--fs-sm); }
+.panenote .notehand summary:hover { color: var(--text); }
+.panenote .notehand pre { margin-top: 8px; }
+.loadnote { display: flex; align-items: center; gap: 10px; color: var(--text-2); font-size: var(--fs-md); padding: 8px 0; }
+.spin { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--border);
+  border-top-color: var(--signal); animation: axspin .8s linear infinite; }
 
 /* ── message bubbles: the playground's chat and the review queue ──── */
 
@@ -2289,6 +2317,8 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   header.bar > #btn-settings { order: 4; }
   header.bar > #btn-right { order: 5; }
   .crumbs .sep:first-child { display: none; }
+  body.onegraph .crumbs .sep:not(:first-child), body.onegraph #btn-project { display: none; }
+  body.onegraph .crumbbtn.projname { max-width: 46vw; }
   .screenbtn .icon { width: 18px; height: 18px; flex: none; color: var(--text-2); }
   .screenbtn::after { display: none; }
 
@@ -2301,7 +2331,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   #sidebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
     width: auto !important; height: min(70vh, 640px); border-left: none;
     border-top: 1px solid var(--border); border-radius: 16px 16px 0 0;
-    box-shadow: 0 -8px 32px rgba(31, 27, 19, .18); padding-bottom: env(safe-area-inset-bottom); }
+    box-shadow: 0 -8px 32px rgba(15, 20, 25, .16); padding-bottom: env(safe-area-inset-bottom); }
   #sidebar::before { content: ""; position: absolute; top: 6px; left: 50%; margin-left: -18px;
     width: 36px; height: 4px; border-radius: 2px; background: var(--border-strong); }
   #sidetabs { padding-top: 6px; height: 50px; }

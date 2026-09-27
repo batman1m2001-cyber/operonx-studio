@@ -141,7 +141,7 @@
     box.textContent = "";
     box.append(el("div", "note", "Loading settings…"));
     try { current = await api(`/api/p/${PID}/settings`); }
-    catch (e) { box.textContent = ""; box.append(el("div", "errbox", e.message)); return; }
+    catch (e) { box.textContent = ""; box.append(loadError(e, () => show())); return; }
     box.textContent = "";
     const head = el("div", "panehead");
     head.append(el("h2", null, "Settings"));

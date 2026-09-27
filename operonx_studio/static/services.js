@@ -22,7 +22,7 @@ const ServicesView = (() => {
     let got, env = null;
     try {
       [got, env] = await Promise.all([api(`/api/p/${PID}/services`), api(`/api/p/${PID}/env-health`).catch(() => null)]);
-    } catch (err) { box.textContent = ""; box.append(el("div", "errbox", err.message)); return; }
+    } catch (err) { box.textContent = ""; box.append(loadError(err, () => show())); return; }
     if (mine !== token) return;
     box.textContent = "";
     const head = el("div", "panehead");
@@ -44,7 +44,10 @@ const ServicesView = (() => {
     }
 
     if (!got.listeners.length) {
-      box.append(paneNote("No services declared", "A service is a graph behind a door — declare one with [[serve]] in operonx.toml, or Service(...) in Python."));
+      box.append(paneNote("No services declared", "A service is a graph behind a door — HTTP, a WebSocket — that clients call.",
+        "[[serve]]\nname  = \"api\"\ngraph = \"main:flow\"\nkind  = \"http\"\npath  = \"/run\"",
+        {ask: {label: "Serve this graph", prompt: "Declare a service for this project's main graph so it can be called "
+          + "over HTTP, then drive it once in the playground and show me what came back."}}));
       return;
     }
     let busy = false;
