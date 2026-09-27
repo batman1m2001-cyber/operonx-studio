@@ -179,6 +179,16 @@
         `Last applied ${fmtAgo(current.swept_at * 1000)} — ${gone ? `${gone} run${gone > 1 ? "s" : ""} deleted` : "nothing to delete"}.`));
     }
     box.append(ret);
+
+    // the Claude account the assistant works as (assistant.js draws it)
+    const asst = el("section", "setsection");
+    asst.append(el("h3", "setsectitle", "Assistant"));
+    asst.append(el("p", "setintro",
+      "The Claude account the assistant works as. The studio keeps its own sign-in, apart from this machine's Claude Code."));
+    const slot = el("div", "setaccount");
+    asst.append(slot);
+    box.append(asst);
+    if (window.oxAccountBlock) window.oxAccountBlock().then((b) => slot.append(b)).catch(() => {});
     preview(current.preview);
   }
 

@@ -495,7 +495,10 @@
   fileInput.accept = "image/png,image/jpeg,image/gif,image/webp,image/*,.py,.json,.jsonl,.csv,.md,.txt,.log,.yaml,.yml,.toml,.js,.ts,.sql,.sh";
   tools.append(bAttach, fileInput, modelPick, el("span", "ax-spacer"), meter, bExpand, send);
   inputWrap.append(grip, tray, input, tools);
-  composer.append(nudge, queued, chips, slash, inputWrap);
+  // signing in: this card takes the box's place while it is needed
+  const signin = el("div", "ax-signin");
+  signin.hidden = true;
+  composer.append(nudge, queued, chips, slash, inputWrap, signin);
 
   // a pasted card, opened: read it, fix it, or take it out
   const peek = el("div", "ax-peek");
@@ -833,6 +836,11 @@
       retry.onclick = () => redo({retry_of: item.turn});
       retry.dataset.retry = item.turn;
       acts.append(el("span", "ax-spacer"));
+      if (item.auth) {
+        const sign = tbtn("Sign in", "ax-btn primary");
+        sign.onclick = () => openSignin("claudeai", "The assistant needs a Claude sign-in to answer.");
+        acts.append(sign);
+      }
       if (item.model_error) {
         // the model the account can't use: the same message on the default
         const dflt = tbtn("Use the default model", "ax-btn primary");
@@ -1407,17 +1415,186 @@
     }
 
     box.append(el("div", "ax-pop-title", "Account"));
-    const a = A.account;
-    const who = el("div", "ax-usage-account");
-    if (!a) who.textContent = "…";
-    else if (a.logged_in === false) who.textContent = "Not signed in";
-    else if (a.logged_in == null) who.textContent = "The account could not be read";
-    else who.textContent = [a.email || a.org || "Signed in", PLAN_NAME[a.plan] || (a.method === "console" ? "API account" : a.plan || "")]
-      .filter(Boolean).join(" · ");
-    box.append(who);
-    if (W.oxAccountActions) box.append(W.oxAccountActions());
+    box.append(accountBlock(A.account, () => { pop.hidden = true; }));
   }
   document.addEventListener("oxrate", (ev) => { if (ev.detail) takeRate(ev.detail); });
+
+  /* ── the assistant's own Claude sign-in (plan §3) ──────────────────────
+   * The studio signs in to Claude in its own place (~/.operonx/claude), so
+   * this machine's Claude Code is never touched. Until it has, the
+   * machine's login is used — and the account says so. Signing in is the
+   * Claude Code extension's flow: the sign-in page opens in a new tab, and
+   * the code it shows afterwards is pasted back here. */
+  const who = (a) => [a.email || a.org || "Claude", PLAN_NAME[a.plan] || (a.method === "console" ? "API account" : a.plan || "")]
+    .filter(Boolean).join(" · ");
+
+  async function refreshAccount(fresh) {
+    try { A.account = (await call(`/api/assistant/account${fresh ? "?fresh=1" : ""}`)).account; } catch { /* keep what we had */ }
+    return A.account;
+  }
+
+  // who the assistant runs as, with what can be done about it
+  function accountBlock(a, before) {
+    const box = el("div", "ax-account");
+    const line = el("div", "ax-account-who");
+    const acts = el("div", "ax-account-acts");
+    const act = (label, cls, fn) => { const b = tbtn(label, "ax-btn " + cls); b.onclick = () => { if (before) before(); fn(); }; acts.append(b); };
+    if (!a) line.textContent = "…";
+    else if (a.logged_in == null) line.textContent = "The account could not be read";
+    else if (a.source === "studio" && a.logged_in) {
+      line.append(el("span", null, "Signed in as "), el("b", null, who(a)));
+      act("Switch account", "ax-btn-quiet", () => openSignin("claudeai", "Sign in with the account to switch to."));
+      act("Sign out", "ax-btn-quiet", signOut);
+    } else if (a.logged_in) {
+      line.append(el("span", null, "Using this machine's login ("), el("b", null, who(a)), el("span", null, ")"));
+      const why = el("div", "ax-account-note", "Give the studio its own sign-in to use another account; this machine's Claude Code stays as it is.");
+      box.append(line, why);
+      act("Sign in with Claude", "primary", () => openSignin("claudeai"));
+      box.append(acts);
+      return box;
+    } else {
+      line.textContent = "Not signed in";
+      act("Sign in with Claude", "primary", () => openSignin("claudeai"));
+    }
+    box.append(line, acts);
+    return box;
+  }
+
+  async function signOut() {
+    const a = A.account || {};
+    if (!confirm(`Sign the assistant out of ${a.email || "its Claude account"}?\n\nIt goes back to this machine's login, if there is one. This machine's Claude Code isn't touched.`)) return;
+    try {
+      A.account = (await call("/api/assistant/logout", {})).account;
+      toast(A.account.logged_in ? `Signed out — using this machine's login (${A.account.email || "Claude"})` : "Signed out");
+      if (!A.account.logged_in) openSignin("claudeai");
+    } catch (err) { toast(err.message, true); }
+  }
+
+  let login = null;      // {id, url, method}
+  function closeSignin() {
+    signin.hidden = true;
+    signin.textContent = "";
+    inputWrap.hidden = false;
+    root.classList.remove("signing");
+    input.focus();
+  }
+
+  /* The card, step by step: sign in on Claude's page; paste the code;
+   * signed in. `why` says what brought it up (a failed turn, say). */
+  function openSignin(method, why) {
+    // the card lives in the assistant's box: bring the assistant into view
+    if (A.mode === "dock" && W.oxSide) W.oxSide.show("assistant");
+    else if (A.mode === "dock" && PHONE.matches) placement.openSheet();
+    signin.textContent = "";
+    signin.hidden = false;
+    inputWrap.hidden = true;
+    root.classList.add("signing");
+    const head = el("div", "ax-signin-head");
+    const mark = el("span", "ax-signin-mark");
+    mark.append(icon("spark"));
+    head.append(mark, el("b", null, "Sign in to Claude"));
+    const body = el("div", "ax-signin-body");
+    signin.append(head, body);
+    const machine = A.account && A.account.logged_in && A.account.source !== "studio";
+    const step1 = (err) => {
+      body.textContent = "";
+      body.append(el("p", null, why || "Sign in with your Claude account. It is the studio's own sign-in: this machine's Claude Code stays as it is."));
+      if (err) body.append(el("p", "ax-signin-err", err));
+      const go = tbtn("Sign in with Claude", "ax-btn primary");
+      go.onclick = () => start("claudeai");
+      const other = el("div", "ax-signin-other");
+      const alt = (label, m) => { const b = el("button", "ax-linkbtn", label); b.type = "button"; b.onclick = () => start(m); return b; };
+      other.append(alt("Console account (API billing)", "console"), el("span", "ax-dotsep", "·"), alt("SSO", "sso"));
+      const row = el("div", "ax-signin-acts");
+      row.append(go);
+      if (machine || (A.account && A.account.logged_in)) {
+        const later = tbtn("Not now", "ax-btn ax-btn-quiet");
+        later.onclick = closeSignin;
+        row.append(later);
+      }
+      body.append(row, other);
+    };
+    const step2 = (url, err) => {
+      body.textContent = "";
+      const p1 = el("p");
+      p1.append("Sign in on the page that opened, then paste the code it shows here. ");
+      const again = el("a", null, "Open the sign-in page again");
+      again.href = url;
+      again.target = "_blank";
+      again.rel = "noopener noreferrer";
+      p1.append(again);
+      body.append(p1);
+      const field = el("input", "ax-signin-code");
+      field.type = "text";
+      field.placeholder = "Paste the code";
+      field.autocomplete = "off";
+      field.spellcheck = false;
+      field.setAttribute("aria-label", "The code from the sign-in page");
+      body.append(field);
+      if (err) body.append(el("p", "ax-signin-err", err));
+      const row = el("div", "ax-signin-acts");
+      const cont = tbtn("Continue", "ax-btn primary");
+      const cancel = tbtn("Cancel", "ax-btn ax-btn-quiet");
+      row.append(cont, cancel);
+      body.append(row);
+      cancel.onclick = async () => {
+        const l = login;
+        login = null;
+        if (l) call(`/api/assistant/login/${l.id}`, undefined, "DELETE").catch(() => {});
+        if (A.account && A.account.logged_in) closeSignin(); else step1();
+      };
+      const send = async () => {
+        const code = field.value.trim();
+        if (!code || !login) return;
+        cont.disabled = true;
+        cont.querySelector("span").textContent = "Checking…";
+        try {
+          const got = await call(`/api/assistant/login/${login.id}/code`, {code});
+          login = null;
+          A.account = got.account;
+          done(got.account);
+        } catch (err2) {
+          login = null;
+          // the CLI ends a sign-in on a wrong code: start again
+          step1(`${err2.message} — start again.`);
+        }
+      };
+      cont.onclick = send;
+      field.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); send(); } });
+      setTimeout(() => field.focus(), 50);
+    };
+    const done = (a) => {
+      body.textContent = "";
+      const ok = el("p", "ax-signin-ok");
+      ok.append(icon("check"), el("span", null, `Signed in as ${who(a)}`));
+      body.append(ok);
+      toast(`The assistant now signs in as ${a.email || "your account"}`);
+      setTimeout(closeSignin, 1600);
+      loadCatalog(true).then(paintHead);
+    };
+    const start = async (m) => {
+      // a tab opened now, inside the click: a tab opened after the request
+      // returns is a popup, and browsers block those
+      const tab = W.open("", "_blank");
+      body.textContent = "";
+      body.append(el("p", null, "Starting the sign-in…"));
+      try {
+        const got = await call("/api/assistant/login", {method: m});
+        login = {id: got.login_id, url: got.url, method: m};
+        if (tab && !tab.closed) { try { tab.location.href = got.url; } catch { /* opened elsewhere */ } }
+        else W.open(got.url, "_blank", "noopener");
+        step2(got.url);
+      } catch (err) {
+        if (tab && !tab.closed) tab.close();
+        step1(err.message);
+      }
+    };
+    if (login) step2(login.url); else step1();
+    if (method && method !== "claudeai" && !login) start(method);
+  }
+
+  // Settings and other screens show the same account block
+  W.oxAccountBlock = async () => accountBlock(await refreshAccount());
 
   /* ── sessions ─────────────────────────────────────────────────────── */
 
@@ -1581,6 +1758,9 @@
       else { A.items.push(it); append(it); markLast(); }
       if (stick) toBottom(); else jump.hidden = false;
     } else if (ev.t === "delta") delta(ev.seq, ev.text);
+    if (ev.t === "item" && ev.item.kind === "error" && ev.item.auth) {
+      refreshAccount(true).then(() => openSignin("claudeai", "The assistant's Claude sign-in didn't work. Sign in again to carry on."));
+    }
     else if (ev.t === "usage" && A.session) { A.session.usage = ev.usage; paintHead(); }
     else if (ev.t === "done") finished(ev);
   }
@@ -2599,7 +2779,12 @@
   async function boot() {
     pruneDrafts();
     loadCatalog().then(paintHead);
-    call("/api/assistant/usage").then((got) => { if (got.rate) takeRate(got.rate); A.account = got.account; }).catch(() => {});
+    call("/api/assistant/usage").then((got) => {
+      if (got.rate) takeRate(got.rate);
+      A.account = got.account;
+      // no sign-in anywhere (neither the studio's nor this machine's): the card first
+      if (A.account && A.account.logged_in === false && A.mode !== "hero") openSignin("claudeai");
+    }).catch(() => {});
     root.classList.toggle("details", A.details);
     paintHead();
     paintChips();

@@ -2205,6 +2205,33 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-nudge-more:hover { background: rgba(0, 0, 0, .05); border: none; }
 .ax-send:disabled { background: var(--surface-3); color: var(--text-3); cursor: not-allowed; }
 
+/* the assistant's account, and signing it in */
+.ax-account { display: flex; flex-direction: column; gap: 8px; padding: 2px 8px 4px; }
+.ax-account-who { color: var(--text-2); font-size: var(--fs-md); overflow-wrap: anywhere; }
+.ax-account-who b { color: var(--text); font-weight: 600; }
+.ax-account-note { color: var(--text-3); font-size: var(--fs-sm); line-height: 1.45; }
+.ax-account-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.setaccount .ax-account { padding: 0; }
+.ax-signin { border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface);
+  box-shadow: var(--sh-1); padding: 14px 14px 12px; animation: axrise .2s var(--ease-out); }
+.ax-signin[hidden] { display: none; }
+.ax-signin-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-size: var(--fs-base); }
+.ax-signin-mark { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; background: var(--text); color: var(--accent); }
+.ax-signin-mark .icon { width: 14px; height: 14px; }
+.ax-signin-body p { margin: 4px 0 10px; color: var(--text-2); font-size: var(--fs-md); line-height: 1.5; }
+.ax-signin-body a { color: var(--signal-strong); }
+.ax-signin-code { width: 100%; height: 36px; padding: 0 10px; margin: 0 0 10px; border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm); font: 13px var(--mono); color: var(--text); background: var(--surface); }
+.ax-signin-code:focus { outline: none; border-color: var(--signal); box-shadow: 0 0 0 3px var(--signal-ring); }
+.ax-signin-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.ax-signin-other { margin-top: 10px; font-size: var(--fs-sm); color: var(--text-3); }
+.ax-linkbtn { min-height: 0; height: auto; padding: 0; border: none; background: none; color: var(--text-2);
+  font-size: var(--fs-sm); text-decoration: underline; text-underline-offset: 2px; }
+.ax-linkbtn:hover { color: var(--text); background: none; border: none; }
+.ax-signin-err { color: var(--err) !important; }
+.ax-signin-ok { display: flex; align-items: center; gap: 8px; color: var(--ok) !important; font-weight: 600; }
+.ax-signin-ok .icon { width: 16px; height: 16px; }
+
 /* the model and effort menu */
 .ax-pop.ax-models { width: 320px; padding: 6px 6px 8px; }
 .ax-model-opt .ax-opt-label { display: flex; align-items: baseline; gap: 8px; width: 100%; }

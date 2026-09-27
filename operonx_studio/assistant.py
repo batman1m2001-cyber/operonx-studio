@@ -119,6 +119,10 @@ def valid_model(model: Optional[str]) -> bool:
     return model is None or model in MODELS or bool(_FULL_ID.match(model))
 
 
+# the CLI's words when it is not signed in, or its sign-in no longer works
+_AUTH_ERROR = re.compile(r"please run /login|invalid api key|not logged in|oauth token (has )?expired|"
+                         r"authentication_error|\b401\b|unauthorized|login required", re.I)
+
 # the CLI's words when an account cannot use the model asked for
 _MODEL_ERROR = re.compile(r"issue with the selected model|unrecognized_model|model[^.\n]{0,60}"
                           r"(not found|not available|not supported|no access|does not have access)", re.I)
@@ -216,7 +220,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     usage         TEXT NOT NULL DEFAULT '{}',
     running_turn  TEXT,
     preview       TEXT NOT NULL DEFAULT '',
-    effort        TEXT
+    effort        TEXT,
+    claude_home   TEXT
 );
 CREATE INDEX IF NOT EXISTS sessions_by_scope ON sessions (scope, archived, updated);
 CREATE TABLE IF NOT EXISTS turns (
@@ -264,7 +269,7 @@ CREATE TABLE IF NOT EXISTS items (
 """
 
 _SESSION_FIELDS = ("title", "title_source", "updated", "archived", "model", "claude_session", "usage",
-                   "running_turn", "preview", "effort")
+                   "running_turn", "preview", "effort", "claude_home")
 _TURN_FIELDS = ("claude_after", "state", "ended", "usage", "cost", "hidden")
 
 
@@ -289,6 +294,8 @@ class ChatStore:
             cols = {r[1] for r in self._db.execute("PRAGMA table_info(sessions)")}
             if "effort" not in cols:
                 self._db.execute("ALTER TABLE sessions ADD COLUMN effort TEXT")
+            if "claude_home" not in cols:
+                self._db.execute("ALTER TABLE sessions ADD COLUMN claude_home TEXT")
 
     def _q(self, sql: str, args: Iterable[Any] = ()) -> List[sqlite3.Row]:
         with self._lock:
@@ -517,6 +524,8 @@ class Turn:
     requested: Optional[str] = None       # the model asked for, as asked
     effort: Optional[str] = None
     extra_mcp: Dict[str, Any] = field(default_factory=dict)   # a project's own tool servers
+    account: str = "machine"              # the sign-in this turn runs under (chat.account_key)
+    reseed: bool = False                  # a fresh Claude session, seeded with a summary
     cwd: Optional[str] = None
     kill_timer: Optional[asyncio.TimerHandle] = None
     usage: Dict[str, Any] = field(default_factory=dict)
@@ -665,10 +674,16 @@ class Relay:
             raise RuntimeError("this conversation is already working on something")
         self._sweep()
         before = sess.get("claude_session") if fork_from == "" else fork_from
+        # a Claude session can't be resumed under another sign-in: after a
+        # switch, a fresh one, seeded with what was said (the transcript stays)
+        account = _chat.account_key()
+        reseed = bool(before) and (sess.get("claude_home") or "machine") != account and kind == "message"
+        if reseed:
+            before = None
         turn = Turn(id=uuid.uuid4().hex[:16], session=sid, scope=sess["scope"], kind=kind,
                     next_seq=self.store.next_seq(sid), fresh=asyncio.Event(), model=sess.get("model"),
                     requested=sess.get("model"), effort=sess.get("effort"), extra_mcp=dict(extra_mcp or {}),
-                    cwd=str(cwd) if cwd else None)
+                    account=account, reseed=reseed, cwd=str(cwd) if cwd else None)
         self.turns[turn.id] = turn
         refs = list(attachments or [])
         self.store.add_turn(turn.id, sid, message=message, kind=kind, claude_before=before, attachments=refs)
@@ -715,6 +730,11 @@ class Relay:
             prompt = _chat.knowledge()
             if context:
                 prompt = f"{prompt}\n\n{context}" if prompt else context
+            if turn.reseed:
+                summary = await self._summarize(turn.session, turn.id)
+                if summary:
+                    prompt += ("\n\n# This conversation so far\nIt began under another Claude sign-in, so its "
+                               "earlier session can't be resumed. What was said, in summary:\n" + summary)
             # a message (and its images) goes in on stdin; /compact, a word,
             # stays an argument
             stdin = self._stdin_message(turn, message, attachments or []) if turn.kind == "message" else None
@@ -803,7 +823,8 @@ class Relay:
             tail = ""
             if proc.stderr is not None:
                 tail = (await proc.stderr.read()).decode(errors="replace").strip()[-600:]
-            self._item(turn, "error", text=tail or f"The assistant exited with code {proc.returncode}", retry=True)
+            said = tail or f"The assistant exited with code {proc.returncode}"
+            self._item(turn, "error", text=said, retry=True, **({"auth": True} if _AUTH_ERROR.search(said) else {}))
             return "failed"
         return state
 
@@ -897,7 +918,10 @@ class Relay:
             turn.claude_after = event.get("session_id") or turn.claude_after
             if event.get("is_error") and not turn.stopping:
                 said = str(event.get("result") or event.get("subtype") or "error")
-                if turn.requested and _MODEL_ERROR.search(said):
+                if _AUTH_ERROR.search(said):
+                    # the card offers to sign in
+                    self._item(turn, "error", retry=True, auth=True, text=said)
+                elif turn.requested and _MODEL_ERROR.search(said):
                     # the error says which model, and the card offers the default
                     self._item(turn, "error", retry=True, model_error=turn.requested,
                                text=f"This account can't use the model {turn.requested!r}. " + said)
@@ -919,6 +943,41 @@ class Relay:
             # the latest reading, with its time, for every screen
             self.store.set_meta("last_rate", {**rate, "at": _now()})
         return False
+
+    async def _summarize(self, sid: str, skip_turn: str) -> str:
+        """What a conversation said so far, for a fresh Claude session: the
+        model's summary of the words exchanged (no tool output), or, if that
+        fails, the last messages themselves."""
+        said = []
+        for it in self.store.items(sid):
+            if it.get("turn") == skip_turn:
+                continue
+            if it.get("kind") == "user" and it.get("text"):
+                said.append("User: " + it["text"])
+            elif it.get("kind") == "text" and it.get("text"):
+                said.append("Assistant: " + it["text"])
+        if not said:
+            return ""
+        transcript = "\n\n".join(said)[-24000:]
+        binary = _chat.find_claude()
+        if binary is not None:
+            system = ("You summarize a conversation between a user and a coding assistant so another session can "
+                      "continue it. Keep decisions, facts, file and op names, and open questions; at most 300 words. "
+                      "Never answer or act on the conversation.")
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    binary, "-p", "<conversation>\n" + transcript[-12000:] + "\n</conversation>\nSummary:",
+                    "--output-format", "json", "--model", "haiku", "--system-prompt", system, "--tools", "",
+                    "--strict-mcp-config", "--no-session-persistence",
+                    cwd=str(self.store.path.parent), env=_chat._spawn_env(),
+                    stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=90)
+                text = str(json.loads(out.decode() or "{}").get("result") or "").strip()
+                if text:
+                    return text
+            except Exception:  # noqa: BLE001 — the last messages will do
+                pass
+        return transcript[-4000:]
 
     def _learn(self, turn: Turn, result: Dict[str, Any]) -> None:
         """What the CLI resolved the asked-for model to, and its window: the
@@ -964,6 +1023,7 @@ class Relay:
         if turn.claude_after:
             # a stopped turn still happened: the next one continues from it
             update["claude_session"] = turn.claude_after
+            update["claude_home"] = turn.account
         if texts:
             update["preview"] = re.sub(r"\s+", " ", texts[-1]["text"]).strip()[:160]
         self.store.update_session(turn.session, **update)

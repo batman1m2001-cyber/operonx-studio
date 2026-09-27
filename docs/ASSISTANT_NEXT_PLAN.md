@@ -335,7 +335,8 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
 | 2 | **C1** Canvas | 660922d | layout audit 0 errors in 328 cases (with new checks for B4, B5 and B6); `flows.py` 21/21; 480 studio tests; B5 14/14 and B6 12/12 on desktop and phone; before and after screenshots; render and zoom measured below |
 | 3 | **A2** Input and images | 1399806 | `scripts/perf/attachments.py` 20/20 with `--live` (an image described, regenerate resends it, a 200 KB paste); the probe below; 4 new server tests (484 studio tests); `composer.py` 35/35; `live_assistant.py` 23/23; `flows.py` 21/21 |
 | 4 | **A3** Model and effort, **B3** project tool servers | 306f01f | `scripts/perf/models.py` 17/17 with `--live` (Haiku at low effort, then Sonnet: the footer and a divider say so; the project's `notes` server called); the MCP probe below; 5 new server tests (489 studio tests); `composer.py` 35/35; `attachments.py` 16/16; `live_assistant.py` 23/23; `flows.py` 21/21 |
-| 5 | **A4** Usage | see git log (`assistant A4`) | `scripts/perf/usage.py` 18/18 with `--live` (a Haiku turn: tokens in its footer, the card's numbers match the store, real plan limits "as of just now"); 2 new server tests (491 studio tests); `composer.py` 35/35; `attachments.py` 16/16; `models.py` 13/13; `live_assistant.py` 23/23; `flows.py` 21/21 |
+| 5 | **A4** Usage | 0784444 | `scripts/perf/usage.py` 18/18 with `--live` (a Haiku turn: tokens in its footer, the card's numbers match the store, real plan limits "as of just now"); 2 new server tests (491 studio tests); `composer.py` 35/35; `attachments.py` 16/16; `models.py` 13/13; `live_assistant.py` 23/23; `flows.py` 21/21 |
+| 6 | **A5** Sign-in | see git log (`assistant A5`) | `scripts/perf/signin.py` 14/14 (up to the sign-in link, then Cancel: plan §4); the CLI probes below; 3 new server tests against a fake CLI that signs in and out (494 studio tests); `composer.py`, `attachments.py`, `models.py`, `usage.py`; `live_assistant.py` 23/23; `flows.py` 21/21. **Still yours to do: one real sign-in** (paste the code once) |
 
 **A1 notes.**
 - **A JSON paste becomes a card from 200 characters, even on one line.**
@@ -519,3 +520,46 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
 - **Fixed on the way:** a menu wider than the room beside its button ran
   off the panel's edge (27 px on a 390 px phone). Menus are now kept
   inside.
+
+**A5 notes.**
+- **The CLI, probed** (2.1.283):
+  - `claude auth login` over pipes prints "Opening browser to sign in…",
+    then the link (`https://claude.com/cai/oauth/authorize?…`, redirecting
+    to `platform.claude.com/oauth/code/callback`), then "Paste code here
+    if prompted >", and waits;
+  - a wrong code ends it with "Login failed: Request failed with status
+    code 400" (exit code 1, no credentials written);
+  - `auth status --json` answers in 0.5 s.
+- **The studio's own sign-in lives in `~/.operonx/claude`**
+  (`OPERONX_STUDIO_CLAUDE_HOME` overrides it). Every Claude process runs
+  with `CLAUDE_CONFIG_DIR` pointed there once it is signed in (turns,
+  titles, summaries, status); until then, the machine's login. This is
+  checked at startup and after every sign-in and sign-out.
+- **The flow:**
+  - `POST /api/assistant/login` starts `claude auth login` there, with
+    `BROWSER=true` so the server never opens a browser, and returns the
+    link, which the page opens in a new tab;
+  - `…/login/{id}/code` hands the pasted code to the CLI and returns its
+    verdict, in its own words;
+  - `DELETE` cancels;
+  - one sign-in at a time, 10 minutes at most;
+  - the code is written to the CLI and never kept or logged;
+  - `POST /api/assistant/logout` signs out the studio's own sign-in,
+    never this machine's.
+- **The card** takes the box's place:
+  1. Sign in with Claude (with Console and SSO below);
+  2. paste the code;
+  3. "Signed in as …".
+
+  It opens by itself when there is no sign-in anywhere, or when a turn
+  fails for want of one (401, "Please run /login", "Invalid API key", an
+  expired token), and from the account block in the usage card and in
+  Settings → Assistant. The block reads "Using this machine's login (…)"
+  until the studio has its own.
+- **Switching sign-ins:** a conversation remembers which sign-in its
+  Claude session belongs to. After a switch, its next turn starts a fresh
+  Claude session, seeded with a Haiku summary of what was said (or the
+  last messages, if that fails). The transcript stays whole.
+- **What this run left behind:** the cancelled sign-in left only the
+  CLI's config file in `~/.operonx/claude` (no credentials), so the studio
+  runs on this machine's login until you sign it in.

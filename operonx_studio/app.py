@@ -2871,11 +2871,14 @@ def build_studio_app(recents: Optional[Recents] = None):
     # read at most every 30 s (it spawns the CLI)
     _account_cache: Dict[str, Any] = {"at": 0.0, "value": None}
 
-    async def _account() -> Dict[str, Any]:
-        if _account_cache["value"] is not None and time.monotonic() - _account_cache["at"] < 30:
+    async def _account(fresh: bool = False) -> Dict[str, Any]:
+        """Who the assistant's Claude runs as: the studio's own sign-in when it
+        has one (``source: studio``), else this machine's (``machine``)."""
+        if not fresh and _account_cache["value"] is not None and time.monotonic() - _account_cache["at"] < 30:
             return _account_cache["value"]
         from . import chat as _chat_mod
 
+        studio = await asyncio.to_thread(_chat_mod.home_signed_in, fresh)
         binary = _chat_mod.find_claude()
         out: Dict[str, Any] = {"logged_in": None}
         if binary is not None:
@@ -2891,12 +2894,151 @@ def build_studio_app(recents: Optional[Recents] = None):
                        "provider": got.get("apiProvider")}
             except Exception:  # noqa: BLE001 — no account line is better than a broken card
                 out = {"logged_in": None}
+        out.update(source="studio" if studio else "machine", home=str(_chat_mod.claude_home()),
+                   login=_login_state())
         _account_cache.update(at=time.monotonic(), value=out)
         return out
 
+    # ── signing the assistant in (docs/ASSISTANT_NEXT_PLAN.md §3) ─────────
+    # `claude auth login` in the studio's own config directory, driven over
+    # pipes: it prints the sign-in link, then reads the code the page shows
+    # after signing in. One at a time; ten minutes at most. The code is
+    # written to the CLI and never kept or logged; the token stays the CLI's.
+    logins: Dict[str, Any] = {}
+
+    # which sign-in the assistant runs under, known before the first turn
+    # needs it (the check spawns the CLI: ~0.5 s)
+    import threading as _threading
+    from . import chat as _chat_boot
+
+    _threading.Thread(target=_chat_boot.home_signed_in, daemon=True).start()
+
+    def _login_state() -> Optional[Dict[str, Any]]:
+        for lid, lg in logins.items():
+            if lg["proc"].returncode is None:
+                return {"id": lid, "method": lg["method"], "url": lg["url"], "started": lg["started"]}
+        return None
+
+    async def _end_login(lid: str) -> None:
+        lg = logins.pop(lid, None)
+        if lg is None:
+            return
+        if lg["timer"] is not None:
+            lg["timer"].cancel()
+        if lg["proc"].returncode is None:
+            lg["proc"].kill()
+            try:
+                await asyncio.wait_for(lg["proc"].wait(), timeout=5)
+            except asyncio.TimeoutError:
+                pass
+
+    @app.post("/api/assistant/login")
+    async def assistant_login(body: Dict[str, Any]) -> JSONResponse:
+        from . import chat as _chat_mod
+
+        method = str(body.get("method") or "claudeai")
+        if method not in ("claudeai", "console", "sso"):
+            return JSONResponse({"error": "method is claudeai, console or sso"}, status_code=400)
+        for lid in list(logins):          # one at a time: a new one replaces a stale one
+            await _end_login(lid)
+        binary = _chat_mod.find_claude()
+        if binary is None:
+            return JSONResponse({"error": "No claude binary found on this machine"}, status_code=500)
+        home = _chat_mod.claude_home()
+        home.mkdir(parents=True, exist_ok=True, mode=0o700)
+        env = _chat_mod._spawn_env(home=False)
+        env["CLAUDE_CONFIG_DIR"] = str(home)
+        env["BROWSER"] = "true"          # never a browser on the studio's own machine: the page opens the link
+        flags = {"claudeai": ["--claudeai"], "console": ["--console"], "sso": ["--sso"]}[method]
+        proc = await asyncio.create_subprocess_exec(
+            binary, "auth", "login", *flags, env=env, stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
+        seen = b""
+        url = None
+        try:
+            end = time.monotonic() + 20
+            while time.monotonic() < end and url is None:
+                chunk = await asyncio.wait_for(proc.stdout.read(4096), timeout=max(0.1, end - time.monotonic()))
+                if not chunk:
+                    break
+                seen += chunk
+                m = re.search(rb"https://\S+", seen)
+                if m and m.end() < len(seen):          # whole: something follows it
+                    url = m.group(0).decode()
+        except asyncio.TimeoutError:
+            pass
+        if url is None:
+            proc.kill()
+            tail = seen.decode(errors="replace").strip()[-300:]
+            return JSONResponse({"error": "The sign-in did not start" + (f": {tail}" if tail else "")}, status_code=502)
+        import uuid as _uuid
+
+        lid = _uuid.uuid4().hex[:12]
+        loop = asyncio.get_running_loop()
+        logins[lid] = {"proc": proc, "method": method, "url": url, "started": time.time(),
+                       "timer": loop.call_later(600, lambda: asyncio.ensure_future(_end_login(lid)))}
+        _account_cache["value"] = None
+        return JSONResponse({"login_id": lid, "url": url, "method": method})
+
+    @app.post("/api/assistant/login/{lid}/code")
+    async def assistant_login_code(lid: str, body: Dict[str, Any]) -> JSONResponse:
+        from . import chat as _chat_mod
+
+        lg = logins.get(lid)
+        if lg is None or lg["proc"].returncode is not None:
+            return JSONResponse({"error": "That sign-in has ended — start again"}, status_code=404)
+        code = str(body.get("code") or "").strip()
+        if not code or len(code) > 2000 or "\n" in code:
+            return JSONResponse({"error": "Paste the code the sign-in page showed"}, status_code=400)
+        proc = lg["proc"]
+        proc.stdin.write(code.encode() + b"\n")
+        await proc.stdin.drain()
+        said = b""
+        try:
+            said, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+        except asyncio.TimeoutError:
+            pass
+        rc = proc.returncode
+        await _end_login(lid)
+        signed = await asyncio.to_thread(_chat_mod.home_signed_in, True)
+        account = await _account(fresh=True)
+        if rc == 0 and signed:
+            return JSONResponse({"ok": True, "account": account})
+        # the CLI's own words ("Login failed: …"), never the code
+        last = [ln for ln in (said or b"").decode(errors="replace").splitlines() if ln.strip()]
+        why = (last[-1] if last else "the sign-in did not finish").replace(code, "…")[:300]
+        return JSONResponse({"ok": False, "error": why, "account": account}, status_code=400)
+
+    @app.delete("/api/assistant/login/{lid}")
+    async def assistant_login_cancel(lid: str) -> JSONResponse:
+        await _end_login(lid)
+        _account_cache["value"] = None
+        return JSONResponse({"cancelled": lid})
+
+    @app.post("/api/assistant/logout")
+    async def assistant_logout() -> JSONResponse:
+        """Sign the studio's own sign-in out. Never this machine's: the
+        assistant then goes back to it."""
+        from . import chat as _chat_mod
+
+        binary = _chat_mod.find_claude()
+        home = _chat_mod.claude_home()
+        if binary is not None and home.is_dir():
+            env = _chat_mod._spawn_env(home=False)
+            env["CLAUDE_CONFIG_DIR"] = str(home)
+            proc = await asyncio.create_subprocess_exec(
+                binary, "auth", "logout", env=env, stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=30)
+            except asyncio.TimeoutError:
+                proc.kill()
+        await asyncio.to_thread(_chat_mod.home_signed_in, True)
+        return JSONResponse({"account": await _account(fresh=True)})
+
     @app.get("/api/assistant/account")
-    async def assistant_account() -> JSONResponse:
-        return JSONResponse({"account": await _account()})
+    async def assistant_account(fresh: int = 0) -> JSONResponse:
+        return JSONResponse({"account": await _account(fresh=bool(fresh))})
 
     @app.get("/api/assistant/usage")
     async def assistant_usage() -> JSONResponse:

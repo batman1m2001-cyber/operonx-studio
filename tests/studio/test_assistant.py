@@ -41,10 +41,40 @@ FAKE = r'''#!/usr/bin/env python3
 import json, os, sys, time, uuid, signal
 
 argv = sys.argv[1:]
+home = os.environ.get("CLAUDE_CONFIG_DIR")
+creds = os.path.join(home, ".fake-credentials") if home else None
+if argv[:1] == ["auth"]:
+    log = os.environ.get("OX_FAKE_LOG")
+    if log:
+        with open(log, "a") as f:
+            f.write(json.dumps({"auth": argv[1], "config_dir": home}) + "\n")
 if argv[:2] == ["auth", "status"]:
+    # the machine's login is you@example.com; a config dir is signed in once
+    # its login finished
+    if home and not os.path.exists(creds):
+        print(json.dumps({"loggedIn": False, "authMethod": "none", "configDirectory": home}))
+        sys.exit(1)
+    email = open(creds).read().strip() if home else "you@example.com"
     print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty",
-                      "email": "you@example.com", "orgName": "Your org", "orgId": "secret-org-id",
+                      "email": email, "orgName": "Your org", "orgId": "secret-org-id",
                       "subscriptionType": "max"}))
+    sys.exit(0)
+if argv[:2] == ["auth", "login"]:
+    sys.stdout.write("Opening browser to sign in…\nIf the browser didn't open, visit: "
+                     "https://claude.com/cai/oauth/authorize?code=true&state=fake\nPaste code here if prompted > ")
+    sys.stdout.flush()
+    code = sys.stdin.readline().strip()
+    if code == "good-code#fake":
+        with open(creds, "w") as f:
+            f.write("studio@example.com")
+        print("Login successful.")
+        sys.exit(0)
+    print("Login failed: Request failed with status code 400")
+    sys.exit(1)
+if argv[:2] == ["auth", "logout"]:
+    if creds and os.path.exists(creds):
+        os.remove(creds)
+    print("Successfully logged out from your Anthropic account.")
     sys.exit(0)
 # a message turn arrives on stdin as one stream-json user message (images,
 # then words); a /compact or a title call as the -p argument
@@ -59,7 +89,8 @@ else:
 log = os.environ.get("OX_FAKE_LOG")
 if log:
     with open(log, "a") as f:
-        f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "msg": msg, "images": images}) + "\n")
+        f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "msg": msg, "images": images,
+                            "config_dir": home}) + "\n")
 
 if "--output-format" in argv and argv[argv.index("--output-format") + 1] == "json":
     print(json.dumps({"type": "result", "result": "Fake title here"}))
@@ -80,6 +111,12 @@ if msg == "/compact":
     emit({"type": "result", "subtype": "success", "session_id": sid, "total_cost_usd": 0.03, "is_error": False,
           "usage": {}, "num_turns": 0})
     sys.exit(0)
+
+if "AUTHFAIL" in msg:
+    emit({"type": "system", "subtype": "init", "session_id": sid, "model": model})
+    emit({"type": "result", "subtype": "success", "session_id": sid, "is_error": True, "usage": {}, "num_turns": 0,
+          "result": "Invalid API key · Please run /login"})
+    sys.exit(1)
 
 if "CRASH" in msg:
     sys.stderr.write("boom: the fake fell over\n")
@@ -150,6 +187,10 @@ def fake(tmp_path: Path, monkeypatch):
     log = tmp_path / "invocations.jsonl"
     monkeypatch.setenv("OPERONX_STUDIO_CLAUDE_BIN", str(binary))
     monkeypatch.setenv("OX_FAKE_LOG", str(log))
+    # the studio's own sign-in lives here, never in the real ~/.operonx/claude
+    monkeypatch.setenv("OPERONX_STUDIO_CLAUDE_HOME", str(tmp_path / "claude-home"))
+    from operonx_studio import chat as _chat_mod
+    _chat_mod._home.update(checked=False, signed_in=False, email=None)
     monkeypatch.setenv("OPERONX_STUDIO_RETENTION", "off")
     # the model-made title runs after a turn, in the background: on only
     # where a test waits for it, so no test ends with one in flight
@@ -755,6 +796,72 @@ def test_plan_limits_are_kept_with_their_reset_times(client, project, fake):
 
 def test_the_account_line_never_carries_an_id(client, project, fake):
     acc = client.get("/api/assistant/account").json()["account"]
-    assert acc == {"logged_in": True, "method": "claude.ai", "email": "you@example.com", "org": "Your org",
-                   "plan": "max", "provider": "firstParty"}
+    assert {k: acc[k] for k in ("logged_in", "method", "email", "org", "plan", "provider", "source")} == \
+        {"logged_in": True, "method": "claude.ai", "email": "you@example.com", "org": "Your org",
+         "plan": "max", "provider": "firstParty", "source": "machine"}
     assert "secret" not in json.dumps(client.get("/api/assistant/usage").json())
+
+
+
+# ── A5: the assistant's own sign-in ───────────────────────────────────────
+
+def _calls(fake):
+    return [c for c in fake() if "argv" in c]
+
+
+def test_signing_in_the_studio_and_out_again(client, project, fake, tmp_path):
+    home = tmp_path / "claude-home"
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    _say(client, sid, "hello")                                         # under this machine's login
+    assert _calls(fake)[-1]["config_dir"] is None
+    assert client.get("/api/assistant/account").json()["account"]["source"] == "machine"
+
+    # a wrong code: the CLI's own words come back, and the sign-in is over
+    got = client.post("/api/assistant/login", json={"method": "claudeai"}).json()
+    assert got["url"] == "https://claude.com/cai/oauth/authorize?code=true&state=fake"
+    bad = client.post(f"/api/assistant/login/{got['login_id']}/code", json={"code": "nope"})
+    assert bad.status_code == 400 and bad.json()["error"] == "Login failed: Request failed with status code 400"
+    assert client.post(f"/api/assistant/login/{got['login_id']}/code", json={"code": "x"}).status_code == 404
+
+    # the right code: signed in, in the studio's own config dir
+    got = client.post("/api/assistant/login", json={"method": "claudeai"}).json()
+    res = client.post(f"/api/assistant/login/{got['login_id']}/code", json={"code": "good-code#fake"}).json()
+    assert res["ok"] and res["account"]["source"] == "studio" and res["account"]["email"] == "studio@example.com"
+    assert (home / ".fake-credentials").is_file()
+
+    # the conversation's Claude session is the machine's: a fresh one, seeded
+    # with a summary; the transcript stays whole
+    _say(client, sid, "and now?")
+    call = _calls(fake)[-1]
+    assert call["config_dir"] == str(home) and "--resume" not in call["argv"]
+    prompt = call["argv"][call["argv"].index("--append-system-prompt") + 1]
+    assert "This conversation so far" in prompt and "Fake title here" in prompt       # the fake's summary
+    items = client.get(f"/api/assistant/sessions/{sid}").json()["items"]
+    assert [i["text"] for i in items if i["kind"] == "user"] == ["hello", "and now?"]
+    _say(client, sid, "and then?")                                     # now it resumes, under the studio's
+    assert "--resume" in _calls(fake)[-1]["argv"]
+
+    # signing out: the studio's own, never the machine's; back to the machine's login
+    out = client.post("/api/assistant/logout").json()["account"]
+    assert out["source"] == "machine" and not (home / ".fake-credentials").exists()
+    logouts = [c for c in fake() if c.get("auth") == "logout"]
+    assert logouts and all(c["config_dir"] == str(home) for c in logouts)
+    _say(client, sid, "back?")
+    assert _calls(fake)[-1]["config_dir"] is None
+
+
+def test_a_sign_in_can_be_cancelled(client, project, fake):
+    got = client.post("/api/assistant/login", json={"method": "console"}).json()
+    assert client.get("/api/assistant/account").json()["account"]["login"]["id"] == got["login_id"]
+    assert client.delete(f"/api/assistant/login/{got['login_id']}").status_code == 200
+    assert client.post(f"/api/assistant/login/{got['login_id']}/code", json={"code": "good-code#fake"}).status_code == 404
+    assert client.post("/api/assistant/login", json={"method": "carrier-pigeon"}).status_code == 400
+
+
+def test_a_turn_that_is_not_signed_in_asks_for_it(client, project, fake):
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    _, events = _say(client, sid, "AUTHFAIL please")
+    err = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "error")
+    assert err["auth"] is True and "Please run /login" in err["text"]

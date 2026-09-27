@@ -27,6 +27,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -177,13 +178,62 @@ def undo(repo: Path, sha: str, files: List[str], new_files: List[str]) -> List[s
     return done
 
 
-def _spawn_env() -> Dict[str, str]:
+# ── the assistant's own sign-in (docs/ASSISTANT_NEXT_PLAN.md §3) ─────────
+# The studio keeps its own Claude sign-in in its own config directory
+# (CLAUDE_CONFIG_DIR), so signing in or out there never touches this
+# machine's Claude Code. Until one exists, the machine's login is used.
+
+def claude_home() -> Path:
+    raw = os.environ.get("OPERONX_STUDIO_CLAUDE_HOME")
+    return Path(raw).expanduser() if raw else Path.home() / ".operonx" / "claude"
+
+
+_home = {"checked": False, "signed_in": False, "email": None}
+
+
+def _status(home: Optional[Path]) -> Dict[str, Any]:
+    """``claude auth status --json`` for *home* (None: the machine's)."""
+    binary = find_claude()
+    if binary is None:
+        return {}
+    env = _spawn_env(home=False)
+    if home is not None:
+        env["CLAUDE_CONFIG_DIR"] = str(home)
+    try:
+        out = subprocess.run([binary, "auth", "status", "--json"], env=env, stdin=subprocess.DEVNULL,
+                             capture_output=True, text=True, timeout=20)
+        return json.loads(out.stdout or "{}")
+    except Exception:  # noqa: BLE001 — an unreadable status reads as signed out
+        return {}
+
+
+def home_signed_in(refresh: bool = False) -> bool:
+    """Whether the studio's own sign-in exists (then every Claude process
+    runs under it). Checked once, then on every sign-in and sign-out."""
+    if refresh or not _home["checked"]:
+        home = claude_home()
+        got = _status(home) if home.is_dir() else {}
+        _home.update(checked=True, signed_in=bool(got.get("loggedIn")), email=got.get("email"))
+    return bool(_home["signed_in"])
+
+
+def account_key() -> str:
+    """Which sign-in a Claude session belongs to: a session can't be resumed
+    under another one."""
+    return f"studio:{_home['email'] or ''}" if home_signed_in() else "machine"
+
+
+def _spawn_env(home: Optional[bool] = None) -> Dict[str, str]:
     # The studio itself is often launched from inside a Claude Code
     # session; the inherited CLAUDE_* vars would make the child believe
     # it is a nested/SDK session and misbehave. HOME must survive — the
     # OAuth credentials live under it.
-    return {k: v for k, v in os.environ.items()
-            if not k.startswith("CLAUDE") and k not in ("CLAUDECODE", "AI_AGENT")}
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("CLAUDE") and k not in ("CLAUDECODE", "AI_AGENT")}
+    # the studio's own sign-in, once there is one (home=False: the machine's)
+    if home_signed_in() if home is None else home:
+        env["CLAUDE_CONFIG_DIR"] = str(claude_home())
+    return env
 
 
 def _tool_hint(block: Dict[str, Any]) -> str:
