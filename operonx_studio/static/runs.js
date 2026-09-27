@@ -198,6 +198,7 @@ const RunsView = (() => {
 
   function row(r) {
     const tr = el("tr", "clickable" + (r.status === "error" ? " failed" : ""));
+    tr.dataset.key = r.run;            // a revisit marks the rows it had not seen
     const st = el("td", "stcell");
     const dot = el("span", "stdot " + (r.status === "error" ? "bad" : "ok"));
     dot.title = r.status;

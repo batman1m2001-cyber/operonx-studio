@@ -3583,6 +3583,53 @@ $("#btn-find").onclick = () => openFind();
 const PANES = {};
 function registerPane(name, pane) { PANES[name] = pane; }
 
+/* A revisited screen shows its last picture at once, and refreshes under
+ * it. Through the tunnel a screen's data is a request away (~0.75 s), and
+ * Runs, Monitor, Settings and the Playground used to go blank or say
+ * "Loading…" for that long on every revisit (measured). The picture is a
+ * copy laid over the screen, inert, while the screen rebuilds beneath it
+ * at its real size; once what is underneath has settled (nothing still
+ * loading) the copy lifts, and rows the copy did not have are marked. */
+const LOADING = /Loading|Starting the|Connecting/;
+const covers = new Set();            // the lift of every cover up: leaving a screen lifts its cover
+function coverWhileFresh(elm) {
+  if (!elm || elm.hidden || !(elm.textContent || "").trim() || elm._cover) return;
+  const parent = elm.offsetParent;
+  if (!parent) return;
+  const cover = elm.cloneNode(true);
+  cover.removeAttribute("id");
+  for (const n of cover.querySelectorAll("[id]")) n.removeAttribute("id");
+  cover.classList.add("revisit-cover");
+  cover.inert = true;
+  cover.setAttribute("aria-hidden", "true");
+  Object.assign(cover.style, {position: "absolute", left: `${elm.offsetLeft}px`, top: `${elm.offsetTop}px`,
+    width: `${elm.offsetWidth}px`, height: `${elm.offsetHeight}px`, margin: "0"});
+  const seen = new Set([...elm.querySelectorAll("[data-key]")].map(n => n.dataset.key));
+  const scroll = elm.scrollTop;
+  elm.after(cover);
+  cover.scrollTop = scroll;
+  elm._cover = cover;
+  let frame = 0;
+  const settled = () => (elm.textContent || "").trim().length > 40 && !LOADING.test(elm.textContent);
+  const lift = () => {
+    covers.delete(lift);
+    if (elm._cover !== cover) return;
+    observer.disconnect();
+    clearTimeout(cap);
+    elm._cover = null;
+    elm.scrollTop = scroll;
+    cover.remove();
+    // what the last picture did not have: marked, quietly, for a moment
+    if (seen.size) for (const n of elm.querySelectorAll("[data-key]")) if (!seen.has(n.dataset.key)) n.classList.add("fresh");
+  };
+  const check = () => { frame = 0; if (settled()) lift(); };
+  const observer = new MutationObserver(() => { if (!frame) frame = requestAnimationFrame(check); });
+  observer.observe(elm, {childList: true, subtree: true, characterData: true});
+  const cap = setTimeout(lift, 6000);
+  covers.add(lift);
+  requestAnimationFrame(() => requestAnimationFrame(check));
+}
+
 function switchTab(name, opts) {
   // where the Flow tab was: a run's pane borrows the canvas, and moving
   // it resets its scroll (hiding it does not)
@@ -3591,6 +3638,7 @@ function switchTab(name, opts) {
     state.flowView = {scale: state.view.scale, x: st.scrollLeft, y: st.scrollTop};
   }
   leaveWorkflow();
+  for (const lift of [...covers]) lift();
   state.tab = name;
   if (name !== "traces") { state.execPanelRun = null; state.execSel = null; }
   if (window.oxRailLabel) window.oxRailLabel(name);
@@ -3604,6 +3652,9 @@ function switchTab(name, opts) {
   $("#jobs").hidden = name !== "jobs";
   $("#resources").hidden = name !== "resources";
   for (const [n, p] of Object.entries(PANES)) p.el.hidden = n !== name;
+  // a revisit: the last picture while the screen refreshes (not for a run
+  // the caller is about to open, nor the canvas)
+  if (!(opts && opts.quiet)) coverWhileFresh(PANES[name] ? PANES[name].el : name === "traces" ? $("#traces") : null);
   if (PANES[name]) PANES[name].show(opts);
   // quiet: the caller is about to fill the Traces pane itself
   if (name === "traces" && !(opts && opts.quiet)) showTraces();

@@ -336,7 +336,8 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
 | 3 | **A2** Input and images | 1399806 | `scripts/perf/attachments.py` 20/20 with `--live` (an image described, regenerate resends it, a 200 KB paste); the probe below; 4 new server tests (484 studio tests); `composer.py` 35/35; `live_assistant.py` 23/23; `flows.py` 21/21 |
 | 4 | **A3** Model and effort, **B3** project tool servers | 306f01f | `scripts/perf/models.py` 17/17 with `--live` (Haiku at low effort, then Sonnet: the footer and a divider say so; the project's `notes` server called); the MCP probe below; 5 new server tests (489 studio tests); `composer.py` 35/35; `attachments.py` 16/16; `live_assistant.py` 23/23; `flows.py` 21/21 |
 | 5 | **A4** Usage | 0784444 | `scripts/perf/usage.py` 18/18 with `--live` (a Haiku turn: tokens in its footer, the card's numbers match the store, real plan limits "as of just now"); 2 new server tests (491 studio tests); `composer.py` 35/35; `attachments.py` 16/16; `models.py` 13/13; `live_assistant.py` 23/23; `flows.py` 21/21 |
-| 6 | **A5** Sign-in | see git log (`assistant A5`) | `scripts/perf/signin.py` 14/14 (up to the sign-in link, then Cancel: plan §4); the CLI probes below; 3 new server tests against a fake CLI that signs in and out (494 studio tests); `composer.py`, `attachments.py`, `models.py`, `usage.py`; `live_assistant.py` 23/23; `flows.py` 21/21. **Still yours to do: one real sign-in** (paste the code once) |
+| 6 | **A5** Sign-in | 2ba96e5 | `scripts/perf/signin.py` 14/14 (up to the sign-in link, then Cancel: plan §4); the CLI probes below; 3 new server tests against a fake CLI that signs in and out (494 studio tests); `composer.py`, `attachments.py`, `models.py`, `usage.py`; `live_assistant.py` 23/23; `flows.py` 21/21. **Still yours to do: one real sign-in** (paste the code once) |
+| 7 | **N2, N4, N3** | see git log (`N2 N4 N3`) | bytes, revisit and first-open times before and after (below); the served bundles token-for-token identical to their sources (acorn); 7 new tests (500 studio tests); layout audit 0 errors in 328 cases; `flows.py` 21/21; `live_assistant.py` 23/23; every UI check above |
 
 **A1 notes.**
 - **A JSON paste becomes a card from 200 characters, even on one line.**
@@ -563,3 +564,64 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
 - **What this run left behind:** the cancelled sign-in left only the
   CLI's config file in `~/.operonx/claude` (no credentials), so the studio
   runs on this machine's login until you sign it in.
+
+**N2, N4, N3 notes.**
+- **N2, smaller scripts and styles.** `rjsmin` was measured and
+  rejected: it collapsed spaces inside nested template literals
+  (`` `nested  ${…}` ``, `` {"k": `v  v`} ``) while its output still
+  parsed. So the plan's "parses" check would have shipped changed text.
+  - **Scripts:** the studio's own `operonx_studio/minify.py` drops
+    comments, indentation, trailing and repeated spaces and blank lines.
+    It keeps every line break (so automatic semicolon insertion reads the
+    same) and every literal byte for byte.
+  - **Proof:** acorn tokenizes the served bundles and their sources
+    identically (124,350 tokens on the project page, 38,901 on home),
+    comparing type, value, raw text and the line breaks before each
+    token. The same check flags rjsmin's change at token 1,438.
+  - **Styles:** `rcssmin` (Apache-2.0, now a dependency). It kept
+    `calc()`'s spaces and every string on this stylesheet's constructs.
+  - `OPERONX_STUDIO_MINIFY=off` serves both readable.
+
+  | Asset (gzipped, as served) | Before | After |
+  |---|---|---|
+  | project page scripts | 154.7 KB | 116.6 KB (−25%) |
+  | home page scripts | 49.2 KB | 39.8 KB (−19%) |
+  | stylesheet | 36.8 KB | 27.8 KB (−24%) |
+- **N4, a revisited screen at once.** Measured first: Evals, Services,
+  Jobs, Alerts, Review, Resources and Prompts already came back at once.
+  Runs went blank, and Monitor, Settings and the Playground said
+  "Loading…", on every revisit.
+  - **How:** a revisit now lays a copy of the screen's last picture over
+    it (inert) while the screen refreshes beneath, at its real size. The
+    copy lifts once the fresh content has settled (6 s at most, or when
+    you leave), and Runs rows it had not shown get a brief highlight.
+  - **Checked:** each cover lifts, leaving mid-refresh lifts it, and the
+    refreshed list works.
+
+  | Revisit, at +700 ms a request (the tunnel's latency) | Before | After |
+  |---|---|---|
+  | Runs | 940 ms, blank | 146 ms |
+  | Monitor | 784 ms, "Loading…" | 39 ms |
+  | Settings | 744 ms, "Loading…" | 18 ms |
+  | Playground | 741 ms, "Loading…" | 26 ms |
+- **N3, the Playground's bridge started early.**
+  - **Measured first:** a first open was the bridge starting, then its
+    first `describe` loading the project's services, which took 2 of the
+    callbot's 2.6 s; the next `describe` took 0.02 s.
+  - **So the warm-up** (`POST …/play/warm`) starts the bridge and asks
+    `describe`, without waiting. The page asks when the pointer or focus
+    reaches the Playground (at most once a minute), and 3 s after
+    opening a project with doors.
+  - **At most two bridges stay up while idle:** the least recently used
+    idle one stops. One with an open session never does, nor the one
+    asked for.
+  - **Fixed on the way:** an open during a warm-up now waits for it,
+    instead of using a bridge that was not ready.
+  - **Memory:** 40 MB (jobs demo), 42 MB (playground demo), 202 MB
+    (callbot).
+
+  | First open of the Playground | Cold (before) | Warmed by 8 s on the page | Pointer on Playground, click 0.6 s later |
+  |---|---|---|---|
+  | callbot | 2,882 ms | 83 ms | — |
+  | jobs demo | 654 ms | 28 ms | 66 ms |
+  | playground demo | 696 ms | 29 ms | 121 ms |

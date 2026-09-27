@@ -544,6 +544,10 @@ def build_studio_app(recents: Optional[Recents] = None):
     # static file changes, so editing a .js still needs no restart.
     _SCRIPT_TAG = re.compile(r'[ \t]*<script src="/static/([A-Za-z0-9_.-]+\.js)"></script>\n?')
     pages: Dict[str, Tuple[str, str, bytes]] = {}   # page -> (asset version, html, bundle)
+    # Served small: comments, indentation and blank lines go, token for token
+    # the same program (operonx_studio/minify.py; the project bundle 155 ->
+    # 117 KB gzipped). OPERONX_STUDIO_MINIFY=off serves it readable.
+    minify = os.environ.get("OPERONX_STUDIO_MINIFY", "on").strip().lower() not in ("off", "0", "false", "no")
 
     def _built(name: str) -> Tuple[str, bytes]:
         version = _asset_version()
@@ -559,7 +563,12 @@ def build_studio_app(recents: Optional[Recents] = None):
                 parts.append(f"\n/* ── {script} ── */\n")
                 parts.append((STATIC / script).read_text(encoding="utf-8"))
                 parts.append("\n;\n")
-            bundle = "".join(parts).encode("utf-8")
+            joined = "".join(parts)
+            if minify:
+                from .minify import strip_js
+
+                joined = strip_js(joined)
+            bundle = joined.encode("utf-8")
             tag = (f'<script src="/static/bundle/{Path(name).stem}.js'
                    f'?v={hashlib.sha1(bundle).hexdigest()[:10]}"></script>\n')
             first = text.index("<script src=\"/static/")
@@ -578,6 +587,30 @@ def build_studio_app(recents: Optional[Recents] = None):
             at = text.find("<script src=")
             text = text[:at] + boot + "\n" + text[at:] if at >= 0 else text + boot
         return HTMLResponse(text, headers={"Cache-Control": "no-cache"})
+
+    styles: Dict[str, Tuple[str, bytes]] = {}       # stylesheet -> (asset version, served bytes)
+
+    @app.get("/static/{name}.css")
+    def stylesheet(name: str) -> Any:
+        """A stylesheet, minified (rcssmin) unless OPERONX_STUDIO_MINIFY=off."""
+        from fastapi.responses import Response
+
+        path = STATIC / f"{name}.css"
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name) or not path.is_file():
+            return JSONResponse({"error": "no such stylesheet"}, status_code=404)
+        version = _asset_version()
+        got = styles.get(name)
+        if got is None or got[0] != version:
+            text = path.read_text(encoding="utf-8")
+            if minify:
+                try:
+                    from .minify import strip_css
+
+                    text = strip_css(text)
+                except ImportError:       # rcssmin missing: served as written
+                    pass
+            got = styles[name] = (version, text.encode("utf-8"))
+        return Response(got[1], media_type="text/css; charset=utf-8")
 
     @app.get("/static/bundle/{stem}.js")
     def page_bundle(stem: str) -> Any:
@@ -2515,6 +2548,16 @@ def build_studio_app(recents: Optional[Recents] = None):
         if summary.service:
             return {"service": summary.service, "variant": summary.variant}
         return None
+
+    @app.post("/api/p/{pid}/play/warm")
+    async def play_warm(pid: str) -> JSONResponse:
+        """Start the project's bridge ahead of the Playground (the page asks
+        when the pointer nears the Playground, or a project with doors has
+        been open a moment); answers at once."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        return JSONResponse({"state": play.warm(pid, watcher)})
 
     @app.get("/api/p/{pid}/play/doors")
     async def play_doors(pid: str, service: str = "") -> JSONResponse:

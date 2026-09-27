@@ -146,9 +146,12 @@ def test_pages_fingerprint_their_assets(client, project):
     bundle = client.get(scripts[0])
     assert "immutable" in bundle.headers["cache-control"]
     assert bundle.headers["content-type"].startswith("application/javascript")
-    # the page's scripts, whole and in page order
-    studio_js = client.get("/static/studio.js").text
-    assistant_js = client.get("/static/assistant.js").text
+    # the page's scripts, whole and in page order (served minified: the same
+    # program without its comments and indentation, operonx_studio/minify.py)
+    from operonx_studio.minify import strip_js
+
+    studio_js = strip_js(client.get("/static/studio.js").text)
+    assistant_js = strip_js(client.get("/static/assistant.js").text)
     assert studio_js in bundle.text and assistant_js in bundle.text
     assert bundle.text.index(studio_js) < bundle.text.index(assistant_js)
     # the plain files still serve, revalidating

@@ -947,6 +947,13 @@ body:not([data-stage]) .canvasbar { display: none; }
 .wfnote.wfmissing { background: var(--surface-2); border: 1px solid var(--border); padding: 12px 14px; }
 .wfnote.wfmissing button { margin-left: auto; }
 
+/* a revisited screen's last picture, over the screen while it refreshes
+   (studio.js coverWhileFresh); rows it did not have are marked a moment */
+.revisit-cover { z-index: 5; overflow: hidden; background: var(--bg); pointer-events: none; }
+tr.fresh > td, .fresh { animation: freshrow 2.4s var(--ease-out); }
+@keyframes freshrow { from { background: var(--signal-soft); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { tr.fresh > td, .fresh { animation: none; } }
+
 /* ── the side panel: one panel on the right, two tabs ─────────────── */
 
 #dragbar { width: 6px; margin-right: -6px; flex: none; cursor: col-resize; z-index: 6;

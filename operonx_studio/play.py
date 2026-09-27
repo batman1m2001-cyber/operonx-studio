@@ -28,6 +28,10 @@ __all__ = ["BridgeError", "Bridges", "PlayBridge"]
 
 #: A bridge nobody has used for this long is stopped.
 IDLE_TTL = 15 * 60.0
+#: At most this many bridges stay up while idle: a warm-up or an open beyond
+#: it stops the least recently used idle one (the callbot's bridge alone
+#: holds ~200 MB; measured, docs/ASSISTANT_NEXT_PLAN.md §8).
+MAX_WARM = 2
 _POLL_HOLD = 4.0
 _KEEP_EVENTS = 4000
 _LINE_LIMIT = 16 * 1024 * 1024
@@ -64,6 +68,7 @@ class PlayBridge:
     last_used: float = field(default_factory=time.monotonic)
     ready: Optional[asyncio.Future] = None
     started_at: float = 0.0
+    warming: Optional[asyncio.Task] = None      # a warm-up's start, kept so it is not collected
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -206,24 +211,76 @@ class Bridges:
     def __init__(self) -> None:
         self._by_pid: Dict[str, PlayBridge] = {}
 
+    def _make(self, pid: str, watcher: Any) -> PlayBridge:
+        bridge = self._by_pid.get(pid)
+        if bridge is None:
+            bridge = PlayBridge(root=watcher.root, env=watcher._child_env(), fingerprint=watcher.fingerprint(),
+                                cmd=[watcher.interpreter(), "-m", "operonx.app.play", "--root", str(watcher.root)])
+            self._by_pid[pid] = bridge
+        return bridge
+
     async def get(self, pid: str, watcher: Any) -> PlayBridge:
         """The project's bridge, started — restarted first when the code
         changed since it started and no session is open."""
         self._sweep()
-        bridge = self._by_pid.get(pid)
+        bridge = self._make(pid, watcher)
         fp = watcher.fingerprint()
-        if bridge is None:
-            bridge = PlayBridge(root=watcher.root, env=watcher._child_env(), fingerprint=fp,
-                                cmd=[watcher.interpreter(), "-m", "operonx.app.play", "--root", str(watcher.root)])
-            self._by_pid[pid] = bridge
-        elif bridge.alive and bridge.fingerprint != fp and not bridge.live:
+        if bridge.alive and bridge.fingerprint != fp and not bridge.live:
             await bridge.stop()
             bridge._push({"t": "bridge_restart", "reason": "the project's code changed"})
         if not bridge.alive:
             bridge.fingerprint = fp
             bridge.cmd[0] = watcher.interpreter()
             await bridge.start()
+        elif bridge.ready is not None and not bridge.ready.done():
+            # a warm-up is still starting it: wait for it, don't start a second
+            try:
+                await asyncio.wait_for(asyncio.shield(bridge.ready), timeout=120)
+            except asyncio.TimeoutError:
+                raise BridgeError("the playground bridge did not start within 120 s") from None
+        bridge.last_used = time.monotonic()
+        self._limit(keep=pid)
         return bridge
+
+    def warm(self, pid: str, watcher: Any) -> str:
+        """Start the project's bridge ahead of the Playground, and have it load
+        what it serves, without waiting for either: a first open found it cold
+        (0.65-2.9 s, measured). Returns
+        ``warm`` (up), or ``starting``. A failure is left for the open to
+        report."""
+        self._sweep()
+        bridge = self._make(pid, watcher)
+        bridge.last_used = time.monotonic()
+        if bridge.alive:
+            return "warm" if bridge.ready is not None and bridge.ready.done() else "starting"
+        bridge.fingerprint = watcher.fingerprint()
+        bridge.cmd[0] = watcher.interpreter()
+
+        async def start() -> None:
+            # started, then asked what it serves: that first `describe` loads
+            # the project's services (2 s of the callbot's 2.6 s first open;
+            # the next one took 0.02 s — measured), so it is the warm-up too
+            try:
+                await bridge.start()
+                await bridge.ask({"op": "describe"}, timeout=60)
+            except (BridgeError, asyncio.TimeoutError):
+                pass
+
+        bridge.warming = asyncio.get_running_loop().create_task(start())
+        self._limit(keep=pid)
+        return "starting"
+
+    def _limit(self, keep: str) -> None:
+        """No more than MAX_WARM bridges up while idle: the least recently
+        used idle ones stop. One with an open session never does."""
+        alive = [(b.last_used, p, b) for p, b in self._by_pid.items() if b.alive or (p == keep)]
+        extra = len(alive) - MAX_WARM
+        for _, p, b in sorted(alive):
+            if extra <= 0:
+                break
+            if p != keep and not b.live:
+                asyncio.get_running_loop().create_task(b.stop())
+                extra -= 1
 
     def peek(self, pid: str) -> Optional[PlayBridge]:
         return self._by_pid.get(pid)

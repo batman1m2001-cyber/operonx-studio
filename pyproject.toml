@@ -23,6 +23,7 @@ dependencies = [
     "tomli>=2.0; python_version < '3.11'",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
+    "rcssmin>=1.1",
 ]
 
 [project.optional-dependencies]

@@ -377,3 +377,47 @@ def test_simulated_users_are_checked_and_refused_where_they_cannot_talk(client, 
     refused = [e for e in events if e["t"] == "refused"]
     assert {e["sid"] for e in refused} == set(got["sids"])
     assert refused[0]["reason"] == "a simulated user speaks text, and this door takes voice"
+
+
+# ── N3: the bridge, warm before the Playground opens ──────────────────────
+
+def test_a_warm_up_starts_the_bridge_and_loads_what_it_serves(client, project):
+    pid = _open(client, project)
+    assert client.post(f"/api/p/{pid}/play/warm").json()["state"] == "starting"
+    for _ in range(300):
+        if client.post(f"/api/p/{pid}/play/warm").json()["state"] == "warm":
+            break
+        time.sleep(0.05)
+    assert client.post(f"/api/p/{pid}/play/warm").json()["state"] == "warm"
+    # the open finds it ready (and says the same as a cold one would)
+    doors = {d["service"] for d in client.get(f"/api/p/{pid}/play/doors").json()["doors"]}
+    assert {"score", "chat"} <= doors
+    assert client.post("/api/p/nope/play/warm").status_code == 404
+
+
+def test_no_more_than_two_bridges_stay_up_while_idle():
+    import asyncio
+
+    from operonx_studio.play import MAX_WARM, Bridges
+
+    class Stub:
+        def __init__(self, used, live=False):
+            self.last_used, self.live, self.stopped = used, ({"s": 1.0} if live else {}), False
+
+        @property
+        def alive(self):
+            return not self.stopped
+
+        async def stop(self):
+            self.stopped = True
+
+    async def run():
+        b = Bridges()
+        b._by_pid = {"a": Stub(1), "b": Stub(2, live=True), "c": Stub(3), "d": Stub(4)}
+        b._limit(keep="d")
+        await asyncio.sleep(0)
+        return {p: s.stopped for p, s in b._by_pid.items()}
+
+    stopped = asyncio.run(run())
+    # four up, two allowed: the oldest idle ones go; one with a session, or the one asked for, never
+    assert MAX_WARM == 2 and stopped == {"a": True, "b": False, "c": True, "d": False}

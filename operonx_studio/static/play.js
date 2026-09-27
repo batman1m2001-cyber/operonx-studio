@@ -994,5 +994,23 @@ const PlayView = (() => {
   }
 
   registerPane("playground", {el: box, show});
+
+  /* The bridge, warm before it is needed: its cold start was 0.65-2.9 s of
+   * the Playground's first open (the callbot's the slowest; measured). Asked
+   * for when the pointer or focus reaches the Playground, and when a project
+   * with doors has been open 3 s. The studio keeps at most two warm. */
+  let warmedAt = 0;
+  const warm = () => {
+    if (Date.now() - warmedAt < 60000 || state.tab === "playground") return;
+    warmedAt = Date.now();
+    api(`/api/p/${PID}/play/warm`, {}).catch(() => { warmedAt = 0; });
+  };
+  const hasDoors = () => ((state.ir || {}).services || []).some(s => s.kind !== "asgi");
+  for (const b of document.querySelectorAll('.rail button[data-tab="playground"]')) {
+    b.addEventListener("pointerenter", warm);
+    b.addEventListener("focus", warm);
+  }
+  setTimeout(() => { if (!document.hidden && hasDoors()) warm(); }, 3000);
+
   return {rerun, rerunSection, show};
 })();
