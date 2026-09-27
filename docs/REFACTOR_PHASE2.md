@@ -780,10 +780,12 @@ A synthetic 302-op flow redraws in about 130 ms and scrolls smoothly.
 - [ ] **Minifying the scripts.** It would save only about 0.25 s once per
   update, and it needs a new dependency. Parked on purpose (§10); revisit
   only if the bundle grows a lot.
-- [ ] **Canvas auto-layout hotfix**, in progress:
-  `docs/LAYOUT_HOTFIX_PLAN.md`. The corner-wire bug has been reproduced:
-  a render while the canvas is hidden, for example when leaving a run's
-  Workflow view for Flow, or after a code change lands on another tab.
+- [x] **Canvas auto-layout hotfix**, done (62b4bfe):
+  `docs/LAYOUT_HOTFIX_PLAN.md` §6. The audit found 14 defects, the
+  reported corner-wire bug among them, and all are fixed. Its error
+  findings went from 12,636 to 0 over 328 cases.
+  `scripts/perf/layout_audit.py` is now the gate before any canvas
+  change.
 
 ### 12.4 Open — shipping
 
