@@ -1279,7 +1279,11 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 
 /* ── One run: the verdict, lenses, the timeline ─────────────────── */
 
-.runhead { flex-direction: column; align-items: stretch; gap: 6px; }
+.runhead { flex-direction: column; align-items: stretch; gap: 6px; flex-wrap: nowrap; }
+/* the origin line is a row of the column: its row-header flex-basis (100%)
+   made it as tall as the header here, and the wrap put it in a second
+   column past the right edge — every job, eval and service run lost it */
+.runhead .tlorigin { flex-basis: auto; margin-top: 0; }
 .runhead-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
 .verdict { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-base);
   color: var(--text); }

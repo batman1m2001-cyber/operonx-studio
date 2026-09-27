@@ -1,7 +1,8 @@
 # Flow canvas auto-layout — audit and hotfix plan
 
-Status: **plan written 2026-09-27; the audit is not run yet, nothing
-fixed yet.** Branch `feat/assistant-first` (after 73c2c9f).
+Status: **done 2026-09-27: audited, 14 findings, all fixed; results in
+§6.** Branch `feat/assistant-first` (after 73c2c9f). The audit harness
+`scripts/perf/layout_audit.py` is the gate before any canvas change.
 
 Written for the next session: the user saw a "weird layout" on the Flow
 canvas and asked for a full audit of the auto-layout, played as a UI/UX
@@ -225,3 +226,177 @@ them all by eye — the checks cannot see "looks wrong".
   change, and regenerate the baseline only for an intended change.
 - Screenshots before and after on desktop and phone, the studio test
   suite (479) green, and commits as Bruce Win with no co-author line.
+
+## 6. Results
+
+The audit ran as planned: 13 projects, every graph, and 328 cases at
+desktop, phone (390 px) and tablet (768 and 1024 px) widths. Every case
+was checked by geometry and screenshotted. All 52 contact sheets were
+then read by eye.
+
+- **Before:** 12,636 error findings.
+- **After:** 0 error findings and 0 warnings.
+
+Two of the findings (F12 and F13) came from the eye review, not the
+checks. Every cause below was confirmed by a measurement or a repro
+before its fix.
+
+### 6.1 Findings and fixes
+
+**F1: the reported bug.** A render while the canvas is hidden measured
+0.
+- *Repro:* 3 of 4 paths put `is_audio`'s ports at (±1, 0) and left the
+  card at its guessed 260 px (268 px when measured). The logged render
+  showed `shown: false, tab: traces`. The baseline had 392 port findings.
+- *Everyday triggers:*
+  - leaving a run's **Workflow view for Flow** (`leaveWorkflow()` renders
+    before `switchTab` shows the stage);
+  - a **code change landing while another tab is open** (pulse →
+    `load(false)`);
+  - opening a page with `#assistant=` (focus mode).
+- *Fix (HF1):* `render()` defers while `#stage` has no client rects. The
+  canvas is drawn at the end of `switchTab("flow")`, and a
+  `ResizeObserver` catches any other way it comes back. `load(first)`
+  fits the view once the canvas shows.
+- *Fix (HF2):* a row that measures 0 wide gets no port.
+
+**F2: wires detached from their ports, on every project at the landing
+zoom.**
+- *Cause:* below about 85% zoom, cards are 48–51 px tall, but
+  `it.h = max(64, measured)` kept the layout's 64 px guess. Every wire out
+  of such a card started 14 px below its port dot.
+- *Measured:* 5,909 model-versus-card findings and 6,139 wire-end
+  findings in the baseline.
+- *Fix:* `it.h` is the measured height.
+
+**F3: members hung out of their container** (ex05 `graded`: its END
+knob at y 2726, its members down to 2770).
+- *Cause:* the END knob stood in the gap between two members, shared no
+  column with them, and so was not pushed down with them. The
+  container's height follows the knob.
+- *Fix:* END is kept under the lowest member (`withBoundaries`' rule).
+
+**F4: the flow's END pill landed on a card** (loopy: `ag` and END
+overlapped by 66×13). The exit's tie also ran straight through that card.
+- *Fix:*
+  - START and END are placed clear of every card in their column,
+    before the extent is computed;
+  - ties are routed like any other wire (`routeAvoiding`);
+  - ties go knob to knob, not box to box (deepnest: 24 px off).
+
+**F5: a router wire to a target directly beneath it** curved back
+through the router's own card (loopy, ex05 `route_1`).
+- *Fix:* the wire steps out beside the card and below its bottom before
+  dropping into the target.
+
+**F6: Find picked "router" when "out" was typed.**
+- *Fix:* an exact name wins, then a name that starts with the text, then
+  one that contains it; among equals, the shallowest.
+
+**F7: switching graphs left the side panel on the previous graph**
+(loopy showed "deepnest").
+- *Fix:* `renderFlowInfo()` and `pushView()` run on the switch.
+
+**F8: the "Replaying … done" pill rode back to the Flow tab.**
+- *Cause:* `leaveWorkflow()` stopped the replay quietly, and a quiet stop
+  never hides the pill.
+- *Fix:* a normal stop.
+
+**F9: a short near-vertical hop blocked by a card bowed about 270 px
+out, and out of its container** (loopy's END tie, ex05 `route_1 → END`).
+The fixed bow sizes were too coarse for a card sitting low in a short
+gap.
+- *Fix:*
+  - a side step: a lane just past the blocking card, then back;
+  - a container's side walls count as obstacles for its members' wires
+    (a new `escape` check covers this).
+
+**F10: the run header's origin line was pushed off the right edge.**
+Affected: every job, eval, service and playground run, in the Tree and
+Workflow views.
+- *Cause:* `.tlorigin { flex-basis: 100% }` was written for a row header.
+  In the column-direction `.runhead` it made the line as tall as the
+  header, and the wrap moved it into a second column (measured at
+  x 1046, 172 px tall).
+- *Fix:* `.runhead` doesn't wrap, and the line's basis is `auto`.
+
+**F11: a loop's return wire left its container** (ex09's `loop`: its
+peak 16 px past the wall, the "↺ loop" label outside).
+- *Fix:* an opened graph with a loop keeps room on its right for the
+  return and its label. The knobs stay centred over the content.
+
+**F12: two neighbours grown to the width cap stood 6 px apart** (310 px
+cards in 316 px slots).
+- *Fix:* a row keeps 16 px between cards. The wider ones give width back
+  about their centres, never below the slot's 260 px. A cut name shows
+  in full on hover.
+
+**F13: a run's Workflow view opened at the top-left corner**, and the
+Flow tab lost its view afterwards.
+- *Cause:* moving the canvas into the run pane resets its scroll; hiding
+  it does not.
+- *Measured, phone:* 3 of 27 cards on screen in the run view; back on
+  Flow, scroll 419 → 0 (9 → 6 cards on screen).
+- *Measured, desktop:* scroll 182 → 0.
+- *Fix:*
+  - the run pane fits its own box (`initView(true)`, the saved view left
+    alone);
+  - the Flow view (zoom and scroll) is remembered when the tab is left
+    and restored exactly when the pane gives the canvas back.
+
+**F14 (a guard against a race, not observed):** the Flow view is saved
+500 ms after scrolling stops. The delayed save now re-checks that Flow
+is still showing, so it can't store a run pane's scroll.
+
+### 6.2 Checked, and left as they are
+
+- **Phone landing view.** The phone opens the flow at 70%, centred, with
+  its sides cut. That is the landing rule (readable over whole), not a
+  defect.
+- **Port dots without a wire.** A decision row whose route is a loop
+  return or an exit shows its port dot with no wire. The loop return
+  leaves from the card's flank. This is a design question.
+- **Runs from other graphs.** A job run of a graph that isn't on the
+  canvas (the `params` graph of a job) paints every card faded.
+- **The edge project's long names.** Its `longnames` graph first used
+  short instance names (s, a, b…), so the long function names never
+  reached a card. It now uses long instance names; the width cap and
+  name-cutting are exercised.
+
+### 6.3 Evidence that nothing else moved
+
+- **Geometry.** Dumped at 3 zooms for callbot, educa_reminder_agent,
+  ex05, big300 and the edge project, committed code against the fix:
+  - at 100%: callbot changed 0 cards and 2 wires (the ties now route knob
+    to knob); big300 is identical;
+  - at 60% and 35%: wires start at the real card bottoms (F2), and
+    container END knobs sit 13–14 px higher;
+  - ex05: its END knob and egress drop 59 px (F3), and `agent` widens
+    for its loop (F11);
+  - the edge project: only its two capped neighbours changed (F12);
+  - no card's x position changed anywhere else.
+- **Render cost is unchanged:**
+
+  | Project | Committed | Fixed |
+  |---|---|---|
+  | callbot | 46–52 ms | 47–50 ms |
+  | big300 | 123–210 ms | 116–134 ms |
+  | ex05 | 32–34 ms | 32–35 ms |
+
+  Zoom frames: p50 16.6 ms, no long tasks.
+- **Checks:**
+  - the reported-bug repro gives correct ports and widths on all paths;
+  - `flows.py`: 21/21;
+  - studio tests: 479 passed.
+
+### 6.4 The gate
+
+```
+scripts/perf/layout_audit.py http://127.0.0.1:8766 <out> --widths --touch --sheets
+```
+
+- It covers 13 projects and 328 cases in about 5 minutes, and exits 1 on
+  any error finding.
+- `--touch` writes a probe file into scratch projects only.
+- `--sheets` writes contact sheets for the eye review; the checks cannot
+  see "looks wrong".

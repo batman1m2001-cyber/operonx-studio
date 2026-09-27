@@ -244,7 +244,8 @@ function withBoundaries(model, key, depth) {
     if (it.node.end) edges.push({src: it.node.id, dst: "__end__", boundary: true});
   }
   model.items.push(start, end);
-  return {items: model.items, edges, w: model.w, h: end.y + KB / 2};
+  // the knobs stay centred over the content; a loop's room widens the box
+  return {items: model.items, edges, w: model.w + (model.loopRoom || 0), h: end.y + KB / 2};
 }
 
 function placeGraph(g, prefix, depth) {
@@ -285,7 +286,23 @@ function placeGraph(g, prefix, depth) {
     maxX = Math.max(maxX, it.x + it.w);
     maxY = Math.max(maxY, it.y + it.h);
   }
-  return {items, edges: g.edges || [], w: maxX + 48, h: maxY + 48};
+  // An opened graph holds its own loops: a return bulges right of its
+  // cards (returnPath: 56 px + 8% of its height, a card may grow 25 px
+  // past its slot) with its "↺ loop" label beyond. Its box keeps room
+  // for both, or the wire left the container (ex09's loop). The top
+  // level has the extent's margin instead.
+  let loopRoom = 0;
+  if (depth > 0) {
+    const byId = new Map(items.map(it => [it.node.id, it]));
+    for (const e of g.edges || []) {
+      const a = e.back && byId.get(e.src), b = e.back && byId.get(e.dst);
+      if (!a || !b) continue;
+      const dy = Math.abs((a.y + a.h / 2) - (b.y + b.h / 2));
+      const need = Math.max(a.x + a.w, b.x + b.w) + 25 + 56 + dy * 0.08 + 34;
+      loopRoom = Math.max(loopRoom, Math.ceil(need - (maxX + 48)));
+    }
+  }
+  return {items, edges: g.edges || [], w: maxX + 48, h: maxY + 48, loopRoom};
 }
 
 function flattenModel(model, ox, oy, out) {
@@ -367,10 +384,20 @@ function _rects(obstacles, a, b) {
   const inside = (o, it) => it && it.x >= o.x - 1 && it.y >= o.y - 1
     && it.x + it.w <= o.x + o.w + 1 && it.y + it.h <= o.y + o.h + 1;
   const out = [];
+  let holder = null;
   for (const o of obstacles) {
     if (o === a || o === b) continue;
-    if (o.inner && (inside(o, a) || inside(o, b))) continue;
+    if (o.inner && (inside(o, a) || inside(o, b))) {
+      if (!holder || o.w * o.h < holder.w * holder.h) holder = o;
+      continue;
+    }
     out.push({l: o.x - 6, r: o.x + o.w + 6, t: o.y - 6, b: o.y + o.h + 6});
+  }
+  // ...and a wire between members stays in their box: its side walls are
+  // obstacles too, so no detour swings out through them (ex05's agent)
+  if (holder) {
+    out.push({l: -1e6, r: holder.x + 4, t: -1e6, b: 1e6, wall: true});
+    out.push({l: holder.x + holder.w - 4, r: 1e6, t: -1e6, b: 1e6, wall: true});
   }
   return out;
 }
@@ -447,8 +474,32 @@ function routeAvoiding(a, b, obstacles) {
       + ` L ${lane} ${y2 - 100}`
       + ` C ${lane} ${y2 - 46}, ${x2} ${y2 - 46}, ${x2} ${y2}`;
   };
+  // A short near-vertical hop blocked by a card in its own column steps
+  // aside just past that card and back. The bow is one symmetric curve:
+  // to clear an op sitting low in a short gap (a loop's router tying to
+  // END over the op beneath it) it swung ~270 px out, and out of its
+  // container.
+  const sideStep = () => {
+    if (Math.abs(x2 - x1) >= 40) return null;
+    const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
+    const block = rects.filter(o => !o.wall && o.l < hi + 8 && o.r > lo - 8 && o.b > y1 && o.t < y2);
+    if (!block.length) return null;
+    const bt = Math.min(...block.map(o => o.t)), bb = Math.max(...block.map(o => o.b));
+    if (bt - y1 < 16 || y2 - bb < 16) return null;   // no room to turn
+    const lane = _clearLaneX(rects, bt, bb, (x1 + x2) / 2);
+    if (lane === null) return null;
+    const q1 = (bt - y1) / 2, q2 = (y2 - bb) / 2;
+    if (_hits(_sampleCubic(x1, y1, x1, y1 + q1, lane, bt - q1, lane, bt), rects)
+        || _hits(_sampleCubic(lane, bb, lane, bb + q2, x2, y2 - q2, x2, y2), rects)) {
+      _lanes.v.pop();   // the turns are blocked: give the lane back
+      return null;
+    }
+    return `M ${x1} ${y1} C ${x1} ${y1 + q1}, ${lane} ${bt - q1}, ${lane} ${bt}`
+      + ` L ${lane} ${bb}`
+      + ` C ${lane} ${bb + q2}, ${x2} ${y2 - q2}, ${x2} ${y2}`;
+  };
   const shortHop = y2 - y1 < 480;
-  return (shortHop ? (bow() ?? laneRoute()) : (laneRoute() ?? bow()))
+  return (shortHop ? (sideStep() ?? bow() ?? laneRoute()) : (laneRoute() ?? bow()))
     ?? bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
 }
 
@@ -539,10 +590,36 @@ function serveNodesFor(graph) {
 
 /* ── rendering ────────────────────────────────────────────────────── */
 
+/* A canvas that is not on screen (another tab, the assistant in focus)
+ * measures every card as 0 × 0: laid out then, decision wires left from
+ * the cards' top-left corners, names kept their guessed widths, and
+ * nothing redrew when the canvas came back (docs/LAYOUT_HOTFIX_PLAN.md).
+ * So a render while hidden only marks the canvas stale; it is drawn the
+ * moment it shows again. */
+const canvasShown = () => $("#stage").getClientRects().length > 0;
+function flushCanvas() {
+  if (!canvasShown()) return;
+  if (state.renderPending) render();
+  // the Flow tab's view, never inside a run's pane (which fits its own):
+  // exactly as it was left when a run's pane borrowed the canvas, else
+  // the saved or landing view
+  if (state.viewPending && !state.workflowOn) {
+    state.viewPending = false;
+    const v = state.flowView;
+    if (!v) { initView(); return; }
+    state.view.scale = v.scale;
+    applyView();
+    $("#stage").scrollLeft = v.x;
+    $("#stage").scrollTop = v.y;
+  }
+}
+
 function render() {
   const g = state.graph;
   const gname = $("#graph-name");
   if (gname) gname.textContent = g ? g.name : "no graph";
+  if (!canvasShown()) { state.renderPending = true; return; }
+  state.renderPending = false;
   const nodesBox = $("#nodes");
   const svg = $("#edges");
   nodesBox.textContent = "";
@@ -626,25 +703,59 @@ function render() {
   const natural = measured.map(m => m.els.map(e => e.offsetWidth));
   nodesBox.classList.remove("measuring");
   const laidOut = measured.map(m => ({shown: !!m.card.offsetHeight, widths: m.els.map(e => e.clientWidth)}));
+  const resize = (m, w) => {
+    const it = m.it;
+    if (w === it.w) return;
+    it.x += (it.w - w) / 2;
+    it.w = w;
+    m.card.style.width = `${w}px`;
+    m.card.style.left = `${it.x}px`;
+  };
   measured.forEach((m, i) => {
     if (!laidOut[i].shown || !m.els.length) return;
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
-    const it = m.it;
-    const newW = Math.max(180, Math.min(310, Math.ceil(it.w + need + 8)));
-    if (newW !== it.w) {
-      it.x += (it.w - newW) / 2;
-      it.w = newW;
-      m.card.style.width = `${newW}px`;
-      m.card.style.left = `${it.x}px`;
-    }
+    const want = Math.ceil(m.it.w + need + 8);
+    m.capped = want > 310;
+    resize(m, Math.max(180, Math.min(310, want)));
   });
+  // Two neighbours both grown to the cap stood 6 px apart (310 wide in
+  // 316 px slots). A row keeps 16 px between its cards: the wider ones
+  // give width back about their centres, never below the slot's own
+  // 260, which leaves the grid's 56.
+  const rowsOf = new Map();
+  for (const m of measured) {
+    const k = `${m.it.key.split("/").slice(0, -1).join("/")}|${Math.round(m.it.y)}`;
+    if (!rowsOf.has(k)) rowsOf.set(k, []);
+    rowsOf.get(k).push(m);
+  }
+  for (const row of rowsOf.values()) {
+    row.sort((p, q) => p.it.x - q.it.x);
+    for (let i = 1; i < row.length; i++) {
+      const a = row[i - 1], b = row[i];
+      const need = 16 - (b.it.x - (a.it.x + a.it.w));
+      if (need <= 0) continue;
+      for (const m of [a, b]) {
+        const w = Math.min(m.it.w, Math.max(NODE_W, m.it.w - need));
+        if (w < m.it.w) { resize(m, w); m.capped = true; }
+      }
+    }
+  }
+  // a name cut short says itself in full on hover
+  for (const m of measured) {
+    if (!m.capped) continue;
+    m.card.dataset.capped = "";
+    for (const e of m.els) if (e.classList.contains("ntext")) e.title = e.textContent;
+  }
   // heights and the decision rows' port dots: all read first (one
   // layout), the rows' sides written after
   const sides = [];
   for (const it of flat.nodes) {
     if (it.inner || it.node.kind === "__boundary__") continue;
     const card = state.cardEls.get(it.key);
-    if (card && card.offsetHeight) it.h = Math.max(it.h, card.offsetHeight);
+    // the card's real height, both ways: the layout's 64 px is a guess,
+    // and a card slimmer than it (50 px at the landing zoom) kept the
+    // guess — every wire out of it then started 14 px below its port
+    if (card && card.offsetHeight) it.h = card.offsetHeight;
     if (card && it.node.routes && it.node.routes.length) {
       // each condition row is a wired exit: record where the wire
       // leaves (first row per target decides), and put the row's port
@@ -659,6 +770,9 @@ function render() {
         const side = tgt && portCX(tgt) < it.x + it.w / 2 ? -1 : 1;
         sides.push([rrow, side < 0]);
         const left = rrow.offsetLeft, top = rrow.offsetTop, w = rrow.offsetWidth, h = rrow.offsetHeight;
+        // a row that is not laid out has no port: its wire leaves the
+        // card's bottom rather than the card's top-left corner
+        if (!w) continue;
         // every row's dot, card-relative — the wire repaint above the
         // card is masked out under each one, so the dot stays the
         // terminal the wire emerges FROM, never a bead the wire buries
@@ -727,6 +841,16 @@ function render() {
       // the END knob rode any shift with its row — the container's
       // bottom edge follows the knob's centre, never the other way
       const endKnob = kids.find(k => k.node.boundary === "end");
+      // ... but a knob standing in the gap between two members shares no
+      // column with them, so a push that moved them down left it on their
+      // row, and the members hung out of the container's bottom (ex05's
+      // graded, under a tall decision card). END keeps withBoundaries'
+      // rule: under the lowest member.
+      if (endKnob) {
+        const lowest = Math.max(...kids.filter(k => k !== endKnob).map(k => k.y + k.h));
+        const floor = lowest + 22 - KB / 2;
+        if (endKnob.y < floor) shiftTree(endKnob, floor - endKnob.y);
+      }
       const newH = Math.max(c.h, endKnob
         ? (endKnob.y + endKnob.h / 2) - c.y
         : bottom + 18 - c.y);
@@ -750,16 +874,43 @@ function render() {
   const at = (name) => flat.nodes.find(it => it.depth === 0 && it.node.name === name);
   const entryTies = (g.entries || []).map(at).filter(Boolean);
   const exitTies = (g.exits || []).map(at).filter(Boolean);
+  // The terminals are placed here, before the extent. Each is centred over
+  // its ops and 96 px away from them — and clear of every card in its
+  // column. An exit with ops beneath it (a loop's router, whose ops
+  // after it loop back) used to put END on top of one of them.
+  const pill = (which, x, y) => ({key: `__main/__${which}`, depth: 0, inner: null,
+                                  x, y, w: B_W, h: B_H,
+                                  node: {id: `__${which}__`, name: which.toUpperCase(),
+                                         kind: "__boundary__", boundary: which}});
+  const over = (items) => items.reduce((s, it) => s + portCX(it), 0) / items.length - B_W / 2;
+  const clearOf = (x, y, dir) => {
+    const tops = flat.nodes.filter(o => o.depth === 0);
+    for (let moved = true, n = 0; moved && n < tops.length; n++) {
+      moved = false;
+      for (const o of tops) {
+        if (o.x < x + B_W + 12 && o.x + o.w > x - 12 && o.y < y + B_H + 30 && o.y + o.h + 30 > y) {
+          y = dir > 0 ? o.y + o.h + 30 : o.y - 30 - B_H;
+          moved = true;
+        }
+      }
+    }
+    return y;
+  };
+  let startIt = null, endIt = null;
+  if (entryTies.length) {
+    const x = over(entryTies);
+    startIt = pill("start", x, clearOf(x, Math.min(...entryTies.map(it => it.y)) - 96, -1));
+  }
+  if (exitTies.length) {
+    const x = over(exitTies);
+    endIt = pill("end", x, clearOf(x, Math.max(...exitTies.map(it => it.y + it.h)) + 96, 1));
+  }
   let minY = gatesIn.length
     ? Math.min(...gatesIn.map(x => x.y)) - 70
     : -NODE_H - 140;
-  if (entryTies.length) {
-    minY = Math.min(minY, Math.min(...entryTies.map(it => it.y)) - 96 - 40);
-  }
+  if (startIt) minY = Math.min(minY, startIt.y - 40);
   let bottom = maxY + 175;
-  if (exitTies.length) {
-    bottom = Math.max(bottom, Math.max(...exitTies.map(it => it.y + it.h)) + 96 + B_H + 40);
-  }
+  if (endIt) bottom = Math.max(bottom, endIt.y + B_H + 40);
   // width includes the right margin where loop returns bulge
   state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: bottom};
 
@@ -819,36 +970,22 @@ function render() {
   // exits. With the client stubs gone, ties land dead-centre on every
   // card, doors included.
   if (flat.nodes.length) {
-    // entryTies / exitTies were resolved above, where the extent needed them
-    const over = (items) => items.reduce((s, it) => s + portCX(it), 0)
-      / items.length - B_W / 2;
-    const tie = (x1, y1, x2, y2) => {
+    // the pills were placed above, where the extent needed them; a tie
+    // routes around a card in its way like any wire (an exit's tie ran
+    // straight through the ops beneath it)
+    const tie = (a, b) => {
       const p = document.createElementNS(SVGNS, "path");
-      p.setAttribute("d", bezier(x1, y1, x2, y2));
+      p.setAttribute("d", routeAvoiding(a, b, flat.nodes));
       p.setAttribute("class", "bedge");
       svg.append(p);
     };
-    if (entryTies.length) {
-      const topY = Math.min(...entryTies.map(it => it.y)) - 96;
-      const startIt = {key: "__main/__start", depth: 0, inner: null,
-                       x: over(entryTies), y: topY, w: B_W, h: B_H,
-                       node: {id: "__start__", name: "START",
-                              kind: "__boundary__", boundary: "start"}};
+    if (startIt) {
       nodesBox.append(boundaryCard(startIt));
-      for (const t of entryTies) {
-        tie(startIt.x + B_W / 2, startIt.y + B_H, t.x + t.w / 2, t.y);
-      }
+      for (const t of entryTies) tie(startIt, t.bIn || t);
     }
-    if (exitTies.length) {
-      const endY = Math.max(...exitTies.map(it => it.y + it.h)) + 96;
-      const endIt = {key: "__main/__end", depth: 0, inner: null,
-                     x: over(exitTies), y: endY, w: B_W, h: B_H,
-                     node: {id: "__end__", name: "END",
-                            kind: "__boundary__", boundary: "end"}};
+    if (endIt) {
       nodesBox.append(boundaryCard(endIt));
-      for (const t of exitTies) {
-        tie(t.x + t.w / 2, t.y + t.h, endIt.x + B_W / 2, endIt.y);
-      }
+      for (const t of exitTies) tie(t.bOut || t, endIt);
     }
   }
 
@@ -884,7 +1021,10 @@ function render() {
     // exits → END. Structural, quiet — not an energy beam.
     if (e.boundary) {
       const bp = document.createElementNS(SVGNS, "path");
-      bp.setAttribute("d", bezier(portCX(a), a.y + a.h, portCX(b), b.y));
+      // around the members in its way, not through them (ex05: a loop's
+      // router ties to END straight through the op beneath it); an opened
+      // member ties from its own END knob, like every other wire
+      bp.setAttribute("d", routeAvoiding(a.bOut || a, b.bIn || b, obstacles));
       bp.setAttribute("class", "bedge");
       svg.append(bp);
       state.edgeEls.push({a: a.key, b: b.key, els: [bp]});
@@ -933,8 +1073,22 @@ function render() {
         // tangent tilts slightly toward the target, so the wire reads
         // "leaving this row, heading there" instead of bowing sideways
         const dip = Math.max(4, Math.min(22, (y2 - y1) * 0.15));
-        p.setAttribute("d",
-          `M ${x1} ${y1} C ${x1 + side * c1} ${y1 + dip}, ${x2} ${y2 - c2}, ${x2} ${y2}`);
+        const bottom = A.y + A.h;
+        if (y2 > bottom && x2 > A.x - 12 && x2 < A.x + A.w + 12) {
+          // the target lies under the card: one curve from the dot to it
+          // bent back through the card's own lower rows. Step out beside
+          // the card and below its bottom first, then drop into the
+          // target — every point of the second half is under the card.
+          const lx = side > 0 ? A.x + A.w + 14 : A.x - 14;
+          const yb = bottom + Math.min(18, Math.max(6, (y2 - bottom) * 0.3));
+          const k = (y2 - yb) / 2;
+          p.setAttribute("d",
+            `M ${x1} ${y1} C ${lx} ${y1}, ${lx} ${y1}, ${lx} ${yb}`
+            + ` C ${lx} ${yb + k}, ${x2} ${y2 - k}, ${x2} ${y2}`);
+        } else {
+          p.setAttribute("d",
+            `M ${x1} ${y1} C ${x1 + side * c1} ${y1 + dip}, ${x2} ${y2 - c2}, ${x2} ${y2}`);
+        }
         p.dataset.fromRow = "1";
       } else {
         p.setAttribute("d", routeAvoiding(A, B, obstacles));
@@ -1046,6 +1200,20 @@ function render() {
   // (op cards were placed before the wires — see the top of render —
   // flatten order still draws a container before its members, so
   // members paint on top of their box without z-index bookkeeping)
+
+  // A wire can bow past every card (a tie routed around an op at the
+  // flow's left edge): the world grows to hold what was actually drawn,
+  // so no stretch of wire sits where the canvas cannot scroll.
+  try {
+    const bb = svg.getBBox();
+    if (bb.width || bb.height) {
+      const ex = state.extent;
+      ex.minX = Math.min(ex.minX, Math.floor(bb.x) - 16);
+      ex.minY = Math.min(ex.minY, Math.floor(bb.y) - 16);
+      ex.maxX = Math.max(ex.maxX, Math.ceil(bb.x + bb.width) + 16);
+      ex.maxY = Math.max(ex.maxY, Math.ceil(bb.y + bb.height) + 16);
+    }
+  } catch { /* nothing drawn */ }
 
   refreshSelection();
   applyView();
@@ -1528,12 +1696,13 @@ function fit() {
  * at the edge. A view the user sets — pan, zoom — is remembered per
  * project and graph, and wins on the next visit. */
 const viewKey = () => `view:${PID}:${state.graph ? state.graph.name : ""}`;
-function initView() {
+function initView(fresh) {
   const ex = state.extent;
   if (!ex) return;
   const stage = $("#stage");
   const r = stage.getBoundingClientRect();
-  const saved = recall(viewKey(), null);
+  // fresh: the landing view for this box, leaving the saved one alone
+  const saved = fresh ? null : recall(viewKey(), null);
   if (saved && saved.scale > 0) {
     state.view.scale = saved.scale;
     applyView();
@@ -1555,10 +1724,15 @@ $("#stage").addEventListener("scroll", () => {
   if (state.tab !== "flow" || !state.extent || state.workflowOn) return;
   clearTimeout(_viewSave);
   _viewSave = setTimeout(() => {
+    // a run opened in the meantime: its pane's scroll is not the Flow view
+    if (state.tab !== "flow" || state.workflowOn) return;
     const st = $("#stage");
     store(viewKey(), {scale: state.view.scale, x: Math.round(st.scrollLeft), y: Math.round(st.scrollTop)});
   }, 500);
 }, {passive: true});
+// however the canvas comes back (leaving the assistant's focus, say), a
+// stale one is drawn as it shows — the tab switch flushes on its own
+new ResizeObserver(() => flushCanvas()).observe($("#stage"));
 
 /* ── inspector ────────────────────────────────────────────────────── */
 
@@ -3121,6 +3295,10 @@ async function showRunWorkflow(run) {
   state.workflowOn = true;
   syncChrome();
   render();
+  // moving the canvas into the run's pane reset its scroll to the top-left
+  // corner (a phone showed 3 of 27 cards, at the edge): the run opens
+  // fitted to its own, smaller box — the Flow tab's saved view untouched
+  initView(true);
   pushView();
   renderFlowInfo();
 }
@@ -3146,7 +3324,9 @@ function walkErrors() {
 // the canvas goes home and the paint comes off — the Flow tab never
 // shows a run
 function leaveWorkflow() {
-  if (liveCanvas) liveCanvas.stop(true);
+  // not quiet: a quiet stop left the "Replaying … done" pill riding back
+  // to the Flow tab with the canvas
+  if (liveCanvas) liveCanvas.stop();
   if (!state.workflowOn) return;
   state.workflowOn = false;
   syncChrome();
@@ -3161,6 +3341,9 @@ function leaveWorkflow() {
   state.runRollups = null;
   state.heatMax = 0;
   render();
+  // ... and coming home it lost the Flow tab's view: it comes back once
+  // the canvas shows at its full size (flushCanvas)
+  state.viewPending = true;
   renderFlowInfo();
 }
 
@@ -3198,6 +3381,12 @@ const PANES = {};
 function registerPane(name, pane) { PANES[name] = pane; }
 
 function switchTab(name, opts) {
+  // where the Flow tab was: a run's pane borrows the canvas, and moving
+  // it resets its scroll (hiding it does not)
+  if (state.tab === "flow" && !state.workflowOn && canvasShown()) {
+    const st = $("#stage");
+    state.flowView = {scale: state.view.scale, x: st.scrollLeft, y: st.scrollTop};
+  }
   leaveWorkflow();
   state.tab = name;
   if (name !== "traces") { state.execPanelRun = null; state.execSel = null; }
@@ -3221,6 +3410,9 @@ function switchTab(name, opts) {
   if (MOBILE.matches && recall("sideTab", "assistant") === "inspect") store(panelKey(), false);
   syncChrome();
   applyPanels();
+  // a canvas left stale while hidden is drawn now, at its final size —
+  // callers read it right after this
+  if (name === "flow") flushCanvas();
   // the inspector speaks about what is on screen: a canvas selection
   // does not follow the user into the Traces list
   if (name !== "flow" && state.sel) { state.sel = null; refreshSelection(); }
@@ -3429,7 +3621,8 @@ $("#graph-pick").onchange = (ev) => {
   state.sel = null;
   state.expanded.clear();
   $("#inspector").classList.remove("open");
-  render(); fit();
+  // the side panel speaks about the graph on screen, not the last one
+  render(); fit(); renderFlowInfo(); pushView();
 };
 
 $("#btn-fit").onclick = fit;
@@ -3555,11 +3748,17 @@ function centerOn(item) {
     if (ev.key !== "Enter") return;
     const q = input.value.trim().toLowerCase();
     if (!q) return;
-    // shallowest match wins — the top-level op, not a container's twin
+    // the exact name first, then a name that starts with it, then any
+    // that contains it ("out" found "router" before "out"); among equals
+    // the shallowest wins — the top-level op, not a container's twin
+    const rank = (item) => {
+      const name = item.node.name.toLowerCase();
+      return (name === q ? 0 : name.startsWith(q) ? 1 : 2) * 100 + item.depth;
+    };
     let best = null;
     for (const [, item] of state.rendered) {
       if (!item.node.name.toLowerCase().includes(q)) continue;
-      if (!best || item.depth < best.depth) best = item;
+      if (!best || rank(item) < rank(best)) best = item;
     }
     if (best) { closeFind(); select(best.key); centerOn(state.rendered.get(best.key)); }
   });
@@ -3679,7 +3878,8 @@ async function load(first) {
   if (state.graph) pick.value = state.graph.name;
   $("#btn-project").title = `${data.graphs.length} operons · ${(data.services || []).length} services · ${(data.jobs || []).length} jobs`;
   render();
-  if (first) initView();
+  // opened on a hidden canvas (the assistant in focus): fit it when it shows
+  if (first) { if (state.renderPending) state.viewPending = true; else initView(); }
   pushView();
   renderFlowInfo();
 }
