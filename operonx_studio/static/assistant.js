@@ -183,16 +183,72 @@
     if (last < text.length) parent.append(document.createTextNode(text.slice(last)));
   }
 
-  function codeBlock(lang, body) {
+  const FOLD_LINES = 12;     // a longer block in the user's message folds
+
+  // opts.name: a file's name for the head; opts.fold: fold past FOLD_LINES
+  function codeBlock(lang, body, opts) {
+    opts = opts || {};
     const box = el("div", "ax-code");
     const head = el("div", "ax-code-head");
-    head.append(el("span", null, lang || "code"));
+    head.append(el("span", "ax-code-lang", [opts.name, lang || (opts.name ? "" : "code")].filter(Boolean).join(" · ")));
     const copy = ibtn("copy", "Copy", "ax-copy");
     copy.onclick = () => copyText(body, copy);
     head.append(copy);
     const pre = el("pre");
     pre.append(el("code", null, body));
     box.append(head, pre);
+    if (opts.fold) foldable(box, body.split("\n").length);
+    return box;
+  }
+
+  // a long block shows its first lines and a "Show all"
+  function foldable(box, lines, all) {
+    if (lines <= FOLD_LINES) return null;
+    all = all || `Show all ${lines} lines`;
+    box.classList.add("folded");
+    const more = el("button", "ax-code-more", all);
+    more.type = "button";
+    more.onclick = () => {
+      const folded = box.classList.toggle("folded");
+      more.textContent = folded ? all : "Show less";
+    };
+    box.append(more);
+    return more;
+  }
+
+  // JSON the user sent: a tree folded past its first level, or the raw text
+  function jsonBlock(value, raw, name) {
+    const box = el("div", "ax-code ax-json");
+    const head = el("div", "ax-code-head");
+    const n = Array.isArray(value) ? value.length : Object.keys(value).length;
+    const unit = Array.isArray(value) ? (n === 1 ? "item" : "items") : (n === 1 ? "key" : "keys");
+    head.append(el("span", "ax-code-lang", `${name ? name + " · " : ""}json · ${n} ${unit}`), el("span", "ax-spacer"));
+    const flip = el("button", "ax-code-flip", "Raw");
+    flip.type = "button";
+    flip.title = "Show the text as sent";
+    const copy = ibtn("copy", "Copy", "ax-copy");
+    copy.onclick = () => copyText(raw, copy);
+    head.append(flip, copy);
+    const tree = el("div", "ax-tree");
+    tree.append(W.Values.render(value, {open: true}));
+    const pre = el("pre");
+    pre.append(el("code", null, raw));
+    pre.hidden = true;
+    // each view folds by its own length: the tree by its rows, the text by its lines
+    let more = null;
+    const refold = () => {
+      box.classList.remove("folded");
+      if (more) more.remove();
+      more = pre.hidden ? foldable(box, n, `Show all ${n} ${unit}`) : foldable(box, raw.split("\n").length);
+    };
+    flip.onclick = () => {
+      pre.hidden = !pre.hidden;
+      tree.hidden = !pre.hidden;
+      flip.textContent = pre.hidden ? "Raw" : "Tree";
+      refold();
+    };
+    box.append(head, tree, pre);
+    refold();
     return box;
   }
 
@@ -210,7 +266,7 @@
     }
   }
 
-  const isBlockStart = (line) => /^\s*```/.test(line) || /^#{1,4}\s/.test(line) || /^\s*>/.test(line)
+  const isBlockStart = (line) => /^\s*`{3,}[^`]*$/.test(line) || /^#{1,4}\s/.test(line) || /^\s*>/.test(line)
     || /^\s*([-*+]|\d+[.)])\s+/.test(line) || /^\s*([-*_])(\s*\1){2,}\s*$/.test(line);
 
   function md(target, text) {
@@ -219,13 +275,17 @@
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
-      const fence = /^\s*```\s*([\w+#.-]*)\s*$/.exec(line);
+      // a fence closes on a backtick run at least as long as its opener;
+      // its info string is the language, then (a file's) name
+      const fence = /^\s*(`{3,})([^`]*)$/.exec(line);
       if (fence) {
+        const close = new RegExp(`^\\s*\`{${fence[1].length},}\\s*$`);
         const body = [];
         i += 1;
-        while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) body.push(lines[i++]);
+        while (i < lines.length && !close.test(lines[i])) body.push(lines[i++]);
         i += 1;   // the closing fence (absent while streaming: the block so far)
-        target.append(codeBlock(fence[1], body.join("\n")));
+        const [lang, ...name] = fence[2].trim().split(/\s+/);
+        target.append(codeBlock(lang, body.join("\n"), {name: name.join(" ")}));
         continue;
       }
       if (!line.trim()) { i += 1; continue; }
@@ -327,6 +387,9 @@
     dropped: new Set(),       // chips the user removed for the next message
     editing: null,            // {turn} when the composer edits an earlier message
     lastEnded: new Set(),
+    blocks: [],               // the composer's pasted cards: {kind, lang, name, text, lines, chars, detail}
+    boxKey: null,             // whose draft the box holds (null until one is loaded)
+    boxH: {},                 // mode → the composer height set by hand (0: grows with the text)
   };
   const K_CURRENT = `ax:${SCOPE}:current`;
 
@@ -343,17 +406,11 @@
   title.title = "Rename this conversation";
   const titleText = el("span", null, "New conversation");
   title.append(titleText);
-  const meter = el("button", "ax-meter");
-  meter.type = "button";
-  meter.hidden = true;
-  const meterRing = el("span", "ax-ring");
-  const meterText = el("span", "ax-meter-text");
-  meter.append(meterRing, meterText);
   const bInfo = ibtn("info", "Conversation details", "ax-b-info");
   const bNew = ibtn("new", "New conversation  ( /new )", "ax-b-new");
   const bFocus = ibtn("expand", "Focus  ( Ctrl J )", "ax-b-focus");
   const bClose = ibtn("x", "Close", "ax-b-close");
-  head.append(bSessions, title, el("span", "ax-spacer"), meter, bInfo, bNew, bFocus, bClose);
+  head.append(bSessions, title, el("span", "ax-spacer"), bInfo, bNew, bFocus, bClose);
 
   // sessions pane
   const side = el("aside", "ax-side");
@@ -384,39 +441,59 @@
   const statusText = el("span", "ax-status-text");
   const statusTime = el("span", "ax-status-time");
   const statusStop = tbtn("Stop", "ax-stop", "stop");
+  statusStop.title = "Stop  ( Esc )";
   status.append(statusDot, statusText, statusTime, statusStop);
 
-  // composer
+  // composer: one box — the pasted cards, the words, then its toolbar
   const composer = el("form", "ax-composer");
   const queued = el("div", "ax-queued");
   queued.hidden = true;
   const chips = el("div", "ax-ctx");
   const inputWrap = el("div", "ax-input");
+  const grip = el("div", "ax-grip");
+  grip.title = "Drag to resize · double-click to fit the text again";
+  grip.setAttribute("aria-hidden", "true");
+  const tray = el("div", "ax-tray");
+  tray.hidden = true;
   const input = el("textarea");
-  input.rows = 1;
-  input.placeholder = PROJECT ? "Ask, or describe a task…" : "Describe what you want to build, or ask about your projects…";
+  input.rows = 2;
+  input.placeholder = PROJECT ? "Ask, or describe a task  ( / for commands )"
+    : "Describe what you want to build, or ask about your projects…";
   input.setAttribute("aria-label", "Message the assistant");
   const slash = el("div", "ax-slash");
   slash.hidden = true;
   slash.setAttribute("role", "listbox");
+  const tools = el("div", "ax-tools");
+  const modelPick = el("button", "ax-model");
+  modelPick.type = "button";
+  modelPick.title = "Which model answers in this conversation";
+  const meter = el("button", "ax-meter");
+  meter.type = "button";
+  meter.hidden = true;
+  const meterRing = el("span", "ax-ring");
+  const meterText = el("span", "ax-meter-text");
+  meter.append(meterRing, meterText);
+  const bExpand = ibtn("unfold", "Expand the editor", "ax-b-expand");
   const send = el("button", "ax-send");
   send.type = "submit";
   send.append(icon("up"));
   send.title = "Send  ( Enter )";
   send.setAttribute("aria-label", "Send");
-  inputWrap.append(input, send);
-  const foot = el("div", "ax-foot-row");
-  const modelPick = el("button", "ax-model");
-  modelPick.type = "button";
-  modelPick.title = "Which model answers in this conversation";
-  const hint = el("span", "ax-hint", "/ for commands");
-  foot.append(modelPick, el("span", "ax-spacer"), hint);
-  composer.append(queued, chips, slash, inputWrap, foot);
+  tools.append(modelPick, el("span", "ax-spacer"), meter, bExpand, send);
+  inputWrap.append(grip, tray, input, tools);
+  composer.append(queued, chips, slash, inputWrap);
+
+  // a pasted card, opened: read it, fix it, or take it out
+  const peek = el("div", "ax-peek");
+  peek.hidden = true;
 
   const pop = el("div", "ax-pop");
   pop.hidden = true;
 
-  main.append(log, jump, status, composer);
+  // the foot holds what sits under the transcript; "New messages" floats above it
+  const foot = el("div", "ax-foot");
+  foot.append(jump, status, composer);
+  main.append(log, foot, peek);
   const body = el("div", "ax-body");
   body.append(side, main);
   root.append(head, body, pop);
@@ -448,10 +525,54 @@
     log.append(turnEl);
   }
 
+  // the user's words keep their line breaks; only `code` and links are marked up
+  function inlineUser(parent, text) {
+    const re = /(`[^`\n]+`)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) parent.append(document.createTextNode(text.slice(last, m.index)));
+      if (m[1]) parent.append(el("code", null, m[1].slice(1, -1)));
+      else {
+        const a = el("a", null, m[2]);
+        a.href = m[2]; a.target = "_blank"; a.rel = "noopener noreferrer";
+        parent.append(a);
+      }
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) parent.append(document.createTextNode(text.slice(last)));
+  }
+
+  function userBlock(lang, name, body) {
+    if ((!lang || lang === "json") && W.Values) {
+      let v;
+      try { v = JSON.parse(body); } catch { v = undefined; }
+      if (v && typeof v === "object") return jsonBlock(v, body, name);
+    }
+    return codeBlock(lang, body, {name, fold: true});
+  }
+
+  /* The user's message: pasted blocks as blocks (a wall sent before the
+   * composer made cards is found and shown as one), the words as typed. */
+  function userBody(target, text) {
+    target.textContent = "";
+    const words = (t) => { const w = el("div", "ax-words"); inlineUser(w, t); target.append(w); };
+    const segs = W.Paste ? W.Paste.split(text) : [{t: "text", text}];
+    let blocks = 0;
+    for (const s of segs) {
+      if (s.t === "block") { target.append(userBlock(s.lang, s.name, s.text)); blocks += 1; continue; }
+      const found = W.Paste && W.Paste.loose(s.text);
+      if (!found) { words(s.text); continue; }
+      if (found.before) words(found.before);
+      target.append(userBlock(found.block.lang, "", found.block.text));
+      blocks += 1;
+    }
+    target.classList.toggle("rich", blocks > 0);
+  }
+
   function renderUser(item) {
     const box = el("div", "ax-user");
     const bubble = el("div", "ax-bubble");
-    bubble.textContent = item.text || "";
+    userBody(bubble, item.text || "");
     box.append(bubble);
     if (item.turn && !item.imported) {
       const acts = el("div", "ax-uacts");
@@ -904,8 +1025,14 @@
     pop.hidden = false;
     const r = anchor.getBoundingClientRect();
     const rr = root.getBoundingClientRect();
-    pop.style.top = `${r.bottom - rr.top + 6}px`;
-    pop.style.right = `${Math.max(8, rr.right - r.right)}px`;
+    // below an anchor in the top half, above one in the bottom half (the
+    // composer's toolbar); lined up with whichever edge it is nearer
+    const low = r.top - rr.top > rr.height / 2;
+    pop.style.top = low ? "" : `${r.bottom - rr.top + 6}px`;
+    pop.style.bottom = low ? `${rr.bottom - r.top + 6}px` : "";
+    const leftish = r.left + r.width / 2 < rr.left + rr.width / 2;
+    pop.style.left = leftish ? `${Math.max(8, r.left - rr.left)}px` : "";
+    pop.style.right = leftish ? "" : `${Math.max(8, rr.right - r.right)}px`;
   }
   document.addEventListener("pointerdown", (ev) => {
     if (!pop.hidden && !pop.contains(ev.target) && !(pop._anchor && pop._anchor.contains(ev.target))) pop.hidden = true;
@@ -1102,6 +1229,7 @@
   /* ── open, new, restore ───────────────────────────────────────────── */
 
   function newSession() {
+    writeDraft();       // what was typed stays with the conversation it was typed in
     A.followToken += 1;
     A.session = null;
     A.items = [];
@@ -1111,21 +1239,24 @@
     local.drop(K_CURRENT);
     paintHead();
     paintBusy();
-    paintQueue();
+    paintEditing();
     renderAll();
     paintList();
+    loadDraft();
   }
 
   async function ensureSession(extra) {
     if (A.session) return A.session;
     const got = await call("/api/assistant/sessions", {scope: SCOPE, ...(extra || {})});
     A.session = got.session;
+    A.boxKey = draftKey();              // what is in the box now belongs to it
     local.set(K_CURRENT, A.session.id);
     paintHead();
     return A.session;
   }
 
   async function openSession(id) {
+    writeDraft();
     const mine = ++A.followToken;
     let got;
     try { got = await call(`/api/assistant/sessions/${id}`); }
@@ -1143,6 +1274,8 @@
     A.editing = null;
     local.set(K_CURRENT, id);
     paintHead();
+    paintEditing();
+    loadDraft();
     renderAll();
     paintList();
     if (got.running) follow(got.running.id, got.running.cursor, got.running);
@@ -1305,17 +1438,25 @@
     return PROJECT ? v : null;
   }
 
-  async function submit(text) {
+  /* Send a message. `fromBox`: it is the composer's, so the box empties
+   * now and comes back if the send fails; a message from elsewhere (a
+   * starter, another screen, the queue) leaves what is being typed alone. */
+  async function submit(text, fromBox) {
     text = String(text || "").trim();
     if (!text) return;
     if (text.startsWith("/") && runCommand(text)) return;
-    if (A.running) { A.queue = text; paintQueue(); input.value = ""; autosize(); return; }
-    if (A.editing) { const t = A.editing.turn; A.editing = null; paintEditing(); await redo({edit_of: t, message: text}); return; }
-    input.value = "";
-    autosize();
+    const snap = fromBox ? takeBox() : null;
     closeSlash();
+    if (A.running) { A.queue = text; paintQueue(); return; }
+    if (A.editing) {
+      const t = A.editing.turn;
+      A.editing = null;
+      paintEditing();
+      if (!(await redo({edit_of: t, message: text})) && snap) { A.editing = {turn: t}; putBox(snap); paintEditing(); }
+      return;
+    }
     let sess;
-    try { sess = await ensureSession(); } catch (err) { toast(err.message, true); return; }
+    try { sess = await ensureSession(); } catch (err) { toast(err.message, true); if (snap) putBox(snap); return; }
     if (A.mode === "hero") placement.enterFocus();
     if (!A.items.length) log.textContent = "";
     // show the message at once; the server's copy replaces it
@@ -1327,8 +1468,7 @@
       got = await call(`/api/assistant/sessions/${sess.id}/turns`, {message: text, view: viewForMessage()});
     } catch (err) {
       if (pendingUser) { pendingUser.remove(); pendingUser = null; }
-      input.value = text;
-      autosize();
+      if (snap) putBox(snap);
       toast(err.message, true);
       return;
     }
@@ -1336,14 +1476,14 @@
     paintChips();
     // the server titles a new conversation from its first message; so does
     // the header, at once (the model's title replaces both when it lands)
-    if (!A.session.title) { A.session.title = titleFrom(text); paintHead(); refreshListIfShown(); }
+    if (!A.session.title) { A.session.title = titleFrom(W.Paste ? W.Paste.gist(text) : text); paintHead(); refreshListIfShown(); }
     // the pending message stays until the server's copy arrives (the first event)
     follow(got.turn, 0);
     refreshListIfShown();
   }
 
   async function redo(opts) {
-    if (!A.session || A.running) return;
+    if (!A.session || A.running) return false;
     // an answer that changed files: its edits stay unless the user puts them back
     const from = A.items.findIndex((x) => x.turn === (opts.retry_of || opts.edit_of));
     const pending = A.items.slice(Math.max(0, from)).filter((x) => x.kind === "changes" && x.state !== "undone");
@@ -1356,23 +1496,36 @@
             await call(`/api/p/${PROJECT}/chat/undo`, {sha: c.sha, files: (c.files || []).filter((f) => !f.new).map((f) => f.path),
               new_files: (c.files || []).filter((f) => f.new).map((f) => f.path)});
             await call(`/api/assistant/sessions/${A.session.id}/items/${c.seq}`, {state: "undone"});
-          } catch (err) { toast(`Could not put the files back: ${err.message}`, true); return; }
+          } catch (err) { toast(`Could not put the files back: ${err.message}`, true); return false; }
         }
       }
     }
     try {
       await call(`/api/assistant/sessions/${A.session.id}/turns`, {...opts, view: viewForMessage()});
-    } catch (err) { toast(err.message, true); return; }
+    } catch (err) { toast(err.message, true); return false; }
     await openSession(A.session.id);
+    return true;
   }
 
+  // an earlier message back in the box, its long blocks as cards again;
+  // what was being typed waits in the draft and returns on cancel
   function startEdit(item) {
     if (A.running) { toast("Wait for the current answer, or stop it, to edit a message"); return; }
+    writeDraft();
     A.editing = {turn: item.turn};
-    input.value = item.text || "";
+    const u = W.Paste ? W.Paste.unpack(item.text || "") : {text: item.text || "", blocks: []};
+    input.value = u.text;
+    A.blocks = u.blocks;
+    paintTray();
     autosize();
     paintEditing();
     input.focus();
+  }
+
+  function cancelEdit() {
+    A.editing = null;
+    paintEditing();
+    loadDraft();
   }
 
   function paintEditing() {
@@ -1382,7 +1535,7 @@
     if (A.editing) {
       queued.append(icon("new"), el("span", null, "Editing an earlier message — sending replaces it and everything after"));
       const x = ibtn("x", "Cancel editing", "ax-mini");
-      x.onclick = () => { A.editing = null; input.value = ""; autosize(); paintEditing(); };
+      x.onclick = cancelEdit;
       queued.append(x);
     } else if (A.queue) paintQueue();
   }
@@ -1392,7 +1545,8 @@
     queued.hidden = !A.queue;
     queued.textContent = "";
     if (!A.queue) return;
-    queued.append(icon("clock"), el("span", null, `Queued: ${A.queue.slice(0, 80)}${A.queue.length > 80 ? "…" : ""}`));
+    const g = (W.Paste ? W.Paste.gist(A.queue) : A.queue).replace(/\s+/g, " ");
+    queued.append(icon("clock"), el("span", null, `Queued: ${g.slice(0, 80)}${g.length > 80 ? "…" : ""}`));
     const x = ibtn("x", "Don't send it", "ax-mini");
     x.onclick = () => { A.queue = null; paintQueue(); };
     queued.append(x);
@@ -1459,6 +1613,7 @@
     input.value = "";
     autosize();
     closeSlash();
+    saveDraft();
     cmd[2](rest.join(" "));
     return true;
   }
@@ -1486,11 +1641,243 @@
 
   /* ── the composer ─────────────────────────────────────────────────── */
 
+  /* Height: two lines at rest, growing with the text to half the panel
+   * (40% of a phone's screen), then scrolling. The grip on the top edge
+   * sets a height by hand, remembered per placement; Expand gives the
+   * words the whole column. */
+  const MIN_BOX = 56;          // two lines of text
+  const expanded = () => root.classList.contains("expanded");
+  const handH = (mode) => (mode in A.boxH ? A.boxH[mode] : (A.boxH[mode] = local.get(`ax:boxh:${mode}`, 0) || 0));
+
   function autosize() {
+    if (expanded()) { input.style.height = ""; return; }
+    const hero = A.mode === "hero";
+    const room = hero ? W.innerHeight : (root.clientHeight || W.innerHeight);
+    const cap = Math.max(120, Math.round(room * (hero ? 0.35 : A.mode === "sheet" ? 0.4 : 0.5)));
+    const hand = hero ? 0 : Math.min(handH(A.mode), Math.round(room * 0.7));
     input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, Math.max(120, Math.round(W.innerHeight * 0.35)))}px`;
+    input.style.height = `${Math.min(Math.max(cap, hand), Math.max(input.scrollHeight, hand))}px`;
   }
-  input.addEventListener("input", () => { autosize(); paintSlash(); });
+
+  grip.addEventListener("pointerdown", (ev) => {
+    if (A.mode === "hero" || expanded()) return;
+    ev.preventDefault();
+    grip.setPointerCapture(ev.pointerId);
+    const y0 = ev.clientY, h0 = input.offsetHeight;
+    const max = Math.round((root.clientHeight || W.innerHeight) * 0.7);
+    root.classList.add("sizing");
+    const move = (e) => { input.style.height = `${Math.max(MIN_BOX, Math.min(max, h0 + y0 - e.clientY))}px`; };
+    const up = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+      grip.removeEventListener("pointercancel", up);
+      root.classList.remove("sizing");
+      const h = input.offsetHeight <= MIN_BOX + 2 ? 0 : input.offsetHeight;
+      A.boxH[A.mode] = h;
+      if (h) local.set(`ax:boxh:${A.mode}`, h); else local.drop(`ax:boxh:${A.mode}`);
+      autosize();
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+    grip.addEventListener("pointercancel", up);
+  });
+  grip.addEventListener("dblclick", () => { A.boxH[A.mode] = 0; local.drop(`ax:boxh:${A.mode}`); autosize(); });
+
+  function setExpanded(on) {
+    if (on === expanded()) return;
+    root.classList.toggle("expanded", on);
+    bExpand.replaceChildren(icon(on ? "fold" : "unfold"));
+    bExpand.title = on ? "Back to the conversation  ( Esc )" : "Expand the editor";
+    bExpand.setAttribute("aria-label", bExpand.title);
+    autosize();
+    if (!on) requestAnimationFrame(toBottom);
+    input.focus();
+  }
+  bExpand.onclick = () => setExpanded(!expanded());
+
+  // the panel changes size (a drag, a rotation, the window): the cap moves
+  let sizeFrame = 0;
+  new ResizeObserver(() => {
+    if (!sizeFrame) sizeFrame = requestAnimationFrame(() => { sizeFrame = 0; autosize(); });
+  }).observe(root);
+
+  /* Pasted cards: a paste past 12 lines or 2,000 characters becomes a card
+   * (static/paste.js says what it is); the message carries it as a fenced
+   * block ahead of the words. */
+  const PASTE_ICON = {json: "braces", code: "code", log: "terminal", text: "file"};
+
+  function paintTray() {
+    tray.textContent = "";
+    tray.hidden = !A.blocks.length;
+    A.blocks.forEach((b, i) => {
+      // compact: what it is, then its size and what is in it
+      const card = el("div", `ax-paste ax-paste-${b.kind || "text"}`);
+      card.dataset.label = W.Paste.label(b);
+      const open = el("button", "ax-paste-open");
+      open.type = "button";
+      open.title = `${card.dataset.label} — preview or edit`;
+      const ico = el("span", "ax-paste-ico");
+      ico.append(icon(PASTE_ICON[b.kind] || "file"));
+      const words = el("span", "ax-paste-words");
+      words.append(el("span", "ax-paste-label", b.name || W.Paste.langLabel(b.lang)));
+      const n = b.lines != null ? b.lines : b.text.split("\n").length;
+      words.append(el("span", "ax-paste-sub", [b.detail, `${n} line${n === 1 ? "" : "s"}`].filter(Boolean).join(" · ")));
+      open.append(ico, words);
+      open.onclick = () => openPeek(i);
+      const x = ibtn("x", "Remove", "ax-paste-x");
+      x.onclick = () => { A.blocks.splice(i, 1); paintTray(); saveDraft(); input.focus(); };
+      card.append(open, x);
+      tray.append(card);
+    });
+  }
+
+  function addBlock(c) {
+    A.blocks.push({kind: c.kind, lang: c.lang, name: c.name || "", text: c.text, lines: c.lines, chars: c.chars,
+      detail: c.detail || ""});
+    paintTray();
+    saveDraft();
+  }
+
+  input.addEventListener("paste", (ev) => {
+    const text = ev.clipboardData && ev.clipboardData.getData("text/plain");
+    if (!text || !W.Paste || !W.Paste.wantsCard(text)) return;  // a short paste stays in the words
+    ev.preventDefault();
+    addBlock(W.Paste.classify(text));
+  });
+
+  function openPeek(i) {
+    const b = A.blocks[i];
+    if (!b) return;
+    peek.textContent = "";
+    const top = el("div", "ax-peek-head");
+    const ico = el("span", "ax-paste-ico");
+    ico.append(icon(PASTE_ICON[b.kind] || "file"));
+    const lang = el("select", "ax-peek-lang");
+    lang.setAttribute("aria-label", "What this is");
+    const langs = {...W.Paste.LABEL};
+    if (!langs[b.lang]) langs[b.lang] = W.Paste.langLabel(b.lang);
+    for (const [k, v] of Object.entries(langs)) { const o = el("option", null, v); o.value = k; lang.append(o); }
+    lang.value = b.lang;
+    const x = ibtn("x", "Close  ( Esc )", "ax-peek-x");
+    top.append(ico, el("b", "ax-peek-title", W.Paste.label(b)), el("span", "ax-spacer"), lang, x);
+    const area = el("textarea", "ax-peek-text");
+    area.value = b.text;
+    area.spellcheck = false;
+    area.setAttribute("aria-label", "The pasted text");
+    const acts = el("div", "ax-peek-acts");
+    const remove = tbtn("Remove", "ax-btn ax-btn-quiet", "trash");
+    const inline = tbtn("Put inline", "ax-btn ax-btn-quiet");
+    inline.title = "As plain words in the box, not a card";
+    const save = tbtn("Save", "ax-btn primary");
+    save.title = "Save  ( Ctrl Enter )";
+    acts.append(remove, inline, el("span", "ax-spacer"), save);
+    peek.append(top, area, acts);
+    const close = () => { peek.hidden = true; peek.textContent = ""; root.classList.remove("peeking"); input.focus(); };
+    x.onclick = close;
+    remove.onclick = () => { A.blocks.splice(i, 1); paintTray(); saveDraft(); close(); };
+    inline.onclick = () => {
+      A.blocks.splice(i, 1);
+      paintTray();
+      const at = input.selectionStart ?? input.value.length;
+      input.value = input.value.slice(0, at) + area.value + input.value.slice(at);
+      close();
+      autosize();
+      saveDraft();
+    };
+    save.onclick = () => {
+      const text = area.value;
+      if (!text.trim()) A.blocks.splice(i, 1);
+      else if (text !== b.text || lang.value !== b.lang) {
+        const c = text !== b.text ? W.Paste.classify(text) : {...b};
+        // the language picked by hand wins over the guess
+        const chosen = lang.value !== b.lang ? lang.value : c.lang;
+        A.blocks[i] = {...b, ...c, lang: chosen, kind: W.Paste.kindOf(chosen),
+          detail: chosen === c.lang ? c.detail || "" : ""};
+      }
+      paintTray();
+      saveDraft();
+      close();
+    };
+    area.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); close(); }
+      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); save.onclick(); }
+    });
+    peek.hidden = false;
+    root.classList.add("peeking");
+    area.focus();
+    area.setSelectionRange(0, 0);
+    area.scrollTop = 0;
+  }
+
+  /* Drafts: each conversation keeps what is being typed (and its cards),
+   * in this browser, until it is sent. A new conversation's draft is the
+   * scope's. */
+  // the box holds one conversation's draft and writes back only to it
+  // (on a page load nothing is loaded yet, so nothing is written over)
+  const draftKey = () => (A.session ? `ax:draft:${A.session.id}` : `ax:draft:${SCOPE}:new`);
+  let draftTimer = 0;
+  function writeDraft() {
+    clearTimeout(draftTimer);
+    const key = A.boxKey;
+    if (!key || A.editing) return;       // an edit is not a draft
+    if (!input.value.trim() && !A.blocks.length) { local.drop(key); return; }
+    local.set(key, {t: Date.now(), text: input.value, blocks: A.blocks});
+  }
+  function saveDraft() { clearTimeout(draftTimer); draftTimer = setTimeout(writeDraft, 300); }
+  // leaving the page writes what the timer has not yet
+  W.addEventListener("pagehide", writeDraft);
+  function loadDraft() {
+    A.boxKey = draftKey();
+    const d = local.get(A.boxKey, null);
+    input.value = (d && typeof d.text === "string") ? d.text : "";
+    A.blocks = (d && Array.isArray(d.blocks)) ? d.blocks.filter((b) => b && typeof b.text === "string") : [];
+    paintTray();
+    autosize();
+  }
+  function pruneDrafts() {
+    // drafts older than 30 days go; a quota never breaks the page
+    try {
+      const old = Date.now() - 30 * 86400e3;
+      for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("ax:draft:") && !((local.get(k, null) || {}).t > old)) localStorage.removeItem(k);
+      }
+    } catch { /* no storage */ }
+  }
+
+  // the box's contents leave on send, and come back if the send fails
+  function takeBox() {
+    const snap = {text: input.value, blocks: A.blocks};
+    clearTimeout(draftTimer);
+    if (!A.editing && A.boxKey) local.drop(A.boxKey);
+    input.value = "";
+    A.blocks = [];
+    paintTray();
+    setExpanded(false);
+    autosize();
+    return snap;
+  }
+  function putBox(snap) {
+    input.value = snap.text;
+    A.blocks = snap.blocks;
+    paintTray();
+    autosize();
+    saveDraft();
+  }
+
+  // Esc empties the box as an edit, so Ctrl Z brings the words back
+  function clearBox() {
+    input.focus();
+    input.select();
+    let done = false;
+    try { done = document.execCommand("delete"); } catch { done = false; }
+    if (!done || input.value) input.value = "";
+    autosize();
+    closeSlash();
+    saveDraft();
+  }
+
+  input.addEventListener("input", () => { autosize(); paintSlash(); saveDraft(); });
   input.addEventListener("keydown", (ev) => {
     if (!slash.hidden && slash._hits) {
       if (ev.key === "ArrowDown") { ev.preventDefault(); slashIndex = (slashIndex + 1) % slash._hits.length; paintSlash(); return; }
@@ -1508,19 +1895,26 @@
       composer.requestSubmit();
       return;
     }
-    if (ev.key === "ArrowUp" && !input.value && !A.running) {
+    if (ev.key === "ArrowUp" && !input.value && !A.blocks.length && !A.running) {
       const last = [...A.items].reverse().find((x) => x.kind === "user" && x.turn && !x.imported);
       if (last) { ev.preventDefault(); startEdit(last); }
     }
     if (ev.key === "Escape") {
-      if (A.editing) { A.editing = null; input.value = ""; autosize(); paintEditing(); }
+      // one thing at a time: the big editor, an edit, the words, a running turn, then the placement
+      ev.preventDefault();
+      if (expanded()) setExpanded(false);
+      else if (A.editing) cancelEdit();
+      else if (input.value) { clearBox(); toast("Cleared — Ctrl Z brings it back"); }
+      else if (A.running) stop();
       else if (A.mode === "focus" || A.mode === "sheet") placement.leave();
     }
   });
   composer.onsubmit = (ev) => {
     ev.preventDefault();
-    if (A.running && !input.value.trim()) { stop(); return; }
-    submit(input.value);
+    const typed = input.value.trim();
+    if (A.running && !typed && !A.blocks.length) { stop(); return; }
+    if (typed.startsWith("/") && runCommand(typed)) return;      // a command leaves the cards be
+    submit(W.Paste ? W.Paste.compose(input.value, A.blocks) : input.value, true);
   };
 
   /* context chips: what rides along with the next message */
@@ -1605,6 +1999,7 @@
   const placement = {
     home: null,
     set(mode) {
+      setExpanded(false);
       A.mode = mode;
       root.classList.remove("dock", "focus", "sheet", "hero");
       root.classList.add(mode);
@@ -1723,6 +2118,7 @@
   }
 
   async function boot() {
+    pruneDrafts();
     root.classList.toggle("details", A.details);
     paintHead();
     paintChips();
@@ -1733,7 +2129,7 @@
     const id = (fromHash && fromHash[1]) || imported || (PROJECT ? local.get(K_CURRENT, null) : null);
     if (fromHash) history.replaceState(null, "", location.pathname + location.search);
     if (id) await openSession(id);
-    else renderAll();
+    else { renderAll(); loadDraft(); }
     if (fromHash && !PHONE.matches) placement.enterFocus();
     else if (fromHash) placement.openSheet();
   }

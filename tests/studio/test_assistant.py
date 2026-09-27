@@ -31,7 +31,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from operonx_studio.app import build_studio_app
-from operonx_studio.assistant import ChatStore, Relay, title_from
+from operonx_studio.assistant import ChatStore, Relay, split_message, title_from
 from operonx_studio.registry import Recents
 
 pytestmark = pytest.mark.unit
@@ -386,6 +386,20 @@ def test_find_archive_rename_delete(client, project, fake):
     assert client.delete(f"/api/assistant/sessions/{a}").json()["deleted"] == a
     assert client.get(f"/api/assistant/sessions/{a}").status_code == 404
     assert client.post("/api/assistant/sessions", json={"scope": "nope"}).status_code == 404
+
+
+def test_pasted_blocks_are_not_the_title():
+    """The composer sends a paste as a fenced block ahead of the words
+    (static/paste.js); the title comes from the words, or names the paste."""
+    body = "\n".join(f'  "k{i}": {i},' for i in range(40))
+    msg = "```json\n{\n" + body + "\n}\n```\n\nWhy is this payload rejected?"
+    assert title_from(msg) == "Why is this payload rejected?"
+    assert title_from("```json\n{\n" + body + "\n}\n```") == "Pasted JSON · 42 lines"
+    assert title_from("```python main.py\nprint(1)\n```") == "main.py · 1 line"
+    # a longer fence holds a shorter one inside
+    words, blocks = split_message("````markdown\nsee:\n```js\nx()\n```\n````\n\nfix it")
+    assert words == "fix it"
+    assert blocks == [("markdown", "", "see:\n```js\nx()\n```")]
 
 
 def test_titles_come_from_the_first_message_then_the_model(client, project, fake, monkeypatch):

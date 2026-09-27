@@ -3784,13 +3784,16 @@ function centerOn(item) {
     panel.style.width = `${width}px`;
   });
   bar.addEventListener("pointerup", () => {
+    if (!dragging) return;
     dragging = false;
     document.body.classList.remove("resizing");
-    store("panelW", parseInt(panel.style.width, 10) || 340);
+    // a click without a drag leaves no width behind (it used to store 340px)
+    if (panel.style.width) store("panelW", parseInt(panel.style.width, 10));
   });
+  // back to the default: 380px, 420px on a large screen (studio.css)
   bar.addEventListener("dblclick", () => {
-    panel.style.width = "380px";
-    store("panelW", 380);
+    panel.style.width = "";
+    store("panelW", null);
   });
 })();
 

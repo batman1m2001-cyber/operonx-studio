@@ -1,7 +1,7 @@
 # Assistant: the next improvements (plan)
 
-Status: **plan, with your decisions taken on 2026-09-27 (§3, §6); nothing
-is built yet.** The build order is in §7. Branch `feat/assistant-first`.
+Status: **being built, in the order of §7.** Your decisions (2026-09-27)
+are in §3 and §6; what has landed is in §8. Branch `feat/assistant-first`.
 
 It covers five asks:
 1. choosing the model, as in Claude Code;
@@ -326,3 +326,24 @@ The order:
 
 Still to discuss after this: shipping S2–S5 (§6.3) and the callbot's
 pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
+
+## 8. Progress
+
+| # | Phase | Commit | Checked with |
+|---|---|---|---|
+| 1 | **A1** Composer | see git log (`assistant A1`) | `scripts/perf/composer.py` 42/42 with `--live` (one Haiku turn); `live_assistant.py` 23/23; `flows.py` 21/21; layout audit 0 errors in 328 cases; 480 studio tests (3 skipped); 39 JS tests |
+
+**A1 notes.**
+- **A JSON paste becomes a card from 200 characters, even on one line.**
+  This goes beyond the plan's rule of 12 lines or 2,000 characters.
+  Minified JSON is a single line, so under that rule the wall you pointed
+  at stayed inline.
+- **Old messages render too.** A message sent before cards existed, with
+  a JSON wall under a question, now shows the question and then the tree.
+- **The title skips the paste.** It comes from the words; a message that
+  is only a paste is named after it ("Pasted JSON · 142 lines"). The
+  naming call sees the words plus one line per block.
+- **Fixed on the way:**
+  - editing and resending an earlier message used to leave its text in
+    the box;
+  - a click on the side panel's drag bar used to store a width of 340 px.
