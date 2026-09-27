@@ -234,3 +234,56 @@ waits on §3.
 - **The sign-in can't be fully automated,** because it finishes on
   Anthropic's page. Tests stop at the URL, and one manual sign-in
   validates the rest.
+
+## 6. Backlog: open problems to discuss
+
+Collected on 2026-09-27 from:
+- the earlier plans: `PLATFORM_PLAN.md` §9 and §14, `REFACTOR_PHASE2.md`
+  §12, and `LAYOUT_HOTFIX_PLAN.md` §6.2;
+- your messages in this session;
+- the branches as they stand.
+
+Nothing here is decided. Each item needs your call. Where I lean one
+way, it says so.
+
+### 6.1 Decisions waiting on you
+
+| # | Problem | Options, and my lean |
+|---|---|---|
+| B1 | **Where the assistant's Claude sign-in lives** (§3 above) | *Its own sign-in* (lean), *shared with this machine*, or *one per studio user* |
+| B2 | **The canvas look.** Phase 2 replaced the organic "brain cell" canvas you had chosen with plain, precise cards, and removed the always-on glow. The phase-2 brief asked for no glow. | Keep the precise cards (lean), or bring the cells back. The old look can be restored. |
+| B3 | **The assistant loads only the studio's own tools.** This skips your personal connectors (Gmail, Drive, Calendar), which is intended. But it *also skips tool servers a project declares for itself*. In return, each answer starts about 1.3 s sooner. | Keep this, but let a project's own servers through (lean); or switch it off (`OPERONX_STUDIO_CHAT_STRICT_MCP=off`) |
+| B4 | **Decision rows without a wire.** A row whose route loops back, or exits the graph, shows its port dot with no wire from it; the loop return leaves from the card's side instead. | Draw the loop return from its own row (lean), hide the dot, or leave it |
+| B5 | **A run of a graph that isn't on the canvas.** For example, a job's `params` graph: its Workflow view paints the *current* graph with every card faded, which misleads. | Say so and offer the Tree view (lean), or draw the run's own graph when the studio knows it |
+| B6 | **Phone landing view.** The flow opens at 70%, centred, with its sides cut off (the "readable over whole" rule). | Keep it (lean), or fit the whole flow on phones |
+| B7 | **Where playground runs are recorded.** They go only to the service's local stores unless a session asks for `remote: true`, so a test never reaches production Langfuse. This was decided in P8 and flagged for you. | Confirm (lean), or record everywhere |
+| B8 | **Production runs can't be replayed.** Only playground runs can: production traffic flows through ports operonx deliberately never records (audio frames). | Opt-in recording of incoming items per service. This has storage and privacy weight (call audio), so it's yours to decide. |
+| B9 | **When to build the shared-team version.** The studio is personal-first: one login, no per-user conversations or sign-ins, no permissions. | Decide when teams are real. It relates to B1's third option. |
+
+### 6.2 Not done: go or no-go
+
+| # | Item | Status |
+|---|---|---|
+| N1 | Dark mode | The colour tokens are ready; no dark theme is defined or checked |
+| N2 | Minifying the scripts | Parked: it saves about 0.25 s once per update and needs a new dependency |
+| N3 | Prewarming the playground bridge | Parked: it costs a project interpreter per open page; the screen says it is starting instead |
+| N4 | Showing a revisited screen's last data at once | Deferred until after one-hop loads, then measure whether the wait is still felt |
+| N5 | A live callbot voice session through the playground | Never run. It drives the shared STT/LLM/TTS and the Redis TTS cache from the callbot's `.env`. The callbot's environment needs operonx 1.9 first. |
+
+### 6.3 Shipping: waiting on you
+
+| # | Item | State |
+|---|---|---|
+| S1 | **operonx 1.9.0** | Branch `feat/runs-records` (8a0ea7d on top; `main` is at 1.8.1). After release, bump the pins in the studio and the callbot. |
+| S2 | **Landing the studio work** | `feat/assistant-first` stacks on `feat/platform` on `redesign/ui`; none are pushed. The studio's `main` is 1d9c773. One PR, or one per phase? |
+| S3 | **Callbot `feat/runs-by-origin`** | 4 commits (runs by origin, key ops, the playground codec) on top of the pushed `refactor/operonx-studio` (ee83947), not pushed |
+| S4 | **Callbot refactor into `staging`** for a real deploy | You asked on 2026-09-18 and said not yet. `staging` has moved since (2b85dc4) and needs a re-sync plan. `staging` is never touched without you. |
+| S5 | **A permanent tunnel** | A Cloudflare account for a named tunnel, or a localhost.run key. The quick-tunnel URL changes on every restart. |
+
+### 6.4 Before a real callbot deploy (last measured; may be out of date)
+
+| # | Problem | Note |
+|---|---|---|
+| D1 | **Capacity** | Fine at the 5-call target, with headroom to about 8, and collapsing at 10 or more (1.7 s late at 10 calls, 3.5 s at 12). Measured on 2026-08-28, *before* the application-layer refactor; re-measure on the current build. |
+| D2 | **Queues between ops are unbounded** | The old channel capped at 4,000 items and counted drops; today a queue grows silently under overload |
+| D3 | **Call store configuration** | `call/_store.py` reads its settings from the environment. Candidate: make it a `call_store:` resource like the others. |

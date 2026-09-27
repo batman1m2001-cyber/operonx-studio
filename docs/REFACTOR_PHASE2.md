@@ -726,6 +726,9 @@ instead (R5).
 
 ## 12. Backlog
 
+> The open items below continue in `docs/ASSISTANT_NEXT_PLAN.md` §6, the
+> one list to discuss from now on.
+
 Saved 2026-09-27 from the final report of phases R0–R6, so the open items
 outlive the conversation. The full numbers are in §10.
 
