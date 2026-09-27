@@ -82,6 +82,11 @@ if "CRASH" in msg:
 
 emit({"type": "system", "subtype": "init", "session_id": sid, "model": model})
 
+if "badmodel" in model:
+    emit({"type": "result", "subtype": "success", "session_id": sid, "is_error": True, "usage": {}, "num_turns": 0,
+          "result": f"There's an issue with the selected model ({model}). It may not exist or you may not have access to it."})
+    sys.exit(1)
+
 if "SLOW" in msg:
     signal.signal(signal.SIGINT, lambda *a: sys.exit(130))
     emit({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}})
@@ -109,7 +114,8 @@ emit({"type": "stream_event", "event": {"type": "content_block_delta", "index": 
 emit({"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {"five_hour": {"utilization": 0.05}}}})
 emit({"type": "result", "subtype": "success", "session_id": sid, "total_cost_usd": 0.0125, "duration_ms": 1234,
       "num_turns": 2, "is_error": "FAIL" in msg, "result": "the fake failed on purpose" if "FAIL" in msg else "Hello world",
-      "usage": usage, "modelUsage": {model: {"contextWindow": 200000, "maxOutputTokens": 32000}}})
+      "usage": usage, "modelUsage": {model: {"contextWindow": 200000, "maxOutputTokens": 32000},
+                                     "claude-helper-1": {"contextWindow": 111}}})
 '''
 
 PROJECT_MAIN = '''
@@ -642,3 +648,77 @@ def test_a_store_from_before_attachments_gains_the_column(tmp_path):
     db.close()
     store = ChatStore(path)
     assert store.turn("t1")["attachments"] == []
+
+
+
+# ── A3: model and effort; B3: a project's own tool servers ────────────────
+
+def test_effort_and_model_reach_the_cli_and_the_answer(client, project, fake):
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    assert client.patch(f"/api/assistant/sessions/{sid}", json={"effort": "extreme"}).status_code == 400
+    assert client.patch(f"/api/assistant/sessions/{sid}", json={"model": "claude-sonnet-5"}).status_code == 200
+    got = client.patch(f"/api/assistant/sessions/{sid}", json={"model": "fable", "effort": "high"}).json()["session"]
+    assert got["model"] == "fable" and got["effort"] == "high"
+    _, events = _say(client, sid, "hello")
+    argv = fake()[-1]["argv"]
+    assert argv[argv.index("--model") + 1] == "fable" and argv[argv.index("--effort") + 1] == "high"
+    end = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "turn_end")
+    assert end["model"] == "fable" and end["effort"] == "high"
+    # the window is the turn's own model's, not the helper listed after it
+    assert client.get(f"/api/assistant/sessions/{sid}").json()["session"]["usage"]["context_window"] == 200000
+    # effort back to the CLI's default: no flag
+    client.patch(f"/api/assistant/sessions/{sid}", json={"effort": None})
+    _say(client, sid, "again")
+    assert "--effort" not in fake()[-1]["argv"]
+
+
+def test_the_menu_learns_what_the_cli_resolved(client, project, fake):
+    got = client.get("/api/assistant/models").json()
+    assert [m["id"] for m in got["models"]] == ["fable", "opus", "sonnet", "haiku"]
+    assert got["efforts"] == ["low", "medium", "high", "xhigh", "max"] and got["default"]["full"] is None
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    _say(client, sid, "hello")                       # no model: the CLI's default (the fake's claude-fake-1)
+    got = client.get("/api/assistant/models").json()
+    assert got["default"] == {"full": "claude-fake-1", "window": 200000}
+
+
+def test_defaults_for_new_conversations(client, project, fake):
+    pid = _pid(client, project)
+    assert client.put("/api/assistant/defaults", json={"model": "gpt"}).status_code == 400
+    assert client.put("/api/assistant/defaults", json={"model": "sonnet", "effort": "high"}).json() == \
+        {"studio_defaults": {"model": "sonnet", "effort": "high"}}
+    s = _session(client, pid)
+    assert (s["model"], s["effort"]) == ("sonnet", "high")
+    assert _session(client, "home")["model"] == "sonnet"
+    # an explicit choice wins; so does the project's [studio.assistant]
+    assert _session(client, pid, model=None)["model"] is None
+    (project / "operonx.toml").write_text(MANIFEST + '\n[studio.assistant]\nmodel = "haiku"\n', encoding="utf-8")
+    s = _session(client, pid)
+    assert (s["model"], s["effort"]) == ("haiku", "high")
+    assert client.get("/api/assistant/models", params={"scope": pid}).json()["new"] == {"model": "haiku", "effort": "high"}
+
+
+def test_a_model_the_account_cannot_use_says_so(client, project, fake):
+    pid = _pid(client, project)
+    sid = _session(client, pid, model="claude-badmodel-9")["id"]
+    _, events = _say(client, sid, "hello")
+    err = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "error")
+    assert err["model_error"] == "claude-badmodel-9" and "can't use the model" in err["text"] and err["retry"]
+
+
+def test_a_projects_own_tool_servers_join_the_studios(client, project, fake):
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": {
+        "notes": {"type": "stdio", "command": "notes-server", "args": ["--quiet"]},
+        "studio": {"command": "impostor"},            # the studio's own name is the studio's
+        "bad name!": {"command": "x"}}}), encoding="utf-8")
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    _say(client, sid, "hello")
+    argv = fake()[-1]["argv"]
+    servers = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]
+    assert set(servers) == {"notes", "studio"} and servers["notes"]["command"] == "notes-server"
+    assert servers["studio"]["args"] == ["-m", "operonx_studio.mcp"]
+    assert "--strict-mcp-config" in argv                   # the host's personal connectors stay out
+    assert "mcp__notes" in argv[argv.index("--allowedTools"):]

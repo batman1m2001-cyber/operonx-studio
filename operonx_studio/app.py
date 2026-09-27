@@ -2769,7 +2769,8 @@ def build_studio_app(recents: Optional[Recents] = None):
     # reload, another device or a studio restart finds them as they were.
     from fastapi.responses import StreamingResponse
 
-    from .assistant import IMAGE_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MODELS, ChatStore, Relay
+    from .assistant import (EFFORTS, IMAGE_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MODEL_INFO, MODELS,
+                            ChatStore, Relay, valid_model)
 
     chat_store = ChatStore(recents.state_file.parent / "assistant.sqlite")
     relay = Relay(chat_store)
@@ -2790,6 +2791,39 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": "unknown project"}, status_code=404)
         return cwd, context + _view_lines(view or {}), _studio_mcp(scope, request)
 
+    def _project_mcp(scope: str) -> Dict[str, Any]:
+        """A project's own tool servers, from its ``.mcp.json``: they join the
+        studio's in a turn. The host's personal connectors never do
+        (``--strict-mcp-config`` stays on)."""
+        owner = _watcher(scope) if scope != "home" else None
+        if owner is None:
+            return {}
+        try:
+            raw = json.loads((Path(owner.root) / ".mcp.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        servers = raw.get("mcpServers") if isinstance(raw, dict) else None
+        if not isinstance(servers, dict):
+            return {}
+        return {str(k): v for k, v in servers.items()
+                if isinstance(v, dict) and k != "studio" and re.fullmatch(r"[\w-]{1,64}", str(k))}
+
+    def _assistant_defaults(scope: str) -> Dict[str, Any]:
+        """A new conversation's model and effort: the project's
+        ``[studio.assistant]`` if it sets them, else the studio's own default
+        (the menu's "Use for new conversations"), else the CLI's."""
+        studio = dict(chat_store.get_meta("defaults", {}) or {})
+        owner = _watcher(scope) if scope != "home" else None
+        project = dict((_studio_table(Path(owner.root)).get("assistant") or {}) if owner is not None else {})
+        out = {}
+        for key, ok in (("model", valid_model), ("effort", lambda e: e is None or e in EFFORTS)):
+            for src in (project, studio):
+                v = src.get(key)
+                if v and ok(v):
+                    out[key] = v
+                    break
+        return out
+
     def _session_out(sess: Dict[str, Any]) -> Dict[str, Any]:
         return {**sess, "scope_name": _scope_name(sess["scope"])}
 
@@ -2806,10 +2840,44 @@ def build_studio_app(recents: Optional[Recents] = None):
         scope = str(body.get("scope") or "home")
         if not _scope_ok(scope):
             return JSONResponse({"error": "unknown project"}, status_code=404)
+        pick = _assistant_defaults(scope)
+        model = (body["model"] or None) if "model" in body else pick.get("model")
+        effort = (body["effort"] or None) if "effort" in body else pick.get("effort")
+        if not valid_model(model):
+            return JSONResponse({"error": f"model is one of {', '.join(MODELS)}, or a full claude-… id"}, status_code=400)
+        if effort is not None and effort not in EFFORTS:
+            return JSONResponse({"error": f"effort is one of {', '.join(EFFORTS)}"}, status_code=400)
+        return JSONResponse({"session": _session_out(chat_store.create_session(scope, model=model, effort=effort))})
+
+    @app.get("/api/assistant/models")
+    def assistant_models(scope: str = "home") -> JSONResponse:
+        """What the model menu offers: each model with what it is good for,
+        what the CLI resolves it to and its context window (as last seen);
+        the effort levels; and the defaults a new conversation takes."""
+        resolved = dict(chat_store.get_meta("resolved", {}) or {})
+        windows = dict(chat_store.get_meta("windows", {}) or {})
+        models = []
+        for m in MODEL_INFO:
+            full = resolved.get(m["id"]) or m["full"]
+            models.append({**m, "full": full, "window": windows.get(full) or m["window"]})
+        default_full = resolved.get("default")
+        return JSONResponse({"models": models, "efforts": list(EFFORTS),
+                             "default": {"full": default_full, "window": windows.get(default_full) if default_full else None},
+                             "studio_defaults": dict(chat_store.get_meta("defaults", {}) or {}),
+                             "new": _assistant_defaults(scope if _scope_ok(scope) else "home")})
+
+    @app.put("/api/assistant/defaults")
+    def assistant_set_defaults(body: Dict[str, Any]) -> JSONResponse:
+        """The studio's own default model and effort for new conversations
+        (a project's ``[studio.assistant]`` still wins for its own)."""
         model = body.get("model") or None
-        if model is not None and model not in MODELS:
-            return JSONResponse({"error": f"model is one of {', '.join(MODELS)}"}, status_code=400)
-        return JSONResponse({"session": _session_out(chat_store.create_session(scope, model=model))})
+        effort = body.get("effort") or None
+        if not valid_model(model):
+            return JSONResponse({"error": f"model is one of {', '.join(MODELS)}, or a full claude-… id"}, status_code=400)
+        if effort is not None and effort not in EFFORTS:
+            return JSONResponse({"error": f"effort is one of {', '.join(EFFORTS)}"}, status_code=400)
+        chat_store.set_meta("defaults", {k: v for k, v in (("model", model), ("effort", effort)) if v})
+        return JSONResponse({"studio_defaults": chat_store.get_meta("defaults", {})})
 
     def _session_or_404(sid: str) -> Any:
         sess = chat_store.session(sid)
@@ -2852,9 +2920,15 @@ def build_studio_app(recents: Optional[Recents] = None):
             update["archived"] = bool(body["archived"])
         if "model" in body:
             model = body.get("model") or None
-            if model is not None and model not in MODELS:
-                return JSONResponse({"error": f"model is one of {', '.join(MODELS)}"}, status_code=400)
+            if not valid_model(model):
+                return JSONResponse({"error": f"model is one of {', '.join(MODELS)}, or a full claude-… id"},
+                                    status_code=400)
             update["model"] = model
+        if "effort" in body:
+            effort = body.get("effort") or None
+            if effort is not None and effort not in EFFORTS:
+                return JSONResponse({"error": f"effort is one of {', '.join(EFFORTS)}"}, status_code=400)
+            update["effort"] = effort
         chat_store.update_session(sid, **update)
         return JSONResponse({"session": _session_out(chat_store.session(sid))})
 
@@ -2955,7 +3029,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         try:
             turn = relay.start(sid, message, cwd=cwd, context=context, mcp=mcp, fork_from=fork_from,
                                view=body.get("view") if isinstance(body.get("view"), dict) else None,
-                               attachments=refs)
+                               attachments=refs, extra_mcp=_project_mcp(sess["scope"]))
         except RuntimeError as exc:
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse({"turn": turn.id, "cursor": 0})

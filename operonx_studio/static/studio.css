@@ -2176,6 +2176,20 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-pop-acts { display: flex; gap: 8px; margin: 10px 0 6px; }
 .ax-toggle { display: flex; align-items: center; gap: 8px; padding: 4px 0; color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; }
 
+/* the model and effort menu */
+.ax-pop.ax-models { width: 320px; padding: 6px 6px 8px; }
+.ax-model-opt .ax-opt-label { display: flex; align-items: baseline; gap: 8px; width: 100%; }
+.ax-opt-win { margin-left: auto; font-size: var(--fs-xs); font-weight: 400; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.ax-opt-warn { font-size: var(--fs-xs); color: var(--warn); font-weight: 500; }
+.ax-model-opt.warn .ax-opt-label > span:first-child { color: var(--text-2); }
+.ax-effort { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 8px 6px; }
+.ax-effort-opt { min-height: 0; height: 26px; padding: 0 9px; border-radius: 999px; font-size: var(--fs-sm); font-weight: 500;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-2); }
+.ax-effort-opt:hover { border-color: var(--border-strong); color: var(--text); }
+.ax-effort-opt.on { background: var(--signal-soft); border-color: color-mix(in srgb, var(--signal) 40%, var(--border)); color: var(--signal-strong); }
+.ax-usenew { margin: 4px 8px 0; padding-top: 8px; border-top: 1px solid var(--border-soft); }
+.ax-switch span { color: var(--text-3); }
+
 /* dock: the side panel's Assistant tab */
 .ax.dock .ax-empty { padding-top: 24px; }
 #sidetabs button[data-side] .icon { width: 15px; height: 15px; color: var(--accent); }

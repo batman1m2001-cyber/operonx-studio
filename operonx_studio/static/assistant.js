@@ -91,7 +91,7 @@
   const fmt = {
     tokens(n) {
       if (n == null) return "—";
-      if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+      if (n >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
       if (n >= 1e4) return `${Math.round(n / 1e3)}k`;
       if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
       return String(n);
@@ -376,7 +376,8 @@
     running: null,            // {id, cursor, state, detail, t0}
     queue: null,              // a message typed while a turn runs
     agent: null,              // {reach, cwd, model}
-    models: ["opus", "sonnet", "haiku"],
+    models: ["fable", "opus", "sonnet", "haiku"],
+    catalog: null,            // GET /api/assistant/models: the menu's models, efforts, defaults
     sessions: [],
     search: "",
     archived: false,
@@ -827,7 +828,14 @@
       const retry = tbtn("Try again", "ax-btn", "refresh");
       retry.onclick = () => redo({retry_of: item.turn});
       retry.dataset.retry = item.turn;
-      acts.append(el("span", "ax-spacer"), retry);
+      acts.append(el("span", "ax-spacer"));
+      if (item.model_error) {
+        // the model the account can't use: the same message on the default
+        const dflt = tbtn("Use the default model", "ax-btn primary");
+        dflt.onclick = async () => { if (await setModel(null, true)) redo({retry_of: item.turn}); };
+        acts.append(dflt);
+      }
+      acts.append(retry);
       card.append(acts);
     }
     A.nodes.set(item.seq, card);
@@ -840,7 +848,7 @@
     if (item.state === "stopped") bits.push("Stopped");
     if (item.ms) bits.push(fmt.ms(item.ms));
     if (item.cost != null) bits.push(fmt.money(item.cost));
-    if (item.model) bits.push(fmt.model(item.model));
+    if (item.model) bits.push(fmt.model(item.model) + (item.effort ? ` · ${EFFORT_LABEL[item.effort] || item.effort}` : ""));
     if (item.context) bits.push(`${fmt.tokens(item.context)} context`);
     const meta = el("span", "ax-turnmeta", bits.join(" · "));
     const acts = el("span", "ax-turnacts");
@@ -878,6 +886,7 @@
       A.nodes.set(item.seq, node);
     } else if (item.kind === "note") { node = el("div", "ax-note", item.text || ""); A.nodes.set(item.seq, node); }
     else if (item.kind === "turn_end") {
+      switchDivider(item);
       node = renderEnd(item);
       for (const g of replyEl.querySelectorAll(".ax-act")) paintActivity(g);
       actEl = null;
@@ -1023,10 +1032,11 @@
     meter.title = pct >= 0.8
       ? `Context ${Math.round(pct * 100)}% full — compact it to keep going`
       : `Context ${Math.round(pct * 100)}% full`;
-    const model = (s && s.model) || null;
+    const p = pillText();
     modelPick.replaceChildren(el("span", "ax-model-dot"),
-      el("span", null, model ? fmt.model(model) : fmt.model((s && s.usage && s.usage.model) || (A.agent && A.agent.model) || "")));
-    modelPick.classList.toggle("pinned", !!model);
+      el("span", null, p.name + (p.effort ? ` · ${EFFORT_LABEL[p.effort] || p.effort}` : "")));
+    modelPick.classList.toggle("pinned", p.pinned);
+    modelPick.title = "The model and effort for this conversation";
   }
 
   function renameInline() {
@@ -1059,6 +1069,7 @@
   function openPop(build, anchor) {
     if (!pop.hidden && pop._anchor === anchor) { pop.hidden = true; return; }
     pop.textContent = "";
+    pop.className = "ax-pop";          // each menu adds its own class
     pop._anchor = anchor;
     build(pop);
     pop.hidden = false;
@@ -1076,32 +1087,144 @@
   document.addEventListener("pointerdown", (ev) => {
     if (!pop.hidden && !pop.contains(ev.target) && !(pop._anchor && pop._anchor.contains(ev.target))) pop.hidden = true;
   });
+  // Esc closes an open menu before anything else hears it
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !pop.hidden) { pop.hidden = true; ev.stopPropagation(); ev.preventDefault(); }
+  }, true);
+
+  /* Model and effort. The pill reads "Opus 5.5 · High"; its menu lists
+   * Default (what Claude Code picks, and what that resolved to last), the
+   * models with what each is good for and its window, and the effort
+   * levels. A conversation already bigger than a model's window is warned
+   * before switching, with Compact first. */
+  const EFFORT_LABEL = {low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max"};
+  const EFFORT_SUB = {low: "fastest, least thinking", medium: "", high: "", xhigh: "", max: "slowest, most thinking"};
+
+  async function loadCatalog(force) {
+    if (A.catalog && !force) return A.catalog;
+    try { A.catalog = await call(`/api/assistant/models?scope=${encodeURIComponent(SCOPE)}`); }
+    catch { A.catalog = A.catalog || {models: [], efforts: Object.keys(EFFORT_LABEL), default: {}}; }
+    A.models = A.catalog.models.map((m) => m.id);
+    return A.catalog;
+  }
+
+  // what a model choice means now: its full name and window
+  function modelFacts(choice) {
+    const cat = A.catalog || {models: [], default: {}};
+    if (!choice) return {full: (cat.default || {}).full || (A.agent && A.agent.model) || null, window: (cat.default || {}).window};
+    const m = cat.models.find((x) => x.id === choice);
+    return m ? {full: m.full, window: m.window} : {full: choice, window: null};
+  }
+
+  function pillText() {
+    const s = A.session;
+    const choice = s ? s.model : ((A.catalog || {}).new || {}).model;
+    const effort = s ? s.effort : ((A.catalog || {}).new || {}).effort;
+    const f = modelFacts(choice);
+    return {name: f.full ? fmt.model(f.full) : "Default model", pinned: !!choice, effort};
+  }
 
   function modelMenu(box) {
-    box.append(el("div", "ax-pop-title", "Model for this conversation"));
-    const opts = [[null, "Default", "Whatever Claude Code uses by default"],
-      ["opus", "Opus", "Most capable, slower"], ["sonnet", "Sonnet", "Balanced"], ["haiku", "Haiku", "Fastest, cheapest"]];
-    for (const [value, label, sub] of opts) {
-      const b = el("button", "ax-opt" + (((A.session && A.session.model) || null) === value ? " on" : ""));
+    box.classList.add("ax-models");
+    const s = A.session;
+    const cat = A.catalog || {models: [], efforts: Object.keys(EFFORT_LABEL), default: {}};
+    const cur = s ? s.model || null : null;
+    const curEffort = s ? s.effort || null : null;
+    const used = s && s.usage ? s.usage.context_tokens || 0 : 0;
+    box.append(el("div", "ax-pop-title", "Model"));
+    const opts = [[null, "Default", "Recommended · Claude Code's pick", modelFacts(null)]]
+      .concat(cat.models.map((m) => [m.id, fmt.model(m.full) || m.label, m.good, {full: m.full, window: m.window}]));
+    for (const [value, label, good, f] of opts) {
+      const b = el("button", "ax-opt ax-model-opt" + (cur === value ? " on" : ""));
       b.type = "button";
-      b.append(el("span", "ax-opt-label", label), el("span", "ax-opt-sub", sub));
-      b.onclick = async () => { pop.hidden = true; await setModel(value); };
+      const head = el("span", "ax-opt-label");
+      head.append(el("span", null, value === null && f.full ? `Default · ${fmt.model(f.full)}` : label));
+      if (f.window) head.append(el("span", "ax-opt-win", `${fmt.tokens(f.window)} context`));
+      b.append(head, el("span", "ax-opt-sub", good));
+      const over = f.window && used > f.window;
+      if (over) {
+        b.classList.add("warn");
+        b.append(el("span", "ax-opt-warn", `This conversation is ${fmt.tokens(used)}, over its ${fmt.tokens(f.window)} window — compact first`));
+      }
+      b.onclick = async () => {
+        pop.hidden = true;
+        if (over) {
+          if (!confirm(`This conversation is ${fmt.tokens(used)} tokens, more than ${label}'s ${fmt.tokens(f.window)} window.\n\nCompact it first, then switch?`)) return;
+          A.afterCompact = () => setModel(value);
+          doCompact();
+          return;
+        }
+        await setModel(value);
+      };
       box.append(b);
     }
+    box.append(el("div", "ax-pop-title", "Effort"));
+    const seg = el("div", "ax-effort");
+    for (const e of [null, ...(cat.efforts || Object.keys(EFFORT_LABEL))]) {
+      const b = el("button", "ax-effort-opt" + (curEffort === e ? " on" : ""), e ? EFFORT_LABEL[e] || e : "Default");
+      b.type = "button";
+      b.title = e ? (EFFORT_SUB[e] ? `${EFFORT_LABEL[e]}: ${EFFORT_SUB[e]}` : EFFORT_LABEL[e]) : "Claude Code's default effort";
+      b.onclick = async () => { await setEffort(e); seg.querySelectorAll(".on").forEach((x) => x.classList.remove("on")); b.classList.add("on"); paintDefaultBox(); };
+      seg.append(b);
+    }
+    box.append(seg);
+    const toggle = el("label", "ax-toggle ax-usenew");
+    const cb = el("input");
+    cb.type = "checkbox";
+    const paintDefaultBox = () => {
+      const d = cat.studio_defaults || {};
+      const sm = A.session ? A.session.model || null : null, se = A.session ? A.session.effort || null : null;
+      cb.checked = (d.model || null) === sm && (d.effort || null) === se;
+    };
+    paintDefaultBox();
+    cb.onchange = async () => {
+      const body = cb.checked ? {model: A.session ? A.session.model : null, effort: A.session ? A.session.effort : null} : {};
+      try {
+        const got = await call("/api/assistant/defaults", body, "PUT");
+        cat.studio_defaults = got.studio_defaults;
+        toast(cb.checked ? "New conversations start with this model and effort" : "New conversations start on the default model");
+      } catch (err) { toast(err.message, true); cb.checked = !cb.checked; }
+    };
+    toggle.append(cb, el("span", null, "Use for new conversations"));
+    box.append(toggle);
   }
 
-  async function setModel(value) {
-    if (!A.session) await ensureSession({model: value});
-    else {
-      try {
-        const got = await call(`/api/assistant/sessions/${A.session.id}`, {model: value}, "PATCH");
-        A.session = got.session;
-      } catch (err) { toast(err.message, true); return; }
-    }
-    paintHead();
-    toast(`This conversation now uses ${value ? fmt.model(value) : "the default model"}`);
+  async function patchSession(body) {
+    if (!A.session) { await ensureSession(body); return true; }
+    try {
+      const got = await call(`/api/assistant/sessions/${A.session.id}`, body, "PATCH");
+      A.session = got.session;
+      return true;
+    } catch (err) { toast(err.message, true); return false; }
   }
-  modelPick.onclick = () => openPop(modelMenu, modelPick);
+
+  async function setModel(value, quiet) {
+    if (!(await patchSession({model: value}))) return false;
+    paintHead();
+    if (!quiet) toast(`This conversation now uses ${value ? fmt.model(modelFacts(value).full || value) : "the default model"}`);
+    return true;
+  }
+
+  async function setEffort(value) {
+    if (!(await patchSession({effort: value}))) return false;
+    paintHead();
+    toast(value ? `Effort: ${EFFORT_LABEL[value] || value}` : "Effort: Claude Code's default");
+    return true;
+  }
+
+  /* A divider where an answer came from another model or effort than the
+   * one before it: "Switched to Sonnet 5 · High". */
+  function switchDivider(end) {
+    const i = A.items.indexOf(end);
+    const prev = [...A.items.slice(0, i < 0 ? A.items.length : i)].reverse().find((x) => x.kind === "turn_end" && x.model);
+    if (!prev || !end.model || !turnEl) return;
+    if (prev.model === end.model && (prev.effort || null) === (end.effort || null)) return;
+    const d = el("div", "ax-divider ax-switch");
+    d.append(el("span", null, `Switched to ${fmt.model(end.model)} · ${end.effort ? EFFORT_LABEL[end.effort] || end.effort : "default effort"}`));
+    turnEl.before(d);
+  }
+
+  modelPick.onclick = async () => { await loadCatalog(); openPop(modelMenu, modelPick); };
 
   function detailsPanel(box) {
     const s = A.session;
@@ -1428,6 +1551,9 @@
       }
     }
     refreshListIfShown();
+    // a model switch waiting on the compaction it asked for
+    if (A.afterCompact) { const f = A.afterCompact; A.afterCompact = null; if (ev.state === "done") f(); }
+    loadCatalog(true).then(paintHead);   // what "Default" resolved to may be news
     if (A.queue) { const q = A.queue; A.queue = null; paintQueue(); submit(q.text, false, q.images); }
   }
 
@@ -1643,12 +1769,20 @@
     ["/new", "Start a new conversation", () => newSession()],
     ["/sessions", "Show your conversations", () => { root.classList.add("side-open"); refreshList(); search.focus(); }],
     ["/compact", "Summarize the conversation to free the context", () => doCompact()],
-    ["/model", "Choose the model: /model opus | sonnet | haiku | default", (arg) => {
-      const v = (arg || "").toLowerCase();
+    ["/model", "Choose the model: /model fable | opus | sonnet | haiku | default | claude-…", async (arg) => {
+      const v = (arg || "").trim().toLowerCase();
+      await loadCatalog();
       if (!v) { openPop(modelMenu, modelPick); return; }
       if (v === "default") setModel(null);
-      else if (A.models.includes(v)) setModel(v);
-      else toast(`No model “${v}” — try opus, sonnet, haiku or default`, true);
+      else if (A.models.includes(v) || /^claude-[a-z0-9][a-z0-9.-]{1,60}$/.test(v)) setModel(v);
+      else toast(`No model “${v}” — try ${A.models.join(", ")} or default`, true);
+    }],
+    ["/effort", "How hard it thinks: /effort low | medium | high | xhigh | max | default", (arg) => {
+      const v = (arg || "").trim().toLowerCase().replace(/^extra\s*high$/, "xhigh");
+      if (!v) { loadCatalog().then(() => openPop(modelMenu, modelPick)); return; }
+      if (v === "default") setEffort(null);
+      else if (EFFORT_LABEL[v]) setEffort(v);
+      else toast(`No effort “${v}” — try low, medium, high, xhigh, max or default`, true);
     }],
     ["/retry", "Regenerate the last answer", () => {
       const last = [...A.items].reverse().find((x) => x.turn);
@@ -1687,7 +1821,7 @@
       b.type = "button";
       b.setAttribute("role", "option");
       b.append(el("span", "ax-slash-name", c[0]), el("span", "ax-slash-desc", c[1]));
-      b.onmousedown = (ev) => { ev.preventDefault(); input.value = c[0] + " "; closeSlash(); if (c[0] !== "/model") submit(c[0]); else input.focus(); };
+      b.onmousedown = (ev) => { ev.preventDefault(); input.value = c[0] + " "; closeSlash(); if (c[0] !== "/model" && c[0] !== "/effort") submit(c[0]); else input.focus(); };
       slash.append(b);
     });
     slash._hits = hits;
@@ -2338,6 +2472,7 @@
 
   async function boot() {
     pruneDrafts();
+    loadCatalog().then(paintHead);
     root.classList.toggle("details", A.details);
     paintHead();
     paintChips();

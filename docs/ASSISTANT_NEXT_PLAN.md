@@ -333,7 +333,8 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
 |---|---|---|---|
 | 1 | **A1** Composer | e00ca94 | `scripts/perf/composer.py` 42/42 with `--live` (one Haiku turn); `live_assistant.py` 23/23; `flows.py` 21/21; layout audit 0 errors in 328 cases; 480 studio tests (3 skipped); 39 JS tests |
 | 2 | **C1** Canvas | 660922d | layout audit 0 errors in 328 cases (with new checks for B4, B5 and B6); `flows.py` 21/21; 480 studio tests; B5 14/14 and B6 12/12 on desktop and phone; before and after screenshots; render and zoom measured below |
-| 3 | **A2** Input and images | see git log (`assistant A2`) | `scripts/perf/attachments.py` 20/20 with `--live` (an image described, regenerate resends it, a 200 KB paste); the probe below; 4 new server tests (484 studio tests); `composer.py` 35/35; `live_assistant.py` 23/23; `flows.py` 21/21 |
+| 3 | **A2** Input and images | 1399806 | `scripts/perf/attachments.py` 20/20 with `--live` (an image described, regenerate resends it, a 200 KB paste); the probe below; 4 new server tests (484 studio tests); `composer.py` 35/35; `live_assistant.py` 23/23; `flows.py` 21/21 |
+| 4 | **A3** Model and effort, **B3** project tool servers | see git log (`assistant A3`) | `scripts/perf/models.py` 17/17 with `--live` (Haiku at low effort, then Sonnet: the footer and a divider say so; the project's `notes` server called); the MCP probe below; 5 new server tests (489 studio tests); `composer.py` 35/35; `attachments.py` 16/16; `live_assistant.py` 23/23; `flows.py` 21/21 |
 
 **A1 notes.**
 - **A JSON paste becomes a card from 200 characters, even on one line.**
@@ -446,3 +447,44 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
   several sit as square tiles. A click shows one large.
 - **The studio on :8766 was restarted** to load the new server code; the
   tunnel carried on.
+
+**A3 and B3 notes.**
+- **The probe** ran on 2026-09-28 with Claude Code 2.1.283, on tiny
+  prompts with no tools:
+  - `fable`, `opus` and `sonnet` resolve to `claude-fable-5-1`,
+    `claude-opus-5-5` and `claude-sonnet-5`, each with a 1M window;
+    `haiku` resolves to `claude-haiku-4-5-20251001`, with 200k.
+  - No `--model` resolves to Opus 5.5.
+  - Full ids work.
+  - Every effort level is accepted on every model tried, including Haiku.
+  - An unknown model fails with "There's an issue with the selected
+    model (…)" (`unrecognized_model`).
+- **The menu shows what the studio has seen, not guesses.** It starts
+  from those resolutions and windows, then keeps what later turns report
+  (the `meta` table), so "Default" names the model it resolved to last.
+- **Fixed on the way:** the context window came from whichever model the
+  result listed last, and every call also lists the CLI's helper model.
+  It is now the turn's own model's window; a test covers it.
+- **Defaults for a new conversation:**
+  1. the project's `[studio.assistant] model / effort` (the plan's
+     place);
+  2. otherwise the studio's own default, which "Use for new
+     conversations" sets (it lives in the store, so home conversations
+     have one too);
+  3. otherwise Claude Code's own.
+- **A switch mid-conversation** shows as a divider before the first
+  answer from the new model or effort, derived from the answers' own
+  records; nothing extra is stored. If the conversation is already bigger
+  than the new model's window, the menu warns and offers Compact first,
+  and the switch happens once the compaction is done.
+- **A model the account can't use** becomes an error card that names it,
+  with "Use the default model" (the same message, retried on the
+  default).
+- **B3, a project's own tool servers.**
+  - The servers in the project's `.mcp.json` join the studio's own in
+    `--mcp-config`. A server named `studio` or with an odd name is
+    skipped.
+  - Their tools join `--allowedTools`, except in the read-only reach.
+  - Measured: with `--strict-mcp-config`, as the studio runs, only
+    `notes` loaded (`mcp__notes__ping`). Without it, the host's claude.ai
+    connectors (Docs, Gmail, Drive, Calendar) loaded too.

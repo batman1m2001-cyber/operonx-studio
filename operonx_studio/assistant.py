@@ -63,7 +63,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import chat as _chat
 
-__all__ = ["ChatStore", "IMAGE_TYPES", "MAX_ATTACHMENTS", "MAX_ATTACHMENT_BYTES", "MODELS", "Relay", "title_from"]
+__all__ = ["ChatStore", "EFFORTS", "IMAGE_TYPES", "MAX_ATTACHMENTS", "MAX_ATTACHMENT_BYTES", "MODELS", "MODEL_INFO",
+           "Relay", "title_from", "valid_model"]
 
 #: The images a message can carry, and the file extension each is kept as.
 IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
@@ -71,8 +72,38 @@ IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "ima
 MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 MAX_ATTACHMENTS = 8
 
-#: The models a session can pin; ``None`` is the CLI's own default.
-MODELS = ("opus", "sonnet", "haiku")
+#: The models a session can pin by alias; ``None`` is the CLI's own default.
+#: A full id (``claude-…``) is accepted too.
+MODELS = ("fable", "opus", "sonnet", "haiku")
+
+#: What the menu says about each. ``full`` and ``window`` are what the CLI
+#: resolved and reported (probed 2026-09-28, Claude Code 2.1.283); the
+#: studio replaces both with what later turns actually report.
+MODEL_INFO = (
+    {"id": "fable", "label": "Fable", "full": "claude-fable-5-1", "window": 1_000_000,
+     "good": "The most capable: the hardest problems, long autonomous work"},
+    {"id": "opus", "label": "Opus", "full": "claude-opus-5-5", "window": 1_000_000,
+     "good": "Deep work: design, refactors, tricky debugging"},
+    {"id": "sonnet", "label": "Sonnet", "full": "claude-sonnet-5", "window": 1_000_000,
+     "good": "Everyday coding: fast and capable"},
+    {"id": "haiku", "label": "Haiku", "full": "claude-haiku-4-5-20251001", "window": 200_000,
+     "good": "Quick answers and small edits"},
+)
+
+#: How hard the model thinks (``--effort``); ``None`` is the CLI's default.
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+_FULL_ID = re.compile(r"^claude-[a-z0-9][a-z0-9.-]{1,60}$")
+
+
+def valid_model(model: Optional[str]) -> bool:
+    """An alias the studio lists, or a full model id."""
+    return model is None or model in MODELS or bool(_FULL_ID.match(model))
+
+
+# the CLI's words when an account cannot use the model asked for
+_MODEL_ERROR = re.compile(r"issue with the selected model|unrecognized_model|model[^.\n]{0,60}"
+                          r"(not found|not available|not supported|no access|does not have access)", re.I)
 
 # What an item keeps of a tool's input and output: enough to see what
 # the agent did, never a whole file.
@@ -166,7 +197,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     claude_session TEXT,
     usage         TEXT NOT NULL DEFAULT '{}',
     running_turn  TEXT,
-    preview       TEXT NOT NULL DEFAULT ''
+    preview       TEXT NOT NULL DEFAULT '',
+    effort        TEXT
 );
 CREATE INDEX IF NOT EXISTS sessions_by_scope ON sessions (scope, archived, updated);
 CREATE TABLE IF NOT EXISTS turns (
@@ -185,6 +217,10 @@ CREATE TABLE IF NOT EXISTS turns (
     attachments   TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS turns_by_session ON turns (session, started);
+CREATE TABLE IF NOT EXISTS meta (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS attachments (
     session  TEXT NOT NULL,
     id       TEXT NOT NULL,
@@ -210,7 +246,7 @@ CREATE TABLE IF NOT EXISTS items (
 """
 
 _SESSION_FIELDS = ("title", "title_source", "updated", "archived", "model", "claude_session", "usage",
-                   "running_turn", "preview")
+                   "running_turn", "preview", "effort")
 _TURN_FIELDS = ("claude_after", "state", "ended", "usage", "cost", "hidden")
 
 
@@ -232,6 +268,9 @@ class ChatStore:
             cols = {r[1] for r in self._db.execute("PRAGMA table_info(turns)")}
             if "attachments" not in cols:
                 self._db.execute("ALTER TABLE turns ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'")
+            cols = {r[1] for r in self._db.execute("PRAGMA table_info(sessions)")}
+            if "effort" not in cols:
+                self._db.execute("ALTER TABLE sessions ADD COLUMN effort TEXT")
 
     def _q(self, sql: str, args: Iterable[Any] = ()) -> List[sqlite3.Row]:
         with self._lock:
@@ -248,12 +287,24 @@ class ChatStore:
         return out
 
     def create_session(self, scope: str, *, model: Optional[str] = None, title: str = "",
-                       title_source: str = "", claude_session: Optional[str] = None) -> Dict[str, Any]:
+                       title_source: str = "", claude_session: Optional[str] = None,
+                       effort: Optional[str] = None) -> Dict[str, Any]:
         sid = uuid.uuid4().hex[:16]
         now = _now()
-        self._q("INSERT INTO sessions (id, scope, title, title_source, created, updated, model, claude_session)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (sid, scope, title, title_source, now, now, model, claude_session))
+        self._q("INSERT INTO sessions (id, scope, title, title_source, created, updated, model, claude_session, effort)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (sid, scope, title, title_source, now, now, model, claude_session, effort))
         return self.session(sid)  # type: ignore[return-value]
+
+    # meta: small studio-wide facts (defaults, what the CLI resolved)
+
+    def get_meta(self, key: str, default: Any = None) -> Any:
+        rows = self._q("SELECT value FROM meta WHERE key = ?", (key,))
+        return json.loads(rows[0]["value"]) if rows else default
+
+    def set_meta(self, key: str, value: Any) -> None:
+        self._q("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, json.dumps(value)))
 
     def session(self, sid: str) -> Optional[Dict[str, Any]]:
         rows = self._q("SELECT * FROM sessions WHERE id = ?", (sid,))
@@ -444,7 +495,10 @@ class Turn:
     think_seq: Optional[int] = None      # the thinking block being streamed
     tools: Dict[str, int] = field(default_factory=dict)   # tool_use_id → item seq
     claude_after: Optional[str] = None
-    model: Optional[str] = None
+    model: Optional[str] = None           # asked for (an alias), then what the CLI resolved it to
+    requested: Optional[str] = None       # the model asked for, as asked
+    effort: Optional[str] = None
+    extra_mcp: Dict[str, Any] = field(default_factory=dict)   # a project's own tool servers
     cwd: Optional[str] = None
     kill_timer: Optional[asyncio.TimerHandle] = None
     usage: Dict[str, Any] = field(default_factory=dict)
@@ -558,10 +612,14 @@ class Relay:
                 u[key] = int(u.get(key) or 0) + int(ru.get(src) or 0)
             if result.get("total_cost_usd") is not None:
                 u["cost_usd"] = round(float(u.get("cost_usd") or 0) + float(result["total_cost_usd"]), 6)
-            for name, mu in (result.get("modelUsage") or {}).items():
-                if mu.get("contextWindow"):
-                    u["context_window"] = int(mu["contextWindow"])
-                    u["model"] = u.get("model") or name
+            # the turn's own model: every call also lists the CLI's helper
+            # model (haiku), and the last listed used to win
+            windows = {n: int(mu["contextWindow"]) for n, mu in (result.get("modelUsage") or {}).items()
+                       if mu.get("contextWindow")}
+            if windows:
+                own = turn.model if turn.model in windows else max(windows, key=lambda n: windows[n])
+                u["context_window"] = windows[own]
+                u["model"] = u.get("model") or own
             u["turns"] = int(u.get("turns") or 0) + 1
         self.store.update_session(turn.session, usage=u)
         self._emit(turn, {"t": "usage", "usage": u})
@@ -571,7 +629,8 @@ class Relay:
 
     def start(self, sid: str, message: str, *, cwd: Optional[Path], context: str,
               mcp: Optional[Dict[str, Any]] = None, kind: str = "message", fork_from: Optional[str] = "",
-              view: Optional[Dict[str, Any]] = None, attachments: Optional[List[Dict[str, Any]]] = None) -> Turn:
+              view: Optional[Dict[str, Any]] = None, attachments: Optional[List[Dict[str, Any]]] = None,
+              extra_mcp: Optional[Dict[str, Any]] = None) -> Turn:
         """Begin a turn in session *sid*; returns at once (call from a loop).
 
         ``fork_from`` is the Claude session to continue: ``""`` means the
@@ -586,6 +645,7 @@ class Relay:
         before = sess.get("claude_session") if fork_from == "" else fork_from
         turn = Turn(id=uuid.uuid4().hex[:16], session=sid, scope=sess["scope"], kind=kind,
                     next_seq=self.store.next_seq(sid), fresh=asyncio.Event(), model=sess.get("model"),
+                    requested=sess.get("model"), effort=sess.get("effort"), extra_mcp=dict(extra_mcp or {}),
                     cwd=str(cwd) if cwd else None)
         self.turns[turn.id] = turn
         refs = list(attachments or [])
@@ -644,8 +704,13 @@ class Relay:
             model = turn.model or os.environ.get("OPERONX_STUDIO_CHAT_MODEL")
             if model:
                 cmd += ["--model", model]
+            if turn.effort and turn.kind == "message":
+                cmd += ["--effort", turn.effort]
             if mcp:
-                cmd += ["--mcp-config", json.dumps({"mcpServers": {"studio": mcp}})]
+                # the studio's own tools, and the project's own servers (its
+                # .mcp.json) beside them
+                servers = {**{k: v for k, v in turn.extra_mcp.items() if k != "studio"}, "studio": mcp}
+                cmd += ["--mcp-config", json.dumps({"mcpServers": servers})]
                 # Only the studio's own tools: not the host's personal
                 # connectors (mail, drive, calendar), which the studio's agent
                 # has no business in, and each turn starts ~1.3 s sooner
@@ -653,6 +718,11 @@ class Relay:
                 if os.environ.get("OPERONX_STUDIO_CHAT_STRICT_MCP", "on").lower() not in ("off", "0", "false"):
                     cmd.append("--strict-mcp-config")
             cmd += _chat._mode_args()
+            # --allowedTools ends the flags: a project server's tools join the
+            # list where the reach allows more than reading
+            mode = os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full").strip().lower()
+            if mcp and turn.extra_mcp and mode != "read":
+                cmd += [f"mcp__{name}" for name in turn.extra_mcp if name != "studio"]
             snap = _chat.snapshot(cwd) if (cwd is not None and turn.kind == "message") else None
             try:
                 turn.proc = await asyncio.create_subprocess_exec(
@@ -804,7 +874,15 @@ class Relay:
         if kind == "result":
             turn.claude_after = event.get("session_id") or turn.claude_after
             if event.get("is_error") and not turn.stopping:
-                self._item(turn, "error", text=str(event.get("result") or event.get("subtype") or "error"), retry=True)
+                said = str(event.get("result") or event.get("subtype") or "error")
+                if turn.requested and _MODEL_ERROR.search(said):
+                    # the error says which model, and the card offers the default
+                    self._item(turn, "error", retry=True, model_error=turn.requested,
+                               text=f"This account can't use the model {turn.requested!r}. " + said)
+                else:
+                    self._item(turn, "error", text=said, retry=True)
+            elif not event.get("is_error"):
+                self._learn(turn, event)
             u = self._usage(turn, context=turn.usage.get("context"), result=event)
             turn.usage.update(cost=event.get("total_cost_usd"), ms=event.get("duration_ms"),
                               turns=event.get("num_turns"), window=u.get("context_window"))
@@ -816,6 +894,23 @@ class Relay:
             u["rate"] = {k: (v or {}).get("utilization") for k, v in (info.get("unifiedWindows") or {}).items()}
             self.store.update_session(turn.session, usage=u)
         return False
+
+    def _learn(self, turn: Turn, result: Dict[str, Any]) -> None:
+        """What the CLI resolved the asked-for model to, and its window: the
+        menu shows these instead of the shipped guesses."""
+        if not turn.model:
+            return
+        try:
+            resolved = dict(self.store.get_meta("resolved", {}) or {})
+            resolved[turn.requested or "default"] = turn.model
+            self.store.set_meta("resolved", resolved)
+            windows = dict(self.store.get_meta("windows", {}) or {})
+            for name, mu in (result.get("modelUsage") or {}).items():
+                if name == turn.model and mu.get("contextWindow"):
+                    windows[name] = int(mu["contextWindow"])
+            self.store.set_meta("windows", windows)
+        except Exception:  # noqa: BLE001 — a note for the menu never fails a turn
+            pass
 
     async def _finish(self, turn: Turn, state: str) -> None:
         proc = turn.proc
@@ -833,7 +928,7 @@ class Relay:
             state = "stopped"
         ms = round((time.monotonic() - turn.started) * 1000)
         self._item(turn, "turn_end", state=state, ms=ms, cost=turn.usage.get("cost"),
-                   context=turn.usage.get("context"), model=turn.model)
+                   context=turn.usage.get("context"), model=turn.model, effort=turn.effort)
         turn.state = state
         turn.done = True
         turn.ended = time.monotonic()
