@@ -1,0 +1,518 @@
+# operonx studio — refactor phase 2: assistant-first
+
+Status: **plan written 2026-09-27, not started.** Branch
+`feat/assistant-first`, off `feat/platform` (P0–P9 of
+[PLATFORM_PLAN.md](PLATFORM_PLAN.md), all done).
+
+Phase 1 built the loop: records, runs, monitor, playground, evals,
+review, prompts, services, alerts, templates. Phase 2 changes how the
+studio *feels* to use. It has one goal:
+
+> **"Tell the AI what you want to accomplish,"** not "here is a
+> complicated platform, learn how to use it."
+
+Three things carry that goal:
+
+- the **Assistant** becomes the primary interface;
+- the **Flow** view becomes understandable at a glance and alive while
+  something runs;
+- the studio gets **fast through the tunnel**, where people actually use
+  it.
+
+A visual refresh (robotics and precision engineering, not cyberpunk)
+runs across all three.
+
+---
+
+## 0. The audit — measured, not guessed
+
+The studio was driven by a Playwright harness as a user would drive it
+(`scripts/perf/`, §8, R0). There are two sets of numbers:
+
+- **Local:** straight to `127.0.0.1:8766`.
+- **Tunnel:** through the `lhr.life` tunnel, which is how the operator
+  on a phone meets it.
+
+The tunnel's round trip costs about 1.25 s on a cold connection and
+about 0.75 s on a warm one. That makes every serial round trip the
+dominant cost.
+
+### 0.1 Performance
+
+| # | What | Measured | Cause |
+|---|---|---|---|
+| P1 | **Open a project, until the first node is drawn** | Tunnel 2.8–3.6 s; local 0.43–0.74 s | A serial chain of 19 requests. First the HTML; then CSS and **16 separate scripts** (6 connections, so several waves of about 0.75 s); only after every script has run does the page start fetching the IR (24 KB gzipped, 1.5 s through the tunnel). |
+| P2 | **An idle page keeps asking** | About 1.2 requests/s, forever, per open tab | `poll()` asks `/stamp`, then `/ui/actions`, one after the other, every 1.5 s. Through the tunnel one cycle takes about 3 s, so something the assistant opens reaches the screen up to 3 s late. |
+| P3 | **Home** | `/api/projects` requested twice; `/api/projects/health` takes 0.6–0.9 s | A duplicate fetch, and a health scan that is not cached. |
+| P4 | **Flow `render()`** | 60–100 ms for 34–50 nodes (about 2 ms a node) on each repaint, measured on callbot and educa_reminder_agent | A full DOM rebuild on every repaint: selection, run paint, re-extract. Zoom and pan are fine: p95 frame 17–20 ms, no long tasks. A 300-node graph would need about 0.6 s a repaint, so **live animation must not go through `render()`.** |
+| P5 | **Assistant streaming** | Text lands in 1–2 s batches through the tunnel, and a fake typewriter smooths it | Turn-based polling. |
+| P6 | **Errors from the tunnel** | The page throws `Unexpected token '<', "<h1>no tun"…` | `api()` parses every response as JSON, including the tunnel's HTML error page. |
+| P7 | **Tunnel address** | The anonymous localhost.run tunnel changed its URL three times in about 40 minutes, then dropped the ssh session with "tunnel inactivity timeout" | Not studio code. It now runs under a loop that reconnects on its own and writes the current URL to a file. A fixed domain needs a localhost.run account key, which is the user's decision. |
+| P8 | **Opening a screen through the tunnel** | Time = number of request hops in a row × about 0.75 s. Jobs: 3 hops, 2.3 s. Runs, Evals, Review and Settings: 2 hops, 1.5–1.9 s. Resources, Monitor, Services, Alerts and Prompts: 1 hop, 0.8 s. Locally, every screen is ready in 100–160 ms. | Screens chain requests: fetch a list, then fetch its first item's details. Each screen also refetches everything on every visit. |
+| P9 | **The playground keeps polling** | `play/events` long-polls continue on every other screen after the playground has been opened once | Nothing stops the poll when the user leaves the screen. |
+
+What is already right, so it is not a target: static files are gzipped
+and cached as immutable (`?v=<hash>`), and the IR is gzipped.
+
+### 0.2 UX — as a demanding user
+
+**The assistant**
+
+- It is hidden. On a project page it sits behind the *Inspect* tab. On
+  home it is a 48 px button in the corner.
+- Its memory is this browser only: localStorage, one conversation per
+  project. On the phone it is a different conversation, and clearing
+  site data loses it.
+- It has no sessions, titles, search, archive or retry.
+- It shows no model, token, context or limit information.
+- A tool chip shows only a name and a hint. There is no result,
+  success or failure, or duration, and no way to see what the agent
+  actually did.
+- *Stop* kills the process and does not say what had finished.
+- The empty state is one sentence. The input is a single line, with no
+  newlines and no commands.
+- On a phone, once it is opened, the sheet stays over 70% of every
+  screen.
+
+**Home**
+
+- The user cannot say what they want. They have to pick a project
+  first.
+- Project rows are mostly `/tmp/claude-0/-home-…` paths.
+- The two `ex17-jobs` projects can be told apart only by path.
+
+**Flow**
+
+- It opens at 100% at the top left. On callbot the user sees a
+  fragment, with cards cut off at the left edge; on a phone, two half
+  cards.
+- Every node carries `FUNC` / `IO` / `SYNC` badges, so the technical
+  detail is what the eye lands on first.
+- Nothing moves while a playground session runs. A run shows on the
+  canvas only after it has finished and been painted.
+
+**Empty screens teach instead of doing.** *Evals* shows an
+`operonx.toml` snippet to copy. *Runs* says "widen the range". Neither
+offers "ask the assistant to set it up".
+
+**The phone.** The breadcrumb truncates to `ed… / ws_ca…`.
+
+### 0.3 What the assistant runtime gives us
+
+These come from Claude Code 2.1.283's `stream-json` output, from a real
+turn run with `haiku`:
+
+| Event | Carries | Used for |
+|---|---|---|
+| `system/init` | `session_id`, `model`, `tools`, `mcp_servers`, `permissionMode` | The model badge and session details |
+| `stream_event` | `text_delta`, and `thinking` block starts and deltas | Token-level text and a "thinking" state |
+| `assistant` message | `usage`: `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` is the context in use | The context meter |
+| `result` | `total_cost_usd`, `duration_ms`, `usage`, `modelUsage[model].contextWindow` (200000), `maxOutputTokens` | Cost, the context limit and turn stats |
+| `rate_limit_event` | 5-hour and 7-day utilization | Power-user details only |
+
+The CLI flags in play: `--resume`, `--fork-session`, `--session-id`,
+`--model`, `--effort`, `--max-budget-usd`, `--autocompact`.
+
+**Still to verify** (R2, step one; a few cents of the host's Claude
+usage, on `haiku`):
+
+- whether `/compact` works in headless `-p` mode;
+- the shape of `tool_result` blocks in `user` events;
+- whether `--resume X --fork-session` reports the new id in `init`.
+
+---
+
+## 1. Principles
+
+1. **Tell, don't learn.** Every empty state and every error offers the
+   one action that fixes it, and usually that action is "ask the
+   assistant".
+2. **Measure, fix, measure again.** Every performance change has
+   before-and-after numbers from the same harness, local and through
+   the tunnel. A loading animation is never the fix.
+3. **Motion has a job.** Energy on the canvas means something is
+   executing, right there, right now. Nothing else pulses, glows or
+   loops.
+4. **Keep what works.** Runs, RunStore, evals, jobs, services, alerts,
+   the playground and the templates keep their APIs and behaviour. New
+   server routes are additive. The 464 studio tests stay green.
+5. **Progressive disclosure.** Tokens, context windows, models, session
+   ids and tool inputs are one click away, never in the way.
+6. **No complexity without a measured problem.** That rules out a node
+   build toolchain, new infrastructure, and WebGL, Workers, WASM or Rust
+   unless a benchmark in this plan fails its budget.
+
+---
+
+## 2. Decisions
+
+| # | Question | Decision | Why |
+|---|---|---|---|
+| 1 | Where conversations live | **A SQLite file beside the studio's state (`studio.json`), behind a small `ChatStore` interface.** Uses stdlib `sqlite3` in WAL mode, with FTS5 for search where it is available and `LIKE` where it is not. | Conversations have to survive a reload and follow the user from desktop to phone, so they belong on the server; localStorage fails both. The studio already keeps its state in local files. Postgres or Redis would be new infrastructure for a single-user studio. Langfuse is a tracing tool, and remote. Claude Code keeps its own transcript for `--resume`; the studio stores what it *renders* (items, titles, usage, flags), linked by the Claude session id. The interface matches the RunStore decision: a team server is a backend swap. |
+| 2 | Streaming | **Short streamed windows.** A chunked NDJSON response streams events as they happen, ends itself at about 8 s, and the client reconnects by cursor. The existing poll stays as the fallback. | The tunnel kills any response at about 10 s (measured in P5 of phase 1), so one long stream is impossible. 8-second windows give token-level delivery with one request per 8 s, instead of a poll round trip per batch. **Gate:** first prove the tunnel does not buffer chunked bodies. If it does, keep the poll and drop the fake typewriter. |
+| 3 | Page liveness | **One `pulse` long-poll per page** (held up to 8 s) replaces `/stamp` + `/ui/actions`. It answers at once on a code change, an assistant action, a finished assistant turn, or a live-run event. | This fixes P2: from about 1.2 requests/s to at most 0.125/s when idle, and changes arrive immediately instead of up to 3 s late. |
+| 4 | Scripts | **The server concatenates the project page's scripts into one bundle** in memory at startup, hashed and served as immutable. No node, no build step. | This fixes P1: 16 requests become one. Splitting code per screen would add a 0.75 s round trip on the first visit to each screen through the tunnel, which is worse, so no splitting. |
+| 5 | The IR on first paint | **Inline it into the project page HTML** when the watcher has it cached (it usually does, via SWR); otherwise fall back to a fetch that starts in `<head>`. | This removes the last serial round trip in P1. |
+| 6 | Regenerate and edit-and-resend | **Every turn runs as `--resume <previous turn's session> --fork-session`**, so each turn has its own session id, and the id of turn *n−1* is the state before turn *n*. Regenerate, and editing an earlier message, fork from that point. | This gives true rewind and branching with no transcript surgery. Prompt caching still applies because the prefix is identical. **Gate:** decision 2's verification of `--fork-session`. Fallback: Retry re-sends in the same session and says so. |
+| 7 | Live Flow | **The playground bridge emits per-op events while a session runs.** This is an additive operonx change: the bridge watches `trace.nodes`, which every op execution is appended to as it finishes. **A recorded run gets an animated replay** from its recorded timings. It is rendered in SVG and CSS (transform, opacity, `stroke-dashoffset`), with per-node class toggles and never a full `render()`. | The data already exists: live for sessions the studio drives, recorded for everything else. Canvas, WebGL, Workers, WASM and Rust are not justified. The largest real graph zooms at a 17–20 ms p95 frame. Revisit only if the 300-node synthetic benchmark (§5) misses its budget *after* repaints are incremental. |
+| 8 | Model choice | **The CLI default, unless the session picks one** of `opus`, `sonnet` or `haiku`, stored on the session. | Normal users never see it; power users can. |
+| 9 | Session titles | **The first message, trimmed, straight away; then a one-line title from `haiku` after the first reply,** in the background. `OPERONX_STUDIO_CHAT_TITLES=off` turns it off. | A good title is what makes a session list usable, and a `haiku` call costs a fraction of a cent. The heuristic title means nothing ever waits for it. |
+| 10 | The old localStorage transcripts | **Imported once.** The first time the new panel loads, it posts any `oxchat:*:log` it finds as an "imported" session, then clears the key. | Nobody loses a conversation to the refactor. |
+| 11 | Fonts | **Keep the system font stack.** No webfont. | A webfont blocks rendering and costs a tunnel round trip. "Precision" comes from tabular numerals, weights, spacing and hairlines, not a typeface. |
+
+---
+
+## 3. The Assistant (A)
+
+### 3.1 Where it lives
+
+- **Desktop project page:** the right column, open by default.
+  - Its tab comes first (Assistant, then Inspect).
+  - Clicking a node still opens Inspect, as it does today. The
+    inspector's header gets an **Ask about this** button that switches
+    back with the node attached as context.
+  - While a turn runs, the Assistant tab shows a live dot.
+- **Focus mode** (a button in the header, or `Ctrl/⌘ J`): the assistant
+  takes the whole stage, with the session list on its left, like
+  claude.ai. The canvas and screens stay one click away. This is for
+  long work.
+- **Home:** a hero composer, "What do you want to build or fix?", above
+  the projects. Below it, recent sessions across all projects. The home
+  assistant can create a project from a template and open it (the
+  template API already exists).
+- **Phone:** an "Ask…" bar docked at the bottom of every screen. It
+  opens a full-screen assistant, and closing it returns to the same
+  place. The 70% sheet is gone.
+
+### 3.2 Sessions
+
+- **Scope:** sessions belong to a project (or to home). The home screen
+  can also list every project's sessions together.
+- **Actions:** a session list with search across titles and content,
+  rename, archive and unarchive, and delete (with a confirmation).
+- **Restoring:** opening a session renders its stored transcript. If a
+  turn is still running, it reattaches, from any device.
+- **Long tasks:** a turn keeps running when the tab closes.
+  - The session list shows a spinner beside it.
+  - When it finishes, any studio page shows a toast (it arrives through
+    `pulse`), plus a browser notification if the user allowed them.
+
+### 3.3 A turn's states
+
+A turn moves through: **starting → thinking → writing → running
+*tool* → done**, or it ends as **stopped** or **failed**.
+
+- **What the user sees:** the current state is one line under the
+  newest message, with an elapsed timer, for example "Reading
+  `app/main.py` · 4 s".
+- **Stop:** sends SIGINT, and kills the process after 3 s. The turn is
+  marked *stopped* and keeps whatever it had already written and done.
+- **Errors:** an error is a card with a plain sentence, the details
+  folded away, and **Retry**.
+
+### 3.4 What the transcript shows
+
+| Item | Shows | On demand |
+|---|---|---|
+| **Your message** | The text | **Edit & resend**, which forks the session (decision 6) |
+| **Answer** | Markdown: headings, lists, tables, code with a copy button, and `studio:` links as rich chips (a run with its status, an op, a screen) | Copy, and **Regenerate** on the last answer |
+| **Thinking** | A quiet "thinking…" line | The thinking text, when the model gives it |
+| **Tool call** | A human verb ("Read `app/main.py`", "Ran tests"), a spinner, then ✓ or ✗ and its duration | The input and output (4 KB, trimmed) |
+| **Studio action** | "Opened run `abc`", as a link | — |
+| **Changes** | The existing diff card, with Keep and Undo | The diff |
+| **Flow changed** | After the edit is re-extracted: which ops were added, changed or removed, and **Show on canvas** | — |
+| **Turn footer** | Nothing by default | Time, tokens and cost: on hover, or always in details mode |
+
+**What did it do?** Each turn has an *Activity* view: every tool call
+with its input and output, the files it changed, the studio actions it
+took, and what it cost. A whole session can be exported as Markdown.
+
+### 3.5 Composer
+
+- The input is multi-line and grows as you type. **Enter** sends;
+  **Shift+Enter** adds a new line.
+- **`/` commands:**
+  - `/new` and `/sessions`
+  - `/compact`
+  - `/model`
+  - `/retry`
+  - `/help`
+  - `/focus`
+- **Context chips** show what rides along with the message: the
+  selected op, the run painted on the canvas, the screen and filter.
+  Each can be removed. This makes the view context the studio already
+  sends visible.
+- The user can keep typing while a turn runs; the send button becomes
+  Stop.
+
+### 3.6 Smart starts
+
+`GET /api/p/{pid}/assistant/suggest` returns starters built from the
+project's state. It uses the RunStore, the IR and the alerts:
+
+- runs that failed in the last day → "Why did 3 runs of `call` fail
+  today?";
+- no evals → "Set up an eval for `call`";
+- an alert firing → "Look into the alert `call errors`";
+- a service not running;
+- an op selected → "Explain `route_1`" / "Why is `route_1` slow?".
+
+Generic starters fill the rest. They show in an empty session, and as
+contextual chips above the composer.
+
+### 3.7 Progressive disclosure
+
+- **Normal view:** nothing technical. A thin context meter appears only
+  once the context is more than 50% full. Above 80%, it suggests
+  **Compact**.
+- **Session details (ⓘ):**
+  - model;
+  - context used and its limit;
+  - input, output and cache tokens for the session;
+  - cost;
+  - number of turns;
+  - Claude session id;
+  - the agent's reach (read, edit or full) and its working directory.
+- **Settings:** the default model; the reach is shown read-only when
+  the deployment fixes it.
+
+### 3.8 Compact
+
+`/compact`, or the button, compacts the conversation. The studio
+session carries on, with a "compacted — N tokens → M" divider in the
+transcript.
+
+If headless `/compact` turns out not to work (the §0.3 check), the
+fallback is: the model writes a continuation summary, a fresh Claude
+session is seeded with it, and the same divider shows.
+
+### 3.9 Server API
+
+All of it is additive. The old `/chat` routes stay while anything uses
+them, then go, with their tests moved to the new routes.
+
+```
+GET    /api/assistant/sessions?scope=&q=&archived=   list and search
+POST   /api/assistant/sessions                       {scope, model?}
+GET    /api/assistant/sessions/{sid}                 session + items
+PATCH  /api/assistant/sessions/{sid}                 {title?, archived?, model?}
+DELETE /api/assistant/sessions/{sid}
+POST   /api/assistant/sessions/{sid}/turns           {message, view, fork_at?}
+POST   /api/assistant/sessions/{sid}/compact
+POST   /api/assistant/import                         old localStorage transcripts
+GET    /api/assistant/turns/{tid}/stream?cursor=     NDJSON, ≤ 8 s a window
+GET    /api/assistant/turns/{tid}?cursor=            poll fallback
+POST   /api/assistant/turns/{tid}/stop
+GET    /api/p/{pid}/assistant/suggest
+GET    /api/p/{pid}/pulse?stamp=&ui=&chat=           decision 3
+```
+
+**Schema:**
+
+- `sessions`: `id`, `scope`, `title`, `title_source`, `created`,
+  `updated`, `archived`, `model`, `claude_session`, `usage` (JSON),
+  `running_turn`
+- `items`: `session`, `seq`, `turn`, `kind`, `payload` (JSON),
+  `created`
+- `turns`: `id`, `session`, `claude_session_before`,
+  `claude_session_after`, `state`, `started`, `ended`, `usage`, `cost`
+- `items_fts`: title and text
+
+**Writes:** the turn relay appends items as events arrive, in batches of
+250 ms or 20 events, so a studio restart loses at most a quarter of a
+second of a running turn's transcript.
+
+---
+
+## 4. Performance (B)
+
+| # | Change | Fixes |
+|---|---|---|
+| B1 | A single script bundle for the project page and one for home (decision 4) | P1 |
+| B2 | The IR inlined into the page HTML (decision 5) | P1 |
+| B3 | `pulse` replaces `/stamp` + `/ui/actions` polling (decision 3) | P2 |
+| B4 | Home: one `/api/projects` request; the health result cached until a project's stamp changes | P3 |
+| B5 | `api()` survives a non-JSON body, retries safe GETs once on a network error, and sends a 401 to the login page | P6 |
+| B6 | Incremental Flow repaints | P4 |
+| B7 | Screens show their last data at once and refresh behind it (stale-while-revalidate in the page). A screen gets what it needs in **one hop**: the list endpoint embeds the first item's details, or both requests go out together. The playground poll stops when its screen is not showing. | P8, P9 |
+
+**B6 in detail:**
+
+- Profile `render()` to find its cost; forced reflows inside loops are
+  the suspect.
+- Painting a run, selecting a node and live-run state all become class
+  and attribute toggles on nodes that already exist.
+- `render()` runs only when the graph's shape changes.
+
+**Budgets:**
+
+| Measure | Budget | Today |
+|---|---|---|
+| Project open to first node, through the tunnel, repeat visit | ≤ 1.6 s | 2.8–3.6 s |
+| Idle requests | ≤ 0.13/s | ≈ 1.2/s |
+| First visit to any screen, through the tunnel | ≤ 1 hop (≈ 0.9 s) | 0.8–2.3 s |
+| Revisiting a screen | Its last data on screen at once | a full refetch |
+| Selection or run-paint on callbot | < 16 ms | 60–100 ms |
+| Full render on callbot | < 40 ms | 60–100 ms |
+| Full render on a synthetic 300-node graph | < 200 ms | — |
+| Streamed assistant text | on screen within one network hop of being generated | — |
+
+---
+
+## 5. Flow (F)
+
+- **F1 — Open fitted.** The first view fits the top level of the graph
+  to the stage and centres it, never below a readable zoom. Once the
+  user pans or zooms, that view is remembered and restored.
+- **F2 — Calm cards.**
+  - A node shows its name and one small glyph for its kind.
+  - The `IO`, `SYNC` and transient badges move to Inspect, or show on
+    hover and in a "details" canvas mode.
+  - Show-key values stay; they are the useful part.
+- **F3 — Alive while running.** Bridge `ops` events (decision 7) drive
+  the canvas:
+  - A node goes idle → active → done or failed, with an
+    opacity and transform transition of 150–250 ms.
+  - On completion, a small particle travels each incoming edge.
+    Particles are SVG circles on the edge path with an `offset-path`
+    animation, or a dash sweep, whichever is cheaper when measured.
+    There are at most 24 at once; the oldest is dropped first.
+  - A header line reads, for example, "call · live · 12 ops · 3.4 s".
+  - `prefers-reduced-motion` turns the particles off and keeps the
+    state colours.
+- **F4 — Replay a recorded run.** A recorded run replays on the canvas
+  at 1×, 4× or instantly, from its recorded start and end times, using
+  the same drawing as F3. This works for any run, including production
+  calls.
+- **F5 — Large graphs.** A synthetic 300-node graph goes into the perf
+  harness. Culling off-screen nodes is added only if B6 still misses
+  the budget.
+
+---
+
+## 6. Visual system (V)
+
+**Direction:** robotics, advanced AI infrastructure, precision
+engineering. Clean, calm and exact.
+
+- **Neutrals:** cool graphite instead of today's warm cream.
+- **Hairlines:** 1 px borders; one shadow layer at most.
+- **Radii:** 6–8 px.
+- **Type:** tabular numerals wherever numbers line up; monospace only
+  for identifiers.
+- **Colour:**
+  - one **signal** colour, used only for live and active state;
+  - the brand gold stays on the mark and the primary action;
+  - status colours are reserved for status.
+- **Motion:** 120–180 ms ease-out transitions on hover, press, panels
+  and new messages (opacity plus a 4 px rise); nothing loops except
+  live state.
+- **Ruled out:** neon, glow, HUD chrome, decorative grids, stacked
+  gradients, and cards that exist only to be cards.
+
+**Colour checks:** the palette is validated with the `dataviz` skill's
+validator (CVD separation and contrast) before it ships.
+
+**Dark mode:** the studio has none today. All colours move to tokens in
+this phase. Outside its token block, `studio.css` still has 210
+hard-coded hex colours (136 distinct), so today a theme cannot be
+swapped. After this phase, a dark theme is a token swap. Dark mode itself ships only if the
+token work leaves time; it is not a gate.
+
+---
+
+## 7. Everything else a user trips on (U)
+
+- **Home:**
+  - Rows show the name and a short path (`~/…`, or `…/scratchpad/p5demo`).
+  - When two projects share a name, the parent folder tells them apart.
+  - Health dots explain themselves on hover.
+- **Empty states** offer the assistant action next to the manual one.
+  For example, Evals gets "Ask the assistant to set up an eval for
+  `call`".
+- **Errors:** every error is one human line, the details folded away,
+  and a retry.
+- **Phone:**
+  - The bottom Ask bar and full-screen assistant (§3.1).
+  - The breadcrumb collapses to the project name.
+  - The rail drawer stays as it is.
+
+---
+
+## 8. Phases
+
+Each phase ships alone and is measured alone.
+
+| Phase | Content | Gate |
+|---|---|---|
+| **R0 — plan and harness** | This document. The audit and screenshot scripts go into `scripts/perf/`, runnable against any base URL. | Committed |
+| **R1 — fast** | B1–B5, B7 | The budget table in §4 met or explained; the numbers recorded in §10 |
+| **R2 — assistant backend** | The §0.3 checks first; then `ChatStore`, forked turns, streamed windows, usage and limits, suggest, pulse, import, titles | Unit tests for the store, turn relay, fork, stop, restore and import, using a fake `claude` binary that replays recorded `stream-json`; then one real `haiku` turn end to end |
+| **R3 — assistant UI** | §3.1–3.8: the panel, sessions, composer, cards, focus mode, phone | Screenshots on desktop and phone; an extensive real-assistant test pass (§9) |
+| **R4 — Flow** | F1–F5; the operonx bridge `ops` event (an additive change on the operonx branch) | Render budgets; live and replay screenshots; operonx tests green |
+| **R5 — visual system and states** | §6 and §7 across every screen | Palette validator green; before-and-after screenshots of every screen |
+| **R6 — verification** | Major flows end to end, the assistant extensively, the Flow view, responsiveness, performance measured again, regressions fixed, polish | §10 filled in |
+
+**Every phase:**
+
+- Studio tests stay green; new behaviour gets tests.
+- Commits are made as Bruce Win, with no co-author line. Nothing is
+  pushed until asked.
+- The live studio on :8766 is restarted after Python changes.
+
+---
+
+## 9. How the assistant will be tested
+
+**Offline** (in CI, at no cost): a fake `claude` binary that replays
+recorded `stream-json` files, including the tool, error, stop and
+compact variants. It covers:
+
+- the relay;
+- persistence;
+- restore after a restart;
+- forking;
+- stop;
+- the streamed windows and cursor resume;
+- search, archive and delete;
+- the old-transcript import.
+
+**Live**, on the real CLI, through the tunnel, on desktop and phone:
+
+1. a question about the project;
+2. a task that edits code, then Keep, then Undo;
+3. a task that uses studio tools (open a run, monitor);
+4. stop mid-tool;
+5. a reload mid-turn, and reattaching from the phone;
+6. retry after a forced error;
+7. regenerate;
+8. edit-and-resend;
+9. compact;
+10. switching sessions while one runs;
+11. search, archive and delete;
+12. a long turn left running while the user moves to another screen.
+
+The live pass uses the host's Claude login; `haiku` is used wherever the
+model does not matter.
+
+---
+
+## 10. Progress
+
+| Phase | State | Numbers |
+|---|---|---|
+| R0 | plan written | baseline in §0 |
+| R1–R6 | not started | |
+
+---
+
+## 11. Not changing
+
+- **No drag and drop.** Code stays the product; the assistant stays the
+  editor.
+- **The business logic** of runs, stores, evals, jobs, services, alerts,
+  the playground and the templates.
+- **No new infrastructure:** no Redis, no Postgres requirement, no node
+  build.
+- **The login wall** stays the security boundary, and the agent's reach
+  (`OPERONX_STUDIO_CHAT_MODE`) stays a deployment decision.

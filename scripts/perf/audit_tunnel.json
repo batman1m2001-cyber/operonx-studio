@@ -1,0 +1,769 @@
+[
+ {
+  "step": "home:first-paint",
+  "ms": 1802,
+  "requests": 6,
+  "api": 1,
+  "kb": 0,
+  "api_kb": 1,
+  "slowest": [
+   [
+    836,
+    "/"
+   ],
+   [
+    740,
+    "/api/projects"
+   ],
+   [
+    0,
+    "/static/studio.css?v=d5d4e7cfdc"
+   ],
+   [
+    0,
+    "/static/icons.js?v=d5d4e7cfdc"
+   ]
+  ],
+  "urls": [
+   "/api/projects"
+  ]
+ },
+ {
+  "step": "home:idle-extra",
+  "ms": 5,
+  "requests": 1,
+  "api": 1,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [
+   [
+    1089,
+    "/api/projects/health"
+   ]
+  ],
+  "urls": [
+   "/api/projects/health"
+  ]
+ },
+ {
+  "step": "38b851b313f7:flow-first-node",
+  "ms": 3897,
+  "requests": 19,
+  "api": 1,
+  "kb": 108,
+  "api_kb": 2,
+  "slowest": [
+   [
+    2904,
+    "/static/settings.js?v=d5d4e7cfdc"
+   ],
+   [
+    2438,
+    "/static/review.js?v=d5d4e7cfdc"
+   ],
+   [
+    2430,
+    "/static/alerts.js?v=d5d4e7cfdc"
+   ],
+   [
+    2421,
+    "/static/prompts.js?v=d5d4e7cfdc"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/ir"
+  ]
+ },
+ {
+  "step": "38b851b313f7:flow-idle-extra",
+  "ms": 559,
+  "requests": 0,
+  "api": 0,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [],
+  "urls": []
+ },
+ {
+  "step": "38b851b313f7:10s-idle",
+  "ms": 10024,
+  "requests": 6,
+  "api": 6,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [
+   [
+    825,
+    "/api/p/38b851b313f7/ui/actions?after=0"
+   ],
+   [
+    766,
+    "/api/p/38b851b313f7/stamp"
+   ],
+   [
+    742,
+    "/api/p/38b851b313f7/ui/actions?after=0"
+   ],
+   [
+    737,
+    "/api/p/38b851b313f7/stamp"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/stamp",
+   "/api/p/38b851b313f7/ui/actions"
+  ]
+ },
+ {
+  "step": "38b851b313f7:playground",
+  "ms": 1543,
+  "requests": 5,
+  "api": 5,
+  "kb": 2,
+  "api_kb": 2,
+  "slowest": [
+   [
+    1024,
+    "/api/p/38b851b313f7/stamp"
+   ],
+   [
+    744,
+    "/api/p/38b851b313f7/runs?origin=playground&name=score&limit=8"
+   ],
+   [
+    741,
+    "/api/p/38b851b313f7/play/doors"
+   ],
+   [
+    721,
+    "/api/p/38b851b313f7/ui/actions?after=0"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/play/doors",
+   "/api/p/38b851b313f7/play/events",
+   "/api/p/38b851b313f7/runs",
+   "/api/p/38b851b313f7/stamp",
+   "/api/p/38b851b313f7/ui/actions"
+  ]
+ },
+ {
+  "step": "38b851b313f7:resources",
+  "ms": 812,
+  "requests": 1,
+  "api": 1,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [
+   [
+    766,
+    "/api/p/38b851b313f7/env-health"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/env-health"
+  ]
+ },
+ {
+  "step": "38b851b313f7:traces",
+  "ms": 1566,
+  "requests": 4,
+  "api": 4,
+  "kb": 8,
+  "api_kb": 8,
+  "slowest": [
+   [
+    763,
+    "/api/p/38b851b313f7/runs/origins?since=1789897429"
+   ],
+   [
+    747,
+    "/api/p/38b851b313f7/runs?since=1789897429&order=started_desc&limit=100"
+   ],
+   [
+    739,
+    "/api/p/38b851b313f7/stamp"
+   ],
+   [
+    722,
+    "/api/p/38b851b313f7/ui/actions?after=0"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/runs",
+   "/api/p/38b851b313f7/runs/origins",
+   "/api/p/38b851b313f7/stamp",
+   "/api/p/38b851b313f7/ui/actions"
+  ]
+ },
+ {
+  "step": "38b851b313f7:monitor",
+  "ms": 792,
+  "requests": 2,
+  "api": 2,
+  "kb": 1,
+  "api_kb": 1,
+  "slowest": [
+   [
+    4713,
+    "/api/p/38b851b313f7/play/events?cursor=5"
+   ],
+   [
+    751,
+    "/api/p/38b851b313f7/monitor?origin=&name=&since=1789897431&until=17905"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/monitor",
+   "/api/p/38b851b313f7/play/events"
+  ]
+ },
+ {
+  "step": "38b851b313f7:review",
+  "ms": 1607,
+  "requests": 5,
+  "api": 5,
+  "kb": 9,
+  "api_kb": 9,
+  "slowest": [
+   [
+    912,
+    "/api/p/38b851b313f7/stamp"
+   ],
+   [
+    785,
+    "/api/p/38b851b313f7/review/queue?verdict=unreviewed&origin=&name=&limi"
+   ],
+   [
+    757,
+    "/api/p/38b851b313f7/runs/groups"
+   ],
+   [
+    743,
+    "/api/p/38b851b313f7/review/run/a4167785-bec5-4db0-9f10-389941edc0e5"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/review/queue",
+   "/api/p/38b851b313f7/review/run/a4167785-bec5-4db0-9f10-389941edc0e5",
+   "/api/p/38b851b313f7/runs/groups",
+   "/api/p/38b851b313f7/stamp",
+   "/api/p/38b851b313f7/ui/actions"
+  ]
+ },
+ {
+  "step": "38b851b313f7:evals",
+  "ms": 1564,
+  "requests": 4,
+  "api": 4,
+  "kb": 2,
+  "api_kb": 2,
+  "slowest": [
+   [
+    758,
+    "/api/p/38b851b313f7/evals"
+   ],
+   [
+    742,
+    "/api/p/38b851b313f7/evals/score_quality/runs/20260926T203723-651714"
+   ],
+   [
+    733,
+    "/api/p/38b851b313f7/stamp"
+   ],
+   [
+    719,
+    "/api/p/38b851b313f7/ui/actions?after=0"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/evals",
+   "/api/p/38b851b313f7/evals/score_quality/runs/20260926T203723-651714",
+   "/api/p/38b851b313f7/stamp",
+   "/api/p/38b851b313f7/ui/actions"
+  ]
+ },
+ {
+  "step": "38b851b313f7:prompts",
+  "ms": 100,
+  "requests": 0,
+  "api": 0,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [],
+  "urls": []
+ },
+ {
+  "step": "38b851b313f7:services",
+  "ms": 832,
+  "requests": 3,
+  "api": 3,
+  "kb": 1,
+  "api_kb": 1,
+  "slowest": [
+   [
+    779,
+    "/api/p/38b851b313f7/services"
+   ],
+   [
+    778,
+    "/api/p/38b851b313f7/env-health"
+   ],
+   [
+    759,
+    "/api/p/38b851b313f7/stamp"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/env-health",
+   "/api/p/38b851b313f7/services",
+   "/api/p/38b851b313f7/stamp"
+  ]
+ },
+ {
+  "step": "38b851b313f7:jobs",
+  "ms": 2315,
+  "requests": 4,
+  "api": 4,
+  "kb": 2,
+  "api_kb": 2,
+  "slowest": [
+   [
+    882,
+    "/api/p/38b851b313f7/ui/actions?after=0"
+   ],
+   [
+    763,
+    "/api/p/38b851b313f7/jobs/score_calls/runs/20260926T190144-292123"
+   ],
+   [
+    739,
+    "/api/p/38b851b313f7/jobs/score_calls/runs"
+   ],
+   [
+    739,
+    "/api/p/38b851b313f7/jobs"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/jobs",
+   "/api/p/38b851b313f7/jobs/score_calls/runs",
+   "/api/p/38b851b313f7/jobs/score_calls/runs/20260926T190144-292123",
+   "/api/p/38b851b313f7/ui/actions"
+  ]
+ },
+ {
+  "step": "38b851b313f7:alerts",
+  "ms": 834,
+  "requests": 3,
+  "api": 3,
+  "kb": 1,
+  "api_kb": 1,
+  "slowest": [
+   [
+    778,
+    "/api/p/38b851b313f7/stamp"
+   ],
+   [
+    771,
+    "/api/p/38b851b313f7/alerts"
+   ],
+   [
+    728,
+    "/api/p/38b851b313f7/ui/actions?after=0"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/alerts",
+   "/api/p/38b851b313f7/stamp",
+   "/api/p/38b851b313f7/ui/actions"
+  ]
+ },
+ {
+  "step": "38b851b313f7:settings",
+  "ms": 1523,
+  "requests": 3,
+  "api": 3,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [
+   [
+    735,
+    "/api/p/38b851b313f7/stamp"
+   ],
+   [
+    733,
+    "/api/p/38b851b313f7/settings/retention/preview"
+   ],
+   [
+    719,
+    "/api/p/38b851b313f7/settings"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/settings",
+   "/api/p/38b851b313f7/settings/retention/preview",
+   "/api/p/38b851b313f7/stamp"
+  ]
+ },
+ {
+  "step": "38b851b313f7:dom-nodes",
+  "n": 2377
+ },
+ {
+  "step": "3d65b3e448e4:flow-first-node",
+  "ms": 2373,
+  "requests": 20,
+  "api": 2,
+  "kb": 19,
+  "api_kb": 23,
+  "slowest": [
+   [
+    1217,
+    "/api/p/3d65b3e448e4/ir"
+   ],
+   [
+    736,
+    "/p/3d65b3e448e4"
+   ],
+   [
+    721,
+    "/api/p/38b851b313f7/ui/actions?after=0"
+   ],
+   [
+    0,
+    "/static/values.js?v=d5d4e7cfdc"
+   ]
+  ],
+  "urls": [
+   "/api/p/38b851b313f7/ui/actions",
+   "/api/p/3d65b3e448e4/ir"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:flow-idle-extra",
+  "ms": 558,
+  "requests": 0,
+  "api": 0,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [],
+  "urls": []
+ },
+ {
+  "step": "3d65b3e448e4:10s-idle",
+  "ms": 10027,
+  "requests": 6,
+  "api": 6,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [
+   [
+    756,
+    "/api/p/3d65b3e448e4/stamp"
+   ],
+   [
+    727,
+    "/api/p/3d65b3e448e4/stamp"
+   ],
+   [
+    725,
+    "/api/p/3d65b3e448e4/stamp"
+   ],
+   [
+    716,
+    "/api/p/3d65b3e448e4/ui/actions?after=0"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/stamp",
+   "/api/p/3d65b3e448e4/ui/actions"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:playground",
+  "ms": 1787,
+  "requests": 5,
+  "api": 5,
+  "kb": 1,
+  "api_kb": 1,
+  "slowest": [
+   [
+    1008,
+    "/api/p/3d65b3e448e4/play/doors"
+   ],
+   [
+    966,
+    "/api/p/3d65b3e448e4/ui/actions?after=0"
+   ],
+   [
+    731,
+    "/api/p/3d65b3e448e4/runs?origin=playground&name=call&limit=8"
+   ],
+   [
+    724,
+    "/api/p/3d65b3e448e4/stamp"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/play/doors",
+   "/api/p/3d65b3e448e4/play/events",
+   "/api/p/3d65b3e448e4/runs",
+   "/api/p/3d65b3e448e4/stamp",
+   "/api/p/3d65b3e448e4/ui/actions"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:resources",
+  "ms": 975,
+  "requests": 2,
+  "api": 2,
+  "kb": 1,
+  "api_kb": 1,
+  "slowest": [
+   [
+    934,
+    "/api/p/3d65b3e448e4/env-health"
+   ],
+   [
+    783,
+    "/api/p/3d65b3e448e4/stamp"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/env-health",
+   "/api/p/3d65b3e448e4/stamp"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:traces",
+  "ms": 1564,
+  "requests": 3,
+  "api": 3,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [
+   [
+    770,
+    "/api/p/3d65b3e448e4/runs?since=1789897462&order=started_desc&limit=100"
+   ],
+   [
+    738,
+    "/api/p/3d65b3e448e4/runs/origins?since=1789897461"
+   ],
+   [
+    717,
+    "/api/p/3d65b3e448e4/ui/actions?after=0"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/runs",
+   "/api/p/3d65b3e448e4/runs/origins",
+   "/api/p/3d65b3e448e4/ui/actions"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:monitor",
+  "ms": 771,
+  "requests": 3,
+  "api": 3,
+  "kb": 1,
+  "api_kb": 1,
+  "slowest": [
+   [
+    4726,
+    "/api/p/3d65b3e448e4/play/events?cursor=6"
+   ],
+   [
+    737,
+    "/api/p/3d65b3e448e4/stamp"
+   ],
+   [
+    723,
+    "/api/p/3d65b3e448e4/monitor?origin=&name=&since=1789897463&until=17905"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/monitor",
+   "/api/p/3d65b3e448e4/play/events",
+   "/api/p/3d65b3e448e4/stamp"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:review",
+  "ms": 1891,
+  "requests": 5,
+  "api": 5,
+  "kb": 2,
+  "api_kb": 2,
+  "slowest": [
+   [
+    944,
+    "/api/p/3d65b3e448e4/review/queue?verdict=unreviewed&origin=&name=&limi"
+   ],
+   [
+    892,
+    "/api/p/3d65b3e448e4/review/run/case-silent-caller-1789028290"
+   ],
+   [
+    736,
+    "/api/p/3d65b3e448e4/stamp"
+   ],
+   [
+    727,
+    "/api/p/3d65b3e448e4/runs/groups"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/review/queue",
+   "/api/p/3d65b3e448e4/review/run/case-silent-caller-1789028290",
+   "/api/p/3d65b3e448e4/runs/groups",
+   "/api/p/3d65b3e448e4/stamp",
+   "/api/p/3d65b3e448e4/ui/actions"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:evals",
+  "ms": 793,
+  "requests": 2,
+  "api": 2,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [
+   [
+    732,
+    "/api/p/3d65b3e448e4/evals"
+   ],
+   [
+    724,
+    "/api/p/3d65b3e448e4/ui/actions?after=0"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/evals",
+   "/api/p/3d65b3e448e4/ui/actions"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:prompts",
+  "ms": 831,
+  "requests": 1,
+  "api": 1,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [
+   [
+    783,
+    "/api/p/3d65b3e448e4/prompts/oc_ask/samples?limit=20"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/prompts/oc_ask/samples"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:services",
+  "ms": 790,
+  "requests": 4,
+  "api": 4,
+  "kb": 1,
+  "api_kb": 1,
+  "slowest": [
+   [
+    1085,
+    "/api/p/3d65b3e448e4/ui/actions?after=0"
+   ],
+   [
+    742,
+    "/api/p/3d65b3e448e4/env-health"
+   ],
+   [
+    741,
+    "/api/p/3d65b3e448e4/services"
+   ],
+   [
+    737,
+    "/api/p/3d65b3e448e4/stamp"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/env-health",
+   "/api/p/3d65b3e448e4/services",
+   "/api/p/3d65b3e448e4/stamp",
+   "/api/p/3d65b3e448e4/ui/actions"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:jobs",
+  "ms": 791,
+  "requests": 1,
+  "api": 1,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [
+   [
+    737,
+    "/api/p/3d65b3e448e4/jobs"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/jobs"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:alerts",
+  "ms": 791,
+  "requests": 2,
+  "api": 2,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [
+   [
+    786,
+    "/api/p/3d65b3e448e4/stamp"
+   ],
+   [
+    741,
+    "/api/p/3d65b3e448e4/alerts"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/alerts",
+   "/api/p/3d65b3e448e4/stamp"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:settings",
+  "ms": 1523,
+  "requests": 3,
+  "api": 3,
+  "kb": 0,
+  "api_kb": 0,
+  "slowest": [
+   [
+    734,
+    "/api/p/3d65b3e448e4/settings/retention/preview"
+   ],
+   [
+    733,
+    "/api/p/3d65b3e448e4/settings"
+   ],
+   [
+    720,
+    "/api/p/3d65b3e448e4/ui/actions?after=0"
+   ]
+  ],
+  "urls": [
+   "/api/p/3d65b3e448e4/settings",
+   "/api/p/3d65b3e448e4/settings/retention/preview",
+   "/api/p/3d65b3e448e4/ui/actions"
+  ]
+ },
+ {
+  "step": "3d65b3e448e4:dom-nodes",
+  "n": 1445
+ },
+ {
+  "errors": []
+ }
+]
