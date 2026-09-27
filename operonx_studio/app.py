@@ -2769,7 +2769,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     # reload, another device or a studio restart finds them as they were.
     from fastapi.responses import StreamingResponse
 
-    from .assistant import MODELS, ChatStore, Relay
+    from .assistant import IMAGE_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MODELS, ChatStore, Relay
 
     chat_store = ChatStore(recents.state_file.parent / "assistant.sqlite")
     relay = Relay(chat_store)
@@ -2858,6 +2858,45 @@ def build_studio_app(recents: Optional[Recents] = None):
         chat_store.update_session(sid, **update)
         return JSONResponse({"session": _session_out(chat_store.session(sid))})
 
+    @app.post("/api/assistant/sessions/{sid}/attachments")
+    def assistant_attach(sid: str, body: Dict[str, Any]) -> JSONResponse:
+        """An image for a message: base64 in, a reference out. The browser has
+        already resized it (a 1568 px long edge); the bytes are kept beside
+        the store, named by their content, and deleted with the conversation."""
+        import base64 as _b64
+        import binascii
+
+        sess = _session_or_404(sid)
+        if isinstance(sess, JSONResponse):
+            return sess
+        mime = str(body.get("mime") or "")
+        if mime not in IMAGE_TYPES:
+            return JSONResponse({"error": "images only: PNG, JPEG, GIF or WebP"}, status_code=400)
+        try:
+            data = _b64.b64decode(str(body.get("data") or ""), validate=True)
+        except (binascii.Error, ValueError):
+            return JSONResponse({"error": "the image is not valid base64"}, status_code=400)
+        if not data:
+            return JSONResponse({"error": "an empty image"}, status_code=400)
+        if len(data) > MAX_ATTACHMENT_BYTES:
+            return JSONResponse({"error": f"the image is over {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB"},
+                                status_code=413)
+        dims = [int(body[k]) if isinstance(body.get(k), (int, float)) and body[k] > 0 else None for k in ("w", "h")]
+        ref = chat_store.put_attachment(sid, data, mime=mime, name=str(body.get("name") or ""), w=dims[0], h=dims[1])
+        return JSONResponse({"attachment": ref})
+
+    @app.get("/api/assistant/sessions/{sid}/attachments/{aid}")
+    def assistant_attachment(sid: str, aid: str) -> Any:
+        from fastapi.responses import FileResponse
+
+        ref = chat_store.attachment(sid, aid)
+        path = chat_store.attachment_path(sid, ref) if ref else None
+        if ref is None or path is None or not path.is_file():
+            return JSONResponse({"error": "no such attachment"}, status_code=404)
+        # named by its content: it never changes under the same address
+        return FileResponse(str(path), media_type=ref["mime"],
+                            headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
     @app.delete("/api/assistant/sessions/{sid}")
     async def assistant_delete(sid: str) -> JSONResponse:
         sess = _session_or_404(sid)
@@ -2879,14 +2918,30 @@ def build_studio_app(recents: Optional[Recents] = None):
             return sess
         message = str(body.get("message") or "").strip()
         fork_from: Optional[str] = ""
+        ids = body.get("attachments")
         redo = str(body.get("retry_of") or body.get("edit_of") or "")
         if redo:
             old = chat_store.turn(redo)
             if old is None or old["session"] != sid:
                 return JSONResponse({"error": "no such turn in this conversation"}, status_code=404)
-            message = message if body.get("edit_of") and message else old["message"]
+            edit = bool(body.get("edit_of")) and (bool(message) or bool(ids))
+            message = message if edit else old["message"]
+            # a retry sends the same images again; an edit sends what it has now
+            if not (edit and isinstance(ids, list)):
+                ids = [a.get("id") for a in old.get("attachments") or []]
             fork_from = old["claude_before"]
-        if not message:
+        refs = []
+        if ids is not None and not isinstance(ids, list):
+            return JSONResponse({"error": "attachments is a list of ids"}, status_code=400)
+        for aid in ids or []:
+            ref = chat_store.attachment(sid, str(aid))
+            if ref is None:
+                return JSONResponse({"error": f"no attachment {aid} in this conversation"}, status_code=400)
+            if ref not in refs:
+                refs.append(ref)
+        if len(refs) > MAX_ATTACHMENTS:
+            return JSONResponse({"error": f"at most {MAX_ATTACHMENTS} images a message"}, status_code=400)
+        if not message and not refs:
             return JSONResponse({"error": "empty message"}, status_code=400)
         env = _turn_env(sess["scope"], body.get("view"), request)
         if isinstance(env, JSONResponse):
@@ -2899,7 +2954,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             chat_store.hide_from(sid, redo)
         try:
             turn = relay.start(sid, message, cwd=cwd, context=context, mcp=mcp, fork_from=fork_from,
-                               view=body.get("view") if isinstance(body.get("view"), dict) else None)
+                               view=body.get("view") if isinstance(body.get("view"), dict) else None,
+                               attachments=refs)
         except RuntimeError as exc:
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse({"turn": turn.id, "cursor": 0})

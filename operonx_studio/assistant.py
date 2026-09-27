@@ -46,9 +46,12 @@ Client events (``i`` is the event's index, the cursor):
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import sqlite3
 import threading
@@ -60,7 +63,13 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import chat as _chat
 
-__all__ = ["ChatStore", "MODELS", "Relay", "title_from"]
+__all__ = ["ChatStore", "IMAGE_TYPES", "MAX_ATTACHMENTS", "MAX_ATTACHMENT_BYTES", "MODELS", "Relay", "title_from"]
+
+#: The images a message can carry, and the file extension each is kept as.
+IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
+#: An image's largest size after the browser resized it; the most a message carries.
+MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
+MAX_ATTACHMENTS = 8
 
 #: The models a session can pin; ``None`` is the CLI's own default.
 MODELS = ("opus", "sonnet", "haiku")
@@ -172,9 +181,21 @@ CREATE TABLE IF NOT EXISTS turns (
     ended         REAL,
     usage         TEXT NOT NULL DEFAULT '{}',
     cost          REAL,
-    hidden        INTEGER NOT NULL DEFAULT 0
+    hidden        INTEGER NOT NULL DEFAULT 0,
+    attachments   TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS turns_by_session ON turns (session, started);
+CREATE TABLE IF NOT EXISTS attachments (
+    session  TEXT NOT NULL,
+    id       TEXT NOT NULL,
+    name     TEXT NOT NULL DEFAULT '',
+    mime     TEXT NOT NULL,
+    size     INTEGER NOT NULL,
+    w        INTEGER,
+    h        INTEGER,
+    created  REAL NOT NULL,
+    PRIMARY KEY (session, id)
+);
 CREATE TABLE IF NOT EXISTS items (
     session  TEXT NOT NULL,
     seq      INTEGER NOT NULL,
@@ -207,6 +228,10 @@ class ChatStore:
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=NORMAL")
             self._db.executescript(_SCHEMA)
+            # additive: stores made before turns carried attachments
+            cols = {r[1] for r in self._db.execute("PRAGMA table_info(turns)")}
+            if "attachments" not in cols:
+                self._db.execute("ALTER TABLE turns ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'")
 
     def _q(self, sql: str, args: Iterable[Any] = ()) -> List[sqlite3.Row]:
         with self._lock:
@@ -267,14 +292,48 @@ class ChatStore:
 
     def delete_session(self, sid: str) -> None:
         with self._lock:
-            for table, col in (("items", "session"), ("turns", "session"), ("sessions", "id")):
+            for table, col in (("items", "session"), ("turns", "session"), ("attachments", "session"),
+                               ("sessions", "id")):
                 self._db.execute(f"DELETE FROM {table} WHERE {col} = ?", (sid,))
+        shutil.rmtree(self.files_dir(sid), ignore_errors=True)
+
+    # attachments: the images a message carries, as files beside the store
+    # (never in it), named by their content; a turn keeps references
+
+    def files_dir(self, sid: str) -> Path:
+        return self.path.parent / "assistant-files" / re.sub(r"[^\w-]", "_", sid)
+
+    def put_attachment(self, sid: str, data: bytes, *, mime: str, name: str = "",
+                       w: Optional[int] = None, h: Optional[int] = None) -> Dict[str, Any]:
+        """Keep an image for session *sid*; the same bytes twice are one file."""
+        ext = IMAGE_TYPES[mime]
+        aid = hashlib.sha256(data).hexdigest()[:32]
+        folder = self.files_dir(sid)
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path = folder / f"{aid}.{ext}"
+        if not path.exists():
+            fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(data)
+        self._q("INSERT OR IGNORE INTO attachments (session, id, name, mime, size, w, h, created)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (sid, aid, name[:200], mime, len(data), w, h, _now()))
+        return self.attachment(sid, aid)  # type: ignore[return-value]
+
+    def attachment(self, sid: str, aid: str) -> Optional[Dict[str, Any]]:
+        """Its reference ({id, name, mime, size, w, h}); None if unknown."""
+        rows = self._q("SELECT id, name, mime, size, w, h FROM attachments WHERE session = ? AND id = ?", (sid, aid))
+        return dict(rows[0]) if rows else None
+
+    def attachment_path(self, sid: str, ref: Dict[str, Any]) -> Path:
+        return self.files_dir(sid) / f"{ref['id']}.{IMAGE_TYPES.get(ref['mime'], 'bin')}"
 
     # turns
 
-    def add_turn(self, tid: str, sid: str, *, message: str, kind: str, claude_before: Optional[str]) -> None:
-        self._q("INSERT INTO turns (id, session, kind, message, claude_before, state, started)"
-                " VALUES (?, ?, ?, ?, ?, 'running', ?)", (tid, sid, kind, message, claude_before, _now()))
+    def add_turn(self, tid: str, sid: str, *, message: str, kind: str, claude_before: Optional[str],
+                 attachments: Optional[List[Dict[str, Any]]] = None) -> None:
+        self._q("INSERT INTO turns (id, session, kind, message, claude_before, state, started, attachments)"
+                " VALUES (?, ?, ?, ?, ?, 'running', ?, ?)",
+                (tid, sid, kind, message, claude_before, _now(), json.dumps(attachments or [])))
 
     def update_turn(self, tid: str, **fields: Any) -> None:
         sets = {k: v for k, v in fields.items() if k in _TURN_FIELDS}
@@ -289,12 +348,14 @@ class ChatStore:
             return None
         out = dict(rows[0])
         out["usage"] = json.loads(out.get("usage") or "{}")
+        out["attachments"] = json.loads(out.get("attachments") or "[]")
         return out
 
     def turns(self, sid: str, *, include_hidden: bool = False) -> List[Dict[str, Any]]:
         rows = self._q("SELECT * FROM turns WHERE session = ?" + ("" if include_hidden else " AND hidden = 0")
                        + " ORDER BY started", (sid,))
-        return [dict(r, usage=json.loads(r["usage"] or "{}")) for r in rows]
+        return [dict(r, usage=json.loads(r["usage"] or "{}"), attachments=json.loads(r["attachments"] or "[]"))
+                for r in rows]
 
     def hide_from(self, sid: str, tid: str) -> None:
         """A regenerate or an edit: turn *tid* and every later turn leave
@@ -510,7 +571,7 @@ class Relay:
 
     def start(self, sid: str, message: str, *, cwd: Optional[Path], context: str,
               mcp: Optional[Dict[str, Any]] = None, kind: str = "message", fork_from: Optional[str] = "",
-              view: Optional[Dict[str, Any]] = None) -> Turn:
+              view: Optional[Dict[str, Any]] = None, attachments: Optional[List[Dict[str, Any]]] = None) -> Turn:
         """Begin a turn in session *sid*; returns at once (call from a loop).
 
         ``fork_from`` is the Claude session to continue: ``""`` means the
@@ -527,22 +588,41 @@ class Relay:
                     next_seq=self.store.next_seq(sid), fresh=asyncio.Event(), model=sess.get("model"),
                     cwd=str(cwd) if cwd else None)
         self.turns[turn.id] = turn
-        self.store.add_turn(turn.id, sid, message=message, kind=kind, claude_before=before)
+        refs = list(attachments or [])
+        self.store.add_turn(turn.id, sid, message=message, kind=kind, claude_before=before, attachments=refs)
         update: Dict[str, Any] = {"running_turn": turn.id, "updated": _now()}
         if not sess.get("title"):
-            update.update(title=title_from(message), title_source="first")
+            # a message that is only images is named by the first
+            first = title_from(message) if message.strip() or not refs else (refs[0].get("name") or "Image")
+            update.update(title=first, title_source="first")
         self.store.update_session(sid, **update)
         self._emit(turn, {"t": "turn", "turn": turn.id, "session": sid, "kind": kind})
         if kind == "message":
-            self._item(turn, "user", text=message, **({"view": view} if view else {}))
+            self._item(turn, "user", text=message, **({"view": view} if view else {}),
+                       **({"attachments": refs} if refs else {}))
         self._state(turn, "starting")
         self._flush(turn, force=True)
         asyncio.get_running_loop().create_task(
-            self._run(turn, message, cwd=cwd, context=context, before=before, mcp=mcp))
+            self._run(turn, message, cwd=cwd, context=context, before=before, mcp=mcp, attachments=refs))
         return turn
 
+    def _stdin_message(self, turn: Turn, message: str, refs: List[Dict[str, Any]]) -> bytes:
+        """The user message as one stream-json line: its images, then its
+        words. On stdin there is no size limit: as one argument, a message
+        past Linux's 128 KiB MAX_ARG_STRLEN failed to start (measured with
+        140 KB; a 205 KB one goes through this way)."""
+        content: List[Dict[str, Any]] = []
+        for ref in refs:
+            path = self.store.attachment_path(turn.session, ref)
+            data = base64.b64encode(path.read_bytes()).decode("ascii")
+            content.append({"type": "image", "source": {"type": "base64", "media_type": ref["mime"], "data": data}})
+        if message:
+            content.append({"type": "text", "text": message})
+        return (json.dumps({"type": "user", "message": {"role": "user", "content": content}}) + "\n").encode("utf-8")
+
     async def _run(self, turn: Turn, message: str, *, cwd: Optional[Path], context: str,
-                   before: Optional[str], mcp: Optional[Dict[str, Any]]) -> None:
+                   before: Optional[str], mcp: Optional[Dict[str, Any]],
+                   attachments: Optional[List[Dict[str, Any]]] = None) -> None:
         binary = _chat.find_claude()
         final = "failed"
         try:
@@ -553,7 +633,11 @@ class Relay:
             prompt = _chat.knowledge()
             if context:
                 prompt = f"{prompt}\n\n{context}" if prompt else context
-            cmd = [binary, "-p", message, "--output-format", "stream-json", "--verbose",
+            # a message (and its images) goes in on stdin; /compact, a word,
+            # stays an argument
+            stdin = self._stdin_message(turn, message, attachments or []) if turn.kind == "message" else None
+            cmd = [binary, "-p", *(["--input-format", "stream-json"] if stdin is not None else [message]),
+                   "--output-format", "stream-json", "--verbose",
                    "--include-partial-messages", "--append-system-prompt", prompt]
             if before:
                 cmd += ["--resume", before, "--fork-session"]
@@ -573,11 +657,20 @@ class Relay:
             try:
                 turn.proc = await asyncio.create_subprocess_exec(
                     *cmd, cwd=str(cwd) if cwd else None, env=_chat._spawn_env(),
-                    stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                    stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE, limit=_chat._LINE_LIMIT, start_new_session=True)
             except OSError as exc:
                 self._item(turn, "error", text=f"Could not start the assistant: {exc}", retry=True)
                 return
+            if stdin is not None and turn.proc.stdin is not None:
+                try:
+                    turn.proc.stdin.write(stdin)
+                    await turn.proc.stdin.drain()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass            # it exited at once: the relay reports why
+                finally:
+                    turn.proc.stdin.close()
             final = await self._relay(turn, cwd, snap)
         except Exception as exc:  # noqa: BLE001 — a turn must always resolve
             self._item(turn, "error", text=f"The relay failed: {exc}", retry=True)

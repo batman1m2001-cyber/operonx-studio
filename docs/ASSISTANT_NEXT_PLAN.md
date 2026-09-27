@@ -332,7 +332,8 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
 | # | Phase | Commit | Checked with |
 |---|---|---|---|
 | 1 | **A1** Composer | e00ca94 | `scripts/perf/composer.py` 42/42 with `--live` (one Haiku turn); `live_assistant.py` 23/23; `flows.py` 21/21; layout audit 0 errors in 328 cases; 480 studio tests (3 skipped); 39 JS tests |
-| 2 | **C1** Canvas | see git log (`canvas C1`) | layout audit 0 errors in 328 cases (with new checks for B4, B5 and B6); `flows.py` 21/21; 480 studio tests; B5 14/14 and B6 12/12 on desktop and phone; before and after screenshots; render and zoom measured below |
+| 2 | **C1** Canvas | 660922d | layout audit 0 errors in 328 cases (with new checks for B4, B5 and B6); `flows.py` 21/21; 480 studio tests; B5 14/14 and B6 12/12 on desktop and phone; before and after screenshots; render and zoom measured below |
+| 3 | **A2** Input and images | see git log (`assistant A2`) | `scripts/perf/attachments.py` 20/20 with `--live` (an image described, regenerate resends it, a 200 KB paste); the probe below; 4 new server tests (484 studio tests); `composer.py` 35/35; `live_assistant.py` 23/23; `flows.py` 21/21 |
 
 **A1 notes.**
 - **A JSON paste becomes a card from 200 characters, even on one line.**
@@ -412,3 +413,36 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
   button.
 - **Added to the scratch `layout-edges` project:** a `looprow` graph,
   where the router's own route is the loop's return.
+
+**A2 notes.**
+- **The probe settled T1, with no fallback needed.** It ran on Haiku, for
+  a few cents, with the CLI at 2.1.283:
+  - with `--input-format stream-json`, one user message on stdin with an
+    image block, then the words, was answered "A red circle and a blue
+    square.";
+  - `--resume --fork-session` still forked (a new session id), and the
+    follow-up knew the circle was red;
+  - a 205 KB message on stdin went through and was counted right. As an
+    argument, 140 KB already failed to start.
+- **Message turns now go in on stdin.** `/compact` and the title call
+  stay arguments, being a word and a short prompt.
+- **Attachments are images only** (PNG, JPEG, GIF, WebP):
+  - the browser resizes each to a 1568 px long edge (a GIF or a small
+    image is kept as it is, so it keeps its motion);
+  - at most 8 a message, and 5 MB each;
+  - they upload at send, before the turn names them;
+  - on disk: `assistant-files/<conversation>/<sha256>.<ext>` beside the
+    store, mode 0600, deleted with the conversation;
+  - turns keep references in a new `attachments` column (an additive
+    migration), so a retry sends the same images and an edit sends what
+    it has now.
+- **Before they are sent,** images live in memory with their
+  conversation's draft. A reload drops them; the words and cards survive
+  it.
+- **Text files** (`.py .json .jsonl .csv .md .txt .log .yaml .toml .js
+  .ts .sql .sh`, up to 2 MB) become cards named after the file, sent as a
+  fenced block under that name. PDFs come later.
+- **In the transcript,** one image keeps its own shape (up to 240 px);
+  several sit as square tiles. A click shows one large.
+- **The studio on :8766 was restarted** to load the new server code; the
+  tunnel carried on.

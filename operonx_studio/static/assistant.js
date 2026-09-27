@@ -389,6 +389,8 @@
     lastEnded: new Set(),
     blocks: [],               // the composer's pasted cards: {kind, lang, name, text, lines, chars, detail}
     boxKey: null,             // whose draft the box holds (null until one is loaded)
+    images: [],               // the composer's images: {blob?, url, name, mime, w, h, ref?, sid?}
+    imagesByKey: new Map(),   // draft key → its images (in memory: bytes stay out of localStorage)
     boxH: {},                 // mode → the composer height set by hand (0: grows with the text)
   };
   const K_CURRENT = `ax:${SCOPE}:current`;
@@ -479,7 +481,14 @@
   send.append(icon("up"));
   send.title = "Send  ( Enter )";
   send.setAttribute("aria-label", "Send");
-  tools.append(modelPick, el("span", "ax-spacer"), meter, bExpand, send);
+  const bAttach = ibtn("plus", "Attach images or files", "ax-b-attach");
+  const fileInput = el("input");
+  fileInput.type = "file";
+  fileInput.multiple = true;
+  fileInput.hidden = true;
+  // images, and the text files that become cards; a phone offers its photos and camera
+  fileInput.accept = "image/png,image/jpeg,image/gif,image/webp,image/*,.py,.json,.jsonl,.csv,.md,.txt,.log,.yaml,.yml,.toml,.js,.ts,.sql,.sh";
+  tools.append(bAttach, fileInput, modelPick, el("span", "ax-spacer"), meter, bExpand, send);
   inputWrap.append(grip, tray, input, tools);
   composer.append(queued, chips, slash, inputWrap);
 
@@ -490,13 +499,17 @@
   const pop = el("div", "ax-pop");
   pop.hidden = true;
 
+  // dropping files anywhere on the assistant
+  const dropzone = el("div", "ax-drop");
+  dropzone.append(icon("plus"), el("span", null, "Drop images or text files"));
+
   // the foot holds what sits under the transcript; "New messages" floats above it
   const foot = el("div", "ax-foot");
   foot.append(jump, status, composer);
   main.append(log, foot, peek);
   const body = el("div", "ax-body");
   body.append(side, main);
-  root.append(head, body, pop);
+  root.append(head, body, pop, dropzone);
 
   /* ── rendering the transcript ─────────────────────────────────────── */
 
@@ -569,10 +582,36 @@
     target.classList.toggle("rich", blocks > 0);
   }
 
+  const attUrl = (ref) => (A.session ? `/api/assistant/sessions/${A.session.id}/attachments/${ref.id}` : "");
+
+  // the images a message carried, as thumbnails; a click shows one large
+  function userImages(atts) {
+    // one image keeps its shape; several sit as square tiles
+    const row = el("div", "ax-uimgs" + (atts.length === 1 ? " one" : ""));
+    for (const a of atts) {
+      const b = el("button", "ax-uimg");
+      b.type = "button";
+      b.title = a.name || "image";
+      const img = el("img");
+      img.src = a.url || attUrl(a);
+      img.alt = a.name || "image";
+      img.loading = "lazy";
+      b.append(img);
+      b.onclick = () => showImage(img.src, a.name);
+      row.append(b);
+    }
+    return row;
+  }
+
   function renderUser(item) {
     const box = el("div", "ax-user");
     const bubble = el("div", "ax-bubble");
     userBody(bubble, item.text || "");
+    if ((item.attachments || []).length) {
+      bubble.prepend(userImages(item.attachments));
+      bubble.classList.add("withimgs");
+      if (!item.text) bubble.classList.add("imgsonly");
+    }
     box.append(bubble);
     if (item.turn && !item.imported) {
       const acts = el("div", "ax-uacts");
@@ -1389,7 +1428,7 @@
       }
     }
     refreshListIfShown();
-    if (A.queue) { const q = A.queue; A.queue = null; paintQueue(); submit(q); }
+    if (A.queue) { const q = A.queue; A.queue = null; paintQueue(); submit(q.text, false, q.images); }
   }
 
   const refreshListIfShown = () => { if (root.classList.contains("side-open") || A.mode === "focus") refreshList(); };
@@ -1441,18 +1480,24 @@
   /* Send a message. `fromBox`: it is the composer's, so the box empties
    * now and comes back if the send fails; a message from elsewhere (a
    * starter, another screen, the queue) leaves what is being typed alone. */
-  async function submit(text, fromBox) {
+  async function submit(text, fromBox, images) {
     text = String(text || "").trim();
-    if (!text) return;
-    if (text.startsWith("/") && runCommand(text)) return;
+    images = fromBox ? A.images.slice() : (images || []);
+    if (!text && !images.length) return;
+    if (!images.length && text.startsWith("/") && runCommand(text)) return;
     const snap = fromBox ? takeBox() : null;
     closeSlash();
-    if (A.running) { A.queue = text; paintQueue(); return; }
+    if (A.running) { A.queue = {text, images}; paintQueue(); return; }
     if (A.editing) {
       const t = A.editing.turn;
       A.editing = null;
       paintEditing();
-      if (!(await redo({edit_of: t, message: text})) && snap) { A.editing = {turn: t}; putBox(snap); paintEditing(); }
+      let ok = false;
+      try {
+        const refs = await uploadImages(A.session.id, images);
+        ok = await redo({edit_of: t, message: text, attachments: refs.map((r) => r.id)});
+      } catch (err) { toast(err.message, true); }
+      if (!ok && snap) { A.editing = {turn: t}; putBox(snap); paintEditing(); }
       return;
     }
     let sess;
@@ -1460,12 +1505,15 @@
     if (A.mode === "hero") placement.enterFocus();
     if (!A.items.length) log.textContent = "";
     // show the message at once; the server's copy replaces it
-    newTurn({seq: -1, text, kind: "user"});
+    newTurn({seq: -1, text, kind: "user", attachments: images.map((im) => ({url: im.url, name: im.name}))});
     pendingUser = turnEl;
     toBottom();
     let got;
     try {
-      got = await call(`/api/assistant/sessions/${sess.id}/turns`, {message: text, view: viewForMessage()});
+      // images go up first (the browser already resized them), then the turn names them
+      const refs = await uploadImages(sess.id, images);
+      got = await call(`/api/assistant/sessions/${sess.id}/turns`,
+        {message: text, view: viewForMessage(), ...(refs.length ? {attachments: refs.map((r) => r.id)} : {})});
     } catch (err) {
       if (pendingUser) { pendingUser.remove(); pendingUser = null; }
       if (snap) putBox(snap);
@@ -1476,7 +1524,11 @@
     paintChips();
     // the server titles a new conversation from its first message; so does
     // the header, at once (the model's title replaces both when it lands)
-    if (!A.session.title) { A.session.title = titleFrom(W.Paste ? W.Paste.gist(text) : text); paintHead(); refreshListIfShown(); }
+    if (!A.session.title) {
+      A.session.title = text ? titleFrom(W.Paste ? W.Paste.gist(text) : text) : (images[0] && images[0].name) || "Image";
+      paintHead();
+      refreshListIfShown();
+    }
     // the pending message stays until the server's copy arrives (the first event)
     follow(got.turn, 0);
     refreshListIfShown();
@@ -1516,6 +1568,8 @@
     const u = W.Paste ? W.Paste.unpack(item.text || "") : {text: item.text || "", blocks: []};
     input.value = u.text;
     A.blocks = u.blocks;
+    A.images = (item.attachments || []).map((ref) => ({ref, sid: A.session && A.session.id, url: attUrl(ref),
+      name: ref.name, mime: ref.mime, w: ref.w, h: ref.h}));
     paintTray();
     autosize();
     paintEditing();
@@ -1545,8 +1599,10 @@
     queued.hidden = !A.queue;
     queued.textContent = "";
     if (!A.queue) return;
-    const g = (W.Paste ? W.Paste.gist(A.queue) : A.queue).replace(/\s+/g, " ");
-    queued.append(icon("clock"), el("span", null, `Queued: ${g.slice(0, 80)}${g.length > 80 ? "…" : ""}`));
+    const n = (A.queue.images || []).length;
+    const g = ((W.Paste ? W.Paste.gist(A.queue.text) : A.queue.text) || "").replace(/\s+/g, " ")
+      + (n ? ` (+${n} image${n === 1 ? "" : "s"})` : "");
+    queued.append(icon("clock"), el("span", null, `Queued: ${g.slice(0, 90)}${g.length > 90 ? "…" : ""}`));
     const x = ibtn("x", "Don't send it", "ax-mini");
     x.onclick = () => { A.queue = null; paintQueue(); };
     queued.append(x);
@@ -1708,7 +1764,22 @@
 
   function paintTray() {
     tray.textContent = "";
-    tray.hidden = !A.blocks.length;
+    tray.hidden = !A.blocks.length && !A.images.length;
+    A.images.forEach((im, i) => {
+      const t = el("div", "ax-thumb");
+      t.title = `${im.name || "image"}${im.w ? ` · ${im.w}×${im.h}` : ""}`;
+      const open = el("button", "ax-thumb-open");
+      open.type = "button";
+      const img = el("img");
+      img.src = im.url;
+      img.alt = im.name || "image";
+      open.append(img);
+      open.onclick = () => showImage(im.url, im.name, () => { A.images.splice(i, 1); paintTray(); saveDraft(); });
+      const x = ibtn("x", "Remove", "ax-thumb-x");
+      x.onclick = () => { A.images.splice(i, 1); paintTray(); saveDraft(); input.focus(); };
+      t.append(open, x);
+      tray.append(t);
+    });
     A.blocks.forEach((b, i) => {
       // compact: what it is, then its size and what is in it
       const card = el("div", `ax-paste ax-paste-${b.kind || "text"}`);
@@ -1739,6 +1810,8 @@
   }
 
   input.addEventListener("paste", (ev) => {
+    const files = [...((ev.clipboardData && ev.clipboardData.files) || [])];
+    if (files.length) { ev.preventDefault(); addFiles(files); return; }
     const text = ev.clipboardData && ev.clipboardData.getData("text/plain");
     if (!text || !W.Paste || !W.Paste.wantsCard(text)) return;  // a short paste stays in the words
     ev.preventDefault();
@@ -1809,6 +1882,148 @@
     area.scrollTop = 0;
   }
 
+  /* Images and files. An image is resized here to a 1568 px long edge
+   * (what the model sees anyway) and kept in memory until the message is
+   * sent, then uploaded; at most 8 a message. A text file becomes a card,
+   * sent as a fenced block under its name. */
+  const MAX_IMAGES = 8;
+  const MAX_EDGE = 1568;
+  const MAX_BYTES = 5 * 1024 * 1024;
+  const KEEP = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+  const TEXT_LANG = {py: "python", json: "json", jsonl: "jsonl", csv: "csv", md: "markdown", txt: "text", log: "log",
+    yaml: "yaml", yml: "yaml", toml: "toml", js: "javascript", ts: "typescript", sql: "sql", sh: "bash"};
+
+  function decode(file) {
+    if (W.createImageBitmap) return createImageBitmap(file);
+    return new Promise((ok, bad) => {
+      const img = new Image();
+      img.onload = () => ok(img);
+      img.onerror = () => bad(new Error("unreadable"));
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  async function prepareImage(file) {
+    const pic = await decode(file);
+    const w0 = pic.width, h0 = pic.height;
+    const scale = Math.min(1, MAX_EDGE / Math.max(w0, h0));
+    // small enough and a kept type: the file as it is (a GIF keeps its motion)
+    if (scale === 1 && KEEP.has(file.type) && file.size <= MAX_BYTES) {
+      if (pic.close) pic.close();
+      return {blob: file, mime: file.type, w: w0, h: h0};
+    }
+    const w = Math.max(1, Math.round(w0 * scale)), h = Math.max(1, Math.round(h0 * scale));
+    const canvas = el("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d").drawImage(pic, 0, 0, w, h);
+    if (pic.close) pic.close();
+    const encode = (type, q) => new Promise((ok) => canvas.toBlob(ok, type, q));
+    let blob = file.type === "image/png" ? await encode("image/png") : null;
+    if (!blob || blob.size > MAX_BYTES) blob = await encode("image/jpeg", 0.88);
+    return {blob, mime: blob.type, w, h};
+  }
+
+  async function addFiles(files) {
+    let room = MAX_IMAGES - A.images.length, skipped = 0;
+    for (const file of files) {
+      const ext = (file.name.split(".").pop() || "").toLowerCase();
+      if (file.type.startsWith("image/")) {
+        if (room <= 0) { skipped += 1; continue; }
+        room -= 1;
+        try {
+          const got = await prepareImage(file);
+          A.images.push({...got, url: URL.createObjectURL(got.blob),
+            name: file.name && file.name !== "image.png" ? file.name : `pasted-image.${got.mime.split("/")[1].replace("jpeg", "jpg")}`});
+        } catch { toast(`Can't read ${file.name || "that image"}`, true); room += 1; }
+      } else if (TEXT_LANG[ext] || file.type.startsWith("text/")) {
+        if (file.size > 2 * 1024 * 1024) { toast(`${file.name} is over 2 MB — too long to send as text`, true); continue; }
+        const text = await file.text();
+        const c = W.Paste.classify(text);
+        const lang = TEXT_LANG[ext] || c.lang;
+        addBlock({...c, name: file.name, lang, kind: W.Paste.kindOf(lang), detail: lang === c.lang ? c.detail : ""});
+      } else {
+        toast(`${file.name}: images and text files only for now`, true);
+      }
+    }
+    if (skipped) toast(`At most ${MAX_IMAGES} images a message — ${skipped} left out`, true);
+    paintTray();
+    saveDraft();
+    input.focus();
+  }
+
+  const blobB64 = (blob) => new Promise((ok, bad) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result).split(",")[1] || "");
+    r.onerror = () => bad(new Error("could not read the image"));
+    r.readAsDataURL(blob);
+  });
+
+  // upload what is not up yet (an edit's images already are), in order
+  async function uploadImages(sid, images) {
+    const refs = [];
+    for (const im of images) {
+      if (im.ref && im.sid === sid) { refs.push(im.ref); continue; }
+      if (!im.blob) continue;
+      const got = await call(`/api/assistant/sessions/${sid}/attachments`,
+        {name: im.name, mime: im.mime, data: await blobB64(im.blob), w: im.w, h: im.h});
+      im.ref = got.attachment;
+      im.sid = sid;
+      refs.push(im.ref);
+    }
+    return refs;
+  }
+
+  // one image, large, over the conversation; Remove when it is still in the box
+  function showImage(src, name, remove) {
+    peek.textContent = "";
+    const top = el("div", "ax-peek-head");
+    const x = ibtn("x", "Close  ( Esc )", "ax-peek-x");
+    top.append(el("b", "ax-peek-title", name || "Image"), el("span", "ax-spacer"), x);
+    const stage = el("div", "ax-peek-img");
+    const img = el("img");
+    img.src = src;
+    img.alt = name || "image";
+    stage.append(img);
+    peek.append(top, stage);
+    if (remove) {
+      const acts = el("div", "ax-peek-acts");
+      const rm = tbtn("Remove", "ax-btn ax-btn-quiet", "trash");
+      rm.onclick = () => { remove(); close(); };
+      acts.append(rm);
+      peek.append(acts);
+    }
+    const close = () => { peek.hidden = true; peek.textContent = ""; root.classList.remove("peeking"); document.removeEventListener("keydown", esc, true); input.focus(); };
+    const esc = (ev) => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); close(); } };
+    document.addEventListener("keydown", esc, true);
+    x.onclick = close;
+    stage.onclick = (ev) => { if (ev.target === stage) close(); };
+    peek.hidden = false;
+    root.classList.add("peeking");
+  }
+
+  bAttach.onclick = () => fileInput.click();
+  fileInput.onchange = () => { const f = [...fileInput.files]; fileInput.value = ""; if (f.length) addFiles(f); };
+
+  // drag and drop onto the assistant, wherever it sits
+  let dragDepth = 0;
+  const hasFiles = (ev) => ev.dataTransfer && [...(ev.dataTransfer.types || [])].includes("Files");
+  root.addEventListener("dragenter", (ev) => {
+    if (!hasFiles(ev)) return;
+    ev.preventDefault();
+    dragDepth += 1;
+    root.classList.add("dropping");
+  });
+  root.addEventListener("dragover", (ev) => { if (hasFiles(ev)) { ev.preventDefault(); ev.dataTransfer.dropEffect = "copy"; } });
+  root.addEventListener("dragleave", () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) root.classList.remove("dropping"); });
+  root.addEventListener("drop", (ev) => {
+    if (!hasFiles(ev)) return;
+    ev.preventDefault();
+    dragDepth = 0;
+    root.classList.remove("dropping");
+    addFiles([...ev.dataTransfer.files]);
+  });
+
   /* Drafts: each conversation keeps what is being typed (and its cards),
    * in this browser, until it is sent. A new conversation's draft is the
    * scope's. */
@@ -1820,7 +2035,8 @@
     clearTimeout(draftTimer);
     const key = A.boxKey;
     if (!key || A.editing) return;       // an edit is not a draft
-    if (!input.value.trim() && !A.blocks.length) { local.drop(key); return; }
+    if (A.images.length) A.imagesByKey.set(key, A.images); else A.imagesByKey.delete(key);
+    if (!input.value.trim() && !A.blocks.length) { local.drop(key); return; }   // images alone live in memory
     local.set(key, {t: Date.now(), text: input.value, blocks: A.blocks});
   }
   function saveDraft() { clearTimeout(draftTimer); draftTimer = setTimeout(writeDraft, 300); }
@@ -1828,6 +2044,7 @@
   W.addEventListener("pagehide", writeDraft);
   function loadDraft() {
     A.boxKey = draftKey();
+    A.images = A.imagesByKey.get(A.boxKey) || [];
     const d = local.get(A.boxKey, null);
     input.value = (d && typeof d.text === "string") ? d.text : "";
     A.blocks = (d && Array.isArray(d.blocks)) ? d.blocks.filter((b) => b && typeof b.text === "string") : [];
@@ -1847,11 +2064,12 @@
 
   // the box's contents leave on send, and come back if the send fails
   function takeBox() {
-    const snap = {text: input.value, blocks: A.blocks};
+    const snap = {text: input.value, blocks: A.blocks, images: A.images};
     clearTimeout(draftTimer);
-    if (!A.editing && A.boxKey) local.drop(A.boxKey);
+    if (!A.editing && A.boxKey) { local.drop(A.boxKey); A.imagesByKey.delete(A.boxKey); }
     input.value = "";
     A.blocks = [];
+    A.images = [];
     paintTray();
     setExpanded(false);
     autosize();
@@ -1860,6 +2078,7 @@
   function putBox(snap) {
     input.value = snap.text;
     A.blocks = snap.blocks;
+    A.images = snap.images || [];
     paintTray();
     autosize();
     saveDraft();
@@ -1912,7 +2131,7 @@
   composer.onsubmit = (ev) => {
     ev.preventDefault();
     const typed = input.value.trim();
-    if (A.running && !typed && !A.blocks.length) { stop(); return; }
+    if (A.running && !typed && !A.blocks.length && !A.images.length) { stop(); return; }
     if (typed.startsWith("/") && runCommand(typed)) return;      // a command leaves the cards be
     submit(W.Paste ? W.Paste.compose(input.value, A.blocks) : input.value, true);
   };
@@ -2087,7 +2306,7 @@
   W.oxAsk = (text) => {
     if (PHONE.matches) placement.openSheet();
     else if (A.mode === "dock" && W.oxSide) W.oxSide.show("assistant");
-    if (A.running) { A.queue = text; paintQueue(); toast("Queued — it goes when the current answer is done"); return; }
+    if (A.running) { A.queue = {text, images: []}; paintQueue(); toast("Queued — it goes when the current answer is done"); return; }
     submit(text);
   };
   // the inspector's "Ask about this": the selection rides along; start typing

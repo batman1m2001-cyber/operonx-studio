@@ -19,6 +19,7 @@ restart marks the turns it killed; the pulse hears a turn end.
 
 from __future__ import annotations
 
+import base64
 import json
 import subprocess
 import threading
@@ -40,11 +41,20 @@ FAKE = r'''#!/usr/bin/env python3
 import json, os, sys, time, uuid, signal
 
 argv = sys.argv[1:]
+# a message turn arrives on stdin as one stream-json user message (images,
+# then words); a /compact or a title call as the -p argument
+images = []
+if "--input-format" in argv and argv[argv.index("--input-format") + 1] == "stream-json":
+    line = sys.stdin.readline()
+    content = (json.loads(line) if line.strip() else {}).get("message", {}).get("content", [])
+    msg = "".join(b.get("text", "") for b in content if b.get("type") == "text")
+    images = [[b["source"]["media_type"], b["source"]["data"]] for b in content if b.get("type") == "image"]
+else:
+    msg = argv[argv.index("-p") + 1] if "-p" in argv else ""
 log = os.environ.get("OX_FAKE_LOG")
 if log:
     with open(log, "a") as f:
-        f.write(json.dumps({"argv": argv, "cwd": os.getcwd()}) + "\n")
-msg = argv[argv.index("-p") + 1] if "-p" in argv else ""
+        f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "msg": msg, "images": images}) + "\n")
 
 if "--output-format" in argv and argv[argv.index("--output-format") + 1] == "json":
     print(json.dumps({"type": "result", "result": "Fake title here"}))
@@ -258,16 +268,17 @@ def test_every_turn_forks_and_redo_forks_from_before(client, project, fake):
 
     # regenerate the second answer: fork from after the FIRST turn
     t3, _ = _say(client, sid, "", retry_of=t2)
-    argv3 = fake()[-1]["argv"]
-    assert argv3[argv3.index("-p") + 1] == "second" and argv3[argv3.index("--resume") + 1] == after1
+    call3 = fake()[-1]
+    argv3 = call3["argv"]
+    assert call3["msg"] == "second" and argv3[argv3.index("--resume") + 1] == after1
     items = client.get(f"/api/assistant/sessions/{sid}").json()["items"]
     assert [i["text"] for i in items if i["kind"] == "user"] == ["first", "second"]
     assert {i["turn"] for i in items} == {t1, t3}                      # t2 is hidden, not shown twice
 
     # edit the FIRST message: a fresh conversation from there
     t4, _ = _say(client, sid, "first, reworded", edit_of=t1)
-    argv4 = fake()[-1]["argv"]
-    assert "--resume" not in argv4 and argv4[argv4.index("-p") + 1] == "first, reworded"
+    call4 = fake()[-1]
+    assert "--resume" not in call4["argv"] and call4["msg"] == "first, reworded"
     items = client.get(f"/api/assistant/sessions/{sid}").json()["items"]
     assert [i["text"] for i in items if i["kind"] == "user"] == ["first, reworded"]
     assert client.post(f"/api/assistant/sessions/{sid}/turns", json={"retry_of": "nope"}).status_code == 404
@@ -531,3 +542,103 @@ def test_starters_come_from_the_projects_state(client, project, fake):
     pointed = client.get(f"/api/p/{pid}/assistant/suggest", params={"node": "shout"}).json()["suggestions"]
     assert [s["label"] for s in pointed[:2]] == ["Explain shout", "Why is shout slow?"]
     assert client.get("/api/p/nope/assistant/suggest").status_code == 404
+
+
+# ── A2: the message on stdin, and images with it ─────────────────────────
+
+PNG = base64.b64encode(bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+    "1f15c4890000000d49444154789c6300010000050001" "0d0a2db40000000049454e44ae426082")).decode()
+
+
+def test_a_message_goes_in_on_stdin_whatever_its_size(client, project, fake):
+    """As one argument a message past Linux's 128 KiB MAX_ARG_STRLEN could
+    not start the CLI; on stdin a 200 KB paste goes through."""
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    big = "".join(f"Line {i:05d}: the quick brown fox jumps over the lazy dog.\n" for i in range(3600))
+    assert len(big.encode()) > 200_000
+    _, events = _say(client, sid, big + "How many lines?")
+    assert events[-1]["state"] == "done"
+    call = fake()[-1]
+    assert call["msg"] == big + "How many lines?"
+    assert "stream-json" in call["argv"] and big[:40] not in " ".join(call["argv"])
+
+
+def test_images_ride_along_and_are_sent_again_on_retry(client, project, fake, tmp_path):
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    up = client.post(f"/api/assistant/sessions/{sid}/attachments",
+                     json={"name": "chart.png", "mime": "image/png", "data": PNG, "w": 1, "h": 1})
+    assert up.status_code == 200, up.text
+    ref = up.json()["attachment"]
+    assert ref["mime"] == "image/png" and ref["name"] == "chart.png" and ref["size"] > 0 and len(ref["id"]) == 32
+    # the same bytes twice are one file
+    assert client.post(f"/api/assistant/sessions/{sid}/attachments",
+                       json={"mime": "image/png", "data": PNG}).json()["attachment"]["id"] == ref["id"]
+    got = client.get(f"/api/assistant/sessions/{sid}/attachments/{ref['id']}")
+    assert got.status_code == 200 and got.headers["content-type"] == "image/png"
+    assert base64.b64encode(got.content).decode() == PNG
+
+    t1, events = _say(client, sid, "What is in this chart?", attachments=[ref["id"]])
+    assert events[-1]["state"] == "done"
+    call = fake()[-1]
+    assert call["msg"] == "What is in this chart?" and call["images"] == [["image/png", PNG]]
+    user = next(i for i in client.get(f"/api/assistant/sessions/{sid}").json()["items"] if i["kind"] == "user")
+    assert user["attachments"] == [ref]                               # references, never bytes
+
+    # regenerate: the same image again; edit: what the edit has now
+    _say(client, sid, "", retry_of=t1)
+    assert fake()[-1]["images"] == [["image/png", PNG]]
+    items = client.get(f"/api/assistant/sessions/{sid}").json()["items"]
+    t2 = next(i for i in items if i["kind"] == "user")["turn"]
+    _say(client, sid, "Describe it in words instead", edit_of=t2, attachments=[])
+    assert fake()[-1]["images"] == [] and fake()[-1]["msg"] == "Describe it in words instead"
+
+    # images alone make a message, and name a new conversation
+    sid2 = _session(client, pid)["id"]
+    ref2 = client.post(f"/api/assistant/sessions/{sid2}/attachments",
+                       json={"name": "screen.png", "mime": "image/png", "data": PNG}).json()["attachment"]
+    _say(client, sid2, "", attachments=[ref2["id"]])
+    assert client.get(f"/api/assistant/sessions/{sid2}").json()["session"]["title"] == "screen.png"
+
+    # deleting the conversation deletes its files
+    folder = next(f for f in (tmp_path / "state").rglob(ref2["id"] + ".png") if f.parent.name == sid2).parent
+    res = client.delete(f"/api/assistant/sessions/{sid2}")
+    assert res.status_code == 200, res.text
+    assert not folder.exists(), list(folder.iterdir())
+
+
+def test_attachments_are_checked(client, project, fake):
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    post = lambda body: client.post(f"/api/assistant/sessions/{sid}/attachments", json=body)
+    assert post({"mime": "application/pdf", "data": PNG}).status_code == 400
+    assert post({"mime": "image/png", "data": "not base64!"}).status_code == 400
+    assert post({"mime": "image/png", "data": ""}).status_code == 400
+    huge = base64.b64encode(b"\0" * (5 * 1024 * 1024 + 1)).decode()
+    assert post({"mime": "image/png", "data": huge}).status_code == 413
+    turn = lambda body: client.post(f"/api/assistant/sessions/{sid}/turns", json=body)
+    assert turn({"message": "hi", "attachments": ["nope"]}).status_code == 400
+    assert turn({"message": "hi", "attachments": "nope"}).status_code == 400
+    ids = []
+    for i in range(9):
+        data = base64.b64encode(base64.b64decode(PNG) + bytes([i])).decode()
+        ids.append(post({"mime": "image/png", "data": data}).json()["attachment"]["id"])
+    assert turn({"message": "hi", "attachments": ids}).status_code == 400          # at most 8
+    assert turn({"message": "", "attachments": []}).status_code == 400
+    assert client.get(f"/api/assistant/sessions/{sid}/attachments/nope").status_code == 404
+
+
+def test_a_store_from_before_attachments_gains_the_column(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.sqlite"
+    db = sqlite3.connect(str(path))
+    db.executescript("""CREATE TABLE turns (id TEXT PRIMARY KEY, session TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'message',
+        message TEXT NOT NULL, claude_before TEXT, claude_after TEXT, state TEXT NOT NULL, started REAL NOT NULL,
+        ended REAL, usage TEXT NOT NULL DEFAULT '{}', cost REAL, hidden INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO turns (id, session, message, state, started) VALUES ('t1', 's1', 'hi', 'done', 1);""")
+    db.commit()
+    db.close()
+    store = ChatStore(path)
+    assert store.turn("t1")["attachments"] == []
