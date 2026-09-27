@@ -1774,6 +1774,10 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   -webkit-mask: radial-gradient(circle, transparent 4px, #000 4.5px); mask: radial-gradient(circle, transparent 4px, #000 4.5px); }
 .ax-meter.hot { color: var(--warn); }
 .ax-meter.hot .ax-ring { background: conic-gradient(var(--warn) calc(var(--pct) * 1%), var(--surface-3) 0); }
+.ax-meter.full { color: var(--err); }
+.ax-meter.full .ax-ring { background: conic-gradient(var(--err) calc(var(--pct) * 1%), var(--surface-3) 0); }
+/* at rest the ring is grey: it only takes a colour when it matters */
+.ax-meter:not(.hot):not(.full) .ax-ring { background: conic-gradient(var(--text-3) calc(var(--pct) * 1%), var(--surface-3) 0); }
 
 .ax-body { flex: 1; min-height: 0; display: flex; position: relative; }
 .ax-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -2175,6 +2179,31 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-bar.hot span { background: var(--warn); }
 .ax-pop-acts { display: flex; gap: 8px; margin: 10px 0 6px; }
 .ax-toggle { display: flex; align-items: center; gap: 8px; padding: 4px 0; color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; }
+
+/* usage: the ring's card, and the line above the box near a plan limit */
+.ax-pop.ax-usage { width: 330px; padding: 4px 12px 12px; }
+/* a row is the label, then the value against the right edge; a bar runs the full width under it */
+.ax-usage .ax-kv { justify-content: space-between; gap: 12px; padding: 5px 0 3px; }
+.ax-usage .ax-k { width: auto; flex: none; }
+.ax-usage .ax-v { flex: 0 1 auto; text-align: right; font-size: var(--fs-sm); color: var(--text); }
+.ax-usage .ax-bar { margin: 2px 0 6px; }
+.ax-bar.full span { background: var(--err); }
+.ax-usage-cost { margin: 0 0 2px; color: var(--text-3); font-size: var(--fs-sm); text-align: right; cursor: help; }
+.ax-usage-head { display: flex; align-items: baseline; justify-content: space-between; margin-top: 8px; }
+.ax-usage-asof { font-size: 10.5px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.ax-usage-none, .ax-usage-account { padding: 2px 8px 4px; color: var(--text-2); font-size: var(--fs-md); }
+.ax-usage-none { color: var(--text-3); font-size: var(--fs-sm); }
+.ax-usage-link { margin: 6px 0 2px; }
+.ax-nudge { display: flex; align-items: center; gap: 8px; padding: 5px 4px 5px 10px; border-radius: var(--r-sm);
+  background: var(--warn-soft); color: var(--warn); font-size: var(--fs-sm); font-weight: 500; }
+.ax-nudge[hidden] { display: none; }
+.ax-nudge > span { flex: 1; min-width: 0; }
+.ax-nudge .icon { width: 14px; height: 14px; flex: none; }
+.ax-nudge.limit { background: var(--err-soft); color: var(--err); }
+.ax-nudge-more { min-height: 0; height: 24px; padding: 0 9px; border: none; border-radius: 999px; background: none;
+  color: inherit; font-size: var(--fs-sm); font-weight: 600; }
+.ax-nudge-more:hover { background: rgba(0, 0, 0, .05); border: none; }
+.ax-send:disabled { background: var(--surface-3); color: var(--text-3); cursor: not-allowed; }
 
 /* the model and effort menu */
 .ax-pop.ax-models { width: 320px; padding: 6px 6px 8px; }

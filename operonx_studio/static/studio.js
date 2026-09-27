@@ -4112,6 +4112,8 @@ async function pulse() {
         document.dispatchEvent(new CustomEvent("oxturnended", {detail: {ended: got.chat_ended}}));
       }
       state.chatSeq = got.chat_last ?? state.chatSeq;
+      // the plan's limits, as last heard by any conversation
+      if (got.assistant_rate) document.dispatchEvent(new CustomEvent("oxrate", {detail: got.assistant_rate}));
       for (const a of got.actions || []) {
         state.uiSeq = a.seq;
         try { await performUi(a.kind, a.args || {}); } catch { /* a stale action is not an error */ }

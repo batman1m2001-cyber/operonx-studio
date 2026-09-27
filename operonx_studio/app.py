@@ -2448,7 +2448,8 @@ def build_studio_app(recents: Optional[Recents] = None):
                 return JSONResponse({"stamp": cur, "ok": ok, "ui_last": last,
                                      "actions": [a for a in queue if a["seq"] > ui] if ui >= 0 else [],
                                      "newest": newest, "newest_info": info,
-                                     "chat_last": relay.finished_seq, "chat_ended": ended})
+                                     "chat_last": relay.finished_seq, "chat_ended": ended,
+                                     "assistant_rate": chat_store.get_meta("last_rate", None)})
             until = time.monotonic() + min(1.0 if not follow else 2.0, left)
             while time.monotonic() < until and bells.get(pid, 0) == rung:
                 await asyncio.sleep(0.1)
@@ -2865,6 +2866,44 @@ def build_studio_app(recents: Optional[Recents] = None):
                              "default": {"full": default_full, "window": windows.get(default_full) if default_full else None},
                              "studio_defaults": dict(chat_store.get_meta("defaults", {}) or {}),
                              "new": _assistant_defaults(scope if _scope_ok(scope) else "home")})
+
+    # the account the assistant's Claude runs as: `claude auth status --json`,
+    # read at most every 30 s (it spawns the CLI)
+    _account_cache: Dict[str, Any] = {"at": 0.0, "value": None}
+
+    async def _account() -> Dict[str, Any]:
+        if _account_cache["value"] is not None and time.monotonic() - _account_cache["at"] < 30:
+            return _account_cache["value"]
+        from . import chat as _chat_mod
+
+        binary = _chat_mod.find_claude()
+        out: Dict[str, Any] = {"logged_in": None}
+        if binary is not None:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    binary, "auth", "status", "--json", env=_chat_mod._spawn_env(),
+                    stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                raw, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
+                got = json.loads(raw.decode() or "{}")
+                # what the card shows; never a token or an id
+                out = {"logged_in": bool(got.get("loggedIn")), "method": got.get("authMethod"),
+                       "email": got.get("email"), "org": got.get("orgName"), "plan": got.get("subscriptionType"),
+                       "provider": got.get("apiProvider")}
+            except Exception:  # noqa: BLE001 — no account line is better than a broken card
+                out = {"logged_in": None}
+        _account_cache.update(at=time.monotonic(), value=out)
+        return out
+
+    @app.get("/api/assistant/account")
+    async def assistant_account() -> JSONResponse:
+        return JSONResponse({"account": await _account()})
+
+    @app.get("/api/assistant/usage")
+    async def assistant_usage() -> JSONResponse:
+        """The plan's limits as last reported (they are the account's, shared
+        by every conversation), with when; and the account."""
+        rate = chat_store.get_meta("last_rate", None)
+        return JSONResponse({"rate": rate, "as_of": (rate or {}).get("at"), "account": await _account()})
 
     @app.put("/api/assistant/defaults")
     def assistant_set_defaults(body: Dict[str, Any]) -> JSONResponse:

@@ -41,6 +41,11 @@ FAKE = r'''#!/usr/bin/env python3
 import json, os, sys, time, uuid, signal
 
 argv = sys.argv[1:]
+if argv[:2] == ["auth", "status"]:
+    print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty",
+                      "email": "you@example.com", "orgName": "Your org", "orgId": "secret-org-id",
+                      "subscriptionType": "max"}))
+    sys.exit(0)
 # a message turn arrives on stdin as one stream-json user message (images,
 # then words); a /compact or a title call as the -p argument
 images = []
@@ -111,7 +116,10 @@ emit({"type": "user", "message": {"role": "user", "content": [
      **({"is_error": True} if "TOOLFAIL" in msg else {})}]}, "session_id": sid})
 emit({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}})
 emit({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": " world"}}})
-emit({"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {"five_hour": {"utilization": 0.05}}}})
+emit({"type": "rate_limit_event", "rate_limit_info": {
+    "status": "allowed", "resetsAt": 1790552400, "rateLimitType": "five_hour", "isUsingOverage": False,
+    "unifiedWindows": {"five_hour": {"utilization": 0.05, "resetsAt": 1790552400},
+                       "seven_day": {"utilization": 0.52, "resetsAt": 1790791200}}}})
 emit({"type": "result", "subtype": "success", "session_id": sid, "total_cost_usd": 0.0125, "duration_ms": 1234,
       "num_turns": 2, "is_error": "FAIL" in msg, "result": "the fake failed on purpose" if "FAIL" in msg else "Hello world",
       "usage": usage, "modelUsage": {model: {"contextWindow": 200000, "maxOutputTokens": 32000},
@@ -243,7 +251,7 @@ def test_a_turn_becomes_items_that_persist_and_restore(client, project, fake):
     assert s["preview"] == "world"
     u = s["usage"]
     assert u["context_tokens"] == 1250 and u["context_window"] == 200000 and u["model"] == "claude-fake-1"
-    assert u["cost_usd"] == 0.0125 and u["turns"] == 1 and u["output_tokens"] == 40 and u["rate"]["five_hour"] == 0.05
+    assert u["cost_usd"] == 0.0125 and u["turns"] == 1 and u["output_tokens"] == 40 and u["rate"]["five_hour"]["used"] == 0.05
 
     call = fake()[0]
     assert call["cwd"] == str(project) and "--resume" not in call["argv"]
@@ -722,3 +730,31 @@ def test_a_projects_own_tool_servers_join_the_studios(client, project, fake):
     assert servers["studio"]["args"] == ["-m", "operonx_studio.mcp"]
     assert "--strict-mcp-config" in argv                   # the host's personal connectors stay out
     assert "mcp__notes" in argv[argv.index("--allowedTools"):]
+
+
+
+# ── A4: usage ─────────────────────────────────────────────────────────────
+
+def test_plan_limits_are_kept_with_their_reset_times(client, project, fake):
+    assert client.get("/api/assistant/usage").json()["rate"] is None      # nothing heard yet
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    _, events = _say(client, sid, "hello")
+    rate = client.get(f"/api/assistant/sessions/{sid}").json()["session"]["usage"]["rate"]
+    assert rate["five_hour"] == {"used": 0.05, "resets": 1790552400}
+    assert rate["seven_day"] == {"used": 0.52, "resets": 1790791200}
+    assert rate["status"] == "allowed" and rate["limited_by"] == "five_hour" and rate["overage"] is False
+    # the account's limits, studio-wide, with when they were heard
+    got = client.get("/api/assistant/usage").json()
+    assert got["rate"]["seven_day"]["used"] == 0.52 and got["as_of"] and got["as_of"] <= time.time()
+    assert client.get(f"/api/p/{pid}/pulse", params={"hold": 0}).json()["assistant_rate"]["five_hour"]["used"] == 0.05
+    # each answer carries its tokens: all input (cached included), output, cached
+    end = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "turn_end")
+    assert end["tokens"] == {"in": 1210, "out": 40, "cached": 1000}
+
+
+def test_the_account_line_never_carries_an_id(client, project, fake):
+    acc = client.get("/api/assistant/account").json()["account"]
+    assert acc == {"logged_in": True, "method": "claude.ai", "email": "you@example.com", "org": "Your org",
+                   "plan": "max", "provider": "firstParty"}
+    assert "secret" not in json.dumps(client.get("/api/assistant/usage").json())

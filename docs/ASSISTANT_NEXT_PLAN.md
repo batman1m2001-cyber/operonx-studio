@@ -334,7 +334,8 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
 | 1 | **A1** Composer | e00ca94 | `scripts/perf/composer.py` 42/42 with `--live` (one Haiku turn); `live_assistant.py` 23/23; `flows.py` 21/21; layout audit 0 errors in 328 cases; 480 studio tests (3 skipped); 39 JS tests |
 | 2 | **C1** Canvas | 660922d | layout audit 0 errors in 328 cases (with new checks for B4, B5 and B6); `flows.py` 21/21; 480 studio tests; B5 14/14 and B6 12/12 on desktop and phone; before and after screenshots; render and zoom measured below |
 | 3 | **A2** Input and images | 1399806 | `scripts/perf/attachments.py` 20/20 with `--live` (an image described, regenerate resends it, a 200 KB paste); the probe below; 4 new server tests (484 studio tests); `composer.py` 35/35; `live_assistant.py` 23/23; `flows.py` 21/21 |
-| 4 | **A3** Model and effort, **B3** project tool servers | see git log (`assistant A3`) | `scripts/perf/models.py` 17/17 with `--live` (Haiku at low effort, then Sonnet: the footer and a divider say so; the project's `notes` server called); the MCP probe below; 5 new server tests (489 studio tests); `composer.py` 35/35; `attachments.py` 16/16; `live_assistant.py` 23/23; `flows.py` 21/21 |
+| 4 | **A3** Model and effort, **B3** project tool servers | 306f01f | `scripts/perf/models.py` 17/17 with `--live` (Haiku at low effort, then Sonnet: the footer and a divider say so; the project's `notes` server called); the MCP probe below; 5 new server tests (489 studio tests); `composer.py` 35/35; `attachments.py` 16/16; `live_assistant.py` 23/23; `flows.py` 21/21 |
+| 5 | **A4** Usage | see git log (`assistant A4`) | `scripts/perf/usage.py` 18/18 with `--live` (a Haiku turn: tokens in its footer, the card's numbers match the store, real plan limits "as of just now"); 2 new server tests (491 studio tests); `composer.py` 35/35; `attachments.py` 16/16; `models.py` 13/13; `live_assistant.py` 23/23; `flows.py` 21/21 |
 
 **A1 notes.**
 - **A JSON paste becomes a card from 200 characters, even on one line.**
@@ -488,3 +489,33 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
   - Measured: with `--strict-mcp-config`, as the studio runs, only
     `notes` loaded (`mcp__notes__ping`). Without it, the host's claude.ai
     connectors (Docs, Gmail, Drive, Calendar) loaded too.
+
+**A4 notes.**
+- **The raw event**, captured first on Claude Code 2.1.283:
+  - `rate_limit_info` has `status`, `resetsAt`, `rateLimitType` and the
+    overage fields;
+  - `unifiedWindows.five_hour` and `.seven_day` each have `utilization`
+    (0 to 1) and `resetsAt` (epoch seconds).
+- **What is stored.** Each window's share used and reset time, the
+  status and the window in force are kept on the conversation and,
+  studio-wide, with the time they were heard (`meta.last_rate`). The
+  plan's limits are the account's, so the newest reading wins everywhere.
+- **Where readings arrive:** with every turn, on the project page's pulse
+  (`assistant_rate`), and from `GET /api/assistant/usage`, which also
+  carries the account (`claude auth status --json`, cached 30 s, never an
+  id or a token).
+- **The ring** is always in the toolbar: grey, amber from 80%, red from
+  95%. Its card, which `/usage` also opens, shows:
+  - context, tokens in, out and cached, and turns;
+  - "≈ $ at API prices" (a hover says a subscription isn't billed per
+    token);
+  - Compact;
+  - both plan windows with "resets 4:49 AM" or "Fri 4:49 AM", and "as
+    of";
+  - the account and its plan.
+- **The nudge** starts at 80% of a plan window. At a limit (status
+  `rejected`, or 100%), Send is held and says when it comes back.
+- **Each answer's footer** carries its tokens.
+- **Fixed on the way:** a menu wider than the room beside its button ran
+  off the panel's edge (27 px on a 390 px phone). Menus are now kept
+  inside.

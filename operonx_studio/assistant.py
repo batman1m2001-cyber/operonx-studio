@@ -63,7 +63,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import chat as _chat
 
-__all__ = ["ChatStore", "EFFORTS", "IMAGE_TYPES", "MAX_ATTACHMENTS", "MAX_ATTACHMENT_BYTES", "MODELS", "MODEL_INFO",
+__all__ = ["ChatStore", "EFFORTS", "parse_rate", "IMAGE_TYPES", "MAX_ATTACHMENTS", "MAX_ATTACHMENT_BYTES", "MODELS", "MODEL_INFO",
            "Relay", "title_from", "valid_model"]
 
 #: The images a message can carry, and the file extension each is kept as.
@@ -94,6 +94,24 @@ MODEL_INFO = (
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 _FULL_ID = re.compile(r"^claude-[a-z0-9][a-z0-9.-]{1,60}$")
+
+
+def parse_rate(info: Dict[str, Any]) -> Dict[str, Any]:
+    """A ``rate_limit_event``'s ``rate_limit_info`` (field names captured
+    from Claude Code 2.1.283): each plan window's share used (0..1) and when
+    it resets (epoch seconds), whether the next request is allowed, and which
+    window is in force."""
+    rate: Dict[str, Any] = {"status": info.get("status"), "limited_by": info.get("rateLimitType"),
+                            "overage": bool(info.get("isUsingOverage"))}
+    for name, w in (info.get("unifiedWindows") or {}).items():
+        w = w or {}
+        rate[name] = {"used": w.get("utilization"), "resets": w.get("resetsAt")}
+    limited = info.get("rateLimitType")
+    if limited and info.get("resetsAt"):
+        win = rate.setdefault(limited, {"used": None, "resets": None})
+        if isinstance(win, dict) and not win.get("resets"):
+            win["resets"] = info["resetsAt"]
+    return rate
 
 
 def valid_model(model: Optional[str]) -> bool:
@@ -606,6 +624,10 @@ class Relay:
             u["context_tokens"] = compacted
         if result is not None:
             ru = result.get("usage") or {}
+            cached = int(ru.get("cache_read_input_tokens") or 0)
+            turn.usage["tokens"] = {"in": int(ru.get("input_tokens") or 0) + cached
+                                    + int(ru.get("cache_creation_input_tokens") or 0),
+                                    "out": int(ru.get("output_tokens") or 0), "cached": cached}
             for key, src in (("input_tokens", "input_tokens"), ("output_tokens", "output_tokens"),
                              ("cache_read_tokens", "cache_read_input_tokens"),
                              ("cache_write_tokens", "cache_creation_input_tokens")):
@@ -888,11 +910,14 @@ class Relay:
                               turns=event.get("num_turns"), window=u.get("context_window"))
             return True
         if kind == "rate_limit_event":
-            info = event.get("rate_limit_info") or {}
+            rate = parse_rate(event.get("rate_limit_info") or {})
             sess = self.store.session(turn.session) or {}
             u = dict(sess.get("usage") or {})
-            u["rate"] = {k: (v or {}).get("utilization") for k, v in (info.get("unifiedWindows") or {}).items()}
+            u["rate"] = rate
             self.store.update_session(turn.session, usage=u)
+            # the plan's limits are the account's, not this conversation's:
+            # the latest reading, with its time, for every screen
+            self.store.set_meta("last_rate", {**rate, "at": _now()})
         return False
 
     def _learn(self, turn: Turn, result: Dict[str, Any]) -> None:
@@ -928,7 +953,8 @@ class Relay:
             state = "stopped"
         ms = round((time.monotonic() - turn.started) * 1000)
         self._item(turn, "turn_end", state=state, ms=ms, cost=turn.usage.get("cost"),
-                   context=turn.usage.get("context"), model=turn.model, effort=turn.effort)
+                   context=turn.usage.get("context"), model=turn.model, effort=turn.effort,
+                   tokens=turn.usage.get("tokens"))
         turn.state = state
         turn.done = True
         turn.ended = time.monotonic()

@@ -378,6 +378,8 @@
     agent: null,              // {reach, cwd, model}
     models: ["fable", "opus", "sonnet", "haiku"],
     catalog: null,            // GET /api/assistant/models: the menu's models, efforts, defaults
+    rate: null,               // the plan's limits as last heard, studio-wide: {five_hour: {used, resets}, …, at}
+    account: null,            // who the assistant's Claude runs as
     sessions: [],
     search: "",
     archived: false,
@@ -449,6 +451,8 @@
 
   // composer: one box — the pasted cards, the words, then its toolbar
   const composer = el("form", "ax-composer");
+  const nudge = el("div", "ax-nudge");
+  nudge.hidden = true;
   const queued = el("div", "ax-queued");
   queued.hidden = true;
   const chips = el("div", "ax-ctx");
@@ -491,7 +495,7 @@
   fileInput.accept = "image/png,image/jpeg,image/gif,image/webp,image/*,.py,.json,.jsonl,.csv,.md,.txt,.log,.yaml,.yml,.toml,.js,.ts,.sql,.sh";
   tools.append(bAttach, fileInput, modelPick, el("span", "ax-spacer"), meter, bExpand, send);
   inputWrap.append(grip, tray, input, tools);
-  composer.append(queued, chips, slash, inputWrap);
+  composer.append(nudge, queued, chips, slash, inputWrap);
 
   // a pasted card, opened: read it, fix it, or take it out
   const peek = el("div", "ax-peek");
@@ -849,6 +853,7 @@
     if (item.ms) bits.push(fmt.ms(item.ms));
     if (item.cost != null) bits.push(fmt.money(item.cost));
     if (item.model) bits.push(fmt.model(item.model) + (item.effort ? ` · ${EFFORT_LABEL[item.effort] || item.effort}` : ""));
+    if (item.tokens) bits.push(`${fmt.tokens(item.tokens.in)} in · ${fmt.tokens(item.tokens.out)} out`);
     if (item.context) bits.push(`${fmt.tokens(item.context)} context`);
     const meta = el("span", "ax-turnmeta", bits.join(" · "));
     const acts = el("span", "ax-turnacts");
@@ -1024,14 +1029,17 @@
     titleText.textContent = s && s.title ? s.title : "New conversation";
     title.disabled = !s;
     const u = (s && s.usage) || {};
+    // the context ring is always there: grey, amber from 80%, red from 95%
     const pct = u.context_tokens && u.context_window ? u.context_tokens / u.context_window : 0;
-    meter.hidden = pct < 0.5;
-    meter.classList.toggle("hot", pct >= 0.8);
+    const shown = pct > 0 && pct < 0.01 ? "<1" : String(Math.round(pct * 100));
+    meter.hidden = false;
+    meter.classList.toggle("hot", pct >= 0.8 && pct < 0.95);
+    meter.classList.toggle("full", pct >= 0.95);
     meterRing.style.setProperty("--pct", String(Math.min(100, Math.round(pct * 100))));
-    meterText.textContent = `${Math.round(pct * 100)}%`;
-    meter.title = pct >= 0.8
-      ? `Context ${Math.round(pct * 100)}% full — compact it to keep going`
-      : `Context ${Math.round(pct * 100)}% full`;
+    meterText.textContent = `${shown}%`;
+    meter.title = (u.context_window ? `Context ${fmt.tokens(u.context_tokens || 0)} of ${fmt.tokens(u.context_window)} · ${shown}%`
+      : "Context") + (pct >= 0.8 ? " — compact it to keep going" : "") + "  ( /usage )";
+    if (u.rate && u.rate.status) takeRate({...u.rate, at: u.rate.at || null}, true);
     const p = pillText();
     modelPick.replaceChildren(el("span", "ax-model-dot"),
       el("span", null, p.name + (p.effort ? ` · ${EFFORT_LABEL[p.effort] || p.effort}` : "")));
@@ -1083,6 +1091,10 @@
     const leftish = r.left + r.width / 2 < rr.left + rr.width / 2;
     pop.style.left = leftish ? `${Math.max(8, r.left - rr.left)}px` : "";
     pop.style.right = leftish ? "" : `${Math.max(8, rr.right - r.right)}px`;
+    // never past the panel's edges (a 330 px card on a 390 px phone)
+    const pr = pop.getBoundingClientRect();
+    if (pr.left < rr.left + 8) { pop.style.left = "8px"; pop.style.right = ""; }
+    else if (pr.right > rr.right - 8) { pop.style.right = "8px"; pop.style.left = ""; }
   }
   document.addEventListener("pointerdown", (ev) => {
     if (!pop.hidden && !pop.contains(ev.target) && !(pop._anchor && pop._anchor.contains(ev.target))) pop.hidden = true;
@@ -1237,21 +1249,11 @@
       box.append(r);
       return r;
     };
-    row("Model", fmt.model((s && s.model) || u.model || (A.agent && A.agent.model) || ""));
-    if (u.context_window) {
-      const pct = Math.round(100 * (u.context_tokens || 0) / u.context_window);
-      const r = row("Context", `${fmt.tokens(u.context_tokens || 0)} of ${fmt.tokens(u.context_window)} · ${pct}%`);
-      const bar = el("div", "ax-bar");
-      const fill = el("span");
-      fill.style.width = `${Math.min(100, pct)}%`;
-      if (pct >= 80) bar.classList.add("hot");
-      bar.append(fill);
-      r.after(bar);
-    }
-    row("Turns", String(u.turns || 0));
-    if (u.cost_usd != null) row("Cost", fmt.money(u.cost_usd));
-    if (u.input_tokens != null) row("Tokens", `${fmt.tokens(u.input_tokens)} in · ${fmt.tokens(u.output_tokens)} out · ${fmt.tokens(u.cache_read_tokens)} cached`);
-    if (u.rate && u.rate.five_hour != null) row("Plan usage", `${Math.round(100 * u.rate.five_hour)}% of 5 h · ${Math.round(100 * (u.rate.seven_day || 0))}% of 7 d`);
+    row("Model", fmt.model((s && s.model) || u.model || (A.agent && A.agent.model) || "")
+      + (s && s.effort ? ` · ${EFFORT_LABEL[s.effort] || s.effort}` : ""));
+    const usage = tbtn("Context, tokens and plan limits", "ax-link ax-usage-link", "chart");
+    usage.onclick = () => { pop.hidden = true; openUsage(); };
+    box.append(usage);
     if (A.agent) {
       row("Reach", {read: "Reads only", edit: "Reads and edits files", full: "Edits files and runs commands"}[A.agent.reach] || A.agent.reach);
       row("Works in", A.agent.cwd || "—", true);
@@ -1293,7 +1295,129 @@
     }
   }
   bInfo.onclick = () => openPop(detailsPanel, bInfo);
-  meter.onclick = () => openPop(detailsPanel, bInfo);
+  meter.onclick = () => openUsage();
+
+  /* ── usage: the context ring's card, plan limits and nudges ─────────── */
+
+  const WINDOW_NAME = {five_hour: "5-hour session", seven_day: "Week", seven_day_opus: "Week, Opus",
+    seven_day_sonnet: "Week, Sonnet"};
+  const PLAN_NAME = {max: "Claude Max", pro: "Claude Pro", team: "Claude Team", enterprise: "Claude Enterprise"};
+  const windowsOf = (rate) => Object.entries(rate || {})
+    .filter(([, w]) => w && typeof w === "object" && w.used != null)
+    .map(([name, w]) => ({name, label: WINDOW_NAME[name] || name.replace(/_/g, " "), used: +w.used, resets: w.resets}));
+
+  // when a window resets: a time today, or a weekday and a time
+  function resetAt(epoch) {
+    if (!epoch) return "";
+    const d = new Date(epoch * 1000), now = new Date();
+    const time = d.toLocaleTimeString(undefined, {hour: "numeric", minute: "2-digit"});
+    return d.toDateString() === now.toDateString() ? time : `${d.toLocaleDateString(undefined, {weekday: "short"})} ${time}`;
+  }
+
+  // a reading of the plan's limits: the newest one wins
+  function takeRate(rate, fromSession) {
+    if (!rate) return;
+    if (fromSession && A.rate && A.rate.at) return;           // the studio-wide one carries its time
+    if (A.rate && rate.at && A.rate.at && rate.at < A.rate.at) return;
+    A.rate = rate;
+    paintNudge();
+  }
+
+  /* From 80% of a plan window, a line above the box says so; at a limit,
+   * Send waits for the reset. */
+  function paintNudge() {
+    const wins = windowsOf(A.rate);
+    const limited = A.rate && A.rate.status === "rejected";
+    const worst = wins.slice().sort((a, b) => b.used - a.used)[0];
+    const atLimit = limited || (worst && worst.used >= 1);
+    const hot = worst && worst.used >= 0.8;
+    nudge.hidden = !(hot || atLimit);
+    nudge.classList.toggle("limit", !!atLimit);
+    nudge.textContent = "";
+    if (!nudge.hidden) {
+      const w = limited && A.rate.limited_by ? (wins.find((x) => x.name === A.rate.limited_by) || worst) : worst;
+      nudge.append(icon(atLimit ? "alert" : "clock"), el("span", null, atLimit
+        ? `The ${w.label.toLowerCase()} limit is reached${w.resets ? ` · it resets at ${resetAt(w.resets)}` : ""}`
+        : `${Math.round(w.used * 100)}% of this ${w.label.toLowerCase()} used${w.resets ? ` · resets ${resetAt(w.resets)}` : ""}`));
+      const more = el("button", "ax-nudge-more", "Usage");
+      more.type = "button";
+      more.onclick = openUsage;
+      nudge.append(more);
+    }
+    const blocked = !!atLimit && !A.running;
+    send.disabled = blocked;
+    send.title = blocked ? `The plan's limit is reached — Send comes back at ${resetAt((worst || {}).resets) || "the reset"}`
+      : (A.running ? "Stop" : "Send  ( Enter )");
+  }
+
+  async function openUsage() {
+    openPop(usageCard, meter);
+    try {
+      const got = await call("/api/assistant/usage");
+      if (got.rate) takeRate(got.rate);
+      A.account = got.account || A.account;
+      if (!pop.hidden && pop.classList.contains("ax-usage")) { pop.textContent = ""; usageCard(pop); }
+    } catch { /* the card shows what it has */ }
+  }
+
+  function usageCard(box) {
+    box.classList.add("ax-usage");
+    const s = A.session;
+    const u = (s && s.usage) || {};
+    const bar = (frac, cls) => {
+      const b = el("div", "ax-bar" + (cls ? " " + cls : ""));
+      const f = el("span");
+      f.style.width = `${Math.min(100, Math.max(0, frac * 100)).toFixed(1)}%`;
+      b.append(f);
+      return b;
+    };
+    const line = (k, v) => { const r = el("div", "ax-kv"); r.append(el("span", "ax-k", k), el("span", "ax-v", v)); box.append(r); return r; };
+    box.append(el("div", "ax-pop-title", "This conversation"));
+    if (u.context_window) {
+      const frac = (u.context_tokens || 0) / u.context_window;
+      line("Context", `${fmt.tokens(u.context_tokens || 0)} of ${fmt.tokens(u.context_window)} · ${frac > 0 && frac < 0.01 ? "<1" : Math.round(frac * 100)}%`);
+      box.append(bar(frac, frac >= 0.95 ? "full" : frac >= 0.8 ? "hot" : ""));
+    } else line("Context", s ? "after the first answer" : "no conversation yet");
+    if (u.input_tokens != null)
+      line("Tokens", `${fmt.tokens((u.input_tokens || 0) + (u.cache_read_tokens || 0) + (u.cache_write_tokens || 0))} in · ${fmt.tokens(u.output_tokens)} out · ${fmt.tokens(u.cache_read_tokens)} cached`);
+    line("Turns", String(u.turns || 0));
+    if (u.cost_usd != null) {
+      const c = el("div", "ax-usage-cost", `≈ ${fmt.money(u.cost_usd)} at API prices`);
+      c.title = "What these tokens would cost on the API. On a Claude subscription nothing is billed per token.";
+      box.append(c);
+    }
+    const acts = el("div", "ax-pop-acts");
+    const compact = tbtn("Compact", "ax-btn" + ((u.context_window && (u.context_tokens || 0) / u.context_window >= 0.95) ? " primary" : ""), "compress");
+    compact.disabled = !(s && s.claude_session) || !!A.running;
+    compact.title = "Summarize the conversation so far, to free the context";
+    compact.onclick = () => { pop.hidden = true; doCompact(); };
+    acts.append(compact);
+    box.append(acts);
+
+    const head = el("div", "ax-pop-title ax-usage-head");
+    head.append(el("span", null, "Plan limits"));
+    if (A.rate && A.rate.at) head.append(el("span", "ax-usage-asof", `as of ${fmt.ago(A.rate.at)}`));
+    box.append(head);
+    const wins = windowsOf(A.rate);
+    if (!wins.length) box.append(el("div", "ax-usage-none", "Not heard yet: the first answer brings them."));
+    for (const w of wins) {
+      const r = line(w.label, `${Math.round(w.used * 100)}% used${w.resets ? ` · resets ${resetAt(w.resets)}` : ""}`);
+      r.classList.add("ax-kv-wide");
+      box.append(bar(w.used, w.used >= 1 ? "full" : w.used >= 0.8 ? "hot" : ""));
+    }
+
+    box.append(el("div", "ax-pop-title", "Account"));
+    const a = A.account;
+    const who = el("div", "ax-usage-account");
+    if (!a) who.textContent = "…";
+    else if (a.logged_in === false) who.textContent = "Not signed in";
+    else if (a.logged_in == null) who.textContent = "The account could not be read";
+    else who.textContent = [a.email || a.org || "Signed in", PLAN_NAME[a.plan] || (a.method === "console" ? "API account" : a.plan || "")]
+      .filter(Boolean).join(" · ");
+    box.append(who);
+    if (W.oxAccountActions) box.append(W.oxAccountActions());
+  }
+  document.addEventListener("oxrate", (ev) => { if (ev.detail) takeRate(ev.detail); });
 
   /* ── sessions ─────────────────────────────────────────────────────── */
 
@@ -1568,6 +1692,7 @@
     send.classList.toggle("stop", busy);
     send.title = busy ? "Stop" : "Send  ( Enter )";
     send.setAttribute("aria-label", busy ? "Stop" : "Send");
+    if (typeof paintNudge === "function") paintNudge();
     clearInterval(tick);
     if (busy) { paintStatus(); tick = setInterval(paintStatus, 1000); }
     document.body.classList.toggle("ax-busy", busy);
@@ -1777,6 +1902,7 @@
       else if (A.models.includes(v) || /^claude-[a-z0-9][a-z0-9.-]{1,60}$/.test(v)) setModel(v);
       else toast(`No model “${v}” — try ${A.models.join(", ")} or default`, true);
     }],
+    ["/usage", "Context, tokens and the plan's limits", () => openUsage()],
     ["/effort", "How hard it thinks: /effort low | medium | high | xhigh | max | default", (arg) => {
       const v = (arg || "").trim().toLowerCase().replace(/^extra\s*high$/, "xhigh");
       if (!v) { loadCatalog().then(() => openPop(modelMenu, modelPick)); return; }
@@ -2473,6 +2599,7 @@
   async function boot() {
     pruneDrafts();
     loadCatalog().then(paintHead);
+    call("/api/assistant/usage").then((got) => { if (got.rate) takeRate(got.rate); A.account = got.account; }).catch(() => {});
     root.classList.toggle("details", A.details);
     paintHead();
     paintChips();
