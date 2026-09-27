@@ -102,7 +102,10 @@ def test_the_queue_reads_judges_and_files_a_case(client, project):
     q = client.get(f"/api/p/{pid}/review/queue").json()
     assert [r["run"] for r in q["runs"]] == ["c3", "c2", "c1"] and q["counts"] == {"unreviewed": 3, "good": 0, "bad": 0}
 
+    assert q["detail"]["run"] == "c3"           # the queue carries the conversation it opens
     got = client.get(f"/api/p/{pid}/review/run/c2").json()
+    opened = client.get(f"/api/p/{pid}/review/queue", params={"open": "c2"}).json()["detail"]
+    assert {k: opened[k] for k in got} == got
     assert [(t["who"], t["text"]) for t in got["turns"]] == [
         ("user", "cancel it"), ("bot", "Sorry, I can only move classes.")]
     assert got["review"] is None

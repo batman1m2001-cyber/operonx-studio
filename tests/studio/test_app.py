@@ -132,8 +132,8 @@ def test_ir_extracts_and_carries_layout(client, project):
 
 def test_pages_fingerprint_their_assets(client, project):
     """Assets cache forever under a content-hashed URL; only the small
-    HTML page revalidates. Over a tunnel that is the difference between
-    one round trip and one per asset."""
+    HTML page revalidates. A page's scripts arrive as ONE bundle — over
+    the tunnel each extra request was another ~0.75 s wave."""
     page = client.get("/")
     assert page.headers["cache-control"] == "no-cache"
     import re
@@ -141,11 +141,71 @@ def test_pages_fingerprint_their_assets(client, project):
     assert m, "asset URLs must carry the version fingerprint"
     pid = _open(client, project)
     proj = client.get(f"/p/{pid}")
-    assert f"/static/studio.js?v={m.group(1)}" in proj.text
-    asset = client.get(f"/static/studio.js?v={m.group(1)}")
-    assert "immutable" in asset.headers["cache-control"]
+    scripts = re.findall(r'<script src="([^"]+)"', proj.text)
+    assert len(scripts) == 1 and scripts[0].startswith("/static/bundle/project.js?v="), scripts
+    bundle = client.get(scripts[0])
+    assert "immutable" in bundle.headers["cache-control"]
+    assert bundle.headers["content-type"].startswith("application/javascript")
+    # the page's scripts, whole and in page order
+    studio_js = client.get("/static/studio.js").text
+    chat_js = client.get("/static/chat.js").text
+    assert studio_js in bundle.text and chat_js in bundle.text
+    assert bundle.text.index(studio_js) < bundle.text.index(chat_js)
+    # the plain files still serve, revalidating
     bare = client.get("/static/studio.js")
     assert bare.headers["cache-control"] == "no-cache"
+    assert client.get("/static/bundle/nope.js").status_code == 404
+
+
+def test_pages_carry_their_first_data(client, project):
+    """The project page inlines the IR the watcher already has (one round
+    trip saved); home inlines the list and its health (two saved). A
+    `</script>` inside the data can never close the island."""
+    import json
+    import re
+
+    pid = _open(client, project)
+    client.get(f"/api/p/{pid}/ir")           # warm, as the prewarm would
+    proj = client.get(f"/p/{pid}").text
+    island = re.search(r'<script id="ir-boot" type="application/json">(.*?)</script>', proj, re.S)
+    assert island, "a warm project inlines its IR"
+    assert "</" not in island.group(1)
+    data = json.loads(island.group(1))
+    assert data == client.get(f"/api/p/{pid}/ir").json()
+    home = client.get("/").text
+    island = re.search(r'<script id="home-boot" type="application/json">(.*?)</script>', home, re.S)
+    boot = json.loads(island.group(1))
+    assert [p["id"] for p in boot["projects"]] == [p["id"] for p in client.get("/api/projects").json()["projects"]]
+    assert pid in boot["health"]
+
+
+def test_the_pulse_holds_and_wakes(client, project):
+    """One held request per page instead of two polls every 1.5 s: it
+    answers at once when the page is behind, holds when it is not, and
+    wakes the moment the assistant opens something."""
+    import threading
+    import time
+
+    pid = _open(client, project)
+    first = client.get(f"/api/p/{pid}/pulse?ui=-1").json()          # page knows nothing yet
+    assert first["ui_last"] == 0 and first["actions"] == []
+    t0 = time.monotonic()
+    held = client.get(f"/api/p/{pid}/pulse?stamp={first['stamp']}&ui=0&hold=1.5").json()
+    assert 1.4 < time.monotonic() - t0 < 4 and held["actions"] == []
+
+    def act():
+        time.sleep(0.4)
+        client.post(f"/api/p/{pid}/ui/action", json={"kind": "open_tab", "args": {"tab": "monitor"}})
+
+    threading.Thread(target=act).start()
+    t0 = time.monotonic()
+    woke = client.get(f"/api/p/{pid}/pulse?stamp={first['stamp']}&ui=0&hold=6").json()
+    assert time.monotonic() - t0 < 3, "an assistant action must not wait out the hold"
+    assert [a["kind"] for a in woke["actions"]] == ["open_tab"] and woke["ui_last"] == 1
+    # a stale stamp answers at once
+    t0 = time.monotonic()
+    client.get(f"/api/p/{pid}/pulse?stamp=1&ui=1&hold=6")
+    assert time.monotonic() - t0 < 2
 
 
 def test_a_broken_project_reports_instead_of_500(client, tmp_path):
@@ -1067,6 +1127,13 @@ def test_jobs_list_runs_and_items_from_the_records(client, jobs_project):
     by_key = {i["key"]: i for i in one["items"]}            # recorded in completion order
     assert {k: v["status"] for k, v in by_key.items()} == {"a": "ok", "b": "failed", "c": "ok"}
     assert "bad item" in by_key["b"]["error"] and by_key["a"]["trace_id"]
+
+    # one round trip: the list carries the opened job's runs and its run
+    detail = client.get(f"/api/p/{pid}/jobs").json()["detail"]
+    assert detail["name"] == "shout_all" and detail["run_id"] == run.run_id
+    assert detail["runs"] == runs["runs"] and detail["one"] == one
+    asked = client.get(f"/api/p/{pid}/jobs", params={"open": "shout_all", "run": run.run_id}).json()["detail"]
+    assert asked["one"] == one
 
     assert client.get(f"/api/p/{pid}/jobs/nope/runs").status_code == 404
     assert client.get(f"/api/p/{pid}/jobs/shout_all/runs/../../etc").status_code == 404

@@ -385,6 +385,9 @@ body.railslim .railtoggle .icon { transform: rotate(180deg); }
   box-shadow: 0 0 0 3px rgba(29, 128, 73, .14); }
 .live.stale { color: var(--err); font-weight: 500; }
 .live.stale .dot { background: var(--err); box-shadow: 0 0 0 3px rgba(201, 54, 45, .15); }
+.live.down { color: var(--warn); }
+.live.down .dot { background: var(--warn); animation: livewait 1.2s ease-in-out infinite; }
+@keyframes livewait { 50% { opacity: .35; } }
 
 /* popovers: the project switcher, the project menu, the legend, find */
 .popover {

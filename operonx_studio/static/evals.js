@@ -67,7 +67,9 @@ const EvalsView = (() => {
   async function show(opts) {
     const mine = ++token;
     if (opts && opts.name) { v.name = opts.name; v.run = opts.run || ""; v.against = ""; v.dataset = ""; save(); }
-    try { data = await api(`/api/p/${PID}/evals`); }
+    // one round trip: the list carries the run the screen opens
+    const q = new URLSearchParams({name: v.name || "", run: v.run || "", against: v.against || ""});
+    try { data = await api(`/api/p/${PID}/evals?${q}`); }
     catch (err) { box.textContent = ""; box.append(el("div", "errbox", err.message)); return; }
     if (mine !== token) return;
     box.textContent = "";
@@ -142,10 +144,14 @@ const EvalsView = (() => {
   }
 
   async function showRun(main, ev, runs, mine) {
-    let got;
-    const q = v.against ? `?against=${encodeURIComponent(v.against)}` : "";
-    try { got = await api(`/api/p/${PID}/evals/${encodeURIComponent(ev.name)}/runs/${encodeURIComponent(v.run)}${q}`); }
-    catch (err) { main.append(el("div", "errbox", err.message)); return; }
+    const pre = data && data.detail;
+    let got = pre && pre.name === ev.name && pre.run_id === v.run && (pre.against_asked || "") === (v.against || "")
+      ? pre : null;
+    if (!got) {
+      const q = v.against ? `?against=${encodeURIComponent(v.against)}` : "";
+      try { got = await api(`/api/p/${PID}/evals/${encodeURIComponent(ev.name)}/runs/${encodeURIComponent(v.run)}${q}`); }
+      catch (err) { main.append(el("div", "errbox", err.message)); return; }
+    }
     if (mine !== token) return;
     const e = got.run.eval || {};
     const a = got.against_eval;

@@ -43,13 +43,14 @@ dominant cost.
 |---|---|---|---|
 | P1 | **Open a project, until the first node is drawn** | Tunnel 2.8–3.6 s; local 0.43–0.74 s | A serial chain of 19 requests. First the HTML; then CSS and **16 separate scripts** (6 connections, so several waves of about 0.75 s); only after every script has run does the page start fetching the IR (24 KB gzipped, 1.5 s through the tunnel). |
 | P2 | **An idle page keeps asking** | About 1.2 requests/s, forever, per open tab | `poll()` asks `/stamp`, then `/ui/actions`, one after the other, every 1.5 s. Through the tunnel one cycle takes about 3 s, so something the assistant opens reaches the screen up to 3 s late. |
-| P3 | **Home** | `/api/projects` requested twice; `/api/projects/health` takes 0.6–0.9 s | A duplicate fetch, and a health scan that is not cached. |
+| P3 | **Home** | Two round trips after the page (`/api/projects`, then `/api/projects/health`), 1.8 s to a full list through the tunnel | The health scan itself is ~0.2 s of server time for 25 projects; the rest is the extra hops. (A "duplicate" `/api/projects` seen in the first run was the harness's own login redirect.) |
 | P4 | **Flow `render()`** | 60–100 ms for 34–50 nodes (about 2 ms a node) on each repaint, measured on callbot and educa_reminder_agent | A full DOM rebuild on every repaint: selection, run paint, re-extract. Zoom and pan are fine: p95 frame 17–20 ms, no long tasks. A 300-node graph would need about 0.6 s a repaint, so **live animation must not go through `render()`.** |
 | P5 | **Assistant streaming** | Text lands in 1–2 s batches through the tunnel, and a fake typewriter smooths it | Turn-based polling. |
 | P6 | **Errors from the tunnel** | The page throws `Unexpected token '<', "<h1>no tun"…` | `api()` parses every response as JSON, including the tunnel's HTML error page. |
 | P7 | **Tunnel address** | The anonymous localhost.run tunnel changed its URL three times in about 40 minutes, then dropped the ssh session with "tunnel inactivity timeout" | Not studio code. It now runs under a loop that reconnects on its own and writes the current URL to a file. A fixed domain needs a localhost.run account key, which is the user's decision. |
 | P8 | **Opening a screen through the tunnel** | Time = number of request hops in a row × about 0.75 s. Jobs: 3 hops, 2.3 s. Runs, Evals, Review and Settings: 2 hops, 1.5–1.9 s. Resources, Monitor, Services, Alerts and Prompts: 1 hop, 0.8 s. Locally, every screen is ready in 100–160 ms. | Screens chain requests: fetch a list, then fetch its first item's details. Each screen also refetches everything on every visit. |
-| P9 | **The playground keeps polling** | `play/events` long-polls continue on every other screen after the playground has been opened once | Nothing stops the poll when the user leaves the screen. |
+| P9 | **Playground first open** | 1.8 s (p5demo) to 3.4 s (callbot) through the tunnel, locally 0.7 s | The bridge process — the project's own interpreter importing the project — starts on first use. (An earlier reading that its event poll "keeps going" after leaving was one trailing 4 s request; the loop stops.) |
+| P10 | **Tunnel throughput** | About 150 KB/s after a 1.25 s cold connection | So bytes matter as well as hops: the 110 KB bundle is ~0.75 s of a first visit. |
 
 What is already right, so it is not a target: static files are gzipped
 and cached as immutable (`?v=<hash>`), and the IR is gzipped.
@@ -334,7 +335,7 @@ second of a running turn's transcript.
 | B4 | Home: one `/api/projects` request; the health result cached until a project's stamp changes | P3 |
 | B5 | `api()` survives a non-JSON body, retries safe GETs once on a network error, and sends a 401 to the login page | P6 |
 | B6 | Incremental Flow repaints | P4 |
-| B7 | Screens show their last data at once and refresh behind it (stale-while-revalidate in the page). A screen gets what it needs in **one hop**: the list endpoint embeds the first item's details, or both requests go out together. The playground poll stops when its screen is not showing. | P8, P9 |
+| B7 | A screen gets what it needs in **one hop**: the list endpoint embeds the first item's details (Jobs, Evals, Review, Settings, Runs, Playground). Showing a revisited screen's last data at once is deferred: after one-hop loads, measure whether it is still felt. | P8 |
 
 **B6 in detail:**
 
@@ -501,8 +502,32 @@ model does not matter.
 
 | Phase | State | Numbers |
 |---|---|---|
-| R0 | plan written | baseline in §0 |
-| R1–R6 | not started | |
+| R0 | done — plan and harness (5f5a562) | baseline in §0 |
+| R1 | done — see below | |
+| R2–R6 | not started | |
+
+**R1, measured through the tunnel** (`scripts/perf/audit.py`, same two
+projects, 2026-09-27; local numbers in brackets):
+
+| Measure | Before | After |
+|---|---|---|
+| Home, to a full list with health | 1.8 s, 3 hops | **1.0 s, 1 hop, 0 API calls** [0.27 s] |
+| Project open, first visit (bundle not cached) | 3.9 s, 19 requests | **2.7 s, 3 requests** — 1.7 s of it is the 110 KB bundle at P10's throughput |
+| Project open, repeat visit | 2.4 s | **1.7 s, 3 requests, 0 API** [0.40–0.46 s] |
+| Idle requests | ≈ 1.2/s (12–14 per 10 s) | **1 per 8 s** |
+| Assistant action → on screen | up to ~3 s | **at once** (the pulse test wakes in < 3 s of a 6 s hold; measured 47 ms locally) |
+| Code change → redrawn | 1.5 s poll + extraction | **~1 s after the save** (extraction included) |
+| Jobs | 2.3 s, 3 hops | **0.77 s, 1 hop** |
+| Evals / Review / Settings | 1.5–1.9 s, 2 hops | **0.77–0.91 s, 1 hop** |
+| Runs | 2.0–2.3 s, 2 hops | **0.79–0.81 s, 1 hop** |
+| Playground | 1.6–2.0 s, 2 hops | 1 hop; 1.8–3.4 s is the bridge's cold start (P9) |
+| Watcher fingerprint (educa_reminder_agent) | 65 ms | **14 ms** — `.operonx` (2.3 k run records) is no longer walked |
+
+Not done, on purpose: **minification.** Measured: −31 KB gzipped JS and
+−7 KB CSS, about 0.25 s once per deploy at P10's throughput. Not worth a
+new runtime dependency. **Prewarming the playground bridge** would spend
+a project interpreter per open page; the screen says it is starting
+instead (R5).
 
 ---
 

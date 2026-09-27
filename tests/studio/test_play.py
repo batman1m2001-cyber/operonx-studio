@@ -133,8 +133,22 @@ def test_doors_and_a_form_request(client, project):
     assert got["events"][1]["msg"]["value"] == {"id": "a", "words": 2}
     trace_id = got["events"][-1]["trace_id"]
 
-    runs = client.get(f"/api/p/{pid}/runs", params={"origin": "playground"}).json()["runs"]
+    # the files store rescans at most every 2 s (the doors call above
+    # already listed it once)
+    import time as _time
+    for _ in range(40):
+        runs = client.get(f"/api/p/{pid}/runs", params={"origin": "playground"}).json()["runs"]
+        if runs:
+            break
+        _time.sleep(0.1)
     assert [r["trace_id"] for r in runs] == [trace_id] and runs[0]["name"] == "score"
+
+    # the screen opens in one round trip: the doors carry the event cursor
+    # and the recent sessions of the asked service (or the first drivable one)
+    again = client.get(f"/api/p/{pid}/play/doors", params={"service": "score"}).json()
+    assert again["recent"]["service"] == "score" and again["recent"]["runs"][0]["run"] == trace_id
+    assert again["cursor"] == client.get(f"/api/p/{pid}/play/events").json()["cursor"]
+    assert client.get(f"/api/p/{pid}/play/doors").json()["recent"]["service"] in ("score", "chat")
 
 
 def test_a_chat_session_polled_like_the_page(client, project):

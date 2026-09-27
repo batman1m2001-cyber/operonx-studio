@@ -48,7 +48,7 @@
     return null;
   }
 
-  async function preview() {
+  async function preview(given) {
     const out = $("#retention-preview");
     const save = $("#retention-save");
     const policy = policyFromForm();
@@ -63,7 +63,7 @@
     out.className = "setnote";
     out.textContent = "Checking what this would delete…";
     try {
-      const {preview: p} = await api(`/api/p/${PID}/settings/retention/preview`, {retention: policy});
+      const p = given || (await api(`/api/p/${PID}/settings/retention/preview`, {retention: policy})).preview;
       let runs = 0, bytes = 0;
       for (const [origin, v] of Object.entries(p)) {
         runs += v.runs; bytes += v.bytes;
@@ -179,7 +179,7 @@
         `Last applied ${fmtAgo(current.swept_at * 1000)} — ${gone ? `${gone} run${gone > 1 ? "s" : ""} deleted` : "nothing to delete"}.`));
     }
     box.append(ret);
-    preview();
+    preview(current.preview);
   }
 
   registerPane("settings", {el: box, show});

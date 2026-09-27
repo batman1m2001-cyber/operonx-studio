@@ -85,12 +85,35 @@ function recall(key, fallback) {
   } catch { return fallback; }
 }
 
+/* Every call to the studio. A body that is not JSON (the tunnel's own
+ * "no tunnel here" page, a proxy's 502) becomes a readable error instead
+ * of a JSON parse exception; a signed-out session goes to the login; a
+ * GET that never reached the server is tried once more. */
 async function api(path, body) {
-  const res = await fetch(path, body === undefined ? {} : {
+  const opts = body === undefined ? {} : {
     method: "POST", headers: {"content-type": "application/json"},
     body: JSON.stringify(body),
-  });
-  const data = await res.json();
+  };
+  let res;
+  try {
+    res = await fetch(path, opts);
+  } catch (err) {
+    if (body !== undefined) throw new Error("The studio did not answer — check the connection");
+    await new Promise(r => setTimeout(r, 600));
+    try { res = await fetch(path, opts); }
+    catch { throw new Error("The studio did not answer — check the connection"); }
+  }
+  if (res.status === 401) {
+    location.href = "/login";
+    throw new Error("signed out");
+  }
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; }
+  catch {
+    throw new Error(res.ok ? "The studio sent something unreadable"
+      : `The studio is unreachable (${res.status}) — the tunnel may have dropped`);
+  }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
@@ -3528,7 +3551,14 @@ syncChrome();
 applyPanels();
 
 async function load(first) {
-  const data = await api(`/api/p/${PID}/ir`);
+  // the first picture rides in the page itself (app.py project_page)
+  const boot = first ? document.getElementById("ir-boot") : null;
+  let data = null;
+  if (boot) {
+    try { data = JSON.parse(boot.textContent); } catch { data = null; }
+    boot.remove();
+  }
+  if (!data) data = await api(`/api/p/${PID}/ir`);
   $("#pname").textContent = "";
   $("#pname").append(el("span", null, data.name || "project"));
   document.title = `${data.name} — operonx studio`;
@@ -3603,34 +3633,44 @@ async function load(first) {
   renderFlowInfo();
 }
 
-let pollN = 0;
-async function poll() {
-  pollN += 1;
-  try {
-    const {stamp} = await api(`/api/p/${PID}/stamp`);
-    if (stamp !== state.stamp) await load(false);
-    await uiActions();
-    // follow-latest, throttled — a directory scan every 6s, never the
-    // remote Langfuse API
-    if (state.follow && pollN % 4 === 0) {
-      const t = await api(`/api/p/${PID}/traces?local_only=1`);
-      const newest = (t.runs || []).find(r => r.source === "local");
-      if (newest && (!state.run || state.run.run !== newest.run)) await showRunWorkflow(newest.run);
+/* The pulse (app.py): one held request that answers the moment the
+ * code changes, the assistant opens something, or — when following —
+ * a newer run lands. It replaced two polls every 1.5 s. */
+state.uiSeq = -1;
+let pulseMiss = 0;
+async function pulse() {
+  for (;;) {
+    try {
+      const q = new URLSearchParams({stamp: String(state.stamp || 0), ui: String(state.uiSeq)});
+      if (state.follow) q.set("follow", (state.run && state.run.run) || "-");
+      const got = await api(`/api/p/${PID}/pulse?${q}`);
+      pulseMiss = 0;
+      setLinkState(true);
+      if (got.stamp !== state.stamp) await load(!state.ir);
+      if (state.uiSeq < 0) state.uiSeq = got.ui_last;   // only what happens from now on
+      for (const a of got.actions || []) {
+        state.uiSeq = a.seq;
+        try { await performUi(a.kind, a.args || {}); } catch { /* a stale action is not an error */ }
+      }
+      if (state.follow && got.newest && (!state.run || state.run.run !== got.newest)) {
+        await showRunWorkflow(got.newest);
+      }
+    } catch {
+      // the studio or the tunnel is briefly away: back off, then say so
+      pulseMiss += 1;
+      if (pulseMiss > 2) setLinkState(false);
+      await new Promise(r => setTimeout(r, Math.min(8000, 800 * pulseMiss)));
     }
-  } catch { /* daemon briefly away; the next poll answers */ }
-  setTimeout(poll, 1500);
+  }
 }
 
-/* What the assistant opened (operonx_studio.mcp posts it): the page
- * follows along, so the user watches the agent work. */
-state.uiSeq = null;
-async function uiActions() {
-  const got = await api(`/api/p/${PID}/ui/actions?after=${state.uiSeq || 0}`);
-  if (state.uiSeq == null) { state.uiSeq = got.last; return; }   // only what happens from now on
-  for (const a of got.actions) {
-    state.uiSeq = a.seq;
-    try { await performUi(a.kind, a.args || {}); } catch { /* a stale action is not an error */ }
-  }
+/* The header's Live dot: it says "Reconnecting" when the pulse keeps
+ * failing, instead of a page that silently stopped updating. */
+function setLinkState(up) {
+  const live = $("#live");
+  if (!live || live.classList.contains("stale")) return;
+  live.classList.toggle("down", !up);
+  $("#live-text").textContent = up ? "Live" : "Reconnecting…";
 }
 
 async function performUi(kind, args) {
@@ -3682,7 +3722,14 @@ window.oxStudioLink = (href) => {
 };
 
 state.follow = recall("follow", false);
-load(true).then(() => setTimeout(poll, 1500));
+load(true).catch((err) => {
+  // the first paint failed (a dropped tunnel, a dead studio): say so where
+  // the canvas would be; the pulse retries and draws when it can
+  const box = el("div", "errbox");
+  box.append(el("div", "errhead", "Could not load this project"), el("div", "note", err.message));
+  box.style.position = "absolute";
+  $("#stage").append(box);
+}).finally(pulse);
 
 /* ── the project menu: Operons · Services · Jobs ───────────────────────
  * The three lists the application layer declares (operonx.app), from
@@ -3781,7 +3828,9 @@ async function showJobs(sel, runId) {
   const mine = (state.jobsView = {});
   if (!box.childNodes.length) box.append(el("div", "note", "Loading jobs…"));
   let data;
-  try { data = await api(`/api/p/${PID}/jobs`); }
+  // one round trip: the list carries the opened job's runs and run
+  const q = new URLSearchParams({open: sel || "", run: runId || ""});
+  try { data = await api(`/api/p/${PID}/jobs?${q}`); }
   catch (e) { box.textContent = ""; box.append(el("div", "errbox", e.message)); return; }
   if (state.jobsView !== mine) return;
   box.textContent = "";
@@ -3825,13 +3874,13 @@ async function showJobs(sel, runId) {
     r.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); showJobs(j.name); } };
     list.append(r);
   }
-  await renderJobDetail(detail, picked, runId, mine);
+  await renderJobDetail(detail, picked, runId, mine, data.detail && data.detail.name === picked.name ? data.detail : null);
   // keep the picked job in view on the phone's horizontal strip
   const on = list.querySelector(".jrow.sel");
   if (on && MOBILE.matches) on.scrollIntoView({block: "nearest", inline: "nearest"});
 }
 
-async function renderJobDetail(detail, job, runId, mine) {
+async function renderJobDetail(detail, job, runId, mine, pre) {
   detail.textContent = "";
   const bar = el("div", "jbar");
   bar.append(el("h2", "jtitle", job.name));
@@ -3856,9 +3905,11 @@ async function renderJobDetail(detail, job, runId, mine) {
   detail.append(el("p", "jpath", facts.join("  ·  ") + (job.record_dir ? `\nrecords in ${job.record_dir}` : "")));
   detail.querySelector(".jpath").style.whiteSpace = "pre-line";
 
-  let data;
-  try { data = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs`); }
-  catch (e) { detail.append(el("div", "errbox", e.message)); return; }
+  let data = pre ? {runs: pre.runs} : null;
+  if (!data) {
+    try { data = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs`); }
+    catch (e) { detail.append(el("div", "errbox", e.message)); return; }
+  }
   if (state.jobsView !== mine) return;
   if (!data.runs.length) {
     detail.append(paneNote("Not run yet", `Press Run to start ${job.name}; its runs and their items appear here.`));
@@ -3893,9 +3944,11 @@ async function renderJobDetail(detail, job, runId, mine) {
   wrap.append(table);
   detail.append(wrap);
 
-  let one;
-  try { one = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs/${open.run_id}`); }
-  catch (e) { detail.append(el("div", "errbox", e.message)); return; }
+  let one = pre && pre.one && pre.run_id === open.run_id ? pre.one : null;
+  if (!one) {
+    try { one = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs/${open.run_id}`); }
+    catch (e) { detail.append(el("div", "errbox", e.message)); return; }
+  }
   if (state.jobsView !== mine) return;
   if (one.run.error) detail.append(el("div", "errbox", one.run.error));
   if (one.run.tree) {

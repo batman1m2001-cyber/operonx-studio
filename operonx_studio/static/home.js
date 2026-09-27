@@ -13,14 +13,28 @@ const el = (tag, cls, text) => {
 };
 
 async function api(path, body) {
-  const res = await fetch(path, body === undefined ? {} : {
-    method: "POST", headers: {"content-type": "application/json"},
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
+  let res;
+  try {
+    res = await fetch(path, body === undefined ? {} : {
+      method: "POST", headers: {"content-type": "application/json"},
+      body: JSON.stringify(body),
+    });
+  } catch { throw new Error("The studio did not answer — check the connection"); }
+  if (res.status === 401) { location.href = "/login"; throw new Error("signed out"); }
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; }
+  catch { throw new Error(`The studio is unreachable (${res.status}) — the tunnel may have dropped`); }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
+
+/* The first list and its signal ride in the page (app.py home). */
+let homeBoot = null;
+try {
+  const node = document.getElementById("home-boot");
+  if (node) { homeBoot = JSON.parse(node.textContent); node.remove(); }
+} catch { homeBoot = null; }
 
 const ago = (epoch) => {
   const s = Date.now() / 1000 - epoch;
@@ -52,7 +66,9 @@ function emptyState() {
 async function loadProjects() {
   const box = $("#projects");
   let projects;
-  try { ({projects} = await api("/api/projects")); }
+  const boot = homeBoot;
+  homeBoot = null;          // only the first paint; a reload asks again
+  try { ({projects} = boot || await api("/api/projects")); }
   catch (e) {
     box.textContent = "";
     box.append(el("div", "errbox", `Could not list projects: ${e.message}`));
@@ -105,14 +121,16 @@ async function loadProjects() {
     }
     box.append(row);
   }
-  paintHealth();
+  paintHealth(boot && boot.health);
 }
 
 /* Signal arrives after the rows: the list must never wait on it. */
-async function paintHealth() {
-  let health;
-  try { ({health} = await api("/api/projects/health")); }
-  catch { return; }
+async function paintHealth(given) {
+  let health = given;
+  if (!health) {
+    try { ({health} = await api("/api/projects/health")); }
+    catch { return; }
+  }
   for (const row of document.querySelectorAll("#projects .projrow")) {
     const info = health[row.dataset.pid];
     if (!info) continue;

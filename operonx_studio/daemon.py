@@ -44,7 +44,11 @@ VENV_PYTHON = (".venv/bin/python", "venv/bin/python", ".venv/Scripts/python.exe"
 
 WATCH_SUFFIXES = {".py", ".toml", ".yaml", ".yml"}
 WATCH_NAMES = {".env", ".env.example"}
-SKIP_DIRS = {"__pycache__", ".venv", "venv", ".git", "node_modules", ".ruff_cache", ".pytest_cache"}
+# `.operonx` holds the project's own run records — thousands of files, none
+# of them code: walking it was 57 of the 65 ms a stamp took on a project
+# with 2.3k recorded runs.
+SKIP_DIRS = {"__pycache__", ".venv", "venv", ".git", "node_modules", ".ruff_cache", ".pytest_cache",
+             ".mypy_cache", ".tox", ".operonx"}
 
 _POLL_SECONDS = 0.7
 

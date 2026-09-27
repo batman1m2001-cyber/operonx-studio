@@ -33,7 +33,9 @@ const RunsView = (() => {
   const save = () => store(`runsView:${PID}`, {folder: v.folder, range: v.range, status: v.status, order: v.order});
   const since = () => {
     const r = RANGES.find(x => x[0] === v.range);
-    return r && r[2] ? Math.floor(Date.now() / 1000 - r[2]) : "";
+    // to the minute: a range of hours or days needs no finer edge, and a
+    // stable value keeps the first page's URL the same across one render
+    return r && r[2] ? Math.floor((Date.now() / 1000 - r[2]) / 60) * 60 : "";
   };
   const qs = (o) => Object.entries(o).filter(([, x]) => x !== "" && x != null)
     .map(([k, x]) => `${k}=${encodeURIComponent(x)}`).join("&");
@@ -259,10 +261,15 @@ const RunsView = (() => {
     return paneNote("No runs in this range", "Widen the time range, or clear the filters.");
   }
 
-  async function loadRows(tbody, more, foot, mine, append) {
+  const firstPage = () => `/api/p/${PID}/runs?${qs({...filterParams(), limit: 100, cursor: ""})}`;
+
+  async function loadRows(tbody, more, foot, mine, append, early) {
     const p = {...filterParams(), limit: 100, cursor: append ? cursor : ""};
     let data;
-    try { data = await api(`/api/p/${PID}/runs?${qs(p)}`); }
+    // the first page was asked for alongside the folders (render) unless
+    // the folder has changed since
+    const ask = !append && early && early.url === firstPage() ? early.got : api(`/api/p/${PID}/runs?${qs(p)}`);
+    try { data = await ask; }
     catch (e) { more.parentNode.replaceChild(el("div", "errbox", e.message), more); return null; }
     if (mine !== token) return null;
     for (const r of data.runs) tbody.append(row(r));
@@ -287,7 +294,12 @@ const RunsView = (() => {
     shell.append(rail, main);
     box.append(shell);
 
-    try { origins = await api(`/api/p/${PID}/runs/origins?${qs({since: since()})}`); }
+    // the folders and the first page of runs in one round trip: the
+    // page carries the tree for the same range
+    const early = {url: firstPage()};
+    early.got = api(`${early.url}&with_origins=1`);
+    early.got.catch(() => {});      // awaited below, or dropped
+    try { origins = (await early.got).origins || null; }
     catch (e) { origins = null; main.append(el("div", "errbox", e.message)); }
     if (mine !== token) return;
     // a folder that no longer exists falls back to all runs
@@ -373,7 +385,7 @@ const RunsView = (() => {
     foot.append(count, more);
     main.append(foot);
     cursor = null;
-    const data = await loadRows(tbody, more, count, mine, false);
+    const data = await loadRows(tbody, more, count, mine, false, early);
     if (data && !data.runs.length) {
       wrap.replaceWith(emptyFor(v.folder));
       foot.hidden = true;

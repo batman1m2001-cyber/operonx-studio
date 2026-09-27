@@ -148,6 +148,13 @@ def test_run_twice_and_see_what_the_fix_fixed(client, project):
                        params={"against": second["run_id"]}).json()
     assert again["flips"] == {"c": "regressed"}
 
+    # one round trip: the list carries the run the screen opens
+    listed = client.get(f"/api/p/{pid}/evals").json()["detail"]
+    assert listed["name"] == "labels" and listed["run_id"] == second["run_id"] and listed["flips"] == {"c": "fixed"}
+    asked = client.get(f"/api/p/{pid}/evals", params={"name": "labels", "run": first["run_id"],
+                                                      "against": second["run_id"]}).json()["detail"]
+    assert {k: asked[k] for k in again} == again
+
     # the runs are the eval's own in the run store
     runs = client.get(f"/api/p/{pid}/runs", params={"origin": "eval"}).json()["runs"]
     assert len(runs) == 6 and {r["name"] for r in runs} == {"labels"}

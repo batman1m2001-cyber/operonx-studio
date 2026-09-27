@@ -29,7 +29,7 @@ import asyncio
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import tomllib as _toml
@@ -535,14 +535,58 @@ def build_studio_app(recents: Optional[Recents] = None):
             digest.update(f"{f.name}:{stat.st_mtime_ns}:{stat.st_size};".encode())
         return digest.hexdigest()[:10]
 
-    asset_v = _asset_version()
+    # One script per page. Through the tunnel every extra request is
+    # another ~0.75 s wave: the project page's 16 scripts took 2.4-2.9 s
+    # of a 3.9 s open (measured, docs/REFACTOR_PHASE2.md P1). A page's
+    # <script src="/static/…"> tags are served as ONE bundle, in page
+    # order — classic scripts share one global scope, so the
+    # concatenation is the same program. Everything is rebuilt when any
+    # static file changes, so editing a .js still needs no restart.
+    _SCRIPT_TAG = re.compile(r'[ \t]*<script src="/static/([A-Za-z0-9_.-]+\.js)"></script>\n?')
+    pages: Dict[str, Tuple[str, str, bytes]] = {}   # page -> (asset version, html, bundle)
 
-    def _page(name: str) -> HTMLResponse:
+    def _built(name: str) -> Tuple[str, bytes]:
+        version = _asset_version()
+        got = pages.get(name)
+        if got is not None and got[0] == version:
+            return got[1], got[2]
         text = (STATIC / name).read_text(encoding="utf-8")
+        scripts = _SCRIPT_TAG.findall(text)
+        bundle = b""
+        if scripts:
+            parts = ['"use strict";\n']
+            for script in scripts:
+                parts.append(f"\n/* ── {script} ── */\n")
+                parts.append((STATIC / script).read_text(encoding="utf-8"))
+                parts.append("\n;\n")
+            bundle = "".join(parts).encode("utf-8")
+            tag = (f'<script src="/static/bundle/{Path(name).stem}.js'
+                   f'?v={hashlib.sha1(bundle).hexdigest()[:10]}"></script>\n')
+            first = text.index("<script src=\"/static/")
+            text = text[:first] + tag + _SCRIPT_TAG.sub("", text[first:])
         # every local asset the page names gets the content version
-        text = re.sub(r'(/static/[A-Za-z0-9_.-]+\.(?:js|css))(?=["\'])',
-                      lambda m: f"{m.group(1)}?v={asset_v}", text)
+        text = re.sub(r'(/static/[A-Za-z0-9_.-]+\.css)(?=["\'])',
+                      lambda m: f"{m.group(1)}?v={version}", text)
+        pages[name] = (version, text, bundle)
+        return text, bundle
+
+    def _page(name: str, boot: str = "") -> HTMLResponse:
+        """A page, its scripts bundled; ``boot`` (inline markup, e.g. a
+        JSON data island) goes in just before the bundle."""
+        text, _ = _built(name)
+        if boot:
+            at = text.find("<script src=")
+            text = text[:at] + boot + "\n" + text[at:] if at >= 0 else text + boot
         return HTMLResponse(text, headers={"Cache-Control": "no-cache"})
+
+    @app.get("/static/bundle/{stem}.js")
+    def page_bundle(stem: str) -> Any:
+        from fastapi.responses import Response
+
+        if not re.fullmatch(r"[a-z]+", stem) or not (STATIC / f"{stem}.html").is_file():
+            return JSONResponse({"error": "no such bundle"}, status_code=404)
+        _, bundle = _built(f"{stem}.html")
+        return Response(bundle, media_type="application/javascript; charset=utf-8")
 
     @app.middleware("http")
     async def _cache_headers(request, call_next):
@@ -655,7 +699,12 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.get("/")
     def home():
-        return _page("home.html")
+        # the list and its signal ride in the page: two tunnel round trips
+        # (~1.5 s) traded for ~0.2 s of server time (measured, 25 projects)
+        boot = json.dumps({"projects": [r.as_dict() for r in recents.ordered()],
+                           "health": _projects_health()}, separators=(",", ":"))
+        return _page("home.html", '<script id="home-boot" type="application/json">'
+                     + boot.replace("</", "<\\/") + "</script>")
 
     @app.get("/api/projects")
     def projects() -> JSONResponse:
@@ -663,6 +712,9 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.get("/api/projects/health")
     def projects_health() -> JSONResponse:
+        return JSONResponse({"health": _projects_health()})
+
+    def _projects_health() -> Dict[str, Any]:
         """Per-card signal for the home page: is the project extractable,
         how big is it, has it run lately. Reads only what is already
         warm (prewarmed watchers, cached IR, a directory listing) — this
@@ -695,7 +747,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             except Exception:  # noqa: BLE001 — a card's signal is best-effort
                 pass
             out[ref.id] = info
-        return JSONResponse({"health": out})
+        return out
 
     @app.post("/api/open")
     def open_project(body: Dict[str, Any]) -> JSONResponse:
@@ -804,9 +856,20 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.get("/p/{pid}")
     def project_page(pid: str) -> Any:
-        if _watcher(pid) is None:
+        watcher = _watcher(pid)
+        if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
-        return _page("project.html")
+        # The graph rides in the page when the watcher already has it, so
+        # the canvas draws without a second round trip (the IR fetch was
+        # 1.2-1.5 s of a tunnel open, after every script). A cold project
+        # is never blocked on here: the page fetches /ir and shows its
+        # loading state instead of a blank tab.
+        boot = ""
+        if watcher.last.stamp != 0.0:
+            payload = json.dumps(_ir_payload(pid, watcher), separators=(",", ":"))
+            boot = ('<script id="ir-boot" type="application/json">'
+                    + payload.replace("</", "<\\/") + "</script>")
+        return _page("project.html", boot)
 
     def _declared_roles(
         root: Path, graphs: List[Dict[str, Any]], services: List[Dict[str, Any]] = ()
@@ -850,24 +913,20 @@ def build_studio_app(recents: Optional[Recents] = None):
                     # frame; it keeps the show keys it declared
                     n["serve_role"] = declared[n["name"]]
 
-    @app.get("/api/p/{pid}/ir")
-    def project_ir(pid: str) -> JSONResponse:
-        watcher = _watcher(pid)
-        if watcher is None:
-            return JSONResponse({"error": "unknown project"}, status_code=404)
+    def _ir_payload(pid: str, watcher: ProjectWatcher) -> Dict[str, Any]:
         result = watcher.refresh_swr()
         ref = recents.get(pid)
         if not result.ok:
-            return JSONResponse({
+            return {
                 "name": ref.name if ref else pid,
                 "root": str(watcher.root),
                 "error": result.error,
                 "stamp": result.stamp,
-            })
+            }
         ir = result.ir
         placed = [_placed(g) for g in ir.get("graphs") or []]
         _declared_roles(watcher.root, placed, ir.get("services") or [])
-        return JSONResponse({
+        return {
             "name": ir.get("project"),
             "description": ir.get("description", ""),
             "root": str(watcher.root),
@@ -879,7 +938,14 @@ def build_studio_app(recents: Optional[Recents] = None):
             "jobs": ir.get("jobs") or [],
             "resources": ir.get("resources") or {},
             "traces_configured": True,
-        })
+        }
+
+    @app.get("/api/p/{pid}/ir")
+    def project_ir(pid: str) -> JSONResponse:
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        return JSONResponse(_ir_payload(pid, watcher))
 
     @app.get("/api/p/{pid}/stamp")
     def project_stamp(pid: str) -> JSONResponse:
@@ -1070,10 +1136,12 @@ def build_studio_app(recents: Optional[Recents] = None):
         pid: str, origin: str = "", name: str = "", status: str = "", since: str = "",
         until: str = "", version: str = "", job_run: str = "", runbook_run: str = "",
         meta: str = "", q: str = "", order: str = "", limit: str = "", cursor: str = "",
+        with_origins: str = "",
     ) -> JSONResponse:
         """Runs by filter, one page at a time — the Runs screen's list.
         ``meta=key:value,key:value`` matches metadata; ``q`` searches ids,
-        keys and metadata."""
+        keys and metadata. ``with_origins`` adds the folder tree for the
+        same range, so the screen opens in one round trip."""
         pr = _runs(pid)
         if pr is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
@@ -1090,8 +1158,12 @@ def build_studio_app(recents: Optional[Recents] = None):
                                       limit=limit, cursor=params.get("cursor") or None)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
-        return JSONResponse({"runs": [_row(s) for s in page.items], "next": page.next_cursor,
-                             "total": page.total, "source": pr.source})
+        out: Dict[str, Any] = {"runs": [_row(s) for s in page.items], "next": page.next_cursor,
+                               "total": page.total, "source": pr.source}
+        if with_origins:
+            got = _origins(pid, since, until)
+            out["origins"] = None if isinstance(got, JSONResponse) else got
+        return JSONResponse(out)
 
     @app.get("/api/p/{pid}/runs/groups")
     def runs_groups(pid: str, by: str = "origin,name", origin: str = "", name: str = "",
@@ -1113,6 +1185,10 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.get("/api/p/{pid}/runs/origins")
     def runs_origins(pid: str, since: str = "", until: str = "") -> JSONResponse:
+        got = _origins(pid, since, until)
+        return got if isinstance(got, JSONResponse) else JSONResponse(got)
+
+    def _origins(pid: str, since: str = "", until: str = "") -> Any:
         """The Runs screen's tree: every service, job, runbook the
         application declares (so an idle one still shows, with 0), plus
         whatever the store holds beyond them, counted in the range."""
@@ -1158,7 +1234,7 @@ def build_studio_app(recents: Optional[Recents] = None):
                        traces=row.get("traces", 0) + g["runs"],
                        last_started=max(x for x in (row["last_started"], g["last_started"]) if x is not None))
         total = sum(g["runs"] for g in counted)
-        return JSONResponse({
+        return {
             "total": total,
             "errors": sum(g["errors"] for g in counted),
             "services": list(folders["service"].values()),
@@ -1168,7 +1244,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             "playground": list(folders["playground"].values()),
             "adhoc": list(folders["adhoc"].values()),
             "source": pr.source,
-        })
+        }
 
     @app.get("/api/p/{pid}/monitor")
     def monitor_view(pid: str, origin: str = "", name: str = "", since: str = "", until: str = "",
@@ -1370,6 +1446,9 @@ def build_studio_app(recents: Optional[Recents] = None):
             "last_sweep": pr.last_sweep,
             "swept_at": pr.swept_at or None,
             "runs": pr.store.count(),
+            # what the current policy would delete, so the screen needs no
+            # second round trip to say so
+            "preview": _retention_preview(watcher, _policy_from({"retention": read_retention(watcher.root)})),
         })
 
     def _policy_from(body: Dict[str, Any]) -> Dict[str, Optional[float]]:
@@ -1396,6 +1475,9 @@ def build_studio_app(recents: Optional[Recents] = None):
             policy = _policy_from(body)
         except (TypeError, ValueError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"preview": _retention_preview(watcher, policy)})
+
+    def _retention_preview(watcher: ProjectWatcher, policy: Dict[str, Optional[float]]) -> Dict[str, Any]:
         pr = project_runs(watcher.root, sweep=False)
         now = time.time()
         out: Dict[str, Any] = {}
@@ -1415,7 +1497,7 @@ def build_studio_app(recents: Optional[Recents] = None):
                 if not cursor:
                     break
             out[origin] = {"runs": runs, "bytes": size}
-        return JSONResponse({"preview": out})
+        return out
 
     @app.post("/api/p/{pid}/settings/retention")
     def retention_save(pid: str, body: Dict[str, Any]) -> JSONResponse:
@@ -1525,19 +1607,34 @@ def build_studio_app(recents: Optional[Recents] = None):
         return path if (path / "run.json").is_file() else None
 
     @app.get("/api/p/{pid}/jobs")
-    def jobs(pid: str) -> JSONResponse:
-        """Every [[job]] with its last run, if any — the Jobs list."""
+    def jobs(pid: str, open: str = "", run: str = "") -> JSONResponse:
+        """Every [[job]] with its last run, if any — the Jobs list.
+
+        ``detail`` carries what the screen shows next to the list — the
+        opened job's runs and its run (``open``/``run``, else the first
+        job and its newest run) — so the screen is one round trip, not
+        three (2.3 s through the tunnel, measured)."""
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
         out = []
+        runs_of: Dict[str, List[Dict[str, Any]]] = {}
         for job in _jobs_of(watcher):
-            runs = _job_runs(job)
+            runs = runs_of[job["name"]] = _job_runs(job)
             last = runs[0] if runs else None
             out.append({**job, "runs": len(runs),
                         "last": ({k: last.get(k) for k in ("run_id", "status", "started", "ended", "counts")}
                                  if last else None)})
-        return JSONResponse({"jobs": out})
+        detail = None
+        picked = next((j for j in out if j["name"] == open), out[0] if out else None)
+        if picked is not None:
+            job = _job(watcher, picked["name"])
+            runs = runs_of[picked["name"]]
+            shown = next((r for r in runs if r.get("run_id") == run), runs[0] if runs else None)
+            one = _job_run_payload(job, shown["run_id"]) if (job and shown) else None
+            detail = {"name": picked["name"], "runs": runs,
+                      "run_id": shown.get("run_id") if shown else None, "one": one}
+        return JSONResponse({"jobs": out, "detail": detail})
 
     @app.get("/api/p/{pid}/jobs/{name}/runs")
     def job_runs(pid: str, name: str) -> JSONResponse:
@@ -1552,9 +1649,15 @@ def build_studio_app(recents: Optional[Recents] = None):
         """One run: run.json plus its items (a job) or its tree (a runbook)."""
         watcher = _watcher(pid)
         job = _job(watcher, name) if watcher else None
-        path = _run_dir(job, run_id) if job else None
-        if path is None:
+        got = _job_run_payload(job, run_id) if job else None
+        if got is None:
             return JSONResponse({"error": "unknown run"}, status_code=404)
+        return JSONResponse(got)
+
+    def _job_run_payload(job: Dict[str, Any], run_id: str) -> Optional[Dict[str, Any]]:
+        path = _run_dir(job, run_id)
+        if path is None:
+            return None
         data = json.loads((path / "run.json").read_text(encoding="utf-8"))
         items: List[Dict[str, Any]] = []
         items_file = path / "items.jsonl"
@@ -1574,7 +1677,7 @@ def build_studio_app(recents: Optional[Recents] = None):
                 tail = log.read_text(encoding="utf-8", errors="replace")[-4000:]
             except OSError:
                 tail = ""
-        return JSONResponse({"run": data, "items": items, "log": tail, "path": str(path)})
+        return {"run": data, "items": items, "log": tail, "path": str(path)}
 
     @app.post("/api/p/{pid}/jobs/{name}/run")
     async def job_start(pid: str, name: str, body: Dict[str, Any]) -> JSONResponse:
@@ -1698,9 +1801,11 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.get("/api/p/{pid}/review/queue")
     def review_queue(pid: str, origin: str = "", name: str = "", status: str = "", verdict: str = "unreviewed",
-                     label: str = "", limit: int = 50) -> JSONResponse:
+                     label: str = "", limit: int = 50, open: str = "") -> JSONResponse:
         """Runs to read, newest first, with their reviews; ``verdict`` is
-        unreviewed | good | bad | all."""
+        unreviewed | good | bad | all. ``detail`` is the conversation the
+        screen opens (``open`` if it is in the queue, else the first): one
+        round trip instead of two."""
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
@@ -1720,18 +1825,29 @@ def build_studio_app(recents: Optional[Recents] = None):
             if label and label not in ((rev or {}).get("labels") or []):
                 continue
             out.append({**_row(s), "review": rev})
-        return JSONResponse({"runs": out[: max(1, min(limit, 500))], "counts": counts, "total": page.total})
+        shown = out[: max(1, min(limit, 500))]
+        detail = None
+        first = next((r for r in shown if r["run"] == open), shown[0] if shown else None)
+        if first is not None:
+            got = _review_payload(pid, watcher, first["run"])
+            if not isinstance(got, JSONResponse):
+                detail = {"run": first["run"], **got}
+        return JSONResponse({"runs": shown, "counts": counts, "total": page.total, "detail": detail})
 
-    @app.get("/api/p/{pid}/review/run/{run}")
-    def review_run(pid: str, run: str) -> JSONResponse:
-        watcher = _watcher(pid)
+    def _review_payload(pid: str, watcher: ProjectWatcher, run: str) -> Any:
         got = _record(pid, run)
         if isinstance(got, JSONResponse):
             return got
         rows, rec = got
-        return JSONResponse({"summary": _row(rec.summary),
-                             "turns": conversation(rows, rec.summary.metadata or {}, _egress_ops(watcher)),
-                             "review": ReviewLog(watcher.root).get(run)})
+        return {"summary": _row(rec.summary),
+                "turns": conversation(rows, rec.summary.metadata or {}, _egress_ops(watcher)),
+                "review": ReviewLog(watcher.root).get(run)}
+
+    @app.get("/api/p/{pid}/review/run/{run}")
+    def review_run(pid: str, run: str) -> JSONResponse:
+        watcher = _watcher(pid)
+        got = _review_payload(pid, watcher, run)
+        return got if isinstance(got, JSONResponse) else JSONResponse(got)
 
     @app.post("/api/p/{pid}/review/run/{run}")
     def review_save(pid: str, run: str, body: Dict[str, Any]) -> JSONResponse:
@@ -2091,13 +2207,27 @@ def build_studio_app(recents: Optional[Recents] = None):
                 for r in _job_runs(job)[:limit]]
 
     @app.get("/api/p/{pid}/evals")
-    def evals_list(pid: str) -> JSONResponse:
-        """Every eval with its recent runs (newest first), and every dataset."""
+    def evals_list(pid: str, name: str = "", run: str = "", against: str = "") -> JSONResponse:
+        """Every eval with its recent runs (newest first), and every dataset.
+
+        ``detail`` is the run the screen opens beside the list (``name`` and
+        ``run``, else the first eval's newest finished run): one round trip
+        instead of two."""
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
         evals = [{**j, "runs": _eval_runs(j)} for j in _jobs_of(watcher) if j.get("kind") == "eval"]
-        return JSONResponse({"evals": evals, "datasets": _datasets(watcher)})
+        detail = None
+        picked = next((e for e in evals if e["name"] == name), evals[0] if evals else None)
+        if picked is not None:
+            done = [r for r in picked["runs"] if r.get("status") != "running"]
+            shown = next((r for r in done if r["run_id"] == run), done[0] if done else None)
+            job = _job(watcher, picked["name"])
+            if shown is not None and job is not None:
+                got = _eval_run_payload(job, shown["run_id"], against)
+                if got is not None:
+                    detail = {"name": picked["name"], "run_id": shown["run_id"], "against_asked": against, **got}
+        return JSONResponse({"evals": evals, "datasets": _datasets(watcher), "detail": detail})
 
     @app.get("/api/p/{pid}/evals/{name}/runs/{run_id}")
     def eval_run(pid: str, name: str, run_id: str, against: str = "") -> JSONResponse:
@@ -2107,10 +2237,16 @@ def build_studio_app(recents: Optional[Recents] = None):
         job = _job(watcher, name) if watcher else None
         if job is None or job.get("kind") != "eval":
             return JSONResponse({"error": f"unknown eval {name!r}"}, status_code=404)
+        got = _eval_run_payload(job, run_id, against)
+        if got is None:
+            return JSONResponse({"error": "unknown run"}, status_code=404)
+        return JSONResponse(got)
+
+    def _eval_run_payload(job: Dict[str, Any], run_id: str, against: str) -> Optional[Dict[str, Any]]:
         runs = _job_runs(job)
         ids = [r["run_id"] for r in runs]
         if run_id not in ids:
-            return JSONResponse({"error": "unknown run"}, status_code=404)
+            return None
 
         def items_of(rid: str) -> List[Dict[str, Any]]:
             path = _run_dir(job, rid) if rid else None
@@ -2140,9 +2276,9 @@ def build_studio_app(recents: Optional[Recents] = None):
                 flips[it["key"]] = "fixed" if b else "regressed"
         run = next(r for r in runs if r["run_id"] == run_id)
         prev = next((r for r in runs if r["run_id"] == against), None)
-        return JSONResponse({"run": run, "items": items, "against": against or None,
-                             "against_eval": (prev or {}).get("eval"), "flips": flips,
-                             "new_cases": [i["key"] for i in items if before and i["key"] not in before]})
+        return {"run": run, "items": items, "against": against or None,
+                "against_eval": (prev or {}).get("eval"), "flips": flips,
+                "new_cases": [i["key"] for i in items if before and i["key"] not in before]}
 
     @app.get("/api/p/{pid}/datasets/{name}")
     def dataset_rows(pid: str, name: str, limit: int = 500) -> JSONResponse:
@@ -2224,9 +2360,16 @@ def build_studio_app(recents: Optional[Recents] = None):
     # The studio tool server (operonx_studio.mcp) posts what it opened;
     # the page polls and shows it, so the user watches the agent work.
     ui_actions: Dict[str, List[Dict[str, Any]]] = {}
+    # bumped whenever something a waiting pulse cares about happens. A
+    # plain counter, not an asyncio.Event: an Event binds to one event
+    # loop, and a waiter checking an int every 100 ms costs nothing.
+    bells: Dict[str, int] = {}
+
+    def _ring(pid: str) -> None:
+        bells[pid] = bells.get(pid, 0) + 1
 
     @app.post("/api/p/{pid}/ui/action")
-    def ui_action(pid: str, body: Dict[str, Any]) -> JSONResponse:
+    async def ui_action(pid: str, body: Dict[str, Any]) -> JSONResponse:
         kind = str(body.get("kind") or "")
         if kind not in ("open_run", "open_monitor", "compare", "select_op", "open_jobs", "open_tab", "open_eval"):
             return JSONResponse({"error": f"unknown action {kind!r}"}, status_code=400)
@@ -2234,7 +2377,66 @@ def build_studio_app(recents: Optional[Recents] = None):
         seq = (queue[-1]["seq"] + 1) if queue else 1
         queue.append({"seq": seq, "kind": kind, "args": dict(body.get("args") or {}), "at": time.time()})
         del queue[:-50]
+        _ring(pid)
         return JSONResponse({"seq": seq})
+
+    # ── the pulse: one held request per open page ──────────────────────
+    # It replaced a /stamp + /ui/actions pair polled every 1.5 s — about
+    # 1.2 requests a second per tab, forever, and an assistant action
+    # reaching the screen up to 3 s late through the tunnel. The pulse
+    # answers as soon as the code changed, the assistant opened
+    # something, or (when the page follows the newest run) a run
+    # arrived; otherwise after `hold` seconds (under the tunnel's ~10 s
+    # cap). File checks are shared: at most one per project per second,
+    # however many tabs wait.
+    checked: Dict[str, Tuple[float, float, bool]] = {}   # pid -> (monotonic, stamp, ok)
+
+    async def _stamp_now(pid: str, watcher: ProjectWatcher) -> Tuple[float, bool]:
+        now = time.monotonic()
+        got = checked.get(pid)
+        if got is not None and now - got[0] < 1.0:
+            return got[1], got[2]
+        result = await asyncio.to_thread(watcher.refresh_swr)
+        checked[pid] = (time.monotonic(), result.stamp, result.ok)
+        return result.stamp, result.ok
+
+    async def _newest_run(pid: str) -> Optional[str]:
+        def look() -> Optional[str]:
+            pr = _runs(pid)
+            if pr is None:
+                return None
+            items = pr.store.list_runs(limit=1).items
+            return items[0].trace_id if items else None
+        try:
+            return await asyncio.to_thread(look)
+        except Exception:  # noqa: BLE001 — following is best-effort
+            return None
+
+    @app.get("/api/p/{pid}/pulse")
+    async def pulse(pid: str, stamp: float = 0.0, ui: int = -1, follow: str = "",
+                    hold: float = 8.0) -> JSONResponse:
+        """``stamp``: the IR the page has; ``ui``: the last assistant action
+        it performed (-1: none yet — answer at once with the latest seq);
+        ``follow``: the newest run it knows, when it follows new runs."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        end = time.monotonic() + max(0.0, min(hold, 8.0))
+        while True:
+            rung = bells.get(pid, 0)
+            cur, ok = await _stamp_now(pid, watcher)
+            queue = ui_actions.get(pid, [])
+            last = queue[-1]["seq"] if queue else 0
+            newest = await _newest_run(pid) if follow else None
+            changed = abs(cur - stamp) > 1e-6 or ui < 0 or last > ui or (follow and newest and newest != follow)
+            left = end - time.monotonic()
+            if changed or left <= 0:
+                return JSONResponse({"stamp": cur, "ok": ok, "ui_last": last,
+                                     "actions": [a for a in queue if a["seq"] > ui] if ui >= 0 else [],
+                                     "newest": newest})
+            until = time.monotonic() + min(1.0 if not follow else 2.0, left)
+            while time.monotonic() < until and bells.get(pid, 0) == rung:
+                await asyncio.sleep(0.1)
 
     @app.get("/api/p/{pid}/ui/actions")
     def ui_actions_since(pid: str, after: int = 0) -> JSONResponse:
@@ -2299,7 +2501,10 @@ def build_studio_app(recents: Optional[Recents] = None):
         return None
 
     @app.get("/api/p/{pid}/play/doors")
-    async def play_doors(pid: str) -> JSONResponse:
+    async def play_doors(pid: str, service: str = "") -> JSONResponse:
+        """The services' doors — plus what the screen asks for next, so it
+        opens in one round trip: the event cursor, and the recent sessions
+        of ``service`` (else of the first door a toy can drive)."""
         bridge, err = await _play(pid)
         if err is not None:
             return err
@@ -2308,7 +2513,18 @@ def build_studio_app(recents: Optional[Recents] = None):
         except (BridgeError, asyncio.TimeoutError) as exc:
             return JSONResponse({"error": str(exc) or "the bridge did not answer",
                                  "log": bridge.status()["log"]}, status_code=503)
-        return JSONResponse({"doors": got.get("doors") or [], "bridge": bridge.status()})
+        cursor = bridge.base + len(bridge.events)     # past the answer just given
+        doors = got.get("doors") or []
+        shown = next((d for d in doors if d.get("service") == service), None) \
+            or next((d for d in doors if d.get("toys")), doors[0] if doors else None)
+        recent = None
+        if shown is not None:
+            pr = _runs(pid)
+            if pr is not None:
+                page = await asyncio.to_thread(pr.store.list_runs, RunFilter(origin="playground", name=shown["service"]),
+                                               "started_desc", 8)
+                recent = {"service": shown["service"], "runs": [_row(r) for r in page.items]}
+        return JSONResponse({"doors": doors, "bridge": bridge.status(), "cursor": cursor, "recent": recent})
 
     @app.get("/api/p/{pid}/play/events")
     async def play_events(pid: str, cursor: Optional[int] = None) -> JSONResponse:

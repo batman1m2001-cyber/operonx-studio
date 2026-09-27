@@ -202,6 +202,10 @@ def test_settings_preview_then_save_applies_the_policy(client, project):
     assert settings["backend"] == "files" and settings["runs"] == 2
     assert settings["last_sweep"] == {"service": 1, "playground": 1, "adhoc": 0}
     assert settings["retention"]["job"] is None
+    # the current policy's preview rides along (one round trip for the screen)
+    current = client.post(f"/api/p/{pid}/settings/retention/preview",
+                          json={"retention": settings["retention"]}).json()["preview"]
+    assert settings["preview"] == current
     preview = client.post(f"/api/p/{pid}/settings/retention/preview",
                           json={"retention": {"job": 30, "service": "forever"}}).json()["preview"]
     assert preview["job"]["runs"] == 1 and preview["job"]["bytes"] > 0
@@ -298,6 +302,10 @@ def test_the_origin_tree_lists_declared_things_and_counts_the_store(client, tmp_
     assert [a["name"] for a in tree["adhoc"]] == ["flow"] and tree["total"] == 6
     everything = client.get(f"/api/p/{pid}/runs/origins").json()
     assert {j["name"]: j["runs"] for j in everything["jobs"]}["qc"] == 4
+    # the Runs screen opens in one round trip: the first page carries the tree
+    page = client.get(f"/api/p/{pid}/runs", params={"since": NOW - 7 * 86400, "with_origins": 1}).json()
+    assert page["origins"] == tree and page["runs"]
+    assert "origins" not in client.get(f"/api/p/{pid}/runs").json()
 
 
 def test_groups_by_job_run_and_by_runbook_run(client, tmp_path):

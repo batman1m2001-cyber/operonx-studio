@@ -33,6 +33,7 @@ const PlayView = (() => {
   const orphans = new Map();          // events for a session not registered yet
                                       // (a simulated user starts before the POST returns)
   let chatSid = null;                 // the chat session on screen
+  let preRecent = null;               // recent sessions that came with the doors
   let ui = null;                      // the rendered pane's live parts
 
   const save = () => store(K, v);
@@ -128,8 +129,14 @@ const PlayView = (() => {
     box.append(head);
     const loading = el("div", "note", "Starting the playground…");
     box.append(loading);
+    let got;
     try {
-      doors = (await api(`/api/p/${PID}/play/doors`)).doors;
+      // one round trip: the doors carry the event cursor and the recent
+      // sessions of the service on screen
+      got = await api(`/api/p/${PID}/play/doors?service=${encodeURIComponent(v.service || "")}`);
+      doors = got.doors;
+      if (cursor == null && got.cursor != null) cursor = got.cursor;
+      preRecent = got.recent || null;
     } catch (err) {
       loading.replaceWith(paneNote("The playground could not start", err.message));
       return;
@@ -341,9 +348,12 @@ const PlayView = (() => {
     }
 
     async function loadRecent() {
-      let got;
-      try { got = await api(`/api/p/${PID}/runs?origin=playground&name=${encodeURIComponent(d.service)}&limit=8`); }
-      catch { return; }
+      let got = preRecent && preRecent.service === d.service ? preRecent : null;
+      preRecent = null;       // the first paint only; later calls ask again
+      if (!got) {
+        try { got = await api(`/api/p/${PID}/runs?origin=playground&name=${encodeURIComponent(d.service)}&limit=8`); }
+        catch { return; }
+      }
       recent.textContent = "";
       if (!got.runs.length) { recent.append(el("div", "note", "Sessions you run here are kept 7 days.")); return; }
       for (const r of got.runs) {

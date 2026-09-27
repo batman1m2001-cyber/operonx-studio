@@ -34,7 +34,7 @@ async def main():
         pg.on("pageerror", lambda e: errors.append(str(e)))
 
         inflight = set()
-        LONG = ("/stamp", "/ui/actions", "/chat/turn/", "/play/events")
+        LONG = ("/stamp", "/ui/actions", "/chat/turn/", "/play/events", "/pulse", "/assistant/turns/")
         def _on(r):
             if not any(k in r.url for k in LONG):
                 inflight.add(r)
@@ -117,7 +117,7 @@ async def main():
         out.append({"errors": errors})
         print("ERRORS", errors)
         await b.close()
-    json.dump(out, open(f"{sys.path[0]}/audit_{TAG}.json", "w"), indent=1)
+    json.dump(out, open(f"audit_{TAG}.json", "w"), indent=1)  # in the working directory
 
 
 asyncio.run(main())

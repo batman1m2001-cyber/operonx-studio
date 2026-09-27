@@ -24,7 +24,7 @@ const ReviewView = (() => {
     let got, groups;
     try {
       [got, groups] = await Promise.all([
-        api(`/api/p/${PID}/review/queue?verdict=${v.verdict}&origin=${origin}&name=${encodeURIComponent(name || "")}&limit=200`),
+        api(`/api/p/${PID}/review/queue?verdict=${v.verdict}&origin=${origin}&name=${encodeURIComponent(name || "")}&limit=200&open=${encodeURIComponent(v.run || "")}`),
         api(`/api/p/${PID}/runs/groups`).catch(() => ({groups: []})),
       ]);
     } catch (err) { box.textContent = ""; box.append(el("div", "errbox", err.message)); return; }
@@ -73,18 +73,20 @@ const ReviewView = (() => {
       list.append(row);
     }
     if (!queue.find(r => r.run === v.run)) v.run = queue[0].run;
-    await open(v.run, main);
+    await open(v.run, main, got.detail && got.detail.run === v.run ? got.detail : null);
   }
 
-  async function open(run, mainEl) {
+  async function open(run, mainEl, pre) {
     v.run = run;
     save();
     const main = mainEl || box.querySelector(".revmain");
     for (const r of box.querySelectorAll(".revrow")) r.classList.toggle("sel", r.dataset.run === run);
     box.querySelector(".revrow.sel")?.scrollIntoView({block: "nearest"});
-    let got;
-    try { got = await api(`/api/p/${PID}/review/run/${encodeURIComponent(run)}`); }
-    catch (err) { main.textContent = ""; main.append(el("div", "errbox", err.message)); return; }
+    let got = pre;
+    if (!got) {
+      try { got = await api(`/api/p/${PID}/review/run/${encodeURIComponent(run)}`); }
+      catch (err) { main.textContent = ""; main.append(el("div", "errbox", err.message)); return; }
+    }
     current = {run, ...got};
     main.textContent = "";
     const s = got.summary;
