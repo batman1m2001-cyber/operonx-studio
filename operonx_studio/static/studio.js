@@ -43,6 +43,9 @@ const state = {
   errIdx: 0,          // cycling cursor for the "error →" jump
 };
 
+// the canvas in motion (defined further down; used by render and leaveWorkflow)
+let liveCanvas = null;
+
 /* What the user is looking at, for anyone who asks — the assistant
  * sends it along with every chat message. */
 function pushView() {
@@ -499,42 +502,16 @@ function bouton(svg, x, y, cls) {
  * spark particles frozen mid-flight — each with a smaller trailing dot
  * behind it, so the comet shape says which way the energy flows without
  * a frame of animation. */
+/* A wire: one stroke. (It was a halo, a core and a white filament with
+ * static spark dots — decoration that said "flowing" when nothing was;
+ * the canvas now moves only when something runs: liveCanvas below.) */
 function energyEdge(svg, d, cls, made) {
-  const glow = document.createElementNS(SVGNS, "path");
-  glow.setAttribute("d", d);
-  glow.setAttribute("class", ("eglow " + cls).trim());
-  svg.append(glow);
   const core = document.createElementNS(SVGNS, "path");
   core.setAttribute("d", d);
   core.setAttribute("class", ("ecore " + cls).trim());
   svg.append(core);
-  // the laser filament: a white-hot hairline down the beam's center
-  const ray = document.createElementNS(SVGNS, "path");
-  ray.setAttribute("d", d);
-  ray.setAttribute("class", ("eray " + cls).trim());
-  svg.append(ray);
-  if (made) made.push(glow, core, ray);
+  if (made) made.push(core);
   return core;
-}
-
-function energySparks(svg, path, cls) {
-  let len;
-  try { len = path.getTotalLength(); } catch { return; }
-  if (!len || len < 130) return;
-  const count = Math.max(1, Math.min(3, Math.round(len / 240)));
-  for (let i = 0; i < count; i++) {
-    const at = ((i + 0.5) / count) * len;
-    const pt = path.getPointAtLength(at);
-    const tail = path.getPointAtLength(Math.max(0, at - 7));
-    const t = document.createElementNS(SVGNS, "circle");
-    t.setAttribute("cx", tail.x); t.setAttribute("cy", tail.y); t.setAttribute("r", 1.6);
-    t.setAttribute("class", ("espark tailspark " + cls).trim());
-    svg.append(t);
-    const c = document.createElementNS(SVGNS, "circle");
-    c.setAttribute("cx", pt.x); c.setAttribute("cy", pt.y); c.setAttribute("r", 2.8);
-    c.setAttribute("class", ("espark " + cls).trim());
-    svg.append(c);
-  }
 }
 
 
@@ -627,39 +604,43 @@ function render() {
   // (positive) or spare (negative); the card resizes by that amount,
   // clamped, and KEEPS ITS SLOT CENTER so the layout's spacing holds —
   // slack between 316px slots absorbs growth up to the cap.
+  //
+  // Reads and writes are BATCHED: measuring card by card (write a style,
+  // read a width, write it back, read again) forced a full layout of the
+  // canvas twice per card — 202 forced layouts, ~85 of the 108 ms a render
+  // of callbot took (measured, docs/REFACTOR_PHASE2.md P4). One class
+  // switches every measured line to max-content at once; all widths are
+  // read in one layout, all laid-out widths in a second, and only then is
+  // anything written.
+  const measured = [];
   for (const it of flat.nodes) {
     if (it.inner || it.node.kind === "__boundary__") continue;
     const card = state.cardEls.get(it.key);
-    if (!card || !card.offsetHeight) continue;
-    const els = [...card.querySelectorAll(".ntext, .brcond")];
-    if (!els.length) {
-      // gates: plain name line, plus the transport line below it
-      for (const sel of [".nname", ".nkind"]) {
-        const e = card.querySelector(sel);
-        if (e) els.push(e);
-      }
-    }
-    if (els.length) {
-      // scrollWidth never reads below clientWidth, so a stretched flex
-      // span hides how little it truly needs — pin it to max-content
-      // for one frame to get the intrinsic width
-      const intrinsic = (e) => {
-        const saved = e.style.cssText;
-        e.style.flex = "none"; e.style.width = "max-content";
-        const w = e.offsetWidth;
-        e.style.cssText = saved;
-        return w;
-      };
-      const need = Math.max(...els.map(e => intrinsic(e) - e.clientWidth));
-      const newW = Math.max(180, Math.min(310, Math.ceil(it.w + need + 8)));
-      if (newW !== it.w) {
-        it.x += (it.w - newW) / 2;
-        it.w = newW;
-        card.style.width = `${newW}px`;
-        card.style.left = `${it.x}px`;
-      }
-    }
+    if (!card) continue;
+    let els = [...card.querySelectorAll(".ntext, .brcond")];
+    // gates: plain name line, plus the transport line below it
+    if (!els.length) els = [".nname", ".nkind"].map(sel => card.querySelector(sel)).filter(Boolean);
+    measured.push({it, card, els});
   }
+  nodesBox.classList.add("measuring");
+  const natural = measured.map(m => m.els.map(e => e.offsetWidth));
+  nodesBox.classList.remove("measuring");
+  const laidOut = measured.map(m => ({shown: !!m.card.offsetHeight, widths: m.els.map(e => e.clientWidth)}));
+  measured.forEach((m, i) => {
+    if (!laidOut[i].shown || !m.els.length) return;
+    const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
+    const it = m.it;
+    const newW = Math.max(180, Math.min(310, Math.ceil(it.w + need + 8)));
+    if (newW !== it.w) {
+      it.x += (it.w - newW) / 2;
+      it.w = newW;
+      m.card.style.width = `${newW}px`;
+      m.card.style.left = `${it.x}px`;
+    }
+  });
+  // heights and the decision rows' port dots: all read first (one
+  // layout), the rows' sides written after
+  const sides = [];
   for (const it of flat.nodes) {
     if (it.inner || it.node.kind === "__boundary__") continue;
     const card = state.cardEls.get(it.key);
@@ -676,24 +657,20 @@ function render() {
         const tgt = flat.nodes.find(o => o.depth === it.depth
           && o.node.name === t && o !== it);
         const side = tgt && portCX(tgt) < it.x + it.w / 2 ? -1 : 1;
-        rrow.classList.toggle("left", side < 0);
+        sides.push([rrow, side < 0]);
+        const left = rrow.offsetLeft, top = rrow.offsetTop, w = rrow.offsetWidth, h = rrow.offsetHeight;
         // every row's dot, card-relative — the wire repaint above the
         // card is masked out under each one, so the dot stays the
         // terminal the wire emerges FROM, never a bead the wire buries
-        it.condDots.push({
-          x: side < 0 ? rrow.offsetLeft - 1 : rrow.offsetLeft + rrow.offsetWidth + 1,
-          y: rrow.offsetTop + rrow.offsetHeight / 2});
-        if (!(t in it.condPorts)) {
-          // x/y of the row's own DOT (card-relative): the wire must
-          // emerge from the condition box itself, not the card border
-          it.condPorts[t] = {
-            x: side < 0 ? rrow.offsetLeft - 1
-                        : rrow.offsetLeft + rrow.offsetWidth + 1,
-            y: rrow.offsetTop + rrow.offsetHeight / 2, side};
-        }
+        const dot = {x: side < 0 ? left - 1 : left + w + 1, y: top + h / 2};
+        it.condDots.push(dot);
+        // x/y of the row's own DOT (card-relative): the wire must
+        // emerge from the condition box itself, not the card border
+        if (!(t in it.condPorts)) it.condPorts[t] = {...dot, side};
       }
     }
   }
+  for (const [rrow, left] of sides) rrow.classList.toggle("left", left);
 
   // Rows part for real heights: semantic zoom grows cards, and a
   // fixed pitch would let them collide. Runs INSIDE every opened
@@ -969,8 +946,6 @@ function render() {
     const faded = state.run && (!ranInRun(a.node) || !ranInRun(b.node));
     if (sheath !== null) {
       drawn = energyEdge(svg, p.getAttribute("d"), sheath.trim(), made);
-      // no sparks on an else-fallback, nor into an op that never ran
-      if (!sheath.includes("relse") && !faded) energySparks(svg, drawn, sheath.trim());
     } else {
       p.setAttribute("class", cls.trim());
       svg.append(p);
@@ -1074,6 +1049,7 @@ function render() {
 
   refreshSelection();
   applyView();
+  if (liveCanvas) liveCanvas.reindex();
 }
 
 /* Selection is a class toggle, not a redraw — clicking around a big
@@ -1539,30 +1515,50 @@ function stageCenter() {
 }
 
 function fit() {
-  // fit the WIDTH: the whole flow across, reading down by scroll — a
-  // both-axes fit shrank every tall flow into confetti
-  const ex = state.extent;
-  if (!ex) return;
-  const stage = $("#stage");
-  const r = stage.getBoundingClientRect();
-  state.view.scale = Math.min(1.2,
-    (r.width - 70) / Math.max(1, ex.maxX - ex.minX));
-  applyView();
-  stage.scrollLeft = 0;
-  stage.scrollTop = 0;
+  // back to the landing view: the whole flow, or its width at a readable
+  // scale — and forget the view the user had saved
+  store(viewKey(), null);
+  initView();
 }
 
-/* the landing view: real size, top of the flow, spine centred */
+/* The landing view: the whole flow when it fits at a readable scale;
+ * otherwise across its width (never below 70% — at 55% a name was 7px on
+ * screen), from the top, centred. It used to open at 100% on the
+ * top-left, so a wide flow (callbot) showed a fragment with cards cut
+ * at the edge. A view the user sets — pan, zoom — is remembered per
+ * project and graph, and wins on the next visit. */
+const viewKey = () => `view:${PID}:${state.graph ? state.graph.name : ""}`;
 function initView() {
   const ex = state.extent;
   if (!ex) return;
   const stage = $("#stage");
-  state.view.scale = 1;
-  applyView();
   const r = stage.getBoundingClientRect();
+  const saved = recall(viewKey(), null);
+  if (saved && saved.scale > 0) {
+    state.view.scale = saved.scale;
+    applyView();
+    stage.scrollLeft = saved.x || 0;
+    stage.scrollTop = saved.y || 0;
+    return;
+  }
+  const w = Math.max(1, ex.maxX - ex.minX), h = Math.max(1, ex.maxY - ex.minY);
+  const room = (n) => n - VIEW_PAD * 2 - 24;
+  const all = Math.min(room(r.width) / w, room(r.height) / h);
+  state.view.scale = all >= 0.7 ? Math.min(1, all) : Math.min(1, Math.max(0.7, room(r.width) / w));
+  applyView();
+  stage.scrollLeft = Math.max(0, (w * state.view.scale + VIEW_PAD * 2 - r.width) / 2);
   stage.scrollTop = 0;
-  stage.scrollLeft = Math.max(0, (ex.maxX - ex.minX) / 2 + VIEW_PAD - r.width / 2);
 }
+// the user's own view, remembered once they stop moving it
+let _viewSave = 0;
+$("#stage").addEventListener("scroll", () => {
+  if (state.tab !== "flow" || !state.extent || state.workflowOn) return;
+  clearTimeout(_viewSave);
+  _viewSave = setTimeout(() => {
+    const st = $("#stage");
+    store(viewKey(), {scale: state.view.scale, x: Math.round(st.scrollLeft), y: Math.round(st.scrollTop)});
+  }, 500);
+}, {passive: true});
 
 /* ── inspector ────────────────────────────────────────────────────── */
 
@@ -3073,7 +3069,7 @@ async function showRunWorkflow(run) {
     .map(o => o.runs ? o.total_ms / o.runs : 0));
 
   state.runRollups = new Map((tree.rollups || []).map(r => [r.op, r]));
-  const extras = [RunView.lensBar()];
+  const extras = [RunView.lensBar(), replayControl(run)];
   box.append(runHeader(run, tree, "workflow", extras));
   box.append(RunView.timeline(state.runTurns, tree.total_ms, (key) => {
     state.runTurn = key; render(); renderFlowInfo();
@@ -3111,6 +3107,7 @@ function walkErrors() {
 // the canvas goes home and the paint comes off — the Flow tab never
 // shows a run
 function leaveWorkflow() {
+  if (liveCanvas) liveCanvas.stop(true);
   if (!state.workflowOn) return;
   state.workflowOn = false;
   syncChrome();
@@ -3655,6 +3652,7 @@ async function pulse() {
       const q = new URLSearchParams({stamp: String(state.stamp || 0), ui: String(state.uiSeq),
                                      chat: String(state.chatSeq)});
       if (state.follow) q.set("follow", (state.run && state.run.run) || "-");
+      else if (state.tab === "flow" && flowLive.on) q.set("follow", flowLive.newest || "-");
       const got = await api(`/api/p/${PID}/pulse?${q}`);
       pulseMiss = 0;
       setLinkState(true);
@@ -3670,6 +3668,8 @@ async function pulse() {
       }
       if (state.follow && got.newest && (!state.run || state.run.run !== got.newest)) {
         await showRunWorkflow(got.newest);
+      } else if (!state.follow && state.tab === "flow" && got.newest) {
+        flowLive.landed(got.newest, got.newest_info);
       }
     } catch {
       // the studio or the tunnel is briefly away: back off, then say so
@@ -3746,6 +3746,280 @@ load(true).catch((err) => {
   box.style.position = "absolute";
   $("#stage").append(box);
 }).finally(pulse);
+
+/* ── the canvas in motion ─────────────────────────────────────────────
+ * The flow comes alive only when something runs: a playground session
+ * (its ops stream from the bridge as they finish — play.js dispatches
+ * "oxops"), or a recorded run replayed from its timings. The op at work
+ * carries the signal ring; when it finishes it settles green or red and
+ * a particle runs each wire out of it toward its consumers, which then
+ * wait, lit, for their own turn. Everything here toggles classes on
+ * cards and wires already drawn — never a render(): a repaint of callbot
+ * costs ~60 ms, far too much per event (docs/REFACTOR_PHASE2.md P4). */
+liveCanvas = (() => {
+  const MAX_PARTICLES = 24;
+  let particles = 0;
+  let run = null;       // {kind: "live"|"replay", label, timers, names, out, active}
+
+  // op name → the rendered keys that stand for it (the op itself, or the
+  // folded container it sits in)
+  function index() {
+    const names = new Map();
+    const put = (name, key) => { if (!names.has(name)) names.set(name, []); names.get(name).push(key); };
+    const walk = (g, key) => { for (const m of (g && g.nodes) || []) { put(m.name, key); if (m.graph) walk(m.graph, key); } };
+    for (const [key, it] of state.rendered) {
+      const n = it.node;
+      if (!n || !n.name) continue;
+      put(n.name, key);
+      if (n.graph && !state.expanded.has(key)) walk(n.graph, key);
+    }
+    const out = new Map();   // key → paths of the wires leaving it
+    for (const e of state.edgeEls) {
+      const path = (e.els || []).find(x => x.getAttribute && x.getAttribute("d"));
+      if (!path) continue;
+      if (!out.has(e.a)) out.set(e.a, []);
+      out.get(e.a).push({path, to: e.b});
+    }
+    return {names, out};
+  }
+
+  function begin(kind, label) {
+    stop(true);
+    const ix = index();
+    run = {kind, label, timers: [], active: new Map(), names: ix.names, out: ix.out, seen: 0, t0: Date.now()};
+    $("#world").classList.add("live");
+    paintBar();
+    return run;
+  }
+
+  function stop(quiet) {
+    if (!run) return;
+    for (const t of run.timers) clearTimeout(t);
+    for (const t of run.active.values()) clearTimeout(t);
+    for (const n of document.querySelectorAll("#nodes .live-active, #nodes .live-done, #nodes .live-failed"))
+      n.classList.remove("live-active", "live-done", "live-failed");
+    for (const p of document.querySelectorAll("#edges path.flowing, #edgetop path.flowing")) p.classList.remove("flowing");
+    for (const p of document.querySelectorAll("#edges path.particle")) p.remove();
+    particles = 0;
+    $("#world").classList.remove("live");
+    run = null;
+    if (!quiet) paintBar();
+  }
+
+  function particle(path, failed, dur) {
+    if (particles + 2 > MAX_PARTICLES || !path || !path.ownerSVGElement) return;
+    const d = path.getAttribute("d");
+    for (const trail of [false, true]) {
+      const p = document.createElementNS(SVGNS, "path");
+      p.setAttribute("d", d);
+      p.setAttribute("pathLength", "100");
+      p.setAttribute("class", "particle" + (trail ? " trail" : "") + (failed ? " failed" : ""));
+      p.style.setProperty("--dur", `${dur}ms`);
+      particles += 1;
+      const done = () => { p.remove(); particles = Math.max(0, particles - 1); };
+      p.addEventListener("animationend", done, {once: true});
+      setTimeout(done, dur + 600);          // reduced motion: no animationend
+      path.ownerSVGElement.append(p);
+    }
+    path.classList.add("flowing");
+  }
+
+  const cardsOf = (op) => (run && run.names.get(op) || []).map(k => [k, state.cardEls.get(k)]).filter(([, c]) => c);
+
+  function start(op) {
+    if (!run) return;
+    for (const [, card] of cardsOf(op)) {
+      card.classList.remove("live-done", "live-failed");
+      card.classList.add("live-active");
+    }
+  }
+
+  function finish(op, status, dur) {
+    if (!run) return;
+    run.seen += 1;
+    const bad = status === "error";
+    dur = Math.max(260, Math.min(900, dur || 500));
+    for (const [key, card] of cardsOf(op)) {
+      card.classList.remove("live-active");
+      card.classList.add(bad ? "live-failed" : "live-done");
+      for (const w of run.out.get(key) || []) {
+        particle(w.path, bad, dur);
+        // the consumer lights as the data reaches it, until it finishes
+        const target = state.cardEls.get(w.to);
+        if (!target || target.classList.contains("bnode")) continue;
+        const prev = run.active.get(w.to);
+        if (prev) clearTimeout(prev);
+        run.active.set(w.to, setTimeout(() => {
+          if (!run) return;
+          target.classList.remove("live-done", "live-failed");
+          target.classList.add("live-active");
+          // nothing more heard from it: it settles on its own
+          run.active.set(w.to, setTimeout(() => target.classList.remove("live-active"), 2500));
+        }, dur * 0.8));
+      }
+    }
+    paintBar();
+  }
+
+  /* a live playground session: ops as they finish */
+  function onOps(detail) {
+    if (state.tab !== "flow" || !state.graph) return;
+    const ops = detail.ops || [];
+    const serving = serviceGraph(detail.service);
+    if (serving && serving !== state.graph.name) return;
+    if (!run || run.kind !== "live" || run.sid !== detail.sid) {
+      begin("live", detail.service ? `${detail.service} · live session` : "Live session");
+      run.sid = detail.sid;
+      run.trace = detail.trace_id;
+      animated.add(detail.trace_id);
+    }
+    // a burst arrives as one batch: spread it over ~a second so each op reads
+    const gap = Math.min(120, 900 / Math.max(1, ops.length));
+    ops.slice(0, 200).forEach((o, i) => {
+      const me = run;
+      me.timers.push(setTimeout(() => { if (run === me) finish(o.op, o.status, o.ms); }, i * gap));
+    });
+  }
+
+  // the graph a service serves ("module:graph" or "graph"), to match the canvas
+  function serviceGraph(service) {
+    if (!service) return null;
+    const sv = ((state.ir || {}).services || []).find(x => x.name === service);
+    return sv && sv.graph ? String(sv.graph).split(":").pop().replace(/\[.*$/, "") : null;
+  }
+
+  /* a recorded run, replayed from its timings: the whole run in 3–12 s,
+   * a two-millisecond job and a ten-minute call alike */
+  async function replay(runId, speed) {
+    let tl;
+    try { tl = await api(`/api/p/${PID}/trace/${encodeURIComponent(runId)}/timeline`); }
+    catch (e) { toast(e.message, true); return; }
+    const spans = tl.spans || [];
+    if (!spans.length) { toast("This run recorded no timings to replay"); return; }
+    const total = Math.max(...spans.map(x => x.start + (x.dur_ms || 0) / 1000));
+    const target = Math.max(3, Math.min(12, spans.length * 0.4)) / (speed || 1);
+    const k = total > 0 ? target / total : 0;
+    const me = begin("replay", `Replaying ${String(runId).slice(0, 12)}`);
+    me.run = runId;
+    me.speed = speed || 1;
+    animated.add(runId);
+    // an op firing again and again within a blink counts once
+    const last = new Map();
+    for (const x of spans) {
+      const at = Math.round(x.start * k * 1000);
+      if (last.has(x.op) && at - last.get(x.op) < 140) continue;
+      last.set(x.op, at);
+      const end = at + Math.max(200, Math.min(1200, (x.dur_ms || 0) * k));
+      me.timers.push(setTimeout(() => { if (run === me) start(x.op); }, at));
+      me.timers.push(setTimeout(() => { if (run === me) finish(x.op, x.status, 420 / me.speed + 200); }, end));
+    }
+    me.timers.push(setTimeout(() => { if (run === me) { me.over = true; paintBar(); } }, target * 1000 + 1400));
+    me.timers.push(setTimeout(() => { if (run === me) stop(); }, target * 1000 + 6000));
+  }
+
+  const animated = new Set();   // runs already shown moving: a landing run is not replayed twice
+
+  /* the pill over the canvas: what is moving, and a way to stop it */
+  function paintBar() {
+    let bar = $("#livebar");
+    if (!run) { if (bar) bar.hidden = true; return; }
+    if (!bar) {
+      bar = el("div", "livebar");
+      bar.id = "livebar";
+    }
+    if (bar.parentNode !== $("#stage")) $("#stage").prepend(bar);
+    bar.hidden = false;
+    bar.textContent = "";
+    bar.classList.toggle("over", !!run.over);
+    bar.append(el("span", "livedot"), el("span", "livelabel", run.over ? `${run.label} — done` : run.label));
+    if (run.seen) bar.append(el("span", "livecount", `${run.seen} op${run.seen === 1 ? "" : "s"}`));
+    if (run.kind === "replay") {
+      const again = Icons.button("resume", undefined, "livebtn", "Replay again");
+      const r0 = run.run, sp = run.speed;
+      again.onclick = () => replay(r0, sp);
+      bar.append(again);
+    }
+    const x = Icons.button("x", undefined, "livebtn", run.kind === "replay" ? "Stop the replay" : "Stop following");
+    x.onclick = () => stop();
+    bar.append(x);
+  }
+
+  document.addEventListener("oxops", (ev) => onOps(ev.detail || {}));
+  document.addEventListener("oxsession", (ev) => {
+    const d = ev.detail || {};
+    if (d.state === "ended" && run && run.kind === "live" && run.sid === d.sid) {
+      run.over = true;
+      run.label = `${d.service || "Session"} · ${d.status === "error" ? "ended with an error" : "finished"}`;
+      paintBar();
+      const me = run;
+      me.timers.push(setTimeout(() => { if (run === me) stop(); }, 5000));
+    }
+  });
+
+  // a repaint during a run rebuilt the cards and wires: point at the new ones
+  function reindex() {
+    if (!run) return;
+    const ix = index();
+    run.names = ix.names;
+    run.out = ix.out;
+    $("#world").classList.add("live");
+    const bar = $("#livebar");
+    if (bar && bar.parentNode !== $("#stage")) $("#stage").prepend(bar);
+  }
+
+  return {replay, stop, reindex, animated, get running() { return run; }};
+})();
+
+/* The Flow tab follows new runs of the graph on screen: each one replays
+ * as it lands (a live playground session already moved the canvas, so
+ * its run is not shown twice). Off in the canvas bar, remembered. */
+const flowLive = {
+  on: recall("flowLive", true),
+  newest: null,
+  landed(id, info) {
+    const first = this.newest === null;
+    if (id === this.newest) return;
+    this.newest = id;
+    if (first || !this.on || liveCanvas.animated.has(id) || liveCanvas.running) return;
+    if (info && state.graph && !graphServes(info)) return;
+    liveCanvas.replay(id, 2);
+  },
+};
+function graphServes(info) {
+  // the run belongs to the graph on screen: its service's or job's graph
+  const ir = state.ir || {};
+  const list = info.origin === "service" || info.origin === "playground" ? ir.services || [] : ir.jobs || [];
+  const decl = list.find(x => x.name === info.name);
+  const g = decl && decl.graph ? String(decl.graph).split(":").pop().replace(/\[.*$/, "") : null;
+  return !g || g === state.graph.name;
+}
+
+const liveBtn = $("#btn-live");
+function paintLiveBtn() {
+  liveBtn.classList.toggle("active", flowLive.on);
+  liveBtn.setAttribute("aria-pressed", String(flowLive.on));
+}
+liveBtn.onclick = () => {
+  flowLive.on = !flowLive.on;
+  store("flowLive", flowLive.on);
+  if (!flowLive.on) liveCanvas.stop();
+  paintLiveBtn();
+  toast(flowLive.on ? "Live: new runs replay on the canvas as they land" : "Live off");
+};
+paintLiveBtn();
+
+/* a run to replay, from the run view's header */
+function replayControl(runId) {
+  const box = el("span", "replayctl");
+  const go = Icons.button("play", "Replay", "small", "Replay this run on the canvas, from its recorded timings");
+  go.onclick = () => liveCanvas.replay(runId, 1);
+  const fast = el("button", "small ghost", "4×");
+  fast.type = "button";
+  fast.title = "Replay four times faster";
+  fast.onclick = () => liveCanvas.replay(runId, 4);
+  box.append(go, fast);
+  return box;
+}
 
 /* ── the project menu: Operons · Services · Jobs ───────────────────────
  * The three lists the application layer declares (operonx.app), from

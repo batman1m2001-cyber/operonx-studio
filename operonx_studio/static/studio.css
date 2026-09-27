@@ -436,9 +436,9 @@ body.railslim .railtoggle .icon { transform: rotate(180deg); }
 /* the canvas is a scrollable document: bars appear only when the flow
    outgrows the window, both axes */
 #stage { position: relative; flex: 1; overflow: auto; cursor: grab; min-width: 0;
-  background-color: #fbfaf8;
-  background-image: radial-gradient(circle, #dcd8ce 1px, transparent 1.2px);
-  background-size: 22px 22px; }
+  background-color: #f8f9fb;
+  background-image: radial-gradient(circle, #d6dce3 1px, transparent 1.2px);
+  background-size: 24px 24px; }
 #stage.panning { cursor: grabbing; }
 #stage.panmode { cursor: grab; }
 #stage.panmode .node { pointer-events: none; }
@@ -460,6 +460,29 @@ body:not([data-stage]) .canvasbar { display: none; }
 .canvasbar .zoompct:hover { background: var(--surface-2); }
 .canvasbar .tsep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 .canvasbar #btn-expand.active { color: var(--accent-strong); background: var(--accent-soft); }
+.canvasbar #btn-live.active { color: var(--signal); background: var(--signal-soft); }
+
+/* what is moving on the canvas: a pill pinned to the stage's top-left
+   (sticky inside the scrolling stage; the negative margin keeps the
+   flow from shifting down) */
+.livebar { position: sticky; top: 12px; left: 12px; z-index: 22; width: max-content; max-width: calc(100% - 24px);
+  height: 34px; margin-bottom: -34px; display: flex; align-items: center; gap: 8px; padding: 0 4px 0 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--sh-2);
+  font-size: var(--fs-md); color: var(--text); animation: axpop .18s var(--ease-out); cursor: default; }
+.livebar[hidden] { display: none; }
+.livedot { position: relative; width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--signal); }
+.livedot::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--signal);
+  animation: axring 1.6s var(--ease-out) infinite; }
+.livebar.over .livedot { background: var(--ok); }
+.livebar.over .livedot::after { display: none; }
+.livelabel { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.livecount { color: var(--text-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.livebtn { width: 28px; min-width: 28px; height: 28px; min-height: 0; padding: 0; border: none; border-radius: 50%;
+  background: none; color: var(--text-3); }
+.livebtn:hover { background: var(--surface-3); color: var(--text); border: none; }
+.livebtn .icon { width: 14px; height: 14px; }
+.replayctl { display: inline-flex; align-items: center; gap: 2px; }
+.replayctl .icon { width: 13px; height: 13px; }
 
 .findbox {
   left: calc(var(--rail-w) + 16px); bottom: 68px; width: 340px; max-width: calc(100% - 32px);
@@ -484,315 +507,160 @@ body:not([data-stage]) .canvasbar { display: none; }
 .lkeysrow { color: var(--text-3); font-size: var(--fs-sm); line-height: 1.7; }
 
 
-/* ── the canvas: cells, energy wires, doors, terminals, decisions ──
-   (the canvas's own visual language — unchanged by the chrome) */
+/* ── the canvas ─────────────────────────────────────────────────────
+   A precise instrument, not an illustration: white cards on a quiet
+   grid, one stroke per wire, the kind as a small tile, selection as a
+   signal-blue ring. Nothing moves at rest; motion means something is
+   running now (the .live-* states and the particles below). */
 
 .wires { position: absolute; overflow: visible; pointer-events: none; }
-.wires path { fill: none; stroke: #b7c8dc; stroke-width: 2; stroke-linecap: round; }
-.wires path.soft { stroke-dasharray: 6 5; }
-.wires path.hot { stroke: var(--wire-deep); stroke-width: 2.5; }
+.wires path { fill: none; stroke: #b8c4d2; stroke-width: 1.5; stroke-linecap: round; }
+.wires path.soft { stroke-dasharray: 5 5; }
+.wires path.hot { stroke: var(--wire-deep); stroke-width: 2; }
 .wires path.serve { stroke: var(--k-serve); stroke-dasharray: 2 4; }
-.wires path.back { stroke: var(--warn); stroke-dasharray: 7 4; }
-.wires path.stream { stroke-width: 2.5; }
-.wires text {
-  fill: #64748b; font: 11px ui-monospace, monospace;
-  paint-order: stroke; stroke: #ffffff; stroke-width: 4px;
-}
+.wires path.back { stroke: var(--warn); stroke-dasharray: 6 4; }
+.wires path.stream { stroke-width: 2; }
+.wires text { fill: #5d6b7c; font: 10.5px var(--mono); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; }
 .wires text.back-label { fill: var(--warn); }
 .wires text.routelabel { fill: var(--k-branch); font-size: 10.5px; }
 
-/* nodes — drawn as neurons: the card is the SOMA (radial cytoplasm,
-   soft membrane glow), the kind glyph sits in a round NUCLEUS, and the
-   ports are synaptic boutons. A bipolar neuron — one dendrite in, one
-   axon out — is exactly what an op is. */
+/* cards */
 .node {
-  position: absolute; width: 260px; min-height: 52px;
-  background: radial-gradient(120% 160% at 30% 20%, #ffffff 0%, #fcfdff 55%, #f2f6fb 100%);
-  border: 1.5px solid #d5dde9;
-  /* an organic, slightly asymmetric membrane — a cell, not a box */
-  border-radius: 30px 22px 28px 24px / 24px 30px 22px 28px;
-  padding: 9px 14px 8px 19px; cursor: pointer;
-  user-select: none;
-  box-shadow: var(--sh-1), 0 0 18px rgba(90, 130, 190, .08);
-  transition: transform var(--tr), box-shadow var(--tr), border-color var(--tr), opacity var(--tr);
+  position: absolute; width: 260px; min-height: 48px; padding: 9px 12px 8px 15px;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px;
+  cursor: pointer; user-select: none; box-shadow: 0 1px 2px rgba(15, 20, 25, .05);
+  transition: transform .15s var(--ease-out), box-shadow var(--tr), border-color var(--tr), opacity .3s ease;
 }
-.node:hover { transform: translateY(-2px); border-color: #b9cbe4;
-  box-shadow: var(--sh-2), 0 0 26px rgba(90, 130, 190, .18); }
-/* small inline icon (branch headers, anywhere a band won't fit):
-   light pastel disc, kind-coloured glyph — nothing saturated */
-.node .nicon {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 50%; margin-right: 8px;
-  font-size: 11px; vertical-align: -5px;
-  color: color-mix(in srgb, var(--kind, var(--k-default)) 80%, #445);
-  background: color-mix(in srgb, var(--kind, var(--k-default)) 11%, #fff);
-  border: 1.5px solid color-mix(in srgb, var(--kind, var(--k-default)) 28%, #fff);
-}
-
-/* the ICON BAND: the cell's left quarter. The pastel itself is painted
-   as a layer of the CELL's background (see .node.cell), so the card's
-   own border-radius clips it — the slice hugs the membrane exactly at
-   every height and zoom, instead of guessing the curve with a second
-   box. This span only floats the glyph and draws the divider, inset so
-   it never pokes past the curved top and bottom.
-   Custom project ops fall back to the ◈ default the same way. */
-.node .iconband {
-  position: absolute; left: 0; top: 12%; bottom: 12%; width: 56px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 19px;
-  color: color-mix(in srgb, var(--kind, var(--k-default)) 74%, #56617a);
-  border-right: 1.5px dashed color-mix(in srgb, var(--kind, var(--k-default)) 22%, #fff);
-  pointer-events: none;
-}
-
-/* the CELL: an op drawn as a brain cell — irregular membrane in the
-   kind's own hue, cytoplasm gradient, a soft nucleus halo behind the
-   content. Two membrane variants keep a row from looking stamped. */
-.node.cell {
-  border: 2px solid color-mix(in srgb, var(--kind, var(--k-func)) 45%, #dbe4f0);
-  /* lit from within: a luminous white core fading into kind-tinted
-     cytoplasm at the membrane — never a flat fill */
-  background:
-    /* first layer: the icon band's pastel — clipped by this very box's
-       radius, so it always follows the membrane */
-    linear-gradient(90deg,
-      color-mix(in srgb, var(--kind, var(--k-func)) 11%, transparent) 0 56px,
-      transparent 56px),
-    radial-gradient(72% 105% at 50% 44%, #ffffff 0%, #fdfeff 30%, #f3f7fc 62%,
-      color-mix(in srgb, var(--kind, var(--k-func)) 10%, #eaf0f8) 100%);
-  border-radius: 46% 54% 48% 52% / 62% 48% 58% 42%;
-  min-height: 58px; padding: 11px 14px 9px 68px;
-  box-shadow: 0 3px 12px rgba(70, 100, 150, .12),
-              0 0 0 5px color-mix(in srgb, var(--kind, var(--k-func)) 7%, transparent),
-              inset 0 0 16px rgba(255, 255, 255, .55);
-}
-.node.cell.alt { border-radius: 54% 46% 56% 44% / 46% 60% 42% 58%; }
-.node.cell:hover {
-  border-color: color-mix(in srgb, var(--kind, var(--k-func)) 65%, #dbe4f0);
-  box-shadow: 0 6px 18px rgba(70, 100, 150, .18),
-              0 0 0 6px color-mix(in srgb, var(--kind, var(--k-func)) 12%, transparent),
-              inset 0 0 16px rgba(255, 255, 255, .55);
-}
-.node.cell.selected {
-  border-color: #38c4ea;
-  background:
-    /* keep the icon band's pastel above the cyber wash */
-    linear-gradient(90deg,
-      color-mix(in srgb, var(--kind, var(--k-func)) 11%, transparent) 0 56px,
-      transparent 56px),
-    radial-gradient(80% 120% at 50% 35%,
-      #f2fdff 0%, #d9f7ff 45%, #a3e9ff 100%);
-  box-shadow: 0 0 0 1.5px rgba(38, 199, 245, .45),
-              0 0 26px rgba(0, 208, 255, .55),
-              inset 0 0 16px rgba(255, 255, 255, .55);
-}
-.node.cell::before {
-  /* no nucleus halo on the white ground — its soft square bounding
-     box read as a dirty rectangle shadow behind every icon */
-  display: none;
-}
+.node:hover { transform: translateY(-1px); border-color: #a9b4c1; box-shadow: var(--sh-2); }
+/* the kind's hairline down the left edge */
+.node::before { content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--kind, var(--k-func)); }
+.node .nicon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+  border-radius: 5px; margin-right: 8px; font-size: 11px; vertical-align: -5px;
+  color: color-mix(in srgb, var(--kind, var(--k-default)) 85%, #223);
+  background: color-mix(in srgb, var(--kind, var(--k-default)) 10%, #fff); }
+/* the kind tile: the card's left strip, the glyph centred in it */
+.node .iconband { position: absolute; left: 0; top: 0; bottom: 0; width: 42px; display: flex; align-items: center;
+  justify-content: center; font-size: 16px; pointer-events: none; border-radius: 9px 0 0 9px;
+  color: color-mix(in srgb, var(--kind, var(--k-default)) 85%, #223);
+  background: color-mix(in srgb, var(--kind, var(--k-default)) 8%, #fff);
+  border-right: 1px solid color-mix(in srgb, var(--kind, var(--k-default)) 16%, #fff); }
+.node.cell { min-height: 50px; padding: 10px 12px 9px 54px; }
+.node.cell::before { display: none; }
 .node.cell .badges { margin-top: 3px; }
 .node.cell .nname { margin-left: 0; }
+.node.selected, .node.cell.selected, .node.branch.selected, .node.gate.selected {
+  border-color: var(--signal); box-shadow: 0 0 0 3px var(--signal-ring), var(--sh-2); }
 .node.dimmed { opacity: .18; }
-.node.heated { border-color: color-mix(in srgb, var(--warn) calc(var(--heat, 0) * 100%), var(--line)); }
-/* selection: the card itself LIGHTS UP — an electric cyan wash across
-   the body with a neon glow. Background does the talking, not border. */
-.node.selected {
-  border-color: #38c4ea;
-  background: radial-gradient(80% 120% at 50% 35%,
-    #f2fdff 0%, #d9f7ff 45%, #a3e9ff 100%);
-  box-shadow: 0 0 0 1.5px rgba(38, 199, 245, .45),
-              0 0 26px rgba(0, 208, 255, .55),
-              0 6px 18px rgba(40, 130, 180, .22);
-}
-.node::before {
-  content: ""; position: absolute; left: 7px; top: 13px; bottom: 13px; width: 4px;
-  border-radius: 4px; background: var(--kind, var(--k-func));
-}
-.node .nname { font-weight: 650; font-size: 13px; overflow: hidden;
+.node.heated { border-color: color-mix(in srgb, var(--warn) calc(var(--heat, 0) * 100%), var(--border-strong)); }
+.node .nname { font-weight: 600; font-size: 13px; color: var(--text); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.005em; }
 /* name line with right-hand chips: bound + generator flash */
 .node .nname.nline { display: flex; align-items: center; gap: 5px; }
 /* the flex gap already spaces the icon — its own margin would double up */
 .nname.nline .nicon { margin-right: 0; }
-.nname.nline .ntext { flex: 1 1 auto; min-width: 0; overflow: hidden;
-  text-overflow: ellipsis; }
+.nname.nline .ntext { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .nchips { display: inline-flex; gap: 3px; flex: none; }
-.nchip { font-size: 8px; font-weight: 600; letter-spacing: 0;
-  padding: 0.5px 4px; border-radius: 999px; line-height: 1.5;
-  color: var(--muted); border: 1px solid var(--line);
-  background: var(--panel-2); }
-.nchip.gen { padding: 0.5px 3px; }
-.nchip.gen { color: #a35d13; border-color: #e2c087; background: #fbf3e2; }
-/* the kind chip wears its family colour — clearly not part of the name */
-.nchip.kind { max-width: 76px; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--kind, var(--k-default));
-  border-color: color-mix(in srgb, var(--kind, var(--k-default)) 35%, #fff);
-  background: color-mix(in srgb, var(--kind, var(--k-default)) 7%, #fff); }
-/* specks at far zoom — the silhouette is the message out there */
+.nchip { font-size: 8.5px; font-weight: 600; letter-spacing: .02em; padding: 0 4px; border-radius: 4px; line-height: 1.6;
+  color: var(--text-3); border: 1px solid var(--border); background: var(--surface-2); }
+/* kind and bound are reference, not the message: shown on hover, on the
+   selected card and close up; the generator mark changes how the op
+   runs, so it stays */
+.nchip:not(.gen) { opacity: 0; transition: opacity var(--tr); }
+.node:hover .nchip, .node.selected .nchip, #world[data-zoom="hi"] .nchip { opacity: 1; }
+.nchip.gen { padding: 0 3px; color: var(--warn); border-color: #ecd3ad; background: var(--warn-soft); }
+.nchip.kind { max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: color-mix(in srgb, var(--kind, var(--k-default)) 85%, #223);
+  border-color: color-mix(in srgb, var(--kind, var(--k-default)) 26%, #fff);
+  background: color-mix(in srgb, var(--kind, var(--k-default)) 6%, #fff); }
 #world[data-zoom="lo"] .nchips { display: none; }
-.node .nkind { color: var(--muted); font-size: 11px; margin-top: 2px; }
+/* semantic zoom: further out, names grow inside their cards so they stay
+   readable on screen (15px at 70% reads as ~10.5px) */
+#world[data-zoom="mid"] .node .nname, #world[data-zoom="mid"] .node.container .chead .nname { font-size: 15px; }
+#world[data-zoom="lo"] .node .nname, #world[data-zoom="lo"] .node.container .chead .nname { font-size: 18px; }
+.node .nkind { color: var(--text-3); font-size: 11px; margin-top: 2px; }
 .node .badges { margin-top: 5px; display: flex; gap: 5px; flex-wrap: wrap; }
-.badge {
-  font-size: 10px; padding: 1.5px 8px; border-radius: 999px;
-  background: var(--panel-2); color: var(--muted); border: 1px solid var(--line);
-}
-.badge.err { color: var(--err); border-color: rgba(207, 63, 54, .4);
-  background: rgba(207, 63, 54, .07); }
-.badge.gen { color: var(--k-io); border-color: rgba(207, 75, 143, .35);
-  background: rgba(207, 75, 143, .06); }
-.badge.loop { color: var(--warn); border-color: rgba(179, 102, 26, .35);
-  background: rgba(179, 102, 26, .06); }
-.badge.sub { color: var(--k-graph); border-color: rgba(23, 143, 102, .35);
-  background: rgba(23, 143, 102, .06); }
-.badge.run { color: var(--text); background: var(--panel);
-  box-shadow: 0 1px 2px rgba(122, 92, 18, .12); }
-.node .port { position: absolute; width: 12px; height: 12px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #dde9f5, #779fca 75%);
-  border: 1.5px solid #5c83ab;
-  box-shadow: 0 0 6px rgba(106, 155, 212, .4);
-  transition: box-shadow var(--tr), transform var(--tr); }
-.node:hover .port, .node.selected .port {
-  box-shadow: 0 0 10px rgba(106, 155, 212, .75); transform: scale(1.15); }
-/* top-down: data enters through the crown, leaves through the base */
-.port.in { top: -7px; left: 50%; margin-left: -6px; }
-.port.out { bottom: -7px; left: 50%; margin-left: -6px; }
-/* neuron anatomy on the wire — all of it static:
-   bouton = the axon's terminal knob at its target
-   eglow/ecore/eray/espark = a beam of energy: a soft halo, a saturated
-   core, a WHITE laser filament with real contrast, and spark particles
-   whose smaller trailing dots point the direction of flow */
-.wires circle.bouton { fill: var(--wire); stroke: #e8f1fd; stroke-width: 1.5; }
+.badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--text-3);
+  border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.badge.err { color: var(--err); border-color: rgba(201, 58, 48, .35); background: var(--err-soft); }
+.badge.gen { color: var(--k-io); border-color: rgba(200, 69, 127, .3); background: rgba(200, 69, 127, .06); }
+.badge.loop { color: var(--warn); border-color: rgba(152, 84, 11, .3); background: var(--warn-soft); }
+.badge.sub { color: var(--k-graph); border-color: rgba(20, 138, 98, .3); background: rgba(20, 138, 98, .06); }
+.badge.run { color: var(--text); background: var(--surface); box-shadow: 0 1px 2px rgba(15, 20, 25, .08); }
+/* ports: plain contacts on the card's crown and base */
+.node .port { position: absolute; width: 9px; height: 9px; border-radius: 50%; background: var(--surface);
+  border: 1.5px solid #8fa3b9; transition: border-color var(--tr), transform var(--tr); }
+.node:hover .port, .node.selected .port { border-color: var(--signal); transform: scale(1.15); }
+.port.in { top: -5px; left: 50%; margin-left: -4.5px; }
+.port.out { bottom: -5px; left: 50%; margin-left: -4.5px; }
+/* a wire's terminal at its target */
+.wires circle.bouton { fill: var(--wire); stroke: var(--surface); stroke-width: 1.5; }
 .wires circle.bouton.b-back { fill: var(--warn); }
 .wires circle.bouton.b-serve { fill: var(--k-serve); }
-.wires path.eglow {
-  stroke: var(--wire-glow); stroke-width: 12;
-  stroke-linecap: round; pointer-events: none;
-}
-.wires path.ecore { stroke: var(--wire); stroke-width: 4; stroke-linecap: round;
-  pointer-events: stroke; }
-.wires path.eray {
-  stroke: #ffffff; stroke-width: 1.6; stroke-linecap: round;
-  pointer-events: none;
-}
-.wires path.eglow.back { stroke: rgba(179, 102, 26, .16); }
-.wires path.ecore.back { stroke: #b3661a; }
-.wires path.eglow.hot { stroke: rgba(65, 114, 159, .3); }
-.wires path.ecore.hot { stroke: var(--wire-deep); stroke-width: 5; }
-.wires path.eray.hot { stroke-width: 2; }
-.wires circle.espark { fill: #fff; stroke: var(--wire); stroke-width: 1.6; }
-.wires circle.espark.tailspark { fill: #bccfe3; opacity: .7; stroke: none; }
-.wires circle.espark.back { stroke: #b3661a; }
-/* if/else routes: the beam in branch amber; the ELSE fallback dashed,
-   laserless — a path that exists but is not flowing */
-.wires path.eglow.cond { stroke: rgba(179, 102, 26, .13); }
-.wires path.ecore.cond { stroke: #b3661a; }
-.wires path.eray.cond { stroke-width: 1.2; opacity: .85; }
-.wires path.ecore.cond.relse { stroke-dasharray: 9 7; opacity: .75; }
-.wires path.eglow.cond.relse { opacity: .5; }
-.wires path.eray.cond.relse { display: none; }
-.wires circle.espark.cond { stroke: #b3661a; }
-/* soft merge edges: the same family, a quieter voice — never gray */
-.wires path.soft { stroke: #a3b9d2; opacity: .8; }
-.node.serve-node { background: linear-gradient(180deg, #fdf6dd, #fbf0cb);
-  border-color: #dcc172; width: 190px; }
+/* the wire itself: one stroke (the ecore class survives the older
+   glow / filament / spark layers it once sat under) */
+.wires path.ecore { stroke: var(--wire); stroke-width: 2; stroke-linecap: round; pointer-events: stroke; }
+.wires path.ecore.back { stroke: var(--warn); }
+.wires path.ecore.hot { stroke: var(--wire-deep); stroke-width: 2.5; }
+/* if/else routes in the branch hue; ELSE dashed: a path that exists but may not flow */
+.wires path.ecore.cond { stroke: var(--k-branch); stroke-width: 1.75; }
+.wires path.ecore.cond.relse { stroke-dasharray: 7 6; opacity: .7; }
+/* soft merge edges: the same family, a quieter voice */
+.wires path.soft { stroke: #a6b8cd; }
+.node.serve-node { background: color-mix(in srgb, var(--accent) 6%, #fff); border-color: #dcc58a; width: 190px; }
 .node.serve-node::before { background: var(--k-serve); }
-.node.errorlit { border-color: var(--err);
-  box-shadow: 0 0 0 3px rgba(207, 63, 54, .12), var(--sh-1); }
+.node.errorlit { border-color: var(--err); box-shadow: 0 0 0 3px rgba(201, 58, 48, .12), var(--sh-1); }
 
-/* ingress/egress — the serve boundary, drawn as doors in the brand
-   gold, visually apart from compute ops */
-.node.gate {
-  background: linear-gradient(180deg, #fdf6dd, #fbf0cb);
-  border: 1.5px dashed #d3b464; border-radius: 22px;
-  min-height: 52px;
-}
+/* ingress/egress — the serve boundary: doors in the brand gold */
+.node.gate { background: color-mix(in srgb, var(--accent) 6%, #fff); border: 1px dashed #d1b25c;
+  border-radius: 12px; min-height: 48px; }
 .node.gate::before { background: var(--k-serve); }
-.node.gate .nname { color: var(--accent-deep); }
-.node.gate .nkind { color: #ab9155; }
+.node.gate .nname { color: var(--accent-strong); }
+.node.gate .nkind { color: var(--text-3); }
 
-/* an opened GraphOp — a container whose members are real nodes on the
-   canvas; the box itself is just the boundary and a title strip */
-.node.container {
-  background: rgba(23, 143, 102, .045);
-  border: 1.5px dashed color-mix(in srgb, var(--kind, var(--k-graph)) 55%, var(--line));
-  padding: 0; cursor: default; box-shadow: none;
-}
+/* an opened GraphOp — its members are real nodes; the box is the boundary and a title strip */
+.node.container { background: rgba(20, 138, 98, .03); padding: 0; cursor: default; box-shadow: none;
+  border: 1px dashed color-mix(in srgb, var(--kind, var(--k-graph)) 50%, var(--border)); border-radius: 12px; }
 .node.container:hover { transform: none; box-shadow: none; }
-.node.container::before { top: 0; bottom: auto; height: 34px; border-radius: 4px 0 0 4px; }
-.node.container .chead {
-  display: flex; align-items: baseline; gap: 10px;
-  height: 34px; padding: 7px 12px 0 16px; cursor: pointer;
-  border-bottom: 1px dashed var(--line);
-  overflow: hidden; white-space: nowrap;
-  background: rgba(255, 253, 246, .55); border-radius: 14px 14px 0 0;
-}
-.node.container .chead .nname { font-weight: 650; font-size: 13px; }
+.node.container::before { top: 0; bottom: auto; height: 34px; left: -1px; border-radius: 0 3px 3px 0; }
+.node.container .chead { display: flex; align-items: baseline; gap: 10px; height: 34px; padding: 8px 12px 0 14px;
+  cursor: pointer; border-bottom: 1px dashed var(--border); overflow: hidden; white-space: nowrap;
+  background: rgba(255, 255, 255, .7); border-radius: 12px 12px 0 0; }
+.node.container .chead .nname { font-weight: 600; font-size: 13px; }
 /* the operon nod: one promoter, the genes inside transcribed together */
 .node.container .chead .promoter { color: var(--accent); font-weight: 800; font-size: 13px; }
-.node.container .chead .nkind { color: var(--muted); font-size: 11px; }
-.node.container .collapse {
-  margin-left: auto; border: none; background: none; color: var(--muted);
-  font-size: 11px; padding: 0 2px; box-shadow: none;
-}
+.node.container .chead .nkind { color: var(--text-3); font-size: 11px; }
+.node.container .collapse { margin-left: auto; border: none; background: none; color: var(--text-3);
+  font-size: 11px; padding: 0 2px; box-shadow: none; min-height: 0; }
 .node.container .collapse:hover { color: var(--text); box-shadow: none; }
 .badge.expand { cursor: pointer; }
 .badge.expand:hover { background: var(--k-graph); color: #fff; border-color: var(--k-graph); }
 
-/* wrap seam — where a long chain breaks to the next band, like a
-   newline. A layout artifact, not uncertainty: thin, faint, SOLID —
-   dashes are reserved for edges that may not fire. */
-.wires path.wrap { stroke: #d0b878; stroke-width: 1.5; opacity: .55; }
-/* ── boundary pills & serve zones ─────────────────────────────────── */
+/* wrap seam — where a long chain breaks to the next band, like a newline */
+.wires path.wrap { stroke: #cfd6df; stroke-width: 1.5; opacity: .8; }
 
-/* START/END terminals: a contact on the wire, drawn in the wire's own
-   blue rather than the old brass push-button. START is a filled dot —
-   the signal comes from here — END a hollow ring: the signal is taken
-   up. Flat, one soft halo, the word beside the contact. */
-.node.bnode {
-  min-height: 0; padding: 0 11px 0 9px; border-radius: 999px;
-  display: flex; align-items: center; justify-content: center; gap: 7px;
-  background: var(--panel); border: 1.5px solid #6a9bd4;
-  box-shadow: 0 0 0 4px rgba(106, 155, 212, .14), 0 1px 2px rgba(60, 80, 110, .08);
-}
-.node.bnode:hover { transform: none;
-  box-shadow: 0 0 0 5px rgba(106, 155, 212, .26), 0 1px 2px rgba(60, 80, 110, .08); }
-.bnode .bglyph { flex: none; width: 10px; height: 10px; border-radius: 50%;
-  font-size: 0; line-height: 0; color: transparent; text-shadow: none;
-  background: #3d7dd6; box-sizing: border-box; }
-.bnode.b-end .bglyph { background: transparent; border: 2.5px solid #3d7dd6; }
-.bnode .blabel { font-size: 9.5px; font-weight: 700;
-  letter-spacing: .14em; color: #2f5f9e; text-shadow: none; }
-/* a container's boundary KNOB: the same contact sitting on the border
-   line itself, with a white collar so the dashed edge reads as passing
-   behind it */
-.node.bnode.knob { padding: 0; border-radius: 50%; z-index: 2;
-  box-shadow: 0 0 0 2.5px #fff, 0 0 0 4px rgba(106, 155, 212, .32); }
+/* START/END: contacts on the wire — START a filled dot, END a ring */
+.node.bnode { min-height: 0; padding: 0 11px 0 9px; border-radius: 999px; display: flex; align-items: center;
+  justify-content: center; gap: 7px; background: var(--surface); border: 1px solid #9fb5cf; box-shadow: none; }
+.node.bnode::before { display: none; }
+.node.bnode:hover { transform: none; border-color: var(--wire-deep); box-shadow: none; }
+.bnode .bglyph { flex: none; width: 9px; height: 9px; border-radius: 50%; font-size: 0; line-height: 0;
+  color: transparent; text-shadow: none; background: var(--wire-deep); box-sizing: border-box; }
+.bnode.b-end .bglyph { background: transparent; border: 2px solid var(--wire-deep); }
+.bnode .blabel { font-size: 9.5px; font-weight: 700; letter-spacing: .14em; color: var(--wire-deep); text-shadow: none; }
+/* a container's boundary knob: the same contact on its border line */
+.node.bnode.knob { padding: 0; border-radius: 50%; z-index: 2; box-shadow: 0 0 0 2.5px var(--surface); }
 .node.bnode.knob .bglyph { width: 8px; height: 8px; }
 
 /* the quiet ties from START to entries and exits to END */
-.wires path.bedge {
-  fill: none; stroke: #8fb3dc; stroke-width: 1.4px; opacity: .6;
-  stroke-dasharray: 3 4;
-}
-.wires path.bedge.hot { opacity: .95; }
+.wires path.bedge { fill: none; stroke: #a9bdd4; stroke-width: 1.25px; opacity: .8; stroke-dasharray: 3 4; }
+.wires path.bedge.hot { opacity: 1; }
 
-/* the client's doors: a frame hugging each gate, nothing more */
-#edges rect.zoneband {
-  fill: rgba(201, 148, 15, .06);
-  stroke: rgba(178, 132, 20, .38); stroke-dasharray: 5 6; stroke-width: 1;
-}
-.badge.start { color: #7c5a06; border-color: rgba(178, 132, 20, .4);
-  background: rgba(201, 148, 15, .08); }
-.wires text.zonelabel {
-  fill: #a1770a; font-size: 10px; font-weight: 700; letter-spacing: .12em;
-  text-anchor: start;
-}
-.wires text.servelabel {
-  fill: #b28414; font-size: 10px; font-style: italic;
-  paint-order: stroke; stroke: #fdf3d0; stroke-width: 3px;
-}
+/* the client's doors: a frame hugging each gate */
+#edges rect.zoneband { fill: rgba(200, 147, 14, .045); stroke: rgba(176, 130, 20, .35); stroke-dasharray: 5 6; stroke-width: 1; }
+.badge.start { color: var(--accent-strong); border-color: rgba(176, 130, 20, .35); background: var(--accent-soft); }
+.wires text.zonelabel { fill: var(--accent-strong); font: 700 10px var(--font); letter-spacing: .12em; text-anchor: start; }
+.wires text.servelabel { fill: #a47a12; font-size: 10px; font-style: italic; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
 .bouton.b-serve { fill: var(--k-serve); }
 
 /* a painted run fades what did not execute — the picture becomes the
@@ -800,65 +668,72 @@ body:not([data-stage]) .canvasbar { display: none; }
 .node.dormant { opacity: .35; filter: saturate(.35); }
 .node.dormant:hover { opacity: .85; filter: none; }
 #edges .dorm { opacity: .15 !important; }
-.dormnote { color: var(--muted); }
-/* semantic zoom: close up, cards say more — text centred with real
-   side insets so it stays inside the cell's curved membrane */
-.node .detail { display: none; margin-top: 5px; padding: 5px 18px 0;
-  border-top: 1px dashed var(--line); text-align: center; }
+.dormnote { color: var(--text-3); }
+/* semantic zoom: close up, cards say more */
+.node .detail { display: none; margin-top: 6px; padding: 5px 0 0; border-top: 1px solid var(--border-soft); }
 #world[data-zoom="hi"] .node .detail { display: block; }
-.detail .dkind { font-size: 9.5px; color: var(--muted);
-  text-transform: uppercase; letter-spacing: .05em;
+.detail .dkind { font-size: 9.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: .05em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.detail .dports { font-size: 9.5px; color: #5c83ab; margin-top: 2px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.detail .dports.dout { color: #a8642a; }
-/* the show line: the output that stands for the op, and with a run
-   painted, its last value — one line, cut, never a payload */
-.detail .dshow { font-size: 9.5px; margin-top: 2px; text-align: left;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.detail .dshow .dkey { color: #a8642a; }
-.detail .dshow .dval { color: #3b5f86; }
+.detail .dports { font-size: 9.5px; color: var(--wire-deep); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail .dports.dout { color: var(--text-2); }
+/* the show line: the output that stands for the op, and with a run painted its last value */
+.detail .dshow { font-size: 10px; margin-top: 2px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail .dshow .dkey { color: var(--text-3); }
+.detail .dshow .dval { color: var(--signal-strong); }
 /* far out, badges are noise too */
 #world[data-zoom="lo"] .node .badges .badge:not(.run):not(.err) { display: none; }
-/* close up, the cell relaxes: gentler pixel radii and more padding so
-   the grown card never pushes its icon into the membrane */
-#world[data-zoom="hi"] .node.cell {
-  border-radius: 42px 54px 46px 50px / 34px 40px 36px 42px;
-  padding: 13px 12px 11px 70px;
-}
+
 /* ── the router as a decision card: one row per condition ─────────── */
-.node.branch {
-  border-radius: 14px; padding: 9px 12px 8px 12px;
-  border: 2px solid color-mix(in srgb, var(--k-branch) 45%, #dbe4f0);
-  background: linear-gradient(180deg, #fffdfa, #fbf6ee);
-}
-/* the kind-accent bar reads as a stray thick line on a tall decision
-   card — the amber border already says "branch" */
+.node.branch { border-radius: 10px; padding: 9px 12px 8px 12px; background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--k-branch) 42%, var(--border)); }
 .node.branch::before { display: none; }
-.node.branch .brlist { margin-top: 6px; display: flex;
-  flex-direction: column; gap: 3px; }
-.brrow { position: relative; display: flex; align-items: center;
-  border: 1px solid #ecdfc8; background: #fff; border-radius: 7px;
-  padding: 2px 16px 2px 8px; min-height: 18px; }
-.brcond { font-size: 10.5px; color: #a35d13; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; }
-.brrow.relse .brcond { color: var(--muted); font-style: italic; }
+.node.branch .brlist { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.brrow { position: relative; display: flex; align-items: center; border: 1px solid var(--border-soft);
+  background: var(--surface-2); border-radius: 6px; padding: 2px 16px 2px 8px; min-height: 18px; }
+.brcond { font-size: 10.5px; color: var(--k-branch); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brrow.relse .brcond { color: var(--text-3); font-style: italic; }
 .brrow.relse { border-style: dashed; }
-.brport { position: absolute; right: -6px; top: 50%; margin-top: -5px;
-  width: 10px; height: 10px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #f2d6ae, #c9822e 75%);
-  border: 1.5px solid #a5691f; box-shadow: 0 0 5px rgba(179, 102, 26, .4); }
-.brrow.relse .brport { background: #efe6d6; border-color: #c9b48d;
-  box-shadow: none; }
+.brport { position: absolute; right: -5px; top: 50%; margin-top: -4.5px; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--surface); border: 1.5px solid var(--k-branch); }
+.brrow.relse .brport { border-color: #c9b48d; }
 /* a row whose target lies left carries its port on the left */
 .brrow.left { padding: 2px 8px 2px 16px; }
-.brrow.left .brport { left: -6px; right: auto; }
+.brrow.left .brport { left: -5px; right: auto; }
+.wires text.condglyph { fill: var(--k-branch); font-size: 11px; font-weight: 700; paint-order: stroke;
+  stroke: var(--surface); stroke-width: 3px; cursor: help; }
+.wires text.condglyph.relse { fill: #b89756; }
 
-.wires text.condglyph { fill: #b25e00; font-size: 11px; font-weight: 700;
-  paint-order: stroke; stroke: #fffaf0; stroke-width: 3px; cursor: help; }
-.wires text.condglyph.relse { fill: #c9a052; }
+/* ── a run in motion (live sessions, replays) ─────────────────────────
+   The op at work carries the signal ring and one expanding outline
+   (transform + opacity only); what finished settles in green or red;
+   what has not been reached yet waits, faded. A particle travels the
+   wire into each op as it fires: a round dash on its own path, moved by
+   stroke-dashoffset over a normalised pathLength of 100. */
+#world.live .node:not(.bnode):not(.container):not(.live-done):not(.live-failed):not(.live-active) { opacity: .5; }
+.node.live-active { border-color: var(--signal); box-shadow: 0 0 0 3px var(--signal-ring), var(--sh-2); opacity: 1; }
+.node.live-active::after { content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+  border: 1.5px solid var(--signal); animation: nodepulse 1.2s var(--ease-out) infinite; }
+@keyframes nodepulse { from { transform: scale(1); opacity: .55; } to { transform: scale(1.07); opacity: 0; } }
+.node.live-done { border-color: color-mix(in srgb, var(--ok) 50%, var(--border-strong)); }
+.node.live-failed { border-color: var(--err); box-shadow: 0 0 0 3px rgba(201, 58, 48, .14); }
+.wires path.particle { fill: none; stroke: var(--signal); stroke-width: 5; stroke-linecap: round;
+  stroke-dasharray: .01 100; stroke-dashoffset: 0; animation: particle var(--dur, .6s) cubic-bezier(.45, 0, .55, 1) forwards;
+  pointer-events: none; }
+.wires path.particle.trail { stroke-width: 3; opacity: .35; animation-delay: .06s; }
+.wires path.particle.failed { stroke: var(--err); }
+@keyframes particle { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
+.wires path.ecore.flowing { stroke: color-mix(in srgb, var(--signal) 70%, var(--wire)); transition: stroke .4s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .wires path.particle { display: none; }
+  .node.live-active::after { animation: none; }
+}
 .crumbbtn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   line-height: 1.5; padding: 1px 0; }
+
+/* render()'s measuring pass: every name line at its natural width, for
+   one layout, then back (studio.js) */
+#nodes.measuring .ntext, #nodes.measuring .brcond, #nodes.measuring .nname,
+#nodes.measuring .nkind { flex: none !important; width: max-content !important; }
 
 /* ── the side panel: one panel on the right, two tabs ─────────────── */
 

@@ -129,8 +129,11 @@ def test_doors_and_a_form_request(client, project):
         "service": "score", "toy": "form", "wait": True, "end": True,
         "send": [{"kind": "json", "value": {"id": "a", "text": "one two"}}]}).json()
     kinds = [e["t"] for e in got["events"]]
-    assert kinds == ["opened", "out", "ended"]
-    assert got["events"][1]["msg"]["value"] == {"id": "a", "words": 2}
+    # the run's ops stream as they finish (a canvas follows them), before the end
+    assert [k for k in kinds if k != "ops"] == ["opened", "out", "ended"]
+    assert "ops" in kinds and kinds.index("ops") < kinds.index("ended")
+    (out,) = [e for e in got["events"] if e["t"] == "out"]
+    assert out["msg"]["value"] == {"id": "a", "words": 2}
     trace_id = got["events"][-1]["trace_id"]
 
     # the files store rescans at most every 2 s (the doors call above

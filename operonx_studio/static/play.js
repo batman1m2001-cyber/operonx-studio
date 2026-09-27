@@ -46,7 +46,9 @@ const PlayView = (() => {
     polling = true;
     try {
       if (cursor == null) cursor = (await api(`/api/p/${PID}/play/events`)).cursor;
-      while (!box.hidden || waiters.size) {
+      // keep listening while a session is open, even off this screen: the
+      // Flow canvas follows its ops live
+      while (!box.hidden || waiters.size || [...sessions.values()].some(x => !x.ended)) {
         let got;
         try { got = await api(`/api/p/${PID}/play/events?cursor=${cursor}`); }
         catch { await new Promise(r => setTimeout(r, 1500)); continue; }
@@ -58,6 +60,17 @@ const PlayView = (() => {
   }
 
   function dispatch(e) {
+    if (e.t === "ops") {
+      const s0 = sessions.get(e.sid);
+      document.dispatchEvent(new CustomEvent("oxops", {detail: {
+        service: s0 ? s0.service : null, sid: e.sid, trace_id: e.trace_id, ops: e.ops || []}}));
+      return;
+    }
+    if (e.t === "ended" || e.t === "opened") {
+      const s0 = sessions.get(e.sid);
+      document.dispatchEvent(new CustomEvent("oxsession", {detail: {
+        state: e.t, service: s0 ? s0.service : e.service, sid: e.sid, trace_id: e.trace_id, status: e.status}}));
+    }
     if (e.t === "rerun" && e.id) {
       if (waiters.has(e.id)) { waiters.get(e.id)(e); waiters.delete(e.id); }
       else { early.set(e.id, e); if (early.size > 20) early.delete(early.keys().next().value); }

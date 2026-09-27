@@ -2404,13 +2404,17 @@ def build_studio_app(recents: Optional[Recents] = None):
         checked[pid] = (time.monotonic(), result.stamp, result.ok)
         return result.stamp, result.ok
 
-    async def _newest_run(pid: str) -> Optional[str]:
-        def look() -> Optional[str]:
+    async def _newest_run(pid: str) -> Optional[Dict[str, Any]]:
+        def look() -> Optional[Dict[str, Any]]:
             pr = _runs(pid)
             if pr is None:
                 return None
             items = pr.store.list_runs(limit=1).items
-            return items[0].trace_id if items else None
+            if not items:
+                return None
+            s0 = items[0]
+            return {"run": s0.trace_id, "origin": s0.origin, "name": s0.service or s0.job or s0.name,
+                    "status": s0.status}
         try:
             return await asyncio.to_thread(look)
         except Exception:  # noqa: BLE001 — following is best-effort
@@ -2433,7 +2437,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             cur, ok = await _stamp_now(pid, watcher)
             queue = ui_actions.get(pid, [])
             last = queue[-1]["seq"] if queue else 0
-            newest = await _newest_run(pid) if follow else None
+            info = await _newest_run(pid) if follow else None
+            newest = info["run"] if info else None
             listening = chat is not None and chat >= 0
             ended = [f for f in relay.finished if f["scope"] == pid and f["seq"] > chat] if listening else []
             changed = (abs(cur - stamp) > 1e-6 or ui < 0 or last > ui or (follow and newest and newest != follow)
@@ -2442,7 +2447,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             if changed or left <= 0:
                 return JSONResponse({"stamp": cur, "ok": ok, "ui_last": last,
                                      "actions": [a for a in queue if a["seq"] > ui] if ui >= 0 else [],
-                                     "newest": newest, "chat_last": relay.finished_seq, "chat_ended": ended})
+                                     "newest": newest, "newest_info": info,
+                                     "chat_last": relay.finished_seq, "chat_ended": ended})
             until = time.monotonic() + min(1.0 if not follow else 2.0, left)
             while time.monotonic() < until and bells.get(pid, 0) == rung:
                 await asyncio.sleep(0.1)

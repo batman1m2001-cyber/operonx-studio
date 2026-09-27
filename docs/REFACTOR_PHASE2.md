@@ -514,7 +514,57 @@ model does not matter.
 | R1 | done — see below | |
 | R2 | done — see below | |
 | R3 | done — see below | |
-| R4–R6 | not started | |
+| R4 | done — see below | |
+| R5–R6 | not started | |
+
+**R4 — the Flow view**, measured with `scripts/perf/render_cost.py`
+(and a layout-geometry dump compared byte for byte before and after):
+
+| Measure | Before | After |
+|---|---|---|
+| `render()`, callbot | 60–108 ms, 202 forced layouts | **36–40 ms** (50 ms with every nested graph open) |
+| `render()`, educa_reminder_agent | 70–98 ms | **28–44 ms** |
+| `render()`, synthetic 302 ops (`p10/big300`) | — | **126–130 ms** steady, ≤ 260 ms cold (budget 200) |
+| Zoom/pan frames, 302 ops (4,555 DOM nodes) | — | p95 **17 ms**, no long tasks |
+| Selecting an op, callbot | — | **9 ms** script, 13.5 ms with layout (p50) |
+| Wire paths drawn, callbot | 153 | **55** |
+| Frames during a replay | — | p50 16.6 ms, p95 20 ms |
+
+- **B6:** the width pass measured card by card (write a style, read a
+  width, write it back, read again) — two full layouts of the canvas per
+  card. One class now switches every name line to max-content, all
+  widths are read in one layout, the laid-out widths in a second, then
+  everything is written; the decision rows' positions are all read
+  before their sides are set. The geometry dump of four projects at
+  three zooms is identical before and after.
+- **F1:** the flow opens fitted — whole when it fits at ≥ 70%, else
+  across its width at ≥ 70% — and names grow at middle and far zoom so
+  they stay ~10 px on screen. A view the user sets is remembered per
+  project and graph; Fit returns to the landing view.
+- **F2:** the organic "cells", cyan neon selection, glow halos, white
+  filaments and static spark dots are gone (the brief rules out glow and
+  decoration, and dots on idle wires said "flowing" when nothing was).
+  Cards are white on a hairline border with a kind tile; kind/bound chips
+  show on hover, selection and close zoom; selection is a signal ring.
+- **F3:** operonx's `serve_session(on_start=)` hands the playground the
+  run's handle; the bridge streams `ops` batches as executions finish
+  (operonx 8a0ea7d, 2225 tests). The page keeps listening while a
+  session is open, even off the playground, and the Flow canvas follows
+  it: the op at work rings in signal blue, finished ops settle green or
+  red, particles run the wires to the consumers, a pill says what is
+  moving and stops it.
+- **F4:** any recorded run replays from its timings (Replay / 4× in the
+  run view), a 2 ms job and a 55 s call alike compressed to 3–12 s; with
+  **Live** on (the canvas bar, default on) each new run of the graph on
+  screen replays as it lands, unless a live session already showed it.
+- **F5:** culling is not needed — the 302-op graph meets the budget.
+
+Found on the way, and fixed: **a project whose graph construction logs
+a warning could not be extracted at all.** operonx's LOGGER writes to
+stdout, the same stream the extractor's JSON went out on ("extractor
+returned invalid JSON"). The daemon and `operonx-extract` now keep
+stdout for the IR alone (fd-level, as the playground bridge does); two
+tests cover a print at import and an unwired-op warning.
 
 **R3** — `static/assistant.js` replaces `chat.js`: one component placed
 as the project page's right column (the default tab now), the whole

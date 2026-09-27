@@ -230,11 +230,17 @@ class ProjectWatcher:
 
     def extract(self) -> ExtractResult:
         """Run extraction in a fresh interpreter and parse the result."""
+        # The IR goes out on a duplicate of stdout; the real fd 1 points at
+        # stderr before any project code is imported. Whatever the project
+        # prints or logs while its graphs are built (operonx's LOGGER writes
+        # warnings to stdout) would otherwise corrupt the JSON: a graph
+        # with an unwired op failed as "extractor returned invalid JSON".
         code = (
-            "import json,sys;"
+            "import json,os,sys;"
+            "out=os.fdopen(os.dup(1),'w',encoding='utf-8');os.dup2(2,1);sys.stdout=sys.stderr;"
             "from operonx_project.manifest import Manifest;"
             "from operonx_project.extract import extract_project;"
-            "sys.stdout.write(json.dumps(extract_project(Manifest.load(sys.argv[1]))))"
+            "out.write(json.dumps(extract_project(Manifest.load(sys.argv[1]))));out.flush()"
         )
         proc = subprocess.run(
             [self.interpreter(), "-c", code, str(self.root)],
