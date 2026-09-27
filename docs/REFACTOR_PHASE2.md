@@ -721,3 +721,75 @@ instead (R5).
   build.
 - **The login wall** stays the security boundary, and the agent's reach
   (`OPERONX_STUDIO_CHAT_MODE`) stays a deployment decision.
+
+---
+
+## 12. Backlog
+
+Saved 2026-09-27 from the final report of phases R0–R6, so the open items
+outlive the conversation. The full numbers are in §10.
+
+### 12.1 Where phase 2 left things
+
+**Speed, measured through the tunnel:**
+
+| Measure | Before | After |
+|---|---|---|
+| Opening a project again | 2.4 s | 1.7 s, no API calls |
+| First visit to a project | 3.9 s, 19 requests | 2.8 s, 3 requests |
+| Any screen | 0.8–2.3 s | about 0.8 s (one round trip) |
+| Background requests while idle | about 1.2 per second | about 1 every 8 s |
+| Redrawing the callbot flow | 60–108 ms | 36–40 ms (same layout, checked byte for byte) |
+
+A synthetic 302-op flow redraws in about 130 ms and scrolls smoothly.
+
+**Flow view:**
+- It opens fitted to the screen, readable, and remembers where the user
+  left it.
+- While something runs, it comes alive. Live playground sessions light
+  each op as it finishes, with small particles along the wires, and any
+  recorded run can be replayed. It stays still at rest.
+
+**Bugs found and fixed along the way:**
+- The first word of an answer could appear twice ("TheThe"). A
+  regression test reproduces it.
+- A project that prints anything, or that triggers an operonx warning,
+  while its graphs are built could not be loaded at all.
+- On tablets, the assistant panel squeezed the Runs table to about
+  150 px. Between phone and desktop widths, the panel now floats over
+  the content.
+
+### 12.2 Open — decisions for the user
+
+- [ ] **The canvas look.** The organic "brain cell" canvas the user
+  chose earlier was replaced with plain, precise cards, and the
+  always-on glow and sparks were removed. The phase-2 brief asked for no
+  neon or glow, and motion only while something runs. The old look can
+  be restored if preferred.
+- [ ] **The assistant cannot reach the user's personal connectors**
+  (Gmail, Drive, Calendar). It loads only the studio's own tools, which
+  also makes each answer start about 1.3 s sooner. The downside is that
+  any tool server a project declares for itself is skipped too.
+  `OPERONX_STUDIO_CHAT_STRICT_MCP=off` turns this off. Keep that as the
+  default, or flip it?
+
+### 12.3 Open — not done
+
+- [ ] **Dark mode.** The colour tokens are in place (`:root`), but no
+  dark theme is defined or checked yet.
+- [ ] **Minifying the scripts.** It would save only about 0.25 s once per
+  update, and it needs a new dependency. Parked on purpose (§10); revisit
+  only if the bundle grows a lot.
+- [ ] **Canvas auto-layout hotfix**, in progress:
+  `docs/LAYOUT_HOTFIX_PLAN.md`. The corner-wire bug has been reproduced:
+  a render while the canvas is hidden, for example when leaving a run's
+  Workflow view for Flow, or after a code change lands on another tab.
+
+### 12.4 Open — shipping
+
+- [ ] Release operonx 1.9.0 (branch `feat/runs-records`, including
+  8a0ea7d, the playground `ops` events), then pin it in the studio and in
+  callbot.
+- [ ] Push `feat/assistant-first` — only when the user says so.
+- [ ] A permanent tunnel: a Cloudflare account (a named tunnel) or a
+  localhost.run key. The quick-tunnel URL changes on every restart.
