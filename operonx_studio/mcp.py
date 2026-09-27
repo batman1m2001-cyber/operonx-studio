@@ -25,7 +25,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional
 
-__all__ = ["TOOLS", "handle", "main"]
+__all__ = ["HOME_TOOLS", "TOOLS", "handle", "main"]
 
 PROTOCOL = "2024-11-05"
 
@@ -39,7 +39,11 @@ class Studio:
         self.token = token
 
     def call(self, path: str, body: Optional[Dict[str, Any]] = None, **params: Any) -> Any:
-        url = f"{self.url}/api/p/{self.pid}{path}"
+        return self.root(f"/p/{self.pid}{path}", body, **params)
+
+    def root(self, path: str, body: Optional[Dict[str, Any]] = None, **params: Any) -> Any:
+        """Any studio API route, ``/api`` + *path*."""
+        url = f"{self.url}/api{path}"
         clean = {k: v for k, v in params.items() if v not in (None, "")}
         if clean:
             url += "?" + urllib.parse.urlencode(clean)
@@ -279,6 +283,32 @@ def t_run_eval(s: Studio, a: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# ── with no project open (the home page's assistant) ─────────────────────
+
+
+def t_list_projects(s: Studio, a: Dict[str, Any]) -> str:
+    got = s.root("/projects")
+    rows = [f"- {p['name']} — {p['root']} (studio:project/{p['id']})" + ("" if p.get("exists") else " [missing]")
+            for p in got.get("projects") or []]
+    return "\n".join(rows) or "The studio knows no projects yet."
+
+
+def t_new_project(s: Studio, a: Dict[str, Any]) -> str:
+    import os.path
+
+    templates = {t["id"]: t for t in s.root("/templates").get("templates") or []}
+    template = str(a.get("template") or "blank")
+    if template not in templates:
+        return f"no template {template!r}; there are: " + ", ".join(templates)
+    parent = os.path.expanduser(str(a.get("path") or "~"))
+    got = s.root("/new", {"path": parent, "name": str(a["name"]), "template": template})
+    return (f"Created {got['name']} at {got['root']} from the {template} template and added it to the studio. "
+            f"Link it for the user as [{got['name']}](studio:project/{got['id']}).")
+
+
+HOME_TOOLS: Dict[str, Dict[str, Any]] = {}
+
+
 def _schema(props: Dict[str, Any], required: List[str] = ()) -> Dict[str, Any]:
     return {"type": "object", "properties": props, "required": list(required)}
 
@@ -342,6 +372,22 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                          "apply": {"type": "boolean"}}, ["resource", "input_per_1m", "output_per_1m"])},
 }
 
+HOME_TOOLS.update({
+    "list_projects": {"fn": t_list_projects,
+                      "description": "The projects this studio knows: name, folder, and the studio link to each.",
+                      "schema": _schema({})},
+    "new_project": {"fn": t_new_project,
+                    "description": "Create a working operonx project from a studio template and add it to the "
+                                   "studio. template is a template id from the briefing (blank if unsure); path is the parent folder (default: the user's home); name is the "
+                                   "new folder's name (letters, digits, underscores).",
+                    "schema": _schema({"name": _S, "template": _S, "path": _S}, ["name"])},
+})
+
+
+def _tools(studio: Studio) -> Dict[str, Dict[str, Any]]:
+    """A project's tools inside a project; the home tools outside one."""
+    return TOOLS if studio.pid and studio.pid != "home" else HOME_TOOLS
+
 
 # ── JSON-RPC ───────────────────────────────────────────────────────────────
 
@@ -357,10 +403,10 @@ def handle(msg: Dict[str, Any], studio: Studio) -> Optional[Dict[str, Any]]:
                        "serverInfo": {"name": "operonx-studio", "version": "1"}}
     elif method == "tools/list":
         result = {"tools": [{"name": n, "description": t["description"], "inputSchema": t["schema"]}
-                            for n, t in TOOLS.items()]}
+                            for n, t in _tools(studio).items()]}
     elif method == "tools/call":
         params = msg.get("params") or {}
-        tool = TOOLS.get(params.get("name"))
+        tool = _tools(studio).get(params.get("name"))
         if tool is None:
             return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": "unknown tool"}}
         try:

@@ -818,13 +818,15 @@ def build_studio_app(recents: Optional[Recents] = None):
         ref = recents.touch(root)
         return JSONResponse({"id": ref.id, "name": ref.name, "root": str(root)})
 
-    @app.get("/api/templates")
-    def templates_list() -> JSONResponse:
+    def _templates() -> List[Dict[str, Any]]:
         from operonx_project.templates import describe
 
-        return JSONResponse({"templates": [{"id": "blank", "title": "A blank project",
-                                            "description": "One small graph behind an HTTP door — the smallest start."},
-                                           *describe()]})
+        return [{"id": "blank", "title": "A blank project",
+                 "description": "One small graph behind an HTTP door — the smallest start."}, *describe()]
+
+    @app.get("/api/templates")
+    def templates_list() -> JSONResponse:
+        return JSONResponse({"templates": _templates()})
 
     @app.get("/api/fs")
     def fs(path: str = "~") -> JSONResponse:
@@ -2413,11 +2415,13 @@ def build_studio_app(recents: Optional[Recents] = None):
             return None
 
     @app.get("/api/p/{pid}/pulse")
-    async def pulse(pid: str, stamp: float = 0.0, ui: int = -1, follow: str = "",
+    async def pulse(pid: str, stamp: float = 0.0, ui: int = -1, follow: str = "", chat: Optional[int] = None,
                     hold: float = 8.0) -> JSONResponse:
         """``stamp``: the IR the page has; ``ui``: the last assistant action
         it performed (-1: none yet — answer at once with the latest seq);
-        ``follow``: the newest run it knows, when it follows new runs."""
+        ``follow``: the newest run it knows, when it follows new runs;
+        ``chat``: the last assistant turn ending it has heard of (-1: none
+        yet — answer at once with the latest; absent: not listening)."""
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
@@ -2428,12 +2432,15 @@ def build_studio_app(recents: Optional[Recents] = None):
             queue = ui_actions.get(pid, [])
             last = queue[-1]["seq"] if queue else 0
             newest = await _newest_run(pid) if follow else None
-            changed = abs(cur - stamp) > 1e-6 or ui < 0 or last > ui or (follow and newest and newest != follow)
+            listening = chat is not None and chat >= 0
+            ended = [f for f in relay.finished if f["scope"] == pid and f["seq"] > chat] if listening else []
+            changed = (abs(cur - stamp) > 1e-6 or ui < 0 or last > ui or (follow and newest and newest != follow)
+                       or (chat is not None and chat < 0) or bool(ended))
             left = end - time.monotonic()
             if changed or left <= 0:
                 return JSONResponse({"stamp": cur, "ok": ok, "ui_last": last,
                                      "actions": [a for a in queue if a["seq"] > ui] if ui >= 0 else [],
-                                     "newest": newest})
+                                     "newest": newest, "chat_last": relay.finished_seq, "chat_ended": ended})
             until = time.monotonic() + min(1.0 if not follow else 2.0, left)
             while time.monotonic() < until and bells.get(pid, 0) == rung:
                 await asyncio.sleep(0.1)
@@ -2706,6 +2713,49 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": str(exc)}, status_code=503)
         return JSONResponse({"bridge": bridge.status()})
 
+    def _view_lines(view: Any) -> str:
+        """What the user is LOOKING at rides along with every message, so
+        "why is this slow?" needs no op name typed — the studio knows."""
+        if not isinstance(view, dict):
+            return ""
+        lines = []
+        if view.get("node"):
+            lines.append(f"- selected op: `{str(view['node'])[:120]}`"
+                         + (f" ({str(view.get('kind'))[:40]})" if view.get("kind") else ""))
+        if view.get("run"):
+            lines.append(f"- run painted on the canvas: `{str(view['run'])[:120]}`")
+        if view.get("tab"):
+            lines.append(f"- open tab: {str(view['tab'])[:20]}")
+        if view.get("lens") and view.get("run"):
+            lines.append(f"- the run is painted with the {str(view['lens'])[:12]} lens")
+        if view.get("exec"):
+            lines.append(f"- selected execution in the run: `{str(view['exec'])[:120]}`")
+        if view.get("runs_filter"):
+            lines.append(f"- Runs screen filter: {str(view['runs_filter'])[:200]}")
+        if view.get("monitor"):
+            lines.append(f"- Monitor showing: {str(view['monitor'])[:120]}")
+        return ("\n\n## What the user is looking at right now\n" + "\n".join(lines)) if lines else ""
+
+    def _studio_mcp(pid: str, request: Request) -> Dict[str, Any]:
+        """The studio's own tools (operonx_studio.mcp), wired to this studio."""
+        import sys as _sys
+
+        server = request.scope.get("server") or ("127.0.0.1", 8765)
+        host = "127.0.0.1" if server[0] in ("0.0.0.0", "::", None) else server[0]
+        env = {"OPERONX_STUDIO_URL": f"http://{host}:{server[1]}", "OPERONX_STUDIO_PID": pid,
+               "OPERONX_STUDIO_TOKEN": auth["token"] if auth else ""}
+        if os.environ.get("PYTHONPATH"):
+            env["PYTHONPATH"] = os.environ["PYTHONPATH"]
+        return {"type": "stdio", "command": _sys.executable, "args": ["-m", "operonx_studio.mcp"], "env": env}
+
+    def _home_briefing() -> str:
+        roster = "\n".join(f"- {r.name}: {r.root}" for r in recents.ordered() if r.exists)
+        return ("# Studio briefing\nNo project is open. Projects this studio knows:\n" + (roster or "(none yet)")
+                + "\n\nYou have studio tools here too: list_projects, and new_project(name, template, path) "
+                "which creates a working project from a template and adds it to the studio. Templates: "
+                + "; ".join(f"{t['id']} — {t['title']}: {t['description']}" for t in _templates())
+                + "\nLink a project for the user as [name](studio:project/<id>); the page opens it.")
+
     @app.post("/api/p/{pid}/chat")
     async def project_chat(pid: str, body: Dict[str, Any], request: Request) -> Any:
         from . import chat as _chat
@@ -2716,40 +2766,9 @@ def build_studio_app(recents: Optional[Recents] = None):
         message = str(body.get("message") or "").strip()
         if not message:
             return JSONResponse({"error": "empty message"}, status_code=400)
-        # What the user is LOOKING at rides along with every message, so
-        # "why is this slow?" needs no op name typed — the studio knows.
-        view = body.get("view") or {}
-        if isinstance(view, dict):
-            lines = []
-            if view.get("node"):
-                lines.append(f"- selected op: `{str(view['node'])[:120]}`"
-                             + (f" ({str(view.get('kind'))[:40]})" if view.get("kind") else ""))
-            if view.get("run"):
-                lines.append(f"- run painted on the canvas: `{str(view['run'])[:120]}`")
-            if view.get("tab"):
-                lines.append(f"- open tab: {str(view['tab'])[:20]}")
-            if view.get("lens") and view.get("run"):
-                lines.append(f"- the run is painted with the {str(view['lens'])[:12]} lens")
-            if view.get("exec"):
-                lines.append(f"- selected execution in the run: `{str(view['exec'])[:120]}`")
-            if view.get("runs_filter"):
-                lines.append(f"- Runs screen filter: {str(view['runs_filter'])[:200]}")
-            if view.get("monitor"):
-                lines.append(f"- Monitor showing: {str(view['monitor'])[:120]}")
-            if lines:
-                context += ("\n\n## What the user is looking at right now\n"
-                            + "\n".join(lines))
-        import sys as _sys
-
-        server = request.scope.get("server") or ("127.0.0.1", 8765)
-        host = "127.0.0.1" if server[0] in ("0.0.0.0", "::", None) else server[0]
-        env = {"OPERONX_STUDIO_URL": f"http://{host}:{server[1]}", "OPERONX_STUDIO_PID": pid,
-               "OPERONX_STUDIO_TOKEN": auth["token"] if auth else ""}
-        if os.environ.get("PYTHONPATH"):
-            env["PYTHONPATH"] = os.environ["PYTHONPATH"]
-        mcp = {"type": "stdio", "command": _sys.executable, "args": ["-m", "operonx_studio.mcp"], "env": env}
+        context += _view_lines(body.get("view") or {})
         turn = _chat.start_turn(message, cwd=cwd, context=context,
-                                session=str(body.get("session") or "") or None, mcp=mcp)
+                                session=str(body.get("session") or "") or None, mcp=_studio_mcp(pid, request))
         return JSONResponse({"turn": turn})
 
     @app.post("/api/chat")
@@ -2761,11 +2780,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         message = str(body.get("message") or "").strip()
         if not message:
             return JSONResponse({"error": "empty message"}, status_code=400)
-        roster = "\n".join(f"- {r.name}: {r.root}" for r in recents.ordered()
-                           if r.exists)
-        context = ("# Studio briefing\nNo project is open. Projects this "
-                   "studio knows:\n" + (roster or "(none yet)"))
-        turn = _chat.start_turn(message, cwd=Path.home(), context=context,
+        turn = _chat.start_turn(message, cwd=Path.home(), context=_home_briefing(),
                                 session=str(body.get("session") or "") or None)
         return JSONResponse({"turn": turn})
 
@@ -2783,6 +2798,285 @@ def build_studio_app(recents: Optional[Recents] = None):
         from . import chat as _chat
 
         if not _chat.stop_turn(turn_id):
+            return JSONResponse({"error": "unknown turn"}, status_code=404)
+        return JSONResponse({"ok": True})
+
+    # ── the assistant: sessions and turns (operonx_studio.assistant) ─────
+    # Conversations persist server-side (SQLite beside studio.json), so a
+    # reload, another device or a studio restart finds them as they were.
+    from fastapi.responses import StreamingResponse
+
+    from .assistant import MODELS, ChatStore, Relay
+
+    chat_store = ChatStore(recents.state_file.parent / "assistant.sqlite")
+    relay = Relay(chat_store)
+    relay.on_finish = _ring      # a waiting pulse on that project hears it
+
+    def _scope_ok(scope: str) -> bool:
+        return scope == "home" or (recents.get(scope) is not None and _watcher(scope) is not None)
+
+    def _scope_name(scope: str) -> str:
+        ref = recents.get(scope)
+        return "Home" if scope == "home" else (ref.name if ref else scope)
+
+    def _turn_env(scope: str, view: Any, request: Request) -> Any:
+        if scope == "home":
+            return Path.home(), _home_briefing(), _studio_mcp("home", request)
+        cwd, context = _chat_briefing(scope)
+        if cwd is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        return cwd, context + _view_lines(view or {}), _studio_mcp(scope, request)
+
+    def _session_out(sess: Dict[str, Any]) -> Dict[str, Any]:
+        return {**sess, "scope_name": _scope_name(sess["scope"])}
+
+    @app.get("/api/assistant/sessions")
+    def assistant_sessions(scope: str = "", q: str = "", archived: str = "0", limit: int = 100) -> JSONResponse:
+        """Newest first; ``scope`` a project id or ``home`` (empty: every
+        scope); ``archived`` 0 | 1 | all; ``q`` searches titles and text."""
+        arch = None if archived == "all" else archived in ("1", "true")
+        rows = chat_store.sessions(scope or None, q=q, archived=arch, limit=limit)
+        return JSONResponse({"sessions": [_session_out(r) for r in rows], "models": list(MODELS)})
+
+    @app.post("/api/assistant/sessions")
+    def assistant_new(body: Dict[str, Any]) -> JSONResponse:
+        scope = str(body.get("scope") or "home")
+        if not _scope_ok(scope):
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        model = body.get("model") or None
+        if model is not None and model not in MODELS:
+            return JSONResponse({"error": f"model is one of {', '.join(MODELS)}"}, status_code=400)
+        return JSONResponse({"session": _session_out(chat_store.create_session(scope, model=model))})
+
+    def _session_or_404(sid: str) -> Any:
+        sess = chat_store.session(sid)
+        return sess if sess is not None else JSONResponse({"error": "no such conversation"}, status_code=404)
+
+    @app.get("/api/assistant/sessions/{sid}")
+    def assistant_session(sid: str) -> JSONResponse:
+        """A conversation as it stands: its items, and — when a turn is
+        running — that turn's live items and the cursor to follow it from."""
+        sess = _session_or_404(sid)
+        if isinstance(sess, JSONResponse):
+            return sess
+        items = chat_store.items(sid)
+        running = relay.running_items(sid)
+        if running is not None:
+            items = [it for it in items if it.get("turn") != running["id"]] + running.pop("items")
+        return JSONResponse({"session": _session_out(sess), "items": items, "running": running,
+                             "models": list(MODELS)})
+
+    @app.patch("/api/assistant/sessions/{sid}")
+    def assistant_patch(sid: str, body: Dict[str, Any]) -> JSONResponse:
+        sess = _session_or_404(sid)
+        if isinstance(sess, JSONResponse):
+            return sess
+        update: Dict[str, Any] = {}
+        if "title" in body:
+            title = re.sub(r"\s+", " ", str(body.get("title") or "")).strip()[:120]
+            if not title:
+                return JSONResponse({"error": "a title cannot be empty"}, status_code=400)
+            update.update(title=title, title_source="user")
+        if "archived" in body:
+            update["archived"] = bool(body["archived"])
+        if "model" in body:
+            model = body.get("model") or None
+            if model is not None and model not in MODELS:
+                return JSONResponse({"error": f"model is one of {', '.join(MODELS)}"}, status_code=400)
+            update["model"] = model
+        chat_store.update_session(sid, **update)
+        return JSONResponse({"session": _session_out(chat_store.session(sid))})
+
+    @app.delete("/api/assistant/sessions/{sid}")
+    async def assistant_delete(sid: str) -> JSONResponse:
+        sess = _session_or_404(sid)
+        if isinstance(sess, JSONResponse):
+            return sess
+        if sess.get("running_turn"):
+            relay.stop(sess["running_turn"])
+        chat_store.delete_session(sid)
+        return JSONResponse({"deleted": sid})
+
+    @app.post("/api/assistant/sessions/{sid}/turns")
+    async def assistant_turn(sid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        """Send a message. ``retry_of`` (regenerate) or ``edit_of`` (a new
+        text for an earlier message) name a turn: it and everything after
+        it leave the transcript, and the conversation forks from just
+        before it."""
+        sess = _session_or_404(sid)
+        if isinstance(sess, JSONResponse):
+            return sess
+        message = str(body.get("message") or "").strip()
+        fork_from: Optional[str] = ""
+        redo = str(body.get("retry_of") or body.get("edit_of") or "")
+        if redo:
+            old = chat_store.turn(redo)
+            if old is None or old["session"] != sid:
+                return JSONResponse({"error": "no such turn in this conversation"}, status_code=404)
+            message = message if body.get("edit_of") and message else old["message"]
+            fork_from = old["claude_before"]
+        if not message:
+            return JSONResponse({"error": "empty message"}, status_code=400)
+        env = _turn_env(sess["scope"], body.get("view"), request)
+        if isinstance(env, JSONResponse):
+            return env
+        cwd, context, mcp = env
+        if redo:
+            running = sess.get("running_turn")
+            if running and running in relay.turns and not relay.turns[running].done:
+                return JSONResponse({"error": "this conversation is already working on something"}, status_code=409)
+            chat_store.hide_from(sid, redo)
+        try:
+            turn = relay.start(sid, message, cwd=cwd, context=context, mcp=mcp, fork_from=fork_from,
+                               view=body.get("view") if isinstance(body.get("view"), dict) else None)
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return JSONResponse({"turn": turn.id, "cursor": 0})
+
+    @app.post("/api/assistant/sessions/{sid}/compact")
+    async def assistant_compact(sid: str, request: Request) -> JSONResponse:
+        sess = _session_or_404(sid)
+        if isinstance(sess, JSONResponse):
+            return sess
+        if not sess.get("claude_session"):
+            return JSONResponse({"error": "nothing to compact yet"}, status_code=400)
+        env = _turn_env(sess["scope"], None, request)
+        if isinstance(env, JSONResponse):
+            return env
+        cwd, context, mcp = env
+        try:
+            turn = relay.start(sid, "/compact", cwd=cwd, context=context, mcp=mcp, kind="compact")
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return JSONResponse({"turn": turn.id, "cursor": 0})
+
+    @app.post("/api/assistant/sessions/{sid}/items/{seq}")
+    def assistant_item(sid: str, seq: int, body: Dict[str, Any]) -> JSONResponse:
+        """Record what the user did with a changes card: kept, or undone."""
+        state = body.get("state")
+        if state not in ("kept", "undone"):
+            return JSONResponse({"error": "state is kept or undone"}, status_code=400)
+        extra = {"restored": int(body["restored"])} if isinstance(body.get("restored"), int) else {}
+        item = chat_store.patch_item(sid, seq, state=state, **extra)
+        if item is None:
+            return JSONResponse({"error": "no such item"}, status_code=404)
+        return JSONResponse({"item": item})
+
+    @app.post("/api/assistant/import")
+    def assistant_import(body: Dict[str, Any]) -> JSONResponse:
+        """A conversation the old panel kept in the browser, carried over
+        once: its items become a session that continues the same Claude
+        session."""
+        scope = str(body.get("scope") or "home")
+        log = body.get("log")
+        if not _scope_ok(scope) or not isinstance(log, list) or not log:
+            return JSONResponse({"error": "nothing to import"}, status_code=400)
+        from .assistant import title_from
+
+        first = next((str(x.get("text") or "") for x in log if isinstance(x, dict) and x.get("w") == "me"), "")
+        sess = chat_store.create_session(scope, title=title_from(first) if first else "Earlier conversation",
+                                         title_source="first", claude_session=str(body.get("session") or "") or None)
+        kinds = {"me": "user", "bot": "text", "tool": "tool", "changes": "changes", "err": "error", "meta": "note"}
+        items = []
+        for x in log[:2000]:
+            if not isinstance(x, dict) or x.get("w") not in kinds:
+                continue
+            item: Dict[str, Any] = {"seq": len(items) + 1, "turn": None, "kind": kinds[x["w"]], "imported": True}
+            if x["w"] == "tool":
+                item.update(name=x.get("name"), label=f"{x.get('name') or 'tool'} {x.get('hint') or ''}".strip(),
+                            status="ok")
+            elif x["w"] == "changes":
+                item.update({k: x.get(k) for k in ("sha", "files", "diff", "state", "restored") if k in x})
+            else:
+                item["text"] = str(x.get("text") or "")
+            items.append(item)
+        chat_store.put_items(sess["id"], items)
+        return JSONResponse({"session": _session_out(chat_store.session(sess["id"])), "items": len(items)})
+
+    @app.get("/api/p/{pid}/assistant/suggest")
+    def assistant_suggest(pid: str, node: str = "") -> JSONResponse:
+        """Starters built from the project's own state, most pressing first:
+        what failed today, an eval that dropped, what is missing, what the
+        user is pointing at — so an empty conversation offers the next
+        useful thing instead of a blank box."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        out: List[Dict[str, Any]] = []
+
+        def add(label: str, prompt: str, kind: str, why: str = "") -> None:
+            out.append({"label": label, "prompt": prompt, "kind": kind, "why": why})
+
+        if node:
+            add(f"Explain {node}", f"Explain what the op `{node}` does, what feeds it and what it feeds.", "op")
+            add(f"Why is {node} slow?", f"Look at recent runs: how long does `{node}` take, and why? "
+                                       "Suggest a fix if there is one.", "op")
+        pr = project_runs(watcher.root, sweep=False)
+        try:
+            day = pr.store.groups(RunFilter(since=time.time() - 86400), by=["origin", "name"])
+        except Exception:  # noqa: BLE001 — a starter is best-effort
+            day = []
+        for g in sorted(day, key=lambda g: -(g.get("errors") or 0))[:2]:
+            if g.get("errors") and g.get("name"):
+                n = g["errors"]
+                add(f"Why did {n} run{'s' if n > 1 else ''} of {g['name']} fail today?",
+                    f"{n} of today's {g['runs']} {g['origin']} runs of `{g['name']}` failed. Find out why, group the "
+                    "failures by cause, and tell me what to fix first.", "failure",
+                    f"{n} failed in the last 24 h")
+        ir = watcher.refresh_swr().ir or {}
+        jobs = ir.get("jobs") or []
+        evals = [j for j in _jobs_of(watcher) if j.get("kind") == "eval"]
+        for ev in evals[:2]:
+            runs = [r for r in _eval_runs(ev, 2) if r.get("status") != "running"]
+            now_rate = ((runs[0].get("eval") or {}).get("pass_rate") if runs else None)
+            then_rate = ((runs[1].get("eval") or {}).get("pass_rate") if len(runs) > 1 else None)
+            if now_rate is not None and then_rate is not None and now_rate < then_rate:
+                add(f"Why did {ev['name']} drop to {round(100 * now_rate)}%?",
+                    f"The eval `{ev['name']}` went from {round(100 * then_rate)}% to {round(100 * now_rate)}%. "
+                    "Which cases regressed, and why?", "eval", "the last run passed fewer cases")
+        services = [sv for sv in ir.get("services") or [] if sv.get("kind") != "asgi"]
+        if services and not evals:
+            name = services[0]["name"]
+            add(f"Set up an eval for {name}", f"Set up an eval for the `{name}` service: a small dataset of real "
+                                               "cases from its runs, evaluators that check what matters, and run it.",
+                "setup", "no evals yet")
+        if services:
+            name = services[0]["name"]
+            add(f"Try {name} and report", f"Drive the `{name}` service through the playground with a few "
+                                           "realistic messages and tell me how it did.", "try")
+        add("Explain this project", "Explain this project in plain words: what it does, its main flow step by "
+                                    "step, and where the risky parts are.", "learn")
+        if not jobs and services:
+            add("Add a nightly job", f"Add a job that runs `{services[0]['name']}`'s graph over a batch of saved "
+                                     "cases every night and records the results.", "setup")
+        # the most pressing first, at most six, no two alike
+        seen, uniq = set(), []
+        for s_ in out:
+            if s_["label"] not in seen:
+                seen.add(s_["label"])
+                uniq.append(s_)
+        return JSONResponse({"suggestions": uniq[:6]})
+
+    @app.get("/api/assistant/turns/{tid}")
+    async def assistant_poll(tid: str, cursor: int = 0) -> JSONResponse:
+        got = await relay.poll(tid, max(0, cursor))
+        if got is None:
+            return JSONResponse({"error": "unknown turn"}, status_code=404)
+        return JSONResponse(got)
+
+    @app.get("/api/assistant/turns/{tid}/stream")
+    async def assistant_stream(tid: str, cursor: int = 0, window: float = 20.0) -> Any:
+        """The turn's events from *cursor* as NDJSON, as they happen, for up
+        to ``window`` seconds; the page reconnects from its cursor."""
+        if tid not in relay.turns:
+            return JSONResponse({"error": "unknown turn"}, status_code=404)
+        return StreamingResponse(relay.stream(tid, max(0, cursor), max(1.0, min(window, 25.0))),
+                                 media_type="application/x-ndjson",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.post("/api/assistant/turns/{tid}/stop")
+    async def assistant_stop(tid: str) -> JSONResponse:          # on the loop: stop() schedules a kill
+        if not relay.stop(tid):
             return JSONResponse({"error": "unknown turn"}, status_code=404)
         return JSONResponse({"ok": True})
 

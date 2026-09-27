@@ -114,12 +114,20 @@ turn run with `haiku`:
 The CLI flags in play: `--resume`, `--fork-session`, `--session-id`,
 `--model`, `--effort`, `--max-budget-usd`, `--autocompact`.
 
-**Still to verify** (R2, step one; a few cents of the host's Claude
-usage, on `haiku`):
+**Verified at the start of R2** (real `haiku` calls, about $0.10 in all):
 
-- whether `/compact` works in headless `-p` mode;
-- the shape of `tool_result` blocks in `user` events;
-- whether `--resume X --fork-session` reports the new id in `init`.
+- `--resume X --fork-session` reports a new session id in `init`, and
+  leaves X's transcript file untouched (its modification time did not
+  change).
+- Tool results arrive in `user` events as `tool_result` blocks carrying
+  the `tool_use_id` (and `is_error` on failure).
+- Headless `/compact` works: `status: compacting`, then
+  `compact_boundary` with `pre_tokens`/`post_tokens` (22,505 → 2,077 in
+  the check), then a `result`.
+- The localhost.run tunnel passes a chunked response through as it is
+  written (lines 0.5 s apart arrived 0.5 s apart) and let a 30 s stream
+  finish. The ~10 s cut measured in phase 1 was another tunnel; the
+  design keeps short windows anyway, since the provider changes.
 
 ---
 
@@ -149,8 +157,8 @@ usage, on `haiku`):
 
 | # | Question | Decision | Why |
 |---|---|---|---|
-| 1 | Where conversations live | **A SQLite file beside the studio's state (`studio.json`), behind a small `ChatStore` interface.** Uses stdlib `sqlite3` in WAL mode, with FTS5 for search where it is available and `LIKE` where it is not. | Conversations have to survive a reload and follow the user from desktop to phone, so they belong on the server; localStorage fails both. The studio already keeps its state in local files. Postgres or Redis would be new infrastructure for a single-user studio. Langfuse is a tracing tool, and remote. Claude Code keeps its own transcript for `--resume`; the studio stores what it *renders* (items, titles, usage, flags), linked by the Claude session id. The interface matches the RunStore decision: a team server is a backend swap. |
-| 2 | Streaming | **Short streamed windows.** A chunked NDJSON response streams events as they happen, ends itself at about 8 s, and the client reconnects by cursor. The existing poll stays as the fallback. | The tunnel kills any response at about 10 s (measured in P5 of phase 1), so one long stream is impossible. 8-second windows give token-level delivery with one request per 8 s, instead of a poll round trip per batch. **Gate:** first prove the tunnel does not buffer chunked bodies. If it does, keep the poll and drop the fake typewriter. |
+| 1 | Where conversations live | **A SQLite file beside the studio's state (`studio.json`), behind a small `ChatStore` interface.** Uses stdlib `sqlite3` in WAL mode. Search is `LIKE` over titles and message text: milliseconds at tens of thousands of items, so FTS5's extra index and its sync code are not worth it. | Conversations have to survive a reload and follow the user from desktop to phone, so they belong on the server; localStorage fails both. The studio already keeps its state in local files. Postgres or Redis would be new infrastructure for a single-user studio. Langfuse is a tracing tool, and remote. Claude Code keeps its own transcript for `--resume`; the studio stores what it *renders* (items, titles, usage, flags), linked by the Claude session id. The interface matches the RunStore decision: a team server is a backend swap. |
+| 2 | Streaming | **Streamed windows.** A chunked NDJSON response streams events as they happen, ends itself after 20 s (a heartbeat line every 5 s of silence), and the client reconnects by cursor. The poll stays as the fallback. | Token-level delivery with one request per 20 s, instead of a poll round trip per batch. A proxy that cuts sooner (one tunnel did, at ~10 s) costs a reconnect, never an event: the cursor is the event's index. **Gate passed** (§0.3): the tunnel does not buffer. |
 | 3 | Page liveness | **One `pulse` long-poll per page** (held up to 8 s) replaces `/stamp` + `/ui/actions`. It answers at once on a code change, an assistant action, a finished assistant turn, or a live-run event. | This fixes P2: from about 1.2 requests/s to at most 0.125/s when idle, and changes arrive immediately instead of up to 3 s late. |
 | 4 | Scripts | **The server concatenates the project page's scripts into one bundle** in memory at startup, hashed and served as immutable. No node, no build step. | This fixes P1: 16 requests become one. Splitting code per screen would add a 0.75 s round trip on the first visit to each screen through the tunnel, which is worse, so no splitting. |
 | 5 | The IR on first paint | **Inline it into the project page HTML** when the watcher has it cached (it usually does, via SWR); otherwise fall back to a fetch that starts in `<head>`. | This removes the last serial round trip in P1. |
@@ -504,7 +512,26 @@ model does not matter.
 |---|---|---|
 | R0 | done — plan and harness (5f5a562) | baseline in §0 |
 | R1 | done — see below | |
-| R2–R6 | not started | |
+| R2 | done — see below | |
+| R3–R6 | not started | |
+
+**R2** — `operonx_studio/assistant.py` (ChatStore + Relay), the
+`/api/assistant/*` routes, `suggest`, the pulse's `chat` field, and the
+home assistant's own tools (`list_projects`, `new_project`). 14 offline
+tests against a fake `claude` that replays real-shaped stream-json.
+One real turn end to end, through the tunnel on `haiku`: the first answer
+token was on the client 8.2 s after sending (a file read first); the
+rest arrived token by token in the same window; 6 items persisted; the
+context meter read 24,539 of 200,000; $0.027.
+
+Found by that real turn, and fixed:
+- A tool label kept an absolute path: the hint was cut to 80 characters
+  before it was made relative, and the project's path is longer than 80.
+- The model-made title answered the conversation instead of naming it
+  ("I can't find operonx.toml…"). The title call now has its own system
+  prompt, no tools and no MCP servers, and anything that does not read
+  as a title is dropped. The same conversation now gets "Dataflow graph
+  HTTP API project" ($0.003).
 
 **R1, measured through the tunnel** (`scripts/perf/audit.py`, same two
 projects, 2026-09-27; local numbers in brackets):

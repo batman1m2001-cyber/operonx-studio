@@ -80,6 +80,11 @@ class Recents:
         self._items: Dict[str, ProjectRef] = {}
         self._load()
 
+    @property
+    def state_file(self) -> Path:
+        """Where this studio keeps its state; other stores sit beside it."""
+        return Path(self._file)
+
     def _load(self) -> None:
         try:
             raw = json.loads(self._file.read_text(encoding="utf-8"))
