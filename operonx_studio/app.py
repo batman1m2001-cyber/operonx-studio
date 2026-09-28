@@ -2370,10 +2370,12 @@ def build_studio_app(recents: Optional[Recents] = None):
             got = _record(pid, run)
             if isinstance(got, JSONResponse):
                 return got
+            from operonx_studio.review import sent_script
+
             md = got[1].summary.metadata or {}
-            script = [m for m in md.get("playground_script") or [] if m.get("kind") in ("text", "json")]
+            script = [m for m in sent_script(md) if m.get("kind") in ("text", "json")]
             if len(script) != 1:
-                return JSONResponse({"error": "a case is one input: pick a playground run that sent exactly one "
+                return JSONResponse({"error": "a case is one input: pick a run that sent exactly one "
                                               "message (a multi-turn session is not one case)"}, status_code=400)
             msg = script[0]
             row: Dict[str, Any] = {"input": msg.get("value") if msg["kind"] == "json" else msg.get("text"),
@@ -2614,8 +2616,10 @@ def build_studio_app(recents: Optional[Recents] = None):
     @app.post("/api/p/{pid}/play/open")
     async def play_open(pid: str, body: Dict[str, Any]) -> JSONResponse:
         """Open a session on a service's door. ``replay_of`` fills the
-        service, the connection query and the messages from a recorded
-        playground run; ``wait`` holds the answer until the session ends."""
+        service, the connection query and the messages from a recorded run
+        — a playground session, or a real one of a service that records
+        (``Service(replay=True)``); ``wait`` holds the answer until the
+        session ends."""
         import uuid as _uuid
 
         msg: Dict[str, Any] = {"op": "open", "sid": _uuid.uuid4().hex[:12]}
@@ -2624,13 +2628,18 @@ def build_studio_app(recents: Optional[Recents] = None):
             got = _record(pid, replay)
             if isinstance(got, JSONResponse):
                 return got
+            from operonx_studio.review import sent_query, sent_script
+
             md = got[1].summary.metadata or {}
-            if "playground_script" not in md or not got[1].summary.service:
-                return JSONResponse({"error": "only a playground run records what was sent; "
-                                              "this one can't be replayed"}, status_code=400)
+            if not ("playground_script" in md or "replay_script" in md) or not got[1].summary.service:
+                return JSONResponse({"error": "this run did not record what was sent — a playground session "
+                                              "does, and so does a service declared with replay=True"},
+                                    status_code=400)
+            # text and JSON go again; audio, bytes and oversized messages were only counted
             msg.update({"service": got[1].summary.service, "toy": md.get("toy"),
-                        "query": md.get("playground_query") or {}, "variant": got[1].summary.variant,
-                        "send": [m for m in md["playground_script"] if m.get("kind") != "bytes"],
+                        "query": sent_query(md), "variant": got[1].summary.variant,
+                        "send": [{k: v for k, v in m.items() if k != "at"} for m in sent_script(md)
+                                 if m.get("kind") in ("text", "json")],
                         "end": True, "replay_of": replay})
         for key in ("service", "toy", "variant"):
             if body.get(key):

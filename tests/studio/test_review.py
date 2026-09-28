@@ -126,3 +126,9 @@ def test_the_queue_reads_judges_and_files_a_case(client, project):
     assert row["input"] == "cancel it" and "expected" not in row
     assert row["tags"] == ["cancel", "review:bad", "wrong-intent"] and row["note"] == "should offer to cancel"
     assert row["from"] == {"run": "c2", "origin": "service", "name": "desk"}
+
+
+def test_a_recorded_service_run_reads_as_a_conversation_too():
+    turns = conversation([], {"replay_script": [{"kind": "json", "value": {"q": 1}, "at": 2.0},
+                                                {"kind": "bytes", "size": 9}]})
+    assert turns == [{"who": "user", "text": '{"q": 1}', "op": "client", "at": 2.0}]

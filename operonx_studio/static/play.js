@@ -37,6 +37,22 @@ const PlayView = (() => {
   let ui = null;                      // the rendered pane's live parts
 
   const save = () => store(K, v);
+  // what a run sent: a playground session's script, or a real session's
+  // when its service records (Service(replay=True))
+  const sentScript = (md) => md.playground_script || md.replay_script || [];
+  let pendingReplay = null;           // {run, service, md}: a replay asked for from a run's page
+
+  /* Replay a recorded run in its service's playground, with the current
+   * code: the toy that fits the door, the run's own messages. */
+  function replayFrom(run, md) {
+    const dd = (doors || []).find(x => x.service === md.service);
+    const toys = (dd && dd.toys) || [];
+    v.service = md.service;
+    v.toy = toys.includes("chat") ? "chat" : toys.includes("form") ? "form" : v.toy;
+    save();
+    pendingReplay = {run, service: md.service, md};
+    switchTab("playground");
+  }
   const door = () => (doors || []).find(d => d.service === v.service);
   const short = (x, n = 90) => { const s = typeof x === "string" ? x : JSON.stringify(x); return s.length > n ? s.slice(0, n) + "…" : s; };
 
@@ -443,16 +459,23 @@ const PlayView = (() => {
       try {
         const sid = await open({replay_of: run, service: d.service, toy: (md && md.toy) || v.toy});
         const s = sessions.get(sid);
-        if (s && v.toy === "chat" && chatView) chatView.attach(sid, s, (md && md.playground_script) || []);
+        if (s && v.toy === "chat" && chatView) chatView.attach(sid, s, sentScript(md || {}));
         toast("Replaying with the current code");
       } catch (err) { toast(err.message, true); }
     }
 
-    let chatView = null;
+    let chatView = null, formView = null;
     if (v.toy === "chat") chatView = chatToy(main, d);
     else if (v.toy === "voice") voiceToy(main, d);
     else if (v.toy === "simulated") simToy(main, d);
-    else formToy(main, d);
+    else formView = formToy(main, d);
+    // a run's "Replay in the Playground": this pane was opened for it
+    if (pendingReplay && pendingReplay.service === d.service) {
+      const p = pendingReplay;
+      pendingReplay = null;
+      if (formView) formView.replay(p.run, p.md);
+      else replayRun(p.run, p.md);
+    }
     loadRecent();
     startPolling();
   }
@@ -990,13 +1013,16 @@ const PlayView = (() => {
       try { value = JSON.parse(ta.value); err.textContent = ""; }
       catch (e) { err.textContent = `Not JSON: ${e.message}`; return; }
       store(key, ta.value);
+      await send({service: d.service, toy: "form", query: queryOf(), send: [{kind: "json", value}], end: true});
+    };
+
+    async function send(body) {
       go.disabled = true;
       reply.textContent = "";
-      const line = el("div", "note", "Running…");
+      const line = el("div", "note", body.replay_of ? "Replaying with the current code…" : "Running…");
       reply.append(line);
       try {
-        const sid = await open({service: d.service, toy: "form", query: queryOf(),
-                                send: [{kind: "json", value}], end: true});
+        const sid = await open(body);
         const outs = [];
         sessions.get(sid).render = (e) => {
           if (e.t === "out") outs.push(e.msg);
@@ -1019,6 +1045,15 @@ const PlayView = (() => {
           }
         };
       } catch (e2) { go.disabled = false; reply.textContent = ""; reply.append(el("div", "errbox", e2.message)); }
+    }
+
+    // a recorded run, sent again: what it sent is shown in the payload box
+    return {
+      replay(run, md) {
+        const first = sentScript(md).find(m => m.kind === "json" || m.kind === "text");
+        if (first) ta.value = first.kind === "json" ? JSON.stringify(first.value, null, 2) : first.text;
+        send({replay_of: run, service: d.service, toy: "form"});
+      },
     };
   }
 
@@ -1114,5 +1149,5 @@ const PlayView = (() => {
   }
   setTimeout(() => { if (!document.hidden && hasDoors()) warm(); }, 3000);
 
-  return {rerun, rerunSection, show};
+  return {rerun, rerunSection, show, replayFrom, sentScript};
 })();

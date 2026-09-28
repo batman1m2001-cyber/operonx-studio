@@ -3151,6 +3151,14 @@ function originLine(s) {
       () => RunsView.openFolder({kind: s.origin, name: s.service || s.name})));
     if (s.transport) line.append(` · ${s.transport}`);
     if (s.session_id) line.append(` · session ${s.session_id}`);
+    // a real session its service recorded, or a playground one: send it again
+    const md = s.metadata || {};
+    const sent = (md.replay_script || md.playground_script || []).filter(m => m.kind === "text" || m.kind === "json");
+    if (sent.length && typeof PlayView !== "undefined" && md.toy !== "rerun") {
+      line.append(" · ");
+      line.append(link("Replay in the Playground", `Send its ${sent.length} message${sent.length === 1 ? "" : "s"} again, to the current code`,
+        () => PlayView.replayFrom(s.trace_id, {...md, service: s.service || s.name})));
+    }
   }
   if (s.version) line.append(` · code @${String(s.version).slice(0, 7)}${s.version_dirty ? " (uncommitted changes)" : ""}`);
   return line;

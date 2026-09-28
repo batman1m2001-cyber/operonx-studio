@@ -181,6 +181,45 @@ def test_a_chat_session_polled_like_the_page(client, project):
     assert client.post(f"/api/p/{pid}/play/open", json={"replay_of": "nope"}).status_code == 404
 
 
+def _served_run(root: Path, trace_id: str, **metadata) -> None:
+    """A run a real client made of the `score` door, as its consumer files it."""
+    from operonx.core.workflow_trace import WorkflowTrace
+    from operonx.telemetry.consumers.local import LocalConsumer
+
+    md = {"origin": "service", "service": "score", "transport": "http", **metadata}
+    LocalConsumer(config={"root": str(root / ".operonx" / "runs")}).consume(WorkflowTrace(
+        trace_id=trace_id, workflow_name="score_flow", started_at=1.0, ended_at=1.1, nodes=[],
+        metadata=md, wall_started_at=time.time() - 60))
+
+
+def _until_listed(client, pid, run):
+    for _ in range(60):
+        if client.get(f"/api/p/{pid}/trace/{run}/tree").status_code == 200:
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"{run} never listed")
+
+
+def test_a_real_session_its_service_recorded_replays_to_the_current_code(client, project):
+    # Service(replay=True): the run carries what the client sent — replay it
+    _served_run(project, "real-1", replay_query={},
+                replay_script=[{"kind": "json", "value": {"id": "a", "text": "one two three"}, "at": 1.0},
+                               {"kind": "bytes", "size": 4, "at": 1.1}])
+    _served_run(project, "real-2")          # a service that does not record
+    pid = _open(client, project)
+    _until_listed(client, pid, "real-1")
+    _until_listed(client, pid, "real-2")
+
+    again = client.post(f"/api/p/{pid}/play/open", json={"replay_of": "real-1", "wait": True}).json()
+    outs = [e["msg"]["value"] for e in again["events"] if e["t"] == "out"]
+    assert outs == [{"id": "a", "words": 3}]          # the JSON went again; the bytes were only counted
+    replayed = client.get(f"/api/p/{pid}/trace/{again['events'][-1]['trace_id']}/tree").json()["summary"]
+    assert replayed["metadata"]["replay_of"] == "real-1" and replayed["origin"] == "playground"
+
+    refused = client.post(f"/api/p/{pid}/play/open", json={"replay_of": "real-2"})
+    assert refused.status_code == 400 and "replay=True" in refused.json()["error"]
+
+
 def test_rerun_plan_and_rerun_after_a_code_change(client, project):
     pid = _open(client, project)
     got = client.post(f"/api/p/{pid}/play/open", json={

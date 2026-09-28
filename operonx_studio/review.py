@@ -77,15 +77,27 @@ def _text(value: Any) -> Optional[str]:
     return None
 
 
+def sent_script(metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """What the user sent in a run, as toy messages: a playground session's
+    script, or a replayable service's (``Service(replay=True)``)."""
+    return list(metadata.get("playground_script") or metadata.get("replay_script") or [])
+
+
+def sent_query(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """The connection query that came with :func:`sent_script`."""
+    return dict(metadata.get("playground_query") or metadata.get("replay_query") or {})
+
+
 def conversation(rows: List[Dict[str, Any]], metadata: Dict[str, Any], egress: Iterable[str] = ()) -> List[Dict[str, Any]]:
     """The run as turns: ``{"who": "user"|"bot", "text", "op", "at"}``, in order."""
     egress = set(egress)
     turns: List[Dict[str, Any]] = []
-    for m in metadata.get("playground_script") or []:
+    for m in sent_script(metadata):
         text = m.get("text") if m.get("kind") == "text" else (
             json.dumps(m.get("value"), ensure_ascii=False) if m.get("kind") == "json" else None)
         if text:
-            turns.append({"who": "user", "text": text, "op": "playground", "at": m.get("at")})
+            turns.append({"who": "user", "text": text, "op": "playground" if "playground_script" in metadata else "client",
+                          "at": m.get("at")})
     sent_by_door = False
     for r in rows:
         at = r.get("wall_start")

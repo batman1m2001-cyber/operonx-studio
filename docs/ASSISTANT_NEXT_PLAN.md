@@ -340,6 +340,7 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
 | 7 | **N2, N4, N3** | see git log (`N2 N4 N3`) | bytes, revisit and first-open times before and after (below); the served bundles token-for-token identical to their sources (acorn); 7 new tests (500 studio tests); layout audit 0 errors in 328 cases; `flows.py` 21/21; `live_assistant.py` 23/23; every UI check above |
 | 8 | **N1** Dark mode | see git log (`N1`) | the palette validator on the dark node kinds (all pairs: every check passes); WCAG contrast of every text token on every dark surface; layout audit in dark (`--dark`) 0 errors in 328 cases; every element's computed colours identical between the two generators, on 32 screens; 20 new tests (520 tests, 3 skipped); `flows.py` 21/21; `composer.py` 35/35; `attachments.py` 16/16; `models.py` 13/13; `usage.py` 15/15; `signin.py` 14/14; every screen in both themes, desktop and phone |
 | 9 | **S1** operonx 1.9.0, **N5** a live voice session (automated part) | see git log (`N5`) | S1: PR #59 gates (below), published; the studio's 520 tests on the PyPI wheel; the callbot's 291 tests (the same 2 env-var failures before and after the bump). N5: six fake-microphone calls through the real STT/LLM/TTS; the call pill's paths; the Monitor's service view; 1 new server test (521 studio tests); 39 JS tests; `flows.py` |
+| 10 | **B8** Replaying real sessions | see git log (`B8`) | a real HTTP request to a service with `replay=True`, its run replayed from the Runs page to changed code (desktop and phone); 10 new operonx tests, 2 new studio tests; the gates below |
 
 **A1 notes.**
 - **A JSON paste becomes a card from 200 characters, even on one line.**
@@ -713,3 +714,23 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
     `synthesize` 21 ms.
 - **Still yours:** the same call with headphones and your own voice
   (open the educa_reminder_agent project → Playground → call → Voice).
+
+**B8 notes.**
+- **What it does:** a service declared with `replay=True` keeps, on each
+  run, what its client sent — the same script a playground session keeps.
+  Its run's page then offers *Replay in the Playground*: the same request,
+  sent to the current code.
+- **Checked end to end:** the demo's `score` service, served for real,
+  got `{"call_id": "123", …}`; its run carried exactly that JSON and the
+  query. The code was then changed (`brief` → `short`); *Replay in the
+  Playground* filled the payload and the new reply said `short`.
+- **Text and JSON only:** audio and bytes are counted, never kept, and so
+  is any message over 64 KB. A door whose JSON frames carry audio says so
+  in its codec (`to_toy`). For the callbot's voice door it records nothing
+  useful, which is why it stays off there.
+- **Changed from §6.1: no separate 7-day limit.** A script lives on its run
+  and goes when the run goes (services: 30 days by default, set in
+  Settings). A shorter life for scripts alone would need an update the run
+  store's contract does not have.
+- **Ships in operonx 1.10.0** (you merge); the studio side works with any
+  version and simply finds no scripts before it.
