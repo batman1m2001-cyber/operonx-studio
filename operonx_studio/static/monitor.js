@@ -381,7 +381,9 @@
     const [origin, name] = v.target ? v.target.split(":") : ["", ""];
     const [, , secs, buckets] = RANGES.find(r => r[0] === v.range) || RANGES[1];
     const until = Math.floor(Date.now() / 1000);
-    const q = `origin=${origin}&name=${encodeURIComponent(name || "")}&since=${until - secs}&until=${until}&buckets=${buckets}`;
+    const withPlay = v.withPlay !== false;
+    const q = `origin=${origin}&name=${encodeURIComponent(name || "")}&since=${until - secs}&until=${until}`
+      + `&buckets=${buckets}&playground=${withPlay ? 1 : 0}`;
     const loading = el("div", "note", "Loading…");
     box.append(loading);
     let m;
@@ -389,12 +391,27 @@
     catch (e) { if (mine === token) loading.replaceWith(loadError(e, () => show())); return; }
     if (mine !== token) return;
     loading.remove();
+    // a service's playground sessions: counted in unless left out, and said so
+    const togglePlay = () => { v.withPlay = !withPlay; store(`monitor:${PID}`, v); show(); };
+    const playNote = () => {
+      const n = m.playground_runs || 0;
+      if (!n) return null;
+      const line = el("p", "note monplay");
+      const sessions = `${n.toLocaleString()} playground session${n === 1 ? "" : "s"}`;
+      const b = el("button", "linkbtn", withPlay ? "Served runs only" : `Include ${sessions}`);
+      b.type = "button";
+      b.onclick = togglePlay;
+      line.append(withPlay ? `Includes ${sessions} · ` : "Served runs only · ", b);
+      return line;
+    };
     if (!m.tiles.runs) {
       box.append(paneNote("No runs in this range",
-        "The Monitor summarises the runs this service or job recorded.", null,
+        withPlay ? "The Monitor summarises the runs this service or job recorded, its playground sessions included."
+          : "The Monitor summarises the runs this service answered; its playground sessions are left out.", null,
         {actions: [...(v.range !== "30d" ? [{label: "Show 30 days", icon: "clock",
           run: () => { v.range = "30d"; store(`monitor:${PID}`, v); show(); }}] : []),
-          {label: "Try a service in the Playground", icon: "play", run: () => switchTab("playground")}]}));
+          ...(!withPlay && m.playground_runs ? [{label: `Include ${m.playground_runs} playground sessions`, icon: "play",
+            run: togglePlay}] : [{label: "Try a service in the Playground", icon: "play", run: () => switchTab("playground")}])]}));
       return;
     }
     const t = m.tiles, p = m.previous;
@@ -405,6 +422,8 @@
     tiles.append(tile("p50 duration", t.p50_ms, p.p50_ms, fmtMs, true));
     tiles.append(tile("p95 duration", t.p95_ms, p.p95_ms, fmtMs, true));
     box.append(tiles);
+    const pn = playNote();
+    if (pn) box.append(pn);
 
     const inner = Math.max(300, box.clientWidth - 56);
     chartW = Math.round(Math.max(300, window.matchMedia("(max-width: 1100px)").matches ? inner - 30 : inner / 2 - 44));

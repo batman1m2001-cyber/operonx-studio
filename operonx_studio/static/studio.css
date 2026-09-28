@@ -413,6 +413,20 @@ body.railslim .railtoggle .icon { transform: rotate(180deg); }
 .live.down { color: var(--warn); }
 .live.down .dot { background: var(--warn); animation: livewait 1.2s ease-in-out infinite; }
 @keyframes livewait { 50% { opacity: .35; } }
+/* a voice call going on while its toy is off screen: back to it, or end it */
+.callpill { display: inline-flex; align-items: center; gap: 2px; padding: 2px; margin-right: 4px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface); box-shadow: var(--sh-1); }
+.callpill[hidden] { display: none; }
+.callpill button { min-height: 26px; padding: 0 9px; border: none; border-radius: 999px; background: transparent;
+  font-size: var(--fs-sm); white-space: nowrap; }
+.callpill-go { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-weight: 500; }
+.callpill-go:hover, .callpill-end:hover { background: var(--surface-2); }
+.callpill-go .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--err);
+  animation: livewait 1.2s ease-in-out infinite; }
+.callpill-time { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.callpill-end { color: var(--err); font-weight: 600; }
+.callpill-end:hover { background: var(--err-soft); }
+@media (prefers-reduced-motion: reduce) { .callpill-go .dot { animation: none; } }
 
 /* popovers: the project switcher, the project menu, the legend, find */
 .popover {
@@ -1610,6 +1624,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .montarget { min-width: 180px; font-weight: 600; }
 .stattiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .stattiles.small { margin-bottom: 12px; }
+.monplay { margin: -6px 0 14px; }
 .stattile { border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; min-width: 0; }
 .statlabel { font-size: var(--fs-sm); color: var(--text-2); }
 .statvalue { font-size: 26px; font-weight: 650; letter-spacing: -.02em; margin-top: 2px; }
@@ -2765,6 +2780,9 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
     max-width: 34vw; font-weight: 600; padding: 0 8px 0 6px; }
   header.bar > .crumbs { order: 2; }
   header.bar > .live { order: 3; }
+  header.bar > .callpill { order: 3; margin-right: 0; }
+  body.oncall header.bar > .crumbs { display: none; }
+  .callpill-name { display: none; }
   header.bar > #btn-settings { order: 4; }
   header.bar > #btn-right { order: 5; }
   .crumbs .sep:first-child { display: none; }

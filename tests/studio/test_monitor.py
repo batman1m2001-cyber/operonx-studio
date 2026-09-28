@@ -119,3 +119,21 @@ def test_an_empty_range_is_empty_not_an_error(store):
     m = monitor(store, origin="service", name="call", since=NOW - 400 * DAY, until=NOW - 300 * DAY)
     assert m["tiles"]["runs"] == 0 and m["tiles"]["error_rate"] is None and m["tiles"]["cost_usd"] is None
     assert m["ops"] == [] and m["errors"] == [] and all(b["ok"] == 0 for b in m["series"])
+
+
+def test_a_services_playground_sessions_count_and_are_said(store):
+    # two sessions of `call` tried in the Playground: its runs too
+    for tid, age in (("pl1", 3), ("pl2", 2)):
+        t = _run(tid, age, stt=500)
+        t.metadata["origin"] = "playground"
+        store.consume(t)
+    m = monitor(store, origin="service", name="call", since=NOW - DAY, until=NOW)
+    assert m["tiles"]["runs"] == 7 and m["playground_runs"] == 2 and m["with_playground"]
+    stt = next(o for o in m["ops"] if o["op"] == "stt")
+    assert stt["runs"] == 7 and stt["max_ms"] == pytest.approx(500)
+
+    served = monitor(store, origin="service", name="call", since=NOW - DAY, until=NOW, with_playground=False)
+    assert served["tiles"]["runs"] == 5 and served["playground_runs"] == 2 and not served["with_playground"]
+    assert next(o for o in served["ops"] if o["op"] == "stt")["runs"] == 5
+    # a job's view, or everything, is untouched by it
+    assert monitor(store, since=NOW - DAY, until=NOW)["playground_runs"] == 0

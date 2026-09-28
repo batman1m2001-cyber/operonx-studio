@@ -15,6 +15,9 @@ The rules that keep the numbers honest:
   kept out of the ranking, their time being the session's length.
 * **Key ops** the service declares (``Service(key_ops=[...])``) come
   first, in the order declared.
+* **A service's playground sessions** are its runs too (``origin=playground``
+  under the service's name): a service's view counts them unless asked
+  not to, and says how many there are.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional, Sequence
 
-from operonx.telemetry.runs import RunFilter, RunStore, percentile
+from operonx.telemetry.runs import RunFilter, RunStore, combine_rollups, percentile
 
 __all__ = ["DAY", "monitor"]
 
@@ -30,15 +33,33 @@ DAY = 86400.0
 _MAX_RUNS = 50_000
 
 
-def _summaries(store: RunStore, where: RunFilter) -> List[Any]:
-    out, cursor = [], None
-    while len(out) < _MAX_RUNS:
-        page = store.list_runs(where, order="started_asc", limit=1000, cursor=cursor)
-        out.extend(page.items)
-        cursor = page.next_cursor
-        if not cursor:
-            break
+def _summaries(store: RunStore, wheres: Sequence[RunFilter]) -> List[Any]:
+    out: List[Any] = []
+    for where in wheres:
+        cursor = None
+        while len(out) < _MAX_RUNS:
+            page = store.list_runs(where, order="started_asc", limit=1000, cursor=cursor)
+            out.extend(page.items)
+            cursor = page.next_cursor
+            if not cursor:
+                break
+    if len(wheres) > 1:
+        out.sort(key=lambda r: r.started_at or 0)
     return out
+
+
+def _op_stats(store: RunStore, wheres: Sequence[RunFilter]) -> List[Any]:
+    if len(wheres) == 1:
+        return store.op_stats(wheres[0])
+    return combine_rollups([r for w in wheres for r in store.rollups(w)])
+
+
+def _wheres(origin: Optional[str], name: Optional[str], since: float, until: float,
+            with_playground: bool) -> List[RunFilter]:
+    origins: List[Optional[str]] = [origin or None]
+    if with_playground and origin == "service" and name:
+        origins.append("playground")
+    return [RunFilter(origin=o, name=name or None, since=since, until=until) for o in origins]
 
 
 def _tiles(runs: Sequence[Any]) -> Dict[str, Any]:
@@ -114,21 +135,26 @@ def monitor(
     until: Optional[float] = None,
     buckets: int = 24,
     key_ops: Sequence[str] = (),
+    with_playground: bool = True,
 ) -> Dict[str, Any]:
     """The Monitor for one origin (or everything) over ``[since, until)``."""
     until = float(until) if until is not None else time.time()
     since = float(since) if since is not None else until - 7 * DAY
     span = max(1.0, until - since)
-    where = RunFilter(origin=origin or None, name=name or None, since=since, until=until)
-    before = RunFilter(origin=origin or None, name=name or None, since=since - span, until=since)
+    where = _wheres(origin, name, since, until, with_playground)
+    before = _wheres(origin, name, since - span, since, with_playground)
     runs = _summaries(store, where)
     prev = _summaries(store, before)
+    # how many playground sessions of this service the range holds, counted
+    # even when they are left out, so the view can offer them
+    playground = (store.count(RunFilter(origin="playground", name=name, since=since, until=until))
+                  if origin == "service" and name else 0)
 
     avg_run = (sum(r.duration_ms or 0 for r in runs) / len(runs)) if runs else 0.0
     total_time = sum(r.duration_ms or 0 for r in runs) or 1.0
-    prev_ops = {s.op: s for s in store.op_stats(before)} if prev else {}
+    prev_ops = {s.op: s for s in _op_stats(store, before)} if prev else {}
     ops = []
-    for s in store.op_stats(where) if runs else []:
+    for s in _op_stats(store, where) if runs else []:
         per_run = s.count / max(1, s.runs)
         background = per_run <= 2 and avg_run > 0 and (s.total_ms / max(1, s.runs)) >= 0.8 * avg_run
         p = prev_ops.get(s.op)
@@ -157,4 +183,6 @@ def monitor(
         "cost_ops": cost_ops,
         "errors": _errors(runs),
         "truncated": len(runs) >= _MAX_RUNS,
+        "playground_runs": playground,
+        "with_playground": bool(with_playground and playground),
     }

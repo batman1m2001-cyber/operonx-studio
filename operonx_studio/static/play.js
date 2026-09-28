@@ -582,6 +582,13 @@ const PlayView = (() => {
   let audioCtx = null;
   let workletReady = false;
 
+  /* The live call belongs to the page, not to the toy: moving to another
+   * screen keeps it going (the Flow canvas follows its ops, a pill in the
+   * header shows it and ends it), and the toy picks it back up when the
+   * Playground is shown again. One call at a time; leaving the page ends it. */
+  let call = null;
+  let pill = null;
+
   function voiceToy(main, d) {
     const rate = (d.audio || {}).rate || 16000;
     const wrap = el("div", "playvoice");
@@ -603,168 +610,263 @@ const PlayView = (() => {
     const sentEl = el("span", null, "0.0 s spoken");
     const heardEl = el("span", null, "0.0 s heard back");
     flow.append(sentEl, el("span", "vsep", "·"), heardEl);
-    let sentS = 0, heardS = 0;
     const log = el("div", "playlog voicelog");
-    log.append(el("div", "note playempty", "Start the call and speak. What the service says is played and written here."));
+    log.append(el("div", "note playempty", "Start the call and speak. What the service says is played and written here. "
+      + "The call keeps going on other screens: watch its ops light up on the Flow."));
     wrap.append(top, flow, status, log);
     main.append(wrap);
-
-    let stream = null, node = null, sid = null, pending = [], sending = false, timer = null, nextAt = 0;
-    const playing = new Set();
-
-    async function start() {
+    const ui = {wrap, label, mic, lvl, sentEl, heardEl, status, log};
+    if (call && call.service === d.service) paintCall(call, ui);
+    else if (call && call.live) {
       mic.disabled = true;
-      status.textContent = "";
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true,
-                                                                    noiseSuppression: true, autoGainControl: true}});
-      } catch (err) { status.textContent = `The microphone is not available: ${err.message}`; mic.disabled = false; return; }
-      audioCtx = audioCtx || new AudioContext();
-      if (audioCtx.state === "suspended") await audioCtx.resume();
-      if (!workletReady) {
-        await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], {type: "application/javascript"})));
-        workletReady = true;
-      }
-      const src = audioCtx.createMediaStreamSource(stream);
-      node = new AudioWorkletNode(audioCtx, "ox-cap");
-      const mute = audioCtx.createGain();
-      mute.gain.value = 0;
-      src.connect(node); node.connect(mute); mute.connect(audioCtx.destination);
-      const ratio = audioCtx.sampleRate / rate;
-      let carry = new Float32Array(0);
-      node.port.onmessage = (ev) => {
-        const x = ev.data;
-        let sum = 0;
-        for (let i = 0; i < x.length; i++) sum += x[i] * x[i];
-        lvl.style.width = `${Math.min(100, Math.sqrt(sum / x.length) * 500).toFixed(0)}%`;
-        const buf = new Float32Array(carry.length + x.length);
-        buf.set(carry); buf.set(x, carry.length);
-        const n = Math.floor(buf.length / ratio);
-        const out = new Int16Array(n);
-        for (let j = 0; j < n; j++) {
-          const a = Math.floor(j * ratio), b = Math.max(a + 1, Math.floor((j + 1) * ratio));
-          let acc = 0;
-          for (let i = a; i < b; i++) acc += buf[i];
-          out[j] = Math.max(-32768, Math.min(32767, Math.round((acc / (b - a)) * 32767)));
-        }
-        carry = buf.slice(Math.floor(n * ratio));
-        pending.push(out);
-      };
-      try { sid = await open({service: d.service, toy: "voice", query: queryOf()}); }
-      catch (err) { status.textContent = err.message; stopCapture(); idle(); return; }
-      sessions.get(sid).render = render;
-      timer = setInterval(flush, 200);
-      label.textContent = "End the call";
-      sentS = heardS = 0;
-      sentEl.textContent = "0.0 s spoken"; heardEl.textContent = "0.0 s heard back";
-      mic.classList.add("live");
-      mic.disabled = false;
-      log.querySelector(".playempty")?.remove();
+      status.textContent = `A call to ${call.service} is live — end it first.`;
     }
-
-    const b64 = (int16) => {
-      const bytes = new Uint8Array(int16.buffer);
-      let bin = "";
-      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-      return btoa(bin);
-    };
-
-    async function flush() {
-      if (box.hidden && sid) { end(); return; }   // the pane was left: the call ends with it
-      if (sending || !pending.length || !sid) return;
-      const total = pending.reduce((n, a) => n + a.length, 0);
-      const all = new Int16Array(total);
-      let o = 0;
-      for (const a of pending) { all.set(a, o); o += a.length; }
-      pending = [];
-      sending = true;
-      sentS += total / rate;
-      sentEl.textContent = `${sentS.toFixed(1)} s spoken`;
-      try { await api(`/api/p/${PID}/play/send`, {sid, msg: {kind: "audio", b64: b64(all), rate}}); }
-      catch { /* the session ended under us; its ended event says how */ }
-      sending = false;
-    }
-
-    function play(m) {
-      if (!audioCtx) return;
-      const raw = atob(m.b64 || "");
-      const n = raw.length >> 1;
-      if (!n) return;
-      const f = new Float32Array(n);
-      for (let i = 0; i < n; i++) {
-        let x = raw.charCodeAt(2 * i) | (raw.charCodeAt(2 * i + 1) << 8);
-        if (x >= 0x8000) x -= 0x10000;
-        f[i] = x / 32768;
-      }
-      const buf = audioCtx.createBuffer(1, n, m.rate || rate);
-      buf.copyToChannel(f, 0);
-      const src = audioCtx.createBufferSource();
-      src.buffer = buf;
-      src.connect(audioCtx.destination);
-      nextAt = Math.max(audioCtx.currentTime + 0.12, nextAt);
-      src.start(nextAt);
-      nextAt += buf.duration;
-      heardS += buf.duration;
-      heardEl.textContent = `${heardS.toFixed(1)} s heard back`;
-      playing.add(src);
-      src.onended = () => playing.delete(src);
-      wrap.dataset.played = String((Number(wrap.dataset.played) || 0) + 1);
-    }
-    function hush() {
-      for (const x of playing) { try { x.stop(); } catch { /* already done */ } }
-      playing.clear();
-      nextAt = 0;
-    }
-
-    function render(e) {
-      if (e.t === "out") {
-        const m = e.msg;
-        if (m.kind === "audio") {
-          play(m);
-          if (m.text) { log.append(el("div", "chat-msg from-bot", m.text)); log.scrollTop = log.scrollHeight; }
-        } else if (m.kind === "text") {
-          log.append(el("div", "chat-msg from-bot", m.text));
-        } else if (m.kind === "json" && (m.value || {}).event === "interrupt") {
-          hush();   // the caller spoke over it: stop what is queued
-          log.append(el("div", "note", "— interrupted —"));
-        }
-        if (m.end) { status.textContent = "The service ended the call."; end(); }
-      } else if (e.t === "refused") {
-        status.textContent = `Refused: ${e.reason}`;
-        stopCapture(); idle();
-      } else if (e.t === "ended") {
-        status.textContent = e.status === "error" ? `The call failed — ${e.error}` : `Call ended · ${fmtMs(e.ms)}`;
-        const o = el("button", "linkbtn", "Open run");
-        o.type = "button";
-        o.onclick = () => performUi("open_run", {run: e.trace_id, quiet: true});
-        status.append(" ", o);
-        stopCapture(); idle();
-      }
-    }
-
-    async function end() {
-      stopCapture();
-      await flush();
-      const was = sid;
-      sid = null;
-      if (was) api(`/api/p/${PID}/play/end`, {sid: was}).catch(() => {});
-    }
-    function stopCapture() {
-      clearInterval(timer);
-      timer = null;
-      if (stream) stream.getTracks().forEach(t => t.stop());
-      stream = null;
-      if (node) { node.port.onmessage = null; node.disconnect(); node = null; }
-      lvl.style.width = "0";
-    }
-    function idle() {
-      label.textContent = "Start the call";
-      mic.classList.remove("live");
-      mic.disabled = false;
-      sid = null;
-    }
-    mic.onclick = () => (sid ? end() : start());
+    mic.onclick = () => (call && call.live && call.service === d.service ? endCall(call) : startCall(d, rate, ui));
   }
+
+  // the call's state onto a toy — a fresh one, after the pane was rebuilt
+  function paintCall(c, ui) {
+    c.ui = ui;
+    ui.label.textContent = c.live ? "End the call" : "Start the call";
+    ui.mic.classList.toggle("live", c.live);
+    ui.mic.disabled = c.starting;
+    ui.sentEl.textContent = `${c.sentS.toFixed(1)} s spoken`;
+    ui.heardEl.textContent = `${c.heardS.toFixed(1)} s heard back`;
+    ui.wrap.dataset.played = String(c.played);
+    if (c.lines.length) {
+      ui.log.textContent = "";
+      for (const [cls, text] of c.lines) ui.log.append(el("div", cls, text));
+      ui.log.scrollTop = ui.log.scrollHeight;
+    }
+    paintStatus(c);
+  }
+  const onScreen = (c) => !!(c && c.ui && c.ui.wrap.isConnected && !box.hidden);
+
+  function say(c, cls, text) {
+    c.lines.push([cls, text]);
+    if (!c.ui) return;
+    c.ui.log.querySelector(".playempty")?.remove();
+    c.ui.log.append(el("div", cls, text));
+    c.ui.log.scrollTop = c.ui.log.scrollHeight;
+  }
+  function paintStatus(c) {
+    if (!c.ui) return;
+    c.ui.status.textContent = c.status;
+    if (c.run) {
+      const o = el("button", "linkbtn", "Open run");
+      o.type = "button";
+      o.onclick = () => performUi("open_run", {run: c.run, quiet: true});
+      c.ui.status.append(" ", o);
+    }
+  }
+  function setStatus(c, text, run) { c.status = text; c.run = run || null; paintStatus(c); }
+
+  async function startCall(d, rate, ui) {
+    const c = call = {service: d.service, rate, sid: null, live: false, starting: true, stream: null, node: null,
+                      pending: [], sending: false, timer: null, sentS: 0, heardS: 0, played: 0, nextAt: 0,
+                      playing: new Set(), lines: [], status: "", run: null, t0: 0, ui: null};
+    paintCall(c, ui);
+    try {
+      c.stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true,
+                                                                    noiseSuppression: true, autoGainControl: true}});
+    } catch (err) { setStatus(c, `The microphone is not available: ${err.message}`); idle(c); return; }
+    audioCtx = audioCtx || new AudioContext();
+    if (audioCtx.state === "suspended") await audioCtx.resume();
+    if (!workletReady) {
+      await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], {type: "application/javascript"})));
+      workletReady = true;
+    }
+    const src = audioCtx.createMediaStreamSource(c.stream);
+    c.node = new AudioWorkletNode(audioCtx, "ox-cap");
+    const mute = audioCtx.createGain();
+    mute.gain.value = 0;
+    src.connect(c.node); c.node.connect(mute); mute.connect(audioCtx.destination);
+    const ratio = audioCtx.sampleRate / rate;
+    let carry = new Float32Array(0);
+    c.node.port.onmessage = (ev) => {
+      const x = ev.data;
+      let sum = 0;
+      for (let i = 0; i < x.length; i++) sum += x[i] * x[i];
+      if (c.ui) c.ui.lvl.style.width = `${Math.min(100, Math.sqrt(sum / x.length) * 500).toFixed(0)}%`;
+      const buf = new Float32Array(carry.length + x.length);
+      buf.set(carry); buf.set(x, carry.length);
+      const n = Math.floor(buf.length / ratio);
+      const out = new Int16Array(n);
+      for (let j = 0; j < n; j++) {
+        const a = Math.floor(j * ratio), b = Math.max(a + 1, Math.floor((j + 1) * ratio));
+        let acc = 0;
+        for (let i = a; i < b; i++) acc += buf[i];
+        out[j] = Math.max(-32768, Math.min(32767, Math.round((acc / (b - a)) * 32767)));
+      }
+      carry = buf.slice(Math.floor(n * ratio));
+      c.pending.push(out);
+    };
+    try { c.sid = await open({service: d.service, toy: "voice", query: queryOf()}); }
+    catch (err) { stopCapture(c); setStatus(c, err.message); idle(c); return; }
+    sessions.get(c.sid).render = (e) => onEvent(c, e);
+    c.live = true;
+    c.starting = false;
+    c.t0 = Date.now();
+    c.timer = setInterval(() => flush(c), 200);
+    if (c.ui) paintCall(c, c.ui);
+    c.ui?.log.querySelector(".playempty")?.remove();
+  }
+
+  const b64 = (int16) => {
+    const bytes = new Uint8Array(int16.buffer);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  };
+
+  // what the microphone gave since the last batch, as one int16 run
+  function takePending(c) {
+    const total = c.pending.reduce((n, a) => n + a.length, 0);
+    const all = new Int16Array(total);
+    let o = 0;
+    for (const a of c.pending) { all.set(a, o); o += a.length; }
+    c.pending = [];
+    c.sentS += total / c.rate;
+    if (c.ui) c.ui.sentEl.textContent = `${c.sentS.toFixed(1)} s spoken`;
+    return all;
+  }
+
+  async function flush(c) {
+    paintPill();
+    if (c.sending || !c.pending.length || !c.sid) return;
+    const all = takePending(c);
+    c.sending = true;
+    try { await api(`/api/p/${PID}/play/send`, {sid: c.sid, msg: {kind: "audio", b64: b64(all), rate: c.rate}}); }
+    catch { /* the session ended under us; its ended event says how */ }
+    c.sending = false;
+  }
+
+  function play(c, m) {
+    if (!audioCtx) return;
+    const raw = atob(m.b64 || "");
+    const n = raw.length >> 1;
+    if (!n) return;
+    const f = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let x = raw.charCodeAt(2 * i) | (raw.charCodeAt(2 * i + 1) << 8);
+      if (x >= 0x8000) x -= 0x10000;
+      f[i] = x / 32768;
+    }
+    const buf = audioCtx.createBuffer(1, n, m.rate || c.rate);
+    buf.copyToChannel(f, 0);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    c.nextAt = Math.max(audioCtx.currentTime + 0.12, c.nextAt);
+    src.start(c.nextAt);
+    c.nextAt += buf.duration;
+    c.heardS += buf.duration;
+    c.played += 1;
+    if (c.ui) {
+      c.ui.heardEl.textContent = `${c.heardS.toFixed(1)} s heard back`;
+      c.ui.wrap.dataset.played = String(c.played);
+    }
+    c.playing.add(src);
+    src.onended = () => c.playing.delete(src);
+  }
+  function hush(c) {
+    for (const x of c.playing) { try { x.stop(); } catch { /* already done */ } }
+    c.playing.clear();
+    c.nextAt = 0;
+  }
+
+  function onEvent(c, e) {
+    if (e.t === "out") {
+      const m = e.msg;
+      if (m.kind === "audio") {
+        play(c, m);
+        if (m.text) say(c, "chat-msg from-bot", m.text);
+      } else if (m.kind === "text") {
+        say(c, "chat-msg from-bot", m.text);
+      } else if (m.kind === "json" && (m.value || {}).event === "interrupt") {
+        hush(c);   // the caller spoke over it: stop what is queued
+        say(c, "note", "— interrupted —");
+      }
+      if (m.end) { setStatus(c, "The service ended the call."); endCall(c); }
+    } else if (e.t === "refused") {
+      setStatus(c, `Refused: ${e.reason}`);
+      stopCapture(c); idle(c);
+    } else if (e.t === "ended") {
+      setStatus(c, e.status === "error" ? `The call failed — ${e.error}` : `Call ended · ${fmtMs(e.ms)}`, e.trace_id);
+      stopCapture(c); idle(c);
+    }
+  }
+
+  async function endCall(c) {
+    if (!c || !c.sid) return;
+    const sid = c.sid;
+    c.sid = null;             // first: nothing below can end it twice
+    stopCapture(c);
+    idle(c);
+    if (c.pending.length) {   // the last words, then the end
+      const all = takePending(c);
+      try { await api(`/api/p/${PID}/play/send`, {sid, msg: {kind: "audio", b64: b64(all), rate: c.rate}}); }
+      catch { /* already over */ }
+    }
+    api(`/api/p/${PID}/play/end`, {sid}).catch(() => {});
+  }
+  function stopCapture(c) {
+    clearInterval(c.timer);
+    c.timer = null;
+    if (c.stream) c.stream.getTracks().forEach(t => t.stop());
+    c.stream = null;
+    if (c.node) { c.node.port.onmessage = null; c.node.disconnect(); c.node = null; }
+    if (c.ui) c.ui.lvl.style.width = "0";
+  }
+  function idle(c) {
+    c.live = false;
+    c.starting = false;
+    if (c.ui) {
+      c.ui.label.textContent = "Start the call";
+      c.ui.mic.classList.remove("live");
+      c.ui.mic.disabled = false;
+    }
+    paintPill();
+  }
+
+  // the call, while its toy is off screen: how long, a way back, a way out
+  function paintPill() {
+    const want = !!(call && call.live) && !onScreen(call);
+    document.body.classList.toggle("oncall", want);   // a phone's header makes room for it
+    if (!want) { if (pill) pill.hidden = true; return; }
+    if (!pill) {
+      pill = el("span", "callpill");
+      const back = el("button", "callpill-go");
+      back.type = "button";
+      back.title = "Back to the call";
+      back.append(el("span", "dot"), el("span", "callpill-name"), el("span", "callpill-time"));
+      const stop = el("button", "callpill-end", "End");
+      stop.type = "button";
+      stop.title = "End the call";
+      back.onclick = () => {
+        if (!call) return;
+        v.service = call.service;
+        v.toy = "voice";
+        save();
+        switchTab("playground");
+      };
+      stop.onclick = () => endCall(call);
+      pill.append(back, stop);
+      const live = document.getElementById("live");
+      if (live) live.before(pill); else return;
+    }
+    pill.hidden = false;
+    const s = Math.floor((Date.now() - call.t0) / 1000);
+    pill.querySelector(".callpill-name").textContent = call.service;
+    pill.querySelector(".callpill-time").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+
+  // leaving the page hangs up (the bridge would otherwise wait on silence)
+  addEventListener("pagehide", () => {
+    if (!call || !call.sid) return;
+    fetch(`/api/p/${PID}/play/end`, {method: "POST", keepalive: true, headers: {"content-type": "application/json"},
+                                     body: JSON.stringify({sid: call.sid})}).catch(() => {});
+  });
 
   /* Simulated user: an LLM persona plays the other side, N at once. */
   function simToy(main, d) {

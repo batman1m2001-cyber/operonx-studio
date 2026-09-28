@@ -1299,8 +1299,9 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.get("/api/p/{pid}/monitor")
     def monitor_view(pid: str, origin: str = "", name: str = "", since: str = "", until: str = "",
-                     buckets: int = 24) -> JSONResponse:
-        """One service's or job's health over a range (see monitor.py)."""
+                     buckets: int = 24, playground: int = 1) -> JSONResponse:
+        """One service's or job's health over a range (see monitor.py); a
+        service's playground sessions are counted in unless ``playground=0``."""
         from operonx_studio.monitor import monitor
 
         watcher = _watcher(pid)
@@ -1316,7 +1317,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         try:
             data = monitor(pr.store, origin=origin or None, name=name or None,
                            since=float(since) if since else None, until=float(until) if until else None,
-                           buckets=buckets, key_ops=key_ops)
+                           buckets=buckets, key_ops=key_ops, with_playground=bool(playground))
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         data["key_ops"] = key_ops

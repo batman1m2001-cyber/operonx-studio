@@ -281,7 +281,7 @@ You approved all five on 2026-09-27.
 
 | # | Item | State |
 |---|---|---|
-| S1 | **operonx 1.9.0** | Branch `feat/runs-records` (8a0ea7d on top; `main` is at 1.8.1). After release, bump the pins in the studio and the callbot. |
+| S1 | **operonx 1.9.0** | **Released 2026-09-28** (PR #59, merged as efd8b37; on PyPI, tag v1.9.0). Pins bumped: the studio `operonx>=1.9.0`, the callbot `feat/runs-by-origin` locked to 1.9.0. |
 | S2 | **Landing the studio work** | `feat/assistant-first` stacks on `feat/platform` on `redesign/ui`; none are pushed. The studio's `main` is 1d9c773. One PR, or one per phase? |
 | S3 | **Callbot `feat/runs-by-origin`** | 4 commits (runs by origin, key ops, the playground codec) on top of the pushed `refactor/operonx-studio` (ee83947), not pushed |
 | S4 | **Callbot refactor into `staging`** for a real deploy | You asked on 2026-09-18 and said not yet. `staging` has moved since (2b85dc4) and needs a re-sync plan. `staging` is never touched without you. |
@@ -339,6 +339,7 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
 | 6 | **A5** Sign-in | 2ba96e5 | `scripts/perf/signin.py` 14/14 (up to the sign-in link, then Cancel: plan §4); the CLI probes below; 3 new server tests against a fake CLI that signs in and out (494 studio tests); `composer.py`, `attachments.py`, `models.py`, `usage.py`; `live_assistant.py` 23/23; `flows.py` 21/21. **Still yours to do: one real sign-in** (paste the code once) |
 | 7 | **N2, N4, N3** | see git log (`N2 N4 N3`) | bytes, revisit and first-open times before and after (below); the served bundles token-for-token identical to their sources (acorn); 7 new tests (500 studio tests); layout audit 0 errors in 328 cases; `flows.py` 21/21; `live_assistant.py` 23/23; every UI check above |
 | 8 | **N1** Dark mode | see git log (`N1`) | the palette validator on the dark node kinds (all pairs: every check passes); WCAG contrast of every text token on every dark surface; layout audit in dark (`--dark`) 0 errors in 328 cases; every element's computed colours identical between the two generators, on 32 screens; 20 new tests (520 tests, 3 skipped); `flows.py` 21/21; `composer.py` 35/35; `attachments.py` 16/16; `models.py` 13/13; `usage.py` 15/15; `signin.py` 14/14; every screen in both themes, desktop and phone |
+| 9 | **S1** operonx 1.9.0, **N5** a live voice session (automated part) | see git log (`N5`) | S1: PR #59 gates (below), published; the studio's 520 tests on the PyPI wheel; the callbot's 291 tests (the same 2 env-var failures before and after the bump). N5: six fake-microphone calls through the real STT/LLM/TTS; the call pill's paths; the Monitor's service view; 1 new server test (521 studio tests); 39 JS tests; `flows.py` |
 
 **A1 notes.**
 - **A JSON paste becomes a card from 200 characters, even on one line.**
@@ -673,3 +674,42 @@ pre-deploy risks D1–D3 (§6.4). B9 comes after this plan.
   keys) had the browser's own look; they now match the other fields. A
   component's own style still wins.
 - **The layout audit takes `--dark`.**
+
+**S1 and N5 notes.**
+- **S1, operonx 1.9.0.** Before the PR: docs for runs, the playground
+  bridge and evals (the tracing guide still showed classes V3 removed);
+  CI's ruff 0.16 would have failed 14 files; `mongo` added to the extras
+  smoke. Gates: 2241 tests on Python 3.10 with the Postgres store tests
+  against a throwaway container, `mkdocs --strict`, the wheel's extras,
+  all 18 examples building offline. You merged; Publish put it on PyPI.
+- **N5, the automated part.** Chrome's fake microphone played a recorded
+  caller ("anh bận lắm gọi lại sau đi", twice) into the callbot's `call`
+  door, in `/home/thanglq/educa-reminder-agent` (the studio project with
+  the telco codec). The call ran end to end: the greeting, the first turn
+  understood (STT 171 ms, `llm_classify` → busy in 167 ms), re-prompts,
+  the bot's hang-up at 52.6 s; 148 ops streamed live; the run recorded
+  locally only, its trace readable in the studio.
+  - **Setup:** the callbot's `.env` has no `STT_API_URL`/`STT_API_KEY`
+    (it predates the http STT path), so the studio runs with only the
+    `STT_*` keys of `.env_dev` exported. No file was changed.
+- **Found and fixed on the way:**
+  - **Leaving the Playground ended a voice call,** so the canvas could
+    never be watched during one. The call now belongs to the page: it
+    keeps going on other screens, a pill in the header shows it
+    ("call 0:29 · End") and leads back to it, the toy picks the live call
+    up again, and leaving the page hangs up (checked against a control:
+    without the handler the session was still live after 43 s; with it,
+    it ended in 4.8 s). On a phone the crumbs step aside for the pill.
+    Checked: a whole call watched from the Flow, the cards lighting on
+    every turn; back to the call mid-way; End from the Monitor.
+  - **That exit also overflowed the stack:** `flush()` and `end()` called
+    each other (the captured stack: `flush → end → flush …`). Gone with
+    the change above; `end` now clears the session first.
+  - **The Monitor hid playground sessions under their service:** with
+    `call` chosen it said "No runs" and pointed to the Playground, whose
+    sessions are `origin=playground`. A service's view now counts them,
+    says how many ("Includes 14 playground sessions · Served runs only"),
+    and pins its key ops first: `stt` p95 179 ms, `llm_classify` 230 ms,
+    `synthesize` 21 ms.
+- **Still yours:** the same call with headphones and your own voice
+  (open the educa_reminder_agent project → Playground → call → Voice).
