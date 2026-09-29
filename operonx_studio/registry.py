@@ -1,6 +1,10 @@
 """Which projects the studio knows about, and what it remembers of them.
 
-State is one JSON file, ``~/.operonx/studio.json`` — recents, nothing else.
+State is one JSON file, ``<state>/studio.json`` — recents, nothing else.
+``<state>`` is ``OPERONX_STUDIO_STATE_DIR``, default ``~/.operonx``: the
+other stores (conversations, accounts, the Claude sign-in, the IR cache)
+sit beside it, so one variable gives a studio a state of its own — a test
+or a gate run never touches the live one.
 Everything worth knowing about a project lives in the project (the
 manifest, the code, the traces); duplicating any of it here would be a
 cache that lies after an edit. What the file holds is only what cannot be
@@ -16,16 +20,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-__all__ = ["ProjectRef", "Recents", "project_id"]
+__all__ = ["ProjectRef", "Recents", "project_id", "state_dir"]
 
-STATE_DIR = Path.home() / ".operonx"
-STATE_FILE = STATE_DIR / "studio.json"
 MANIFEST = "operonx.toml"
+
+
+def state_dir() -> Path:
+    """Where this studio keeps its own state. Read on every call, not at
+    import: the CLI and the tests set the variable after importing."""
+    raw = os.environ.get("OPERONX_STUDIO_STATE_DIR")
+    return Path(raw).expanduser() if raw else Path.home() / ".operonx"
 
 
 def project_id(root: Path) -> str:
@@ -76,7 +86,7 @@ class Recents:
     """The open-project history, persisted across studio restarts."""
 
     def __init__(self, state_file: Optional[Path] = None):
-        self._file = state_file or STATE_FILE
+        self._file = state_file or state_dir() / "studio.json"
         self._items: Dict[str, ProjectRef] = {}
         self._load()
 

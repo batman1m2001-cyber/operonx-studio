@@ -184,8 +184,10 @@ def undo(repo: Path, sha: str, files: List[str], new_files: List[str]) -> List[s
 # machine's Claude Code. Until one exists, the machine's login is used.
 
 def claude_home() -> Path:
+    from .registry import state_dir
+
     raw = os.environ.get("OPERONX_STUDIO_CLAUDE_HOME")
-    return Path(raw).expanduser() if raw else Path.home() / ".operonx" / "claude"
+    return Path(raw).expanduser() if raw else state_dir() / "claude"
 
 
 _home = {"checked": False, "signed_in": False, "email": None}
