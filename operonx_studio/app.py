@@ -801,7 +801,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         user = users.check(username, password)
         if user is None:
             throttle.fail(*keys)
-            return JSONResponse({"error": "wrong username or password"}, status_code=401)
+            return JSONResponse({"error": "Wrong username or password."}, status_code=401)
         if user["disabled"]:
             # only someone who knew the password learns this
             return JSONResponse({"error": "This account is disabled — ask an admin"}, status_code=403)
