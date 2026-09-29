@@ -31,7 +31,7 @@ async def main():
             await pg.screenshot(path=f"{OUT}/{name}_flow.png")
             # the assistant
             if mob:
-                await pg.click(".chat-fab")
+                await pg.click(".ax-askbar")        # the phone's Ask bar (the old chat button went in R3)
             else:
                 await pg.evaluate("window.oxSide && window.oxSide.show('assistant')")
             await pg.wait_for_timeout(500)
