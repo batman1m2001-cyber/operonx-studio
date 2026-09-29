@@ -530,6 +530,8 @@ class Turn:
     kill_timer: Optional[asyncio.TimerHandle] = None
     usage: Dict[str, Any] = field(default_factory=dict)
     last_flush: float = 0.0
+    owner: Optional[str] = None           # the person whose turn it is (their user id)
+    on_end: List[Any] = field(default_factory=list)       # called once the turn has ended
 
 
 def _tool_label(name: str, inputs: Dict[str, Any], cwd: Optional[str] = None) -> str:
@@ -564,6 +566,16 @@ class Relay:
         self.finished: List[Dict[str, Any]] = []   # recent turn endings, for the pulse
         self.finished_seq = 0
         self.on_finish: Optional[Any] = None        # called with the scope when a turn ends
+        # a turn's MCP config lives in a 0600 file here while it runs (it
+        # carries the turn's agent token: on the command line, any local
+        # user could read it from /proc). A studio that died left its
+        # files behind; their tokens died with it.
+        self.run_dir = store.path.parent / "run"
+        for stale in self.run_dir.glob("mcp-*.json"):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
         # a previous studio died with its turns; say so in their transcripts
         for sid in store.interrupted():
             sess = store.session(sid)
@@ -661,11 +673,14 @@ class Relay:
     def start(self, sid: str, message: str, *, cwd: Optional[Path], context: str,
               mcp: Optional[Dict[str, Any]] = None, kind: str = "message", fork_from: Optional[str] = "",
               view: Optional[Dict[str, Any]] = None, attachments: Optional[List[Dict[str, Any]]] = None,
-              extra_mcp: Optional[Dict[str, Any]] = None) -> Turn:
+              extra_mcp: Optional[Dict[str, Any]] = None, owner: Optional[str] = None,
+              on_end: Optional[List[Any]] = None) -> Turn:
         """Begin a turn in session *sid*; returns at once (call from a loop).
 
         ``fork_from`` is the Claude session to continue: ``""`` means the
-        session's latest, ``None`` a fresh conversation."""
+        session's latest, ``None`` a fresh conversation. ``owner`` is who
+        asked; ``on_end`` callables run once the turn has ended (the app
+        revokes the turn's agent token there)."""
         sess = self.store.session(sid)
         if sess is None:
             raise KeyError(sid)
@@ -683,7 +698,8 @@ class Relay:
         turn = Turn(id=uuid.uuid4().hex[:16], session=sid, scope=sess["scope"], kind=kind,
                     next_seq=self.store.next_seq(sid), fresh=asyncio.Event(), model=sess.get("model"),
                     requested=sess.get("model"), effort=sess.get("effort"), extra_mcp=dict(extra_mcp or {}),
-                    account=account, reseed=reseed, cwd=str(cwd) if cwd else None)
+                    account=account, reseed=reseed, cwd=str(cwd) if cwd else None, owner=owner,
+                    on_end=list(on_end or []))
         self.turns[turn.id] = turn
         refs = list(attachments or [])
         self.store.add_turn(turn.id, sid, message=message, kind=kind, claude_before=before, attachments=refs)
@@ -722,6 +738,7 @@ class Relay:
                    attachments: Optional[List[Dict[str, Any]]] = None) -> None:
         binary = _chat.find_claude()
         final = "failed"
+        config: Optional[Path] = None
         try:
             if binary is None:
                 self._item(turn, "error", text="No claude binary found on this machine — set "
@@ -752,7 +769,8 @@ class Relay:
                 # the studio's own tools, and the project's own servers (its
                 # .mcp.json) beside them
                 servers = {**{k: v for k, v in turn.extra_mcp.items() if k != "studio"}, "studio": mcp}
-                cmd += ["--mcp-config", json.dumps({"mcpServers": servers})]
+                config = self._mcp_file(turn, {"mcpServers": servers})
+                cmd += ["--mcp-config", str(config)]
                 # Only the studio's own tools: not the host's personal
                 # connectors (mail, drive, calendar), which the studio's agent
                 # has no business in, and each turn starts ~1.3 s sooner
@@ -788,7 +806,22 @@ class Relay:
             self._item(turn, "error", text=f"The relay failed: {exc}", retry=True)
             final = "failed"
         finally:
+            if config is not None:
+                try:
+                    config.unlink()
+                except OSError:
+                    pass
             await self._finish(turn, final)
+
+    def _mcp_file(self, turn: Turn, config: Dict[str, Any]) -> Path:
+        """The turn's MCP config as a file only this user can read, named
+        by the turn; deleted when the turn ends."""
+        self.run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path = self.run_dir / f"mcp-{turn.id}.json"
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(config, fh)
+        return path
 
     async def _relay(self, turn: Turn, cwd: Optional[Path], snap: Optional[Dict[str, Any]]) -> str:
         proc = turn.proc
@@ -1038,6 +1071,12 @@ class Relay:
         del self.finished[:-50]
         if turn.fresh is not None:
             turn.fresh.set()
+        for hook in turn.on_end:
+            try:
+                hook()
+            except Exception:  # noqa: BLE001 — a clean-up never breaks a turn
+                pass
+        turn.on_end = []
         if self.on_finish is not None:
             try:
                 self.on_finish(turn.scope)
@@ -1102,6 +1141,8 @@ class Relay:
                 proc.kill()
             turn.kill_timer = asyncio.get_running_loop().call_later(
                 3.0, lambda: proc.returncode is None and proc.kill())
+        if reason == "access":
+            self._item(turn, "error", text="Stopped: an admin changed this person's access.", retry=False)
         if reason == "time":
             self._item(turn, "error", text="Stopped: this ran longer than the studio allows "
                                            "(OPERONX_STUDIO_CHAT_MAX_MIN).", retry=False)

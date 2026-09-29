@@ -334,6 +334,9 @@ select { width: auto; min-height: 30px; padding: 4px 28px 4px 10px; font-size: v
 .loginbtn { width: 100%; margin-top: 20px; min-height: 40px; font-size: var(--fs-base); }
 .loginerr { color: var(--err); font-size: var(--fs-md); margin-top: 12px; }
 .loginerr:empty { display: none; }
+.loginrule { color: var(--text-3); font-size: var(--fs-sm); margin: 10px 0 0; }
+.loginalt { display: block; text-align: center; margin-top: 14px; font-size: var(--fs-md); color: var(--text-2); }
+.logincard [hidden] { display: none; }
 
 /* ── the project shell ────────────────────────────────────────────── */
 

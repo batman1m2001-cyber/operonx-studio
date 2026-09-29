@@ -22,6 +22,7 @@ means the tabs say so instead of guessing.
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import re
 import os
@@ -48,6 +49,7 @@ from operonx_studio.registry import MANIFEST, ProjectRef, Recents
 __all__ = ["build_studio_app", "serve_studio"]
 
 STATIC = Path(__file__).parent / "static"
+_LOG = logging.getLogger(__name__)
 
 
 # ── project-side helpers ────────────────────────────────────────────────
@@ -516,7 +518,18 @@ def build_studio_app(recents: Optional[Recents] = None):
     from fastapi.middleware.gzip import GZipMiddleware
     from fastapi.responses import HTMLResponse
 
-    app = FastAPI(title="operonx studio", docs_url=None, redoc_url=None)
+    from fastapi import Depends
+
+    from .access import AccessDenied, authorize, is_open_path, unclassified
+
+    def _authorize(request: Request) -> None:
+        authorize(request)
+
+    # Every route passes the access table (operonx_studio/access.py) before
+    # its handler runs. No /openapi.json: it is not an APIRoute, so the
+    # table could not guard it, and nothing reads it.
+    app = FastAPI(title="operonx studio", docs_url=None, redoc_url=None, openapi_url=None,
+                  dependencies=[Depends(_authorize)])
     app.state.recents = recents
     app.state.watchers = watchers
     # IR payloads carry every binding, source snippet and layout — tens to
@@ -644,66 +657,340 @@ def build_studio_app(recents: Optional[Recents] = None):
                 if "v" in request.query_params else "no-cache")
         return response
 
-    # ── authentication ──────────────────────────────────────────────
-    # The studio rides a public tunnel; an open door there is an open
-    # door to the filesystem browser and the param editor. Simple by
-    # design: one user/pass (root/123 unless configured), a signed
-    # session cookie that survives restarts, and an off switch.
+    # ── authentication: people, sessions, the agent's token ─────────────
+    # The studio rides a public tunnel; an open door there is an open door
+    # to the filesystem browser and the param editor. Accounts live in
+    # <state>/users.sqlite (operonx_studio/users.py); the middleware below
+    # resolves who is asking (request.state.user) and the access table
+    # decides what they may do (operonx_studio/access.py).
     #
-    #   OPERONX_STUDIO_USER=...   (default "root")
-    #   OPERONX_STUDIO_PASS=...   (default "123")
-    #   OPERONX_STUDIO_AUTH=off   (no auth at all — trusted networks)
-    auth: Optional[Dict[str, str]] = None
-    if os.environ.get("OPERONX_STUDIO_AUTH", "").lower() not in ("off", "0", "false"):
-        import hmac as _hmac
+    #   OPERONX_STUDIO_USER/PASS   the first admin, read once on a start with no accounts
+    #   OPERONX_STUDIO_AUTH=off    no sign-in: everyone is the first admin (trusted networks, the tests)
+    from .users import AgentTokens, PasswordError, Throttle, UserStore, password_problem, check_password
 
-        _user = os.environ.get("OPERONX_STUDIO_USER", "root")
-        _pass = os.environ.get("OPERONX_STUDIO_PASS", "123")
-        _key = hashlib.sha256(f"oxstudio:{_user}:{_pass}".encode()).digest()
-        auth = {"user": _user, "pass": _pass,
-                "token": _hmac.new(_key, b"session-v1", hashlib.sha256).hexdigest()}
+    auth_on = os.environ.get("OPERONX_STUDIO_AUTH", "").lower() not in ("off", "0", "false")
+    users = UserStore(recents.state_file.parent / "users.sqlite")
+    agents = AgentTokens()
+    throttle = Throttle()
+    app.state.users = users
+    app.state.agents = agents
+    if auth_on:
+        from . import chat as _chat_first
+
+        users.ensure_first_admin(os.environ.get("OPERONX_STUDIO_USER", "root"),
+                                 os.environ.get("OPERONX_STUDIO_PASS", "123"),
+                                 claude_home=str(_chat_first.claude_home()))
+
+    #: who everyone is with auth off and no accounts yet
+    LOCAL = {"id": "local", "username": "local", "name": "local", "role": "admin", "must_change": False,
+             "disabled": False, "machine_login": True}
+
+    def _person(user: Dict[str, Any], via: str) -> Dict[str, Any]:
+        """What a request carries about who sent it: never the hash."""
+        return {"id": user["id"], "username": user["username"], "name": user.get("name") or user["username"],
+                "role": user["role"], "must_change": bool(user.get("must_change")), "via": via}
+
+    #: what someone who must choose a password may still reach
+    _MUST_CHANGE_OK = ("/api/me", "/api/me/password", "/api/logout")
+
+    def _cookie(response: Any, request: Any, token: str) -> None:
+        # Secure when the tunnel says the browser spoke https to it
+        secure = (request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+                  or request.url.scheme == "https")
+        response.set_cookie("oxsession", token, httponly=True, samesite="lax", secure=secure,
+                            max_age=30 * 86400)
+
+    def _same_origin(request: Any) -> bool:
+        """A state change from another site's page is refused (decision D15).
+        No Origin (curl, the assistant's tools, old browsers on same-origin
+        GETs) is not a browser request from elsewhere."""
+        origin = request.headers.get("origin")
+        if origin is None:
+            return True
+        from urllib.parse import urlsplit
+
+        host = urlsplit(origin).netloc.lower()
+        allowed = {h.strip().lower() for h in (request.headers.get("host", ""),
+                                               request.headers.get("x-forwarded-host", "")) if h.strip()}
+        return bool(host) and host in allowed
+
+    def _client(request: Any) -> str:
+        """Who is knocking, for the throttle. Behind the tunnel every request
+        comes from loopback, so a loopback peer's X-Forwarded-For is trusted;
+        anyone else's is not (it would let them pick their own key)."""
+        peer = request.client.host if request.client else ""
+        fwd = request.headers.get("x-forwarded-for", "")
+        if fwd and peer in ("127.0.0.1", "::1", "localhost"):
+            return fwd.split(",")[0].strip()
+        return peer
 
     @app.middleware("http")
     async def _guard(request, call_next):
-        if auth is not None:
-            path = request.url.path
-            is_open = (path == "/login" or path == "/api/login"
-                       or path.startswith("/static"))
-            if not is_open and request.cookies.get("oxsession") != auth["token"]:
-                if path.startswith("/api/"):
-                    return JSONResponse({"error": "authentication required"},
-                                        status_code=401)
-                from fastapi.responses import RedirectResponse
+        path = request.url.path
+        if request.method not in ("GET", "HEAD", "OPTIONS") and not _same_origin(request):
+            return JSONResponse({"error": "cross-site request refused"}, status_code=403)
+        if not auth_on:
+            admin = users.first_admin()
+            request.state.user = _person(admin, "web") if admin else dict(LOCAL, via="web")
+            return await call_next(request)
+        user, session, touched = None, None, False
+        token = request.cookies.get("oxsession") or ""
+        if token:
+            uid = agents.resolve(token)
+            if uid is not None:
+                got = users.cached_user(uid)
+                if got is not None and not got["disabled"]:
+                    user = _person(got, "assistant")
+            else:
+                got, session, touched = users.resolve(token)
+                if got is not None:
+                    user = _person(got, "web")
+        request.state.user = user
+        request.state.session = session
+        if user is None and not is_open_path(path):
+            if path.startswith("/api/"):
+                return JSONResponse({"error": "authentication required"}, status_code=401)
+            from fastapi.responses import RedirectResponse
 
-                return RedirectResponse("/login", status_code=302)
-        return await call_next(request)
+            return RedirectResponse("/login", status_code=302)
+        if user is not None and user["must_change"] and not is_open_path(path) and path not in _MUST_CHANGE_OK:
+            if path.startswith("/api/"):
+                return JSONResponse({"error": "choose a new password first", "must_change": True},
+                                    status_code=403)
+            from fastapi.responses import RedirectResponse
 
-    @app.get("/login")
-    def login_page() -> HTMLResponse:
-        return _page("login.html")
-
-    @app.post("/api/login")
-    def login(body: Dict[str, Any]) -> JSONResponse:
-        if auth is None:
-            return JSONResponse({"ok": True})
-        import hmac as _hmac
-
-        good = (_hmac.compare_digest(str(body.get("username") or ""), auth["user"])
-                and _hmac.compare_digest(str(body.get("password") or ""), auth["pass"]))
-        if not good:
-            return JSONResponse({"error": "wrong username or password"}, status_code=401)
-        response = JSONResponse({"ok": True})
-        response.set_cookie("oxsession", auth["token"], httponly=True,
-                            samesite="lax", max_age=30 * 86400)
+            return RedirectResponse("/login", status_code=302)
+        response = await call_next(request)
+        if touched:
+            # the session's 30 days moved on; so does the browser's copy
+            _cookie(response, request, token)
         return response
 
+    @app.exception_handler(AccessDenied)
+    async def _denied(request, exc: AccessDenied):
+        if exc.status == 401 and not request.url.path.startswith("/api/"):
+            from fastapi.responses import RedirectResponse
+
+            return RedirectResponse("/login", status_code=302)
+        return JSONResponse({"error": exc.message}, status_code=exc.status)
+
+    @app.get("/login")
+    def login_page(request: Request) -> HTMLResponse:
+        # someone signed in with a temporary or default password lands on
+        # the "choose your password" step, without a flash of the form
+        me = getattr(request.state, "user", None)
+        boot = ""
+        if auth_on and me is not None and me["must_change"] and me["via"] == "web":
+            boot = ('<script id="login-boot" type="application/json">'
+                    + json.dumps({"step": "password", "username": me["username"]}).replace("</", "<\\/")
+                    + "</script>")
+        return _page("login.html", boot)
+
+    @app.post("/api/login")
+    def login(body: Dict[str, Any], request: Request) -> JSONResponse:
+        if not auth_on:
+            return JSONResponse({"ok": True, "must_change": False})
+        username = str(body.get("username") or "").strip().lower()[:64]
+        password = str(body.get("password") or "")[:1024]
+        keys = (f"user:{username}", f"addr:{_client(request)}")
+        wait = throttle.locked(*keys)
+        if wait > 0:
+            secs = int(wait) + 1
+            return JSONResponse({"error": f"Too many attempts — try again in {secs} s", "retry_after": secs},
+                                status_code=429, headers={"Retry-After": str(secs)})
+        user = users.check(username, password)
+        if user is None:
+            throttle.fail(*keys)
+            return JSONResponse({"error": "wrong username or password"}, status_code=401)
+        if user["disabled"]:
+            # only someone who knew the password learns this
+            return JSONResponse({"error": "This account is disabled — ask an admin"}, status_code=403)
+        throttle.clear(*keys)
+        token = users.start_session(user["id"], label=request.headers.get("user-agent", ""))
+        response = JSONResponse({"ok": True, "must_change": user["must_change"],
+                                 "user": _person(user, "web")})
+        _cookie(response, request, token)
+        return response
+
+    def _end_this_session(request: Any) -> None:
+        token = request.cookies.get("oxsession") or ""
+        if token and agents.resolve(token) is None:
+            users.end_session(token)
+
     @app.get("/logout")
-    def logout():
+    def logout(request: Request):
         from fastapi.responses import RedirectResponse
 
+        _end_this_session(request)
         response = RedirectResponse("/login", status_code=302)
         response.delete_cookie("oxsession")
         return response
+
+    @app.post("/api/logout")
+    def api_logout(request: Request) -> JSONResponse:
+        _end_this_session(request)
+        response = JSONResponse({"ok": True})
+        response.delete_cookie("oxsession")
+        return response
+
+    def _me_out(user: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: user.get(k) for k in ("id", "username", "name", "role", "must_change", "disabled",
+                                          "machine_login", "claude_email", "created", "last_seen")}
+
+    @app.get("/api/me")
+    def me(request: Request) -> JSONResponse:
+        who = request.state.user
+        row = users.user(who["id"]) if who["id"] != "local" else None
+        return JSONResponse({"user": {**(_me_out(row) if row else {}), **who}, "auth": auth_on})
+
+    @app.post("/api/me/password")
+    def me_password(body: Dict[str, Any], request: Request) -> JSONResponse:
+        """Choose your own password. The current one is asked for, except on
+        the first sign-in with a temporary one (you just typed it). Your
+        other sessions end; this one stays."""
+        who = request.state.user
+        row = users.user(who["id"]) if who["id"] != "local" else None
+        if row is None:
+            return JSONResponse({"error": "There are no accounts yet — auth is off"}, status_code=400)
+        new = str(body.get("new") or "")
+        if not row["must_change"] and not check_password(str(body.get("current") or ""), row["pw"]):
+            return JSONResponse({"error": "Your current password is not right"}, status_code=400)
+        problem = password_problem(new, row["username"])
+        if problem is None and check_password(new, row["pw"]):
+            problem = "Choose a password different from the one you have."
+        if problem:
+            return JSONResponse({"error": problem}, status_code=400)
+        users.set_password(row["id"], new, must_change=False)
+        ended = users.end_sessions(row["id"], keep=getattr(request.state, "session", None))
+        return JSONResponse({"ok": True, "ended_sessions": ended})
+
+    # ── people (admins; the Team page arrives in P2) ──
+
+    def _stop_turns_of(uid: str) -> int:
+        stopped = 0
+        for turn in list(relay.turns.values()):
+            if turn.owner == uid and not turn.done:
+                relay.stop(turn.id, reason="access")
+                stopped += 1
+        return stopped
+
+    def _user_out(user: Dict[str, Any], counts: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+        return {**_me_out(user), "sessions": (counts or {}).get(user["id"], 0)}
+
+    def _target(uid: str, request: Any) -> Any:
+        row = users.user(uid)
+        if row is None:
+            return JSONResponse({"error": "no such person"}, status_code=404)
+        return row
+
+    @app.get("/api/admin/users")
+    def admin_users() -> JSONResponse:
+        counts = users.session_counts()
+        return JSONResponse({"users": [_user_out(u, counts) for u in users.users()], "roles": ["admin", "editor", "viewer"]})
+
+    @app.post("/api/admin/users")
+    def admin_add(body: Dict[str, Any]) -> JSONResponse:
+        """Someone new, with a temporary password shown once."""
+        try:
+            user, password = users.create(str(body.get("username") or ""), name=str(body.get("name") or ""),
+                                          role=str(body.get("role") or "editor"), must_change=True)
+        except PasswordError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"user": _user_out(user), "password": password})
+
+    @app.patch("/api/admin/users/{uid}")
+    async def admin_update(uid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        row = _target(uid, request)
+        if isinstance(row, JSONResponse):
+            return row
+        me_id = request.state.user["id"]
+        update: Dict[str, Any] = {}
+        if "name" in body:
+            update["name"] = str(body.get("name") or "").strip()[:80]
+        if "role" in body and body["role"] != row["role"]:
+            if uid == me_id:
+                return JSONResponse({"error": "You can't change your own role"}, status_code=400)
+            if body["role"] not in ("admin", "editor", "viewer"):
+                return JSONResponse({"error": "A role is admin, editor or viewer"}, status_code=400)
+            update["role"] = body["role"]
+        if "disabled" in body and bool(body["disabled"]) != row["disabled"]:
+            if uid == me_id:
+                return JSONResponse({"error": "You can't disable yourself"}, status_code=400)
+            update["disabled"] = bool(body["disabled"])
+        rank = {"viewer": 0, "editor": 1, "admin": 2}
+        demoted = "role" in update and rank[update["role"]] < rank[row["role"]]
+        disabled = bool(update.get("disabled"))
+        if (demoted or disabled) and row["role"] == "admin" and not row["disabled"] and users.active_admins() <= 1:
+            return JSONResponse({"error": "They are the last active admin"}, status_code=400)
+        user = users.update(uid, **update)
+        stopped = 0
+        if demoted or disabled:
+            # decision D16: a demotion or a disable holds from the next request
+            users.end_sessions(uid)
+            agents.revoke_user(uid)
+            stopped = _stop_turns_of(uid)
+        return JSONResponse({"user": _user_out(user), "stopped_turns": stopped})
+
+    @app.post("/api/admin/users/{uid}/password")
+    def admin_reset(uid: str, request: Request) -> JSONResponse:
+        """A temporary password, shown once; they choose their own at the
+        next sign-in, and every session of theirs ends now."""
+        row = _target(uid, request)
+        if isinstance(row, JSONResponse):
+            return row
+        if uid == request.state.user["id"]:
+            return JSONResponse({"error": "Change your own password from your account"}, status_code=400)
+        password = users.reset_password(uid)
+        agents.revoke_user(uid)
+        return JSONResponse({"user": _user_out(users.user(uid)), "password": password})
+
+    @app.delete("/api/admin/users/{uid}")
+    async def admin_delete(uid: str, request: Request) -> JSONResponse:
+        """Someone leaves: their sessions and turns end, their own Claude
+        sign-in is signed out and removed. (Their conversations go too once
+        conversations have owners — docs/TEAM_PLAN.md P3.)"""
+        row = _target(uid, request)
+        if isinstance(row, JSONResponse):
+            return row
+        if uid == request.state.user["id"]:
+            return JSONResponse({"error": "You can't delete yourself"}, status_code=400)
+        if row["role"] == "admin" and not row["disabled"] and users.active_admins() <= 1:
+            return JSONResponse({"error": "They are the last active admin"}, status_code=400)
+        users.end_sessions(uid)
+        agents.revoke_user(uid)
+        stopped = _stop_turns_of(uid)
+        await _forget_claude_home(row)
+        users.delete(uid)
+        return JSONResponse({"deleted": uid, "stopped_turns": stopped})
+
+    async def _forget_claude_home(row: Dict[str, Any]) -> None:
+        """Sign their own Claude directory out, then remove it — only when
+        it lies inside this studio's state directory: a directory the
+        studio did not make (a real ~/.claude named by an env variable) is
+        never touched."""
+        import shutil
+
+        from . import chat as _chat_mod
+
+        raw = row.get("claude_home")
+        if not raw:
+            return
+        home = Path(raw).resolve()
+        state = recents.state_file.parent.resolve()
+        if state not in home.parents or not home.is_dir():
+            return
+        binary = _chat_mod.find_claude()
+        if binary is not None:
+            env = _chat_mod._spawn_env(home=False)
+            env["CLAUDE_CONFIG_DIR"] = str(home)
+            proc = await asyncio.create_subprocess_exec(
+                binary, "auth", "logout", env=env, stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=30)
+            except asyncio.TimeoutError:
+                proc.kill()
+        shutil.rmtree(home, ignore_errors=True)
 
     def _watcher(pid: str) -> Optional[ProjectWatcher]:
         if pid in watchers:
@@ -1834,9 +2121,8 @@ def build_studio_app(recents: Optional[Recents] = None):
     # ── the review queue: runs read as conversations, judged, labelled ──
     from .review import ReviewLog, conversation
 
-    def _reviewer() -> str:
-        # one login today; a team server returns real accounts here
-        return (auth or {}).get("user") or "local"
+    def _reviewer(request: Any) -> str:
+        return request.state.user["username"]
 
     def _egress_ops(watcher: ProjectWatcher) -> set:
         names: set = set()
@@ -1902,7 +2188,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         return got if isinstance(got, JSONResponse) else JSONResponse(got)
 
     @app.post("/api/p/{pid}/review/run/{run}")
-    def review_save(pid: str, run: str, body: Dict[str, Any]) -> JSONResponse:
+    def review_save(pid: str, run: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
@@ -1911,7 +2197,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             labels = [x for x in labels.split(",")]
         try:
             rec = ReviewLog(watcher.root).put(run, verdict=body.get("verdict") or None, labels=labels,
-                                              note=str(body.get("note") or ""), user=_reviewer())
+                                              note=str(body.get("note") or ""), user=_reviewer(request))
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse(rec)
@@ -2818,11 +3104,20 @@ def build_studio_app(recents: Optional[Recents] = None):
 
         server = request.scope.get("server") or ("127.0.0.1", 8765)
         host = "127.0.0.1" if server[0] in ("0.0.0.0", "::", None) else server[0]
+        # a token for this turn's owner alone, revoked when the turn ends
+        # (decision D12); the shared login cookie it replaced never expired
+        ttl = (float(os.environ.get("OPERONX_STUDIO_CHAT_MAX_MIN") or 60) + 5) * 60
+        token = agents.issue(request.state.user["id"], ttl)
         env = {"OPERONX_STUDIO_URL": f"http://{host}:{server[1]}", "OPERONX_STUDIO_PID": pid,
-               "OPERONX_STUDIO_TOKEN": auth["token"] if auth else ""}
+               "OPERONX_STUDIO_TOKEN": token}
         if os.environ.get("PYTHONPATH"):
             env["PYTHONPATH"] = os.environ["PYTHONPATH"]
         return {"type": "stdio", "command": _sys.executable, "args": ["-m", "operonx_studio.mcp"], "env": env}
+
+    def _revoker(mcp: Dict[str, Any]):
+        """Ends the turn's agent token (run when the turn ends)."""
+        token = ((mcp or {}).get("env") or {}).get("OPERONX_STUDIO_TOKEN") or ""
+        return lambda: agents.revoke(token)
 
     def _home_briefing() -> str:
         roster = "\n".join(f"- {r.name}: {r.root}" for r in recents.ordered() if r.exists)
@@ -3277,8 +3572,10 @@ def build_studio_app(recents: Optional[Recents] = None):
         try:
             turn = relay.start(sid, message, cwd=cwd, context=context, mcp=mcp, fork_from=fork_from,
                                view=body.get("view") if isinstance(body.get("view"), dict) else None,
-                               attachments=refs, extra_mcp=_project_mcp(sess["scope"]))
+                               attachments=refs, extra_mcp=_project_mcp(sess["scope"]),
+                               owner=request.state.user["id"], on_end=[_revoker(mcp)])
         except RuntimeError as exc:
+            _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse({"turn": turn.id, "cursor": 0})
 
@@ -3294,8 +3591,10 @@ def build_studio_app(recents: Optional[Recents] = None):
             return env
         cwd, context, mcp = env
         try:
-            turn = relay.start(sid, "/compact", cwd=cwd, context=context, mcp=mcp, kind="compact")
+            turn = relay.start(sid, "/compact", cwd=cwd, context=context, mcp=mcp, kind="compact",
+                               owner=request.state.user["id"], on_end=[_revoker(mcp)])
         except RuntimeError as exc:
+            _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse({"turn": turn.id, "cursor": 0})
 
@@ -3430,6 +3729,10 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"ok": True})
 
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+    # closed by default: a route the table has no rule for answers 403
+    for method, path in unclassified(app.routes):
+        _LOG.warning("operonx studio: %s %s has no access rule (operonx_studio/access.py) — it answers 403",
+                     method, path)
     return app
 
 

@@ -14,48 +14,43 @@
 <main class="loginwrap">
   <div class="logincard">
     <svg class="mark big" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6"/><circle cx="12" cy="12" r="5.2"/><circle class="dot" cx="18.3" cy="5.7" r="1.7"/></svg>
-    <h1 class="logintitle">Sign in to operonx studio</h1>
-    <p class="loginhint">Your flows, runs and jobs, from anywhere.</p>
-    <form id="login-form" novalidate>
-      <div class="field">
-        <label for="login-user">Username</label>
-        <input type="text" id="login-user" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus required>
-      </div>
-      <div class="field">
-        <label for="login-pass">Password</label>
-        <input type="password" id="login-pass" autocomplete="current-password" required>
-      </div>
-      <div class="loginerr" id="login-err" role="alert"></div>
-      <button class="primary loginbtn" type="submit" id="login-btn">Sign in</button>
-    </form>
+    <section id="step-signin">
+      <h1 class="logintitle">Sign in to operonx studio</h1>
+      <p class="loginhint">Your flows, runs and jobs, from anywhere.</p>
+      <form id="login-form" novalidate>
+        <div class="field">
+          <label for="login-user">Username</label>
+          <input type="text" id="login-user" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus required>
+        </div>
+        <div class="field">
+          <label for="login-pass">Password</label>
+          <input type="password" id="login-pass" autocomplete="current-password" required>
+        </div>
+        <div class="loginerr" id="login-err" role="alert"></div>
+        <button class="primary loginbtn" type="submit" id="login-btn">Sign in</button>
+      </form>
+    </section>
+    <section id="step-password" hidden>
+      <h1 class="logintitle">Choose your password</h1>
+      <p class="loginhint">Signed in as <b id="pw-who"></b>. The password you used is temporary — choose your own to continue.</p>
+      <form id="pw-form" novalidate>
+        <input type="text" id="pw-user" autocomplete="username" hidden readonly>
+        <div class="field">
+          <label for="pw-new">New password</label>
+          <input type="password" id="pw-new" autocomplete="new-password" minlength="8" required aria-describedby="pw-rule">
+        </div>
+        <div class="field">
+          <label for="pw-again">New password, again</label>
+          <input type="password" id="pw-again" autocomplete="new-password" minlength="8" required>
+        </div>
+        <p class="loginrule" id="pw-rule">At least 8 characters, and not your username.</p>
+        <div class="loginerr" id="pw-err" role="alert"></div>
+        <button class="primary loginbtn" type="submit" id="pw-btn">Save and continue</button>
+        <a class="loginalt" href="/logout">Sign out instead</a>
+      </form>
+    </section>
   </div>
 </main>
-<script>
-document.getElementById("login-form").onsubmit = async (ev) => {
-  ev.preventDefault();
-  const err = document.getElementById("login-err");
-  const btn = document.getElementById("login-btn");
-  err.textContent = "";
-  btn.disabled = true;
-  btn.textContent = "Signing in…";
-  try {
-    const res = await fetch("/api/login", {
-      method: "POST",
-      headers: {"content-type": "application/json"},
-      body: JSON.stringify({
-        username: document.getElementById("login-user").value,
-        password: document.getElementById("login-pass").value,
-      }),
-    });
-    if (res.ok) { location.href = "/"; return; }
-    const data = await res.json().catch(() => ({}));
-    err.textContent = data.error || "Sign-in failed.";
-  } catch {
-    err.textContent = "The studio did not answer — is it still running?";
-  }
-  btn.disabled = false;
-  btn.textContent = "Sign in";
-};
-</script>
+<script src="/static/login.js"></script>
 </body>
 </html>

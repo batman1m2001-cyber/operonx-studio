@@ -87,10 +87,17 @@ if "--input-format" in argv and argv[argv.index("--input-format") + 1] == "strea
 else:
     msg = argv[argv.index("-p") + 1] if "-p" in argv else ""
 log = os.environ.get("OX_FAKE_LOG")
+# the MCP config is a file (it carries the turn's agent token): what it
+# held, and who could read it, while the turn ran
+mcp, mcp_mode = None, None
+if "--mcp-config" in argv:
+    cfg = argv[argv.index("--mcp-config") + 1]
+    mcp_mode = oct(os.stat(cfg).st_mode & 0o777)
+    mcp = json.load(open(cfg))
 if log:
     with open(log, "a") as f:
         f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "msg": msg, "images": images,
-                            "config_dir": home}) + "\n")
+                            "config_dir": home, "mcp": mcp, "mcp_mode": mcp_mode}) + "\n")
 
 if "--output-format" in argv and argv[argv.index("--output-format") + 1] == "json":
     print(json.dumps({"type": "result", "result": "Fake title here"}))
@@ -298,7 +305,7 @@ def test_a_turn_becomes_items_that_persist_and_restore(client, project, fake):
     assert call["cwd"] == str(project) and "--resume" not in call["argv"]
     prompt = call["argv"][call["argv"].index("--append-system-prompt") + 1]
     assert "Project briefing: chatty-demo" in prompt and "selected op: `shout`" in prompt
-    mcp = json.loads(call["argv"][call["argv"].index("--mcp-config") + 1])
+    mcp = call["mcp"]
     assert mcp["mcpServers"]["studio"]["env"]["OPERONX_STUDIO_PID"] == pid
     assert "--strict-mcp-config" in call["argv"]       # the studio's tools, not the host's connectors
 
@@ -551,8 +558,7 @@ def test_home_turns_brief_the_roster_and_carry_home_tools(client, project, fake)
     call = fake()[0]
     prompt = call["argv"][call["argv"].index("--append-system-prompt") + 1]
     assert "No project is open" in prompt and "chatty-demo" in prompt and "rag-qa" in prompt
-    mcp = json.loads(call["argv"][call["argv"].index("--mcp-config") + 1])
-    assert mcp["mcpServers"]["studio"]["env"]["OPERONX_STUDIO_PID"] == "home"
+    assert call["mcp"]["mcpServers"]["studio"]["env"]["OPERONX_STUDIO_PID"] == "home"
 
 
 def test_the_pulse_hears_a_turn_end(client, project, fake):
@@ -766,7 +772,7 @@ def test_a_projects_own_tool_servers_join_the_studios(client, project, fake):
     sid = _session(client, pid)["id"]
     _say(client, sid, "hello")
     argv = fake()[-1]["argv"]
-    servers = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]
+    servers = fake()[-1]["mcp"]["mcpServers"]
     assert set(servers) == {"notes", "studio"} and servers["notes"]["command"] == "notes-server"
     assert servers["studio"]["args"] == ["-m", "operonx_studio.mcp"]
     assert "--strict-mcp-config" in argv                   # the host's personal connectors stay out

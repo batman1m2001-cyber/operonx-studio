@@ -280,8 +280,10 @@ def test_undo_endpoint(studio, repo):
 
 EDITING_CLAUDE = '''#!/usr/bin/env python3
 import json, os, sys
+argv = sys.argv[1:]
+mcp = json.load(open(argv[argv.index("--mcp-config") + 1])) if "--mcp-config" in argv else None
 with open(os.environ["OX_FAKE_OUT"], "w") as f:
-    json.dump({"argv": sys.argv[1:]}, f)
+    json.dump({"argv": argv, "mcp": mcp}, f)
 if not os.environ.get("OX_FAKE_READONLY"):
     with open("main.py", "a") as f:
         f.write("# tuned\\n")
@@ -318,8 +320,9 @@ def test_a_turn_gets_the_studio_tools_and_reports_its_changes(tmp_path, repo, mo
     assert [(f["path"], f["added"]) for f in change["files"]] == [("main.py", 1)]
     assert "+# tuned" in change["diff"]
 
-    argv = json.loads(report.read_text())["argv"]
-    server = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]["studio"]
+    got = json.loads(report.read_text())
+    argv = got["argv"]
+    server = got["mcp"]["mcpServers"]["studio"]
     assert server["args"] == ["-m", "operonx_studio.mcp"] and server["env"]["OPERONX_STUDIO_PID"] == pid
     prompt = argv[argv.index("--append-system-prompt") + 1]
     assert "mcp__studio__" in prompt and "studio:run/" in prompt
