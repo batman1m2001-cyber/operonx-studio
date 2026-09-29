@@ -14,14 +14,14 @@ Findings refer to `docs/design/OPEN_FINDINGS.md`.
 
 | Group | Items | Done when |
 |---|---|---|
-| **O1 Branches and Refs** | S7 Ref-vs-Ref in `if_()` (compare to another Ref works) · S8 `_resolve` keyed by source and var · S9 `hasattr()` on a Ref raises for `_`-names · E2 a `.build()` branch with no match runs no target · E8 `START >> if_(...)` works (predicate op too) | each has a test; the guide's "never compare two Refs" and "always `.else_()`" rules become plain advice or go |
+| **O1 Branches and Refs** | S7 Ref-vs-Ref in `if_()` (compare to another Ref works) · S8 `_resolve` keyed by source and var · S9 `hasattr()` on a Ref raises for `_`-names · E2 a `.build()` branch with no match runs no target · E8 `START >> if_(...)` works (predicate op too) · **added** E9 `and`/`or`/`not` on a Ref raises (it silently used only one side) | each has a test; the guide's "never compare two Refs" and "always `.else_()`" rules become plain advice or go |
 | **O2 Scheduler** | E1 one hard + two soft edges waits for the hard one · E3 `.parallel(max=N)` limits · E4 an op on a loop's exit arm runs once; ops after a loop run once · E6 an erroring back-edge source stops the loop · E7 `.collect()` behind a per-item op gathers the whole stream · C4 dead loop path removed · S2 `loop_iters` removed · S3 duplicate block removed · S4 comments match the per-edge design · S5 a late `fatal` is not dropped | a test per behaviour; loop and streaming suites green |
 | **O3 Errors and state** | S1 an op that raises: **Decided** — a run still does not raise (one bad op must not kill a live call), but `run()` returns `"$errors"` and `handle.errors` names each failed op, the dead handlers go, and `execution-flow.md` says what happens · C1/S6 first and later calls resolve inputs the same way · C2 `stream()` raises a fatal error like `run()` · C3 `__interrupt__` is not in the payload | tests; the guide's "an op that raises" section shows `"$errors"` |
 | **O4 Agent layer** | A1–A8 | a test per finding |
-| **O5 Providers and harness** | P1–P7 (P1, P2 in `packages/operonx-code`) | a test per finding |
+| **O5 Providers and harness** | P1–P7 (P1, P2 in `packages/operonx-code`) · **added** L1 `LLMOp` `user=` fails at build, not silently at run · L2 a Ref in `validators=` fails at build | a test per finding |
 | **O6 MCP and heartbeat** | M1–M5 | a test per finding |
 | **O7 Manifest** | E5 `operonx.toml` accepts `on_error = "record"` | a test |
-| **O8 Docs** | `OPEN_FINDINGS.md` records each as fixed; the guide drops the rules the fixes made unnecessary; `CLAUDE.md`'s stale examples (`ask()`, `chat()`, `GraphOp.loop`) rewritten | `tests/guide` green; no stale API names in `CLAUDE.md` |
+| **O8 Docs** | `OPEN_FINDINGS.md` records each as fixed; the guide drops the rules the fixes made unnecessary; `CLAUDE.md`'s stale examples (`ask()`, `chat()`, `GraphOp.loop`) rewritten; `HANDOFF.md` (written for 1.3.0, still "read this first") brought to 1.11.0 | `tests/guide` green; no stale API names in `CLAUDE.md` |
 | **O9 Release** | 1.11.0: PR, CI green | **Yours:** merge; then PyPI has 1.11.0 |
 
 ## 2. Callbot (`feat/runs-by-origin`)
@@ -59,3 +59,7 @@ T1 with them. T3 last. Progress is recorded in §6 as each item closes.
 
 | Item | State | Evidence |
 |---|---|---|
+| O1–O6/O7 | in progress | six agents, one worktree each under `/home/thanglq/operonx-wt/`, branches `fix/o1…o6`, off operonx `main` 444aae3 |
+| O8 `CLAUDE.md` | done | `release/1.11.0` cd729cb — no `chat()`/`ask()`/`GraphOp.loop`; wiring styles it shows re-run against 1.10.2 |
+| K4 | done | callbot 838586b — `call_store:default` + `source:call_logs` in resources.yaml, same variable names; 295 tests pass |
+| T3 plan | done | `docs/TEAM_PLAN.md` — six phases P1–P6, each with its gate; claims spot-checked against app.py, chat.py, assistant.py |
