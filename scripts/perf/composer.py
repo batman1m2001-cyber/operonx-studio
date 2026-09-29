@@ -15,6 +15,8 @@ import sys
 
 from playwright.async_api import async_playwright
 
+import studio_login
+
 BASE, OUT, PID = sys.argv[1:4]
 LIVE = "--live" in sys.argv
 RESULTS = []
@@ -35,11 +37,7 @@ def ok(name, cond, detail=""):
 
 
 async def login(pg):
-    await pg.goto(f"{BASE}/login")
-    await pg.fill("#login-user", "root")
-    await pg.fill("#login-pass", "123")
-    await pg.keyboard.press("Enter")
-    await pg.wait_for_url(f"{BASE}/")
+    await studio_login.login(pg, BASE)
 
 
 async def paste(pg, text):

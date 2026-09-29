@@ -6,7 +6,7 @@ usage: audit.py <base> <pid> [<pid> ...] <tag>    (writes audit_<tag>.json)
 
 A screen is "ready" when no request other than the long polls has been
 in flight for 500 ms. Needs playwright (pip install playwright;
-playwright install chromium). Log-in is root/123, the studio default.
+playwright install chromium). Signs in as OX_STUDIO_USER / OX_STUDIO_PASS (studio_login.py).
 """
 import asyncio
 import json
@@ -14,6 +14,8 @@ import sys
 import time
 
 from playwright.async_api import async_playwright
+
+import studio_login
 
 BASE = sys.argv[1]
 PIDS = sys.argv[2:-1]
@@ -75,11 +77,7 @@ async def main():
             print(json.dumps(row))
             reqs.clear()
 
-        await pg.goto(f"{BASE}/login")
-        await pg.fill("#login-user", "root")
-        await pg.fill("#login-pass", "123")
-        await pg.keyboard.press("Enter")
-        await pg.wait_for_url(f"{BASE}/")
+        await studio_login.login(pg, BASE)
         reqs.clear()
         t0 = time.monotonic()
         await pg.goto(f"{BASE}/")

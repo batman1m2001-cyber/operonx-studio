@@ -12,6 +12,8 @@ import time
 
 from playwright.async_api import async_playwright
 
+import studio_login
+
 BASE, OUT, PID, ROOT = sys.argv[1:5]
 RESULTS = []
 
@@ -55,11 +57,7 @@ async def main():
         pg = await ctx.new_page()
         errors = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
-        await pg.goto(f"{BASE}/login")
-        await pg.fill("#login-user", "root")
-        await pg.fill("#login-pass", "123")
-        await pg.keyboard.press("Enter")
-        await pg.wait_for_url(f"{BASE}/")
+        await studio_login.login(pg, BASE)
         await pg.goto(f"{BASE}/p/{PID}")
         await pg.wait_for_selector(".node")
         await pg.keyboard.press("Control+j")
@@ -213,11 +211,7 @@ async def main():
                                   device_scale_factor=2)
         pg = await ctx.new_page()
         pg.on("pageerror", lambda e: errors.append(str(e)))
-        await pg.goto(f"{BASE}/login")
-        await pg.fill("#login-user", "root")
-        await pg.fill("#login-pass", "123")
-        await pg.keyboard.press("Enter")
-        await pg.wait_for_url(f"{BASE}/")
+        await studio_login.login(pg, BASE)
         await pg.goto(f"{BASE}/p/{PID}")
         await pg.wait_for_selector(".node")
         await pg.click(".ax-askbar")

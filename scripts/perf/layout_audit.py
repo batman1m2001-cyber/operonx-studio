@@ -43,6 +43,8 @@ import time
 
 from playwright.async_api import async_playwright
 
+import studio_login
+
 
 class _Skip(Exception):
     """A case with nothing to check here (not a failure)."""
@@ -335,11 +337,7 @@ async def audit(pg, meta, shot=True, extra=None):
 
 
 async def login(pg):
-    await pg.goto(f"{BASE}/login")
-    await pg.fill("#login-user", "root")
-    await pg.fill("#login-pass", "123")
-    await pg.keyboard.press("Enter")
-    await pg.wait_for_url(f"{BASE}/")
+    await studio_login.login(pg, BASE)
 
 
 async def tab(pg, name):

@@ -7,16 +7,14 @@ import sys
 
 from playwright.async_api import async_playwright
 
+import studio_login
+
 BASE, OUT, PID = sys.argv[1], sys.argv[2], sys.argv[3]
 SID = sys.argv[4] if len(sys.argv) > 4 else ""
 
 
 async def login(pg):
-    await pg.goto(f"{BASE}/login")
-    await pg.fill("#login-user", "root")
-    await pg.fill("#login-pass", "123")
-    await pg.keyboard.press("Enter")
-    await pg.wait_for_url(f"{BASE}/")
+    await studio_login.login(pg, BASE)
 
 
 async def main():

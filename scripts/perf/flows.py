@@ -10,6 +10,8 @@ import time
 
 from playwright.async_api import async_playwright
 
+import studio_login
+
 BASE, OUT, PID, BIG = sys.argv[1:5]
 RESULTS = []
 
@@ -39,11 +41,7 @@ async def main():
 
         # home → project
         async def home():
-            await pg.goto(f"{BASE}/login")
-            await pg.fill("#login-user", "root")
-            await pg.fill("#login-pass", "123")
-            await pg.keyboard.press("Enter")
-            await pg.wait_for_url(f"{BASE}/")
+            await studio_login.login(pg, BASE)
             await pg.wait_for_selector(".projrow")
             ok("home lists projects with health", await pg.locator(".projrow .hdot.ok").count() > 0)
             ok("home has the assistant first", await pg.locator(".ax.hero textarea").is_visible())
