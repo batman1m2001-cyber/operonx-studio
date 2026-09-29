@@ -597,10 +597,17 @@ def build_studio_app(recents: Optional[Recents] = None):
         pages[name] = (version, text, bundle)
         return text, bundle
 
-    def _page(name: str, boot: str = "") -> HTMLResponse:
+    def _page(name: str, boot: str = "", request: Any = None) -> HTMLResponse:
         """A page, its scripts bundled; ``boot`` (inline markup, e.g. a
-        JSON data island) goes in just before the bundle."""
+        JSON data island) goes in just before the bundle. With *request*,
+        who is signed in rides along too (``#me-boot``): the account menu
+        draws at once, never a flash of the wrong name."""
         text, _ = _built(name)
+        who = getattr(getattr(request, "state", None), "user", None) if request is not None else None
+        if who is not None:
+            me = {"user": {k: who[k] for k in ("id", "username", "name", "role")}, "auth": auth_on}
+            boot = ('<script id="me-boot" type="application/json">'
+                    + json.dumps(me).replace("</", "<\\/") + "</script>" + boot)
         if boot:
             at = text.find("<script src=")
             text = text[:at] + boot + "\n" + text[at:] if at >= 0 else text + boot
@@ -768,10 +775,11 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.exception_handler(AccessDenied)
     async def _denied(request, exc: AccessDenied):
-        if exc.status == 401 and not request.url.path.startswith("/api/"):
+        if not request.url.path.startswith("/api/"):
+            # a page someone may not open sends them somewhere they may
             from fastapi.responses import RedirectResponse
 
-            return RedirectResponse("/login", status_code=302)
+            return RedirectResponse("/login" if exc.status == 401 else "/", status_code=302)
         return JSONResponse({"error": exc.message}, status_code=exc.status)
 
     @app.get("/login")
@@ -864,7 +872,11 @@ def build_studio_app(recents: Optional[Recents] = None):
         ended = users.end_sessions(row["id"], keep=getattr(request.state, "session", None))
         return JSONResponse({"ok": True, "ended_sessions": ended})
 
-    # ── people (admins; the Team page arrives in P2) ──
+    # ── people (admins): the Team page and its API ──
+
+    @app.get("/team")
+    def team_page(request: Request) -> HTMLResponse:
+        return _page("team.html", "", request)
 
     def _stop_turns_of(uid: str) -> int:
         stopped = 0
@@ -1032,7 +1044,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     # ── home ────────────────────────────────────────────────────────────
 
     @app.get("/")
-    def home():
+    def home(request: Request):
         # the list and its signal ride in the page: two tunnel round trips
         # (~1.5 s) traded for ~0.2 s of server time (measured, 25 projects)
         boot = json.dumps({"projects": [r.as_dict() for r in recents.ordered()],
@@ -1040,7 +1052,7 @@ def build_studio_app(recents: Optional[Recents] = None):
                            "sessions": [_session_out(x) for x in chat_store.sessions(None, limit=6)]},
                           separators=(",", ":"), default=str)
         return _page("home.html", '<script id="home-boot" type="application/json">'
-                     + boot.replace("</", "<\\/") + "</script>")
+                     + boot.replace("</", "<\\/") + "</script>", request)
 
     @app.get("/api/projects")
     def projects() -> JSONResponse:
@@ -1193,7 +1205,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     # ── one project ─────────────────────────────────────────────────────
 
     @app.get("/p/{pid}")
-    def project_page(pid: str) -> Any:
+    def project_page(pid: str, request: Request) -> Any:
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
@@ -1207,7 +1219,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             payload = json.dumps(_ir_payload(pid, watcher), separators=(",", ":"))
             boot = ('<script id="ir-boot" type="application/json">'
                     + payload.replace("</", "<\\/") + "</script>")
-        return _page("project.html", boot)
+        return _page("project.html", boot, request)
 
     def _declared_roles(
         root: Path, graphs: List[Dict[str, Any]], services: List[Dict[str, Any]] = ()

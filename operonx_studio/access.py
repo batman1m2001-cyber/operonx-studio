@@ -61,6 +61,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", "/api/logout"): "self",
 
     # ── people ──
+    ("GET", "/team"): "admin",
     ("GET", "/api/admin/users"): "admin",
     ("POST", "/api/admin/users"): "admin",
     ("PATCH", "/api/admin/users/{uid}"): "admin",

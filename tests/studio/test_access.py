@@ -139,12 +139,15 @@ def test_anonymous_gets_401_or_the_login_page_everywhere_but_open(people):
 def test_admin_routes_refuse_editors_and_viewers(people):
     team = people["team"]
     admin_routes = _by_level(team, "admin")
-    assert len(admin_routes) == 5
+    assert len(admin_routes) == 6                       # /team and the five /api/admin/users routes
     for who in ("editor", "viewer"):
         team.use(people[who]["token"])
         for method, path in admin_routes:
             res = _call(team.client, method, _url(path, people["pid"]), people["tmp"])
-            assert res.status_code == 403 and res.json() == {"error": "Admins only"}, (who, method, path)
+            if path.startswith("/api/"):
+                assert res.status_code == 403 and res.json() == {"error": "Admins only"}, (who, method, path)
+            else:                                                    # a page sends them home instead
+                assert res.status_code == 302 and res.headers["location"] == "/", (who, method, path)
     team.use(team.admin_token)
     for method, path in admin_routes:
         res = _call(team.client, method, _url(path, "x"), people["tmp"])

@@ -305,3 +305,54 @@ def test_reset_password_from_the_command_line(team):
 def test_reset_password_with_no_accounts_says_so(tmp_path):
     got = _cli(tmp_path / "empty", "--reset-password", "root")
     assert got.returncode == 2 and "no accounts" in got.stdout
+
+
+# ── the Team page and the account menu (P2) ───────────────────────────────
+
+def _boot(html: str, node: str) -> dict:
+    import json
+
+    return json.loads(html.split(f'<script id="{node}" type="application/json">')[1].split("</script>")[0])
+
+
+def test_the_team_page_is_for_admins(team):
+    c = team.client
+    ann = team.person("ann", "editor")
+    team.use(team.admin_token)
+    page = c.get("/team")
+    assert page.status_code == 200 and 'id="team"' in page.text
+    assert _boot(page.text, "me-boot")["user"]["username"] == "root"
+    team.use(ann["token"])
+    away = c.get("/team", follow_redirects=False)
+    assert away.status_code == 302 and away.headers["location"] == "/"     # a page, not a JSON 403
+    assert c.get("/api/admin/users").status_code == 403                    # the API still says why
+    team.use(None)
+    assert c.get("/team", follow_redirects=False).headers["location"] == "/login"
+
+
+def test_every_page_knows_who_is_signed_in(team, tmp_path):
+    c = team.client
+    ann = team.person("ann", "viewer")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "operonx.toml").write_text('[project]\nname = "p"\n', encoding="utf-8")
+    pid = c.post("/api/open", json={"path": str(proj)}).json()["id"]
+    team.use(ann["token"])
+    for path in ("/", f"/p/{pid}"):
+        me = _boot(c.get(path).text, "me-boot")
+        assert me == {"user": {"id": ann["id"], "username": "ann", "name": "Ann", "role": "viewer"}, "auth": True}, path
+    # the account menu's script rides in every page's bundle
+    for page in ("home", "project", "team"):
+        assert "Change password" in c.get(f"/static/bundle/{page}.js").text, page
+
+
+def test_auth_off_pages_say_so(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from operonx_studio.app import build_studio_app
+    from operonx_studio.registry import Recents
+
+    with TestClient(build_studio_app(Recents(state_file=tmp_path / "s" / "studio.json"))) as c:
+        me = _boot(c.get("/").text, "me-boot")
+        assert me["auth"] is False and me["user"]["role"] == "admin"
+        assert c.get("/team").status_code == 200
