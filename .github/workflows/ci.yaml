@@ -27,4 +27,4 @@ jobs:
         run: |
           for f in operonx_studio/static/*.js; do node --check "$f"; done
       - name: JS tests
-        run: node --test tests/js/
+        run: node --test tests/js/*.test.mjs
