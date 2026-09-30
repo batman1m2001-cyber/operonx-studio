@@ -69,6 +69,7 @@ def test_styles_keep_their_spaces_where_they_mean_something():
 
 def _bundle_and_css(monkeypatch, tmp_path, setting):
     from fastapi.testclient import TestClient
+
     from operonx_studio.app import build_studio_app
     from operonx_studio.registry import Recents
 

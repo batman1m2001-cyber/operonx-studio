@@ -3,10 +3,13 @@ frame times across a burst of 40 wheel-zooms.
 
 usage: render_cost.py <base> <pid> [<pid> ...]
 """
-import asyncio, sys, json
-from playwright.async_api import async_playwright
+import asyncio
+import json
+import sys
 
 import studio_login
+from playwright.async_api import async_playwright
+
 BASE = sys.argv[1]
 async def main():
     async with async_playwright() as p:

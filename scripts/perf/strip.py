@@ -1,6 +1,8 @@
 """Paste screenshots side by side: strip.py <out.png> <in.png> ... (needs pillow)."""
 import sys
+
 from PIL import Image
+
 out_path, paths = sys.argv[1], sys.argv[2:]
 ims = [Image.open(p).convert("RGB") for p in paths]
 scale = 0.5 if ims[0].width > 700 else 0.45

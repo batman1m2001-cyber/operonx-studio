@@ -14,10 +14,9 @@ import io
 import json
 import sys
 
+import studio_login
 from PIL import Image, ImageDraw
 from playwright.async_api import async_playwright
-
-import studio_login
 
 BASE, OUT, PID = sys.argv[1:4]
 LIVE = "--live" in sys.argv

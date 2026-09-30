@@ -10,7 +10,6 @@ op, and errors grouped by message.
 from __future__ import annotations
 
 import pytest
-
 from operonx.core.workflow_trace import OpExecution, WorkflowTrace
 from operonx.telemetry.runs import percentile
 from operonx.telemetry.runs.sqlite import SqliteRunStore

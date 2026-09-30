@@ -64,4 +64,15 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
-extend-ignore = ["E712", "F401", "F541", "E501"]
+# E731 / F841 as in operonx's own config: a lambda for a one-line helper
+# and a name kept for an assert's readability are intended.
+extend-ignore = ["E712", "F401", "F541", "E501", "E731", "F841"]
+
+[tool.ruff.lint.per-file-ignores]
+# OKLab's own names: l, m, s are the cone responses in every reference.
+"operonx_studio/theme.py" = ["E741"]
+# pytest fixtures shared by import (`from test_assistant import fake`)
+# are "redefined" as parameters by design.
+"tests/**" = ["F811"]
+# one-off measurement scripts, run by hand: terse on purpose
+"scripts/perf/**" = ["E701", "E702", "E722", "E741"]

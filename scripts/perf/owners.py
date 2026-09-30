@@ -15,9 +15,8 @@ import json
 import sys
 import time
 
-from playwright.async_api import async_playwright
-
 import studio_login
+from playwright.async_api import async_playwright
 
 BASE, OUT, PID = sys.argv[1:4]
 RESULTS = []

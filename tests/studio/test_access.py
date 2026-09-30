@@ -184,9 +184,8 @@ def test_editors_pass_edit_routes_and_everyone_passes_read_and_self(people):
 # ── P5: a viewer is refused before anything happens ──────────────────────
 
 def test_a_viewer_is_refused_before_the_handler_runs_and_an_editor_is_not(people):
-    from test_runs import _trace
-
     from operonx.telemetry.runs.files import FilesRunStore
+    from test_runs import _trace
 
     team, pid, tmp = people["team"], people["pid"], people["tmp"]
     c = team.client
