@@ -758,6 +758,12 @@
     const top = el("div", "ax-card-head");
     top.append(icon("file"), el("b", null, `Changed ${files.length} file${files.length === 1 ? "" : "s"}`),
       el("span", "ax-add", `+${plus}`), el("span", "ax-del", `−${minus}`));
+    // another person's assistant worked in this project at the same time:
+    // the diff can't tell whose edit is whose, so the card says so (§2.3)
+    const overlap = (item.overlap || []).length
+      ? el("p", "ax-overlap", `${item.overlap.join(", ")}'s assistant was working in this project at the same time — `
+                              + "some of these changes may be theirs. Check the diff before you undo.")
+      : null;
     const flist = el("div", "ax-files");
     for (const f of files) {
       const r = el("div", "ax-file");
@@ -813,7 +819,7 @@
       }
     };
     acts.append(note, el("span", "ax-spacer"), undo, keep);
-    card.append(top, flist, fold, acts);
+    card.append(...[top, overlap, flist, fold, acts].filter(Boolean));
     paint();
     A.nodes.set(item.seq, card);
     return card;

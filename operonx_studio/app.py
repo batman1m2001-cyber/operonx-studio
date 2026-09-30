@@ -958,9 +958,8 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.delete("/api/admin/users/{uid}")
     async def admin_delete(uid: str, request: Request) -> JSONResponse:
-        """Someone leaves: their sessions and turns end, their own Claude
-        sign-in is signed out and removed. (Their conversations go too once
-        conversations have owners — docs/TEAM_PLAN.md P3.)"""
+        """Someone leaves: their sessions and turns end, their conversations
+        are deleted, their own Claude sign-in is signed out and removed."""
         row = _target(uid, request)
         if isinstance(row, JSONResponse):
             return row
@@ -971,6 +970,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         users.end_sessions(uid)
         agents.revoke_user(uid)
         stopped = _stop_turns_of(uid)
+        for sid in chat_store.owned_by(uid):
+            chat_store.delete_session(sid)
         await _forget_claude_home(row)
         users.delete(uid)
         return JSONResponse({"deleted": uid, "stopped_turns": stopped})
@@ -1049,7 +1050,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         # (~1.5 s) traded for ~0.2 s of server time (measured, 25 projects)
         boot = json.dumps({"projects": [r.as_dict() for r in recents.ordered()],
                            "health": _projects_health(),
-                           "sessions": [_session_out(x) for x in chat_store.sessions(None, limit=6)]},
+                           "sessions": [_session_out(x) for x in
+                                        chat_store.sessions(None, owner=request.state.user["id"], limit=6)]},
                           separators=(",", ":"), default=str)
         return _page("home.html", '<script id="home-boot" type="application/json">'
                      + boot.replace("</", "<\\/") + "</script>", request)
@@ -2711,7 +2713,9 @@ def build_studio_app(recents: Optional[Recents] = None):
     # ── the assistant's hands: UI actions and undo ──────────────────────
     # The studio tool server (operonx_studio.mcp) posts what it opened;
     # the page polls and shows it, so the user watches the agent work.
-    ui_actions: Dict[str, List[Dict[str, Any]]] = {}
+    # keyed by (project, person): what one person's assistant opens shows on
+    # that person's screen only (the agent token says whose turn it is)
+    ui_actions: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
     # bumped whenever something a waiting pulse cares about happens. A
     # plain counter, not an asyncio.Event: an Event binds to one event
     # loop, and a waiter checking an int every 100 ms costs nothing.
@@ -2721,11 +2725,11 @@ def build_studio_app(recents: Optional[Recents] = None):
         bells[pid] = bells.get(pid, 0) + 1
 
     @app.post("/api/p/{pid}/ui/action")
-    async def ui_action(pid: str, body: Dict[str, Any]) -> JSONResponse:
+    async def ui_action(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         kind = str(body.get("kind") or "")
         if kind not in ("open_run", "open_monitor", "compare", "select_op", "open_jobs", "open_tab", "open_eval"):
             return JSONResponse({"error": f"unknown action {kind!r}"}, status_code=400)
-        queue = ui_actions.setdefault(pid, [])
+        queue = ui_actions.setdefault((pid, request.state.user["id"]), [])
         seq = (queue[-1]["seq"] + 1) if queue else 1
         queue.append({"seq": seq, "kind": kind, "args": dict(body.get("args") or {}), "at": time.time()})
         del queue[:-50]
@@ -2769,8 +2773,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             return None
 
     @app.get("/api/p/{pid}/pulse")
-    async def pulse(pid: str, stamp: float = 0.0, ui: int = -1, follow: str = "", chat: Optional[int] = None,
-                    hold: float = 8.0) -> JSONResponse:
+    async def pulse(request: Request, pid: str, stamp: float = 0.0, ui: int = -1, follow: str = "",
+                    chat: Optional[int] = None, hold: float = 8.0) -> JSONResponse:
         """``stamp``: the IR the page has; ``ui``: the last assistant action
         it performed (-1: none yet — answer at once with the latest seq);
         ``follow``: the newest run it knows, when it follows new runs;
@@ -2779,16 +2783,18 @@ def build_studio_app(recents: Optional[Recents] = None):
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
+        me = request.state.user["id"]
         end = time.monotonic() + max(0.0, min(hold, 8.0))
         while True:
             rung = bells.get(pid, 0)
             cur, ok = await _stamp_now(pid, watcher)
-            queue = ui_actions.get(pid, [])
+            queue = ui_actions.get((pid, me), [])
             last = queue[-1]["seq"] if queue else 0
             info = await _newest_run(pid) if follow else None
             newest = info["run"] if info else None
             listening = chat is not None and chat >= 0
-            ended = [f for f in relay.finished if f["scope"] == pid and f["seq"] > chat] if listening else []
+            ended = [f for f in relay.finished
+                     if f["scope"] == pid and f["seq"] > chat and f.get("owner") == me] if listening else []
             changed = (abs(cur - stamp) > 1e-6 or ui < 0 or last > ui or (follow and newest and newest != follow)
                        or (chat is not None and chat < 0) or bool(ended))
             left = end - time.monotonic()
@@ -2803,8 +2809,8 @@ def build_studio_app(recents: Optional[Recents] = None):
                 await asyncio.sleep(0.1)
 
     @app.get("/api/p/{pid}/ui/actions")
-    def ui_actions_since(pid: str, after: int = 0) -> JSONResponse:
-        queue = ui_actions.get(pid, [])
+    def ui_actions_since(request: Request, pid: str, after: int = 0) -> JSONResponse:
+        queue = ui_actions.get((pid, request.state.user["id"]), [])
         return JSONResponse({"actions": [a for a in queue if a["seq"] > after],
                              "last": queue[-1]["seq"] if queue else 0})
 
@@ -3126,6 +3132,18 @@ def build_studio_app(recents: Optional[Recents] = None):
             env["PYTHONPATH"] = os.environ["PYTHONPATH"]
         return {"type": "stdio", "command": _sys.executable, "args": ["-m", "operonx_studio.mcp"], "env": env}
 
+    def _busy() -> Optional[JSONResponse]:
+        """At most OPERONX_STUDIO_CHAT_MAX_TURNS turns run at once across the
+        studio (default 6, decision D14): each is a Claude Code process."""
+        try:
+            cap = int(os.environ.get("OPERONX_STUDIO_CHAT_MAX_TURNS") or 6)
+        except ValueError:
+            cap = 6
+        if relay.running() >= max(1, cap):
+            return JSONResponse({"error": f"The studio is busy — {cap} assistant turns are running. "
+                                          "Try again when one ends."}, status_code=429)
+        return None
+
     def _revoker(mcp: Dict[str, Any]):
         """Ends the turn's agent token (run when the turn ends)."""
         token = ((mcp or {}).get("env") or {}).get("OPERONX_STUDIO_TOKEN") or ""
@@ -3148,8 +3166,28 @@ def build_studio_app(recents: Optional[Recents] = None):
                             ChatStore, Relay, valid_model)
 
     chat_store = ChatStore(recents.state_file.parent / "assistant.sqlite")
+    app.state.chat_store = chat_store
+    # conversations from before owners (or from an auth-off studio) are the
+    # first admin's: today's single login is that admin (decision D3)
+    _first = users.first_admin()
+    chat_store.adopt(_first["id"] if _first else "local")
     relay = Relay(chat_store)
     relay.on_finish = _ring      # a waiting pulse on that project hears it
+
+    def _name_of(uid: Optional[str]) -> str:
+        user = users.cached_user(uid) if uid and uid != "local" else None
+        return (user or {}).get("name") or (user or {}).get("username") or "someone"
+
+    relay.name_of = _name_of
+
+    def _my_defaults(me: str) -> Dict[str, Any]:
+        """A person's own default model and effort. The first admin — today's
+        single login — starts from what the studio-wide setting was."""
+        got = chat_store.get_meta(f"defaults:{me}", None)
+        if got is None:
+            first = users.first_admin()
+            got = chat_store.get_meta("defaults", {}) if (first and first["id"] == me) or me == "local" else {}
+        return dict(got or {})
 
     def _scope_ok(scope: str) -> bool:
         return scope == "home" or (recents.get(scope) is not None and _watcher(scope) is not None)
@@ -3183,11 +3221,11 @@ def build_studio_app(recents: Optional[Recents] = None):
         return {str(k): v for k, v in servers.items()
                 if isinstance(v, dict) and k != "studio" and re.fullmatch(r"[\w-]{1,64}", str(k))}
 
-    def _assistant_defaults(scope: str) -> Dict[str, Any]:
+    def _assistant_defaults(scope: str, me: str) -> Dict[str, Any]:
         """A new conversation's model and effort: the project's
         ``[studio.assistant]`` if it sets them, else the studio's own default
         (the menu's "Use for new conversations"), else the CLI's."""
-        studio = dict(chat_store.get_meta("defaults", {}) or {})
+        studio = _my_defaults(me)
         owner = _watcher(scope) if scope != "home" else None
         project = dict((_studio_table(Path(owner.root)).get("assistant") or {}) if owner is not None else {})
         out = {}
@@ -3203,29 +3241,32 @@ def build_studio_app(recents: Optional[Recents] = None):
         return {**sess, "scope_name": _scope_name(sess["scope"])}
 
     @app.get("/api/assistant/sessions")
-    def assistant_sessions(scope: str = "", q: str = "", archived: str = "0", limit: int = 100) -> JSONResponse:
+    def assistant_sessions(request: Request, scope: str = "", q: str = "", archived: str = "0",
+                           limit: int = 100) -> JSONResponse:
         """Newest first; ``scope`` a project id or ``home`` (empty: every
         scope); ``archived`` 0 | 1 | all; ``q`` searches titles and text."""
         arch = None if archived == "all" else archived in ("1", "true")
-        rows = chat_store.sessions(scope or None, q=q, archived=arch, limit=limit)
+        rows = chat_store.sessions(scope or None, owner=request.state.user["id"], q=q, archived=arch, limit=limit)
         return JSONResponse({"sessions": [_session_out(r) for r in rows], "models": list(MODELS)})
 
     @app.post("/api/assistant/sessions")
-    def assistant_new(body: Dict[str, Any]) -> JSONResponse:
+    def assistant_new(body: Dict[str, Any], request: Request) -> JSONResponse:
         scope = str(body.get("scope") or "home")
         if not _scope_ok(scope):
             return JSONResponse({"error": "unknown project"}, status_code=404)
-        pick = _assistant_defaults(scope)
+        me = request.state.user["id"]
+        pick = _assistant_defaults(scope, me)
         model = (body["model"] or None) if "model" in body else pick.get("model")
         effort = (body["effort"] or None) if "effort" in body else pick.get("effort")
         if not valid_model(model):
             return JSONResponse({"error": f"model is one of {', '.join(MODELS)}, or a full claude-… id"}, status_code=400)
         if effort is not None and effort not in EFFORTS:
             return JSONResponse({"error": f"effort is one of {', '.join(EFFORTS)}"}, status_code=400)
-        return JSONResponse({"session": _session_out(chat_store.create_session(scope, model=model, effort=effort))})
+        return JSONResponse({"session": _session_out(chat_store.create_session(scope, owner=me, model=model,
+                                                                                    effort=effort))})
 
     @app.get("/api/assistant/models")
-    def assistant_models(scope: str = "home") -> JSONResponse:
+    def assistant_models(request: Request, scope: str = "home") -> JSONResponse:
         """What the model menu offers: each model with what it is good for,
         what the CLI resolves it to and its context window (as last seen);
         the effort levels; and the defaults a new conversation takes."""
@@ -3238,8 +3279,9 @@ def build_studio_app(recents: Optional[Recents] = None):
         default_full = resolved.get("default")
         return JSONResponse({"models": models, "efforts": list(EFFORTS),
                              "default": {"full": default_full, "window": windows.get(default_full) if default_full else None},
-                             "studio_defaults": dict(chat_store.get_meta("defaults", {}) or {}),
-                             "new": _assistant_defaults(scope if _scope_ok(scope) else "home")})
+                             "studio_defaults": _my_defaults(request.state.user["id"]),
+                             "new": _assistant_defaults(scope if _scope_ok(scope) else "home",
+                                                        request.state.user["id"])})
 
     # the account the assistant's Claude runs as: `claude auth status --json`,
     # read at most every 30 s (it spawns the CLI)
@@ -3422,7 +3464,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"rate": rate, "as_of": (rate or {}).get("at"), "account": await _account()})
 
     @app.put("/api/assistant/defaults")
-    def assistant_set_defaults(body: Dict[str, Any]) -> JSONResponse:
+    def assistant_set_defaults(body: Dict[str, Any], request: Request) -> JSONResponse:
         """The studio's own default model and effort for new conversations
         (a project's ``[studio.assistant]`` still wins for its own)."""
         model = body.get("model") or None
@@ -3431,18 +3473,29 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": f"model is one of {', '.join(MODELS)}, or a full claude-… id"}, status_code=400)
         if effort is not None and effort not in EFFORTS:
             return JSONResponse({"error": f"effort is one of {', '.join(EFFORTS)}"}, status_code=400)
-        chat_store.set_meta("defaults", {k: v for k, v in (("model", model), ("effort", effort)) if v})
-        return JSONResponse({"studio_defaults": chat_store.get_meta("defaults", {})})
+        me = request.state.user["id"]
+        chat_store.set_meta(f"defaults:{me}", {k: v for k, v in (("model", model), ("effort", effort)) if v})
+        return JSONResponse({"studio_defaults": _my_defaults(me)})
 
-    def _session_or_404(sid: str) -> Any:
+    def _session_or_404(sid: str, request: Any) -> Any:
+        """The conversation, if it is the asker's. Someone else's answers
+        exactly like one that does not exist (admins included, D7)."""
         sess = chat_store.session(sid)
-        return sess if sess is not None else JSONResponse({"error": "no such conversation"}, status_code=404)
+        if sess is None or sess.get("owner") != request.state.user["id"]:
+            return JSONResponse({"error": "no such conversation"}, status_code=404)
+        return sess
+
+    def _turn_or_404(tid: str, request: Any) -> Any:
+        turn = relay.turns.get(tid)
+        if turn is None or turn.owner != request.state.user["id"]:
+            return JSONResponse({"error": "unknown turn"}, status_code=404)
+        return turn
 
     @app.get("/api/assistant/sessions/{sid}")
-    def assistant_session(sid: str) -> JSONResponse:
+    def assistant_session(sid: str, request: Request) -> JSONResponse:
         """A conversation as it stands: its items, and — when a turn is
         running — that turn's live items and the cursor to follow it from."""
-        sess = _session_or_404(sid)
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         items = chat_store.items(sid)
@@ -3461,8 +3514,8 @@ def build_studio_app(recents: Optional[Recents] = None):
                                        "model": os.environ.get("OPERONX_STUDIO_CHAT_MODEL") or None}})
 
     @app.patch("/api/assistant/sessions/{sid}")
-    def assistant_patch(sid: str, body: Dict[str, Any]) -> JSONResponse:
-        sess = _session_or_404(sid)
+    def assistant_patch(sid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         update: Dict[str, Any] = {}
@@ -3488,14 +3541,14 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"session": _session_out(chat_store.session(sid))})
 
     @app.post("/api/assistant/sessions/{sid}/attachments")
-    def assistant_attach(sid: str, body: Dict[str, Any]) -> JSONResponse:
+    def assistant_attach(sid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         """An image for a message: base64 in, a reference out. The browser has
         already resized it (a 1568 px long edge); the bytes are kept beside
         the store, named by their content, and deleted with the conversation."""
         import base64 as _b64
         import binascii
 
-        sess = _session_or_404(sid)
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         mime = str(body.get("mime") or "")
@@ -3515,9 +3568,11 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"attachment": ref})
 
     @app.get("/api/assistant/sessions/{sid}/attachments/{aid}")
-    def assistant_attachment(sid: str, aid: str) -> Any:
+    def assistant_attachment(sid: str, aid: str, request: Request) -> Any:
         from fastapi.responses import FileResponse
 
+        if isinstance(_session_or_404(sid, request), JSONResponse):
+            return JSONResponse({"error": "no such attachment"}, status_code=404)
         ref = chat_store.attachment(sid, aid)
         path = chat_store.attachment_path(sid, ref) if ref else None
         if ref is None or path is None or not path.is_file():
@@ -3527,8 +3582,8 @@ def build_studio_app(recents: Optional[Recents] = None):
                             headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
     @app.delete("/api/assistant/sessions/{sid}")
-    async def assistant_delete(sid: str) -> JSONResponse:
-        sess = _session_or_404(sid)
+    async def assistant_delete(sid: str, request: Request) -> JSONResponse:
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         if sess.get("running_turn"):
@@ -3542,7 +3597,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         text for an earlier message) name a turn: it and everything after
         it leave the transcript, and the conversation forks from just
         before it."""
-        sess = _session_or_404(sid)
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         message = str(body.get("message") or "").strip()
@@ -3576,6 +3631,10 @@ def build_studio_app(recents: Optional[Recents] = None):
         if isinstance(env, JSONResponse):
             return env
         cwd, context, mcp = env
+        busy = _busy()
+        if busy is not None:
+            _revoker(mcp)()
+            return busy
         if redo:
             running = sess.get("running_turn")
             if running and running in relay.turns and not relay.turns[running].done:
@@ -3593,7 +3652,7 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.post("/api/assistant/sessions/{sid}/compact")
     async def assistant_compact(sid: str, request: Request) -> JSONResponse:
-        sess = _session_or_404(sid)
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         if not sess.get("claude_session"):
@@ -3602,6 +3661,10 @@ def build_studio_app(recents: Optional[Recents] = None):
         if isinstance(env, JSONResponse):
             return env
         cwd, context, mcp = env
+        busy = _busy()
+        if busy is not None:
+            _revoker(mcp)()
+            return busy
         try:
             turn = relay.start(sid, "/compact", cwd=cwd, context=context, mcp=mcp, kind="compact",
                                owner=request.state.user["id"], on_end=[_revoker(mcp)])
@@ -3611,8 +3674,10 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"turn": turn.id, "cursor": 0})
 
     @app.post("/api/assistant/sessions/{sid}/items/{seq}")
-    def assistant_item(sid: str, seq: int, body: Dict[str, Any]) -> JSONResponse:
+    def assistant_item(sid: str, seq: int, body: Dict[str, Any], request: Request) -> JSONResponse:
         """Record what the user did with a changes card: kept, or undone."""
+        if isinstance(_session_or_404(sid, request), JSONResponse):
+            return JSONResponse({"error": "no such item"}, status_code=404)
         state = body.get("state")
         if state not in ("kept", "undone"):
             return JSONResponse({"error": "state is kept or undone"}, status_code=400)
@@ -3623,7 +3688,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"item": item})
 
     @app.post("/api/assistant/import")
-    def assistant_import(body: Dict[str, Any]) -> JSONResponse:
+    def assistant_import(body: Dict[str, Any], request: Request) -> JSONResponse:
         """A conversation the old panel kept in the browser, carried over
         once: its items become a session that continues the same Claude
         session."""
@@ -3634,7 +3699,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         from .assistant import title_from
 
         first = next((str(x.get("text") or "") for x in log if isinstance(x, dict) and x.get("w") == "me"), "")
-        sess = chat_store.create_session(scope, title=title_from(first) if first else "Earlier conversation",
+        sess = chat_store.create_session(scope, owner=request.state.user["id"],
+                                         title=title_from(first) if first else "Earlier conversation",
                                          title_source="first", claude_session=str(body.get("session") or "") or None)
         kinds = {"me": "user", "bot": "text", "tool": "tool", "changes": "changes", "err": "error", "meta": "note"}
         items = []
@@ -3718,25 +3784,27 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"suggestions": uniq[:6]})
 
     @app.get("/api/assistant/turns/{tid}")
-    async def assistant_poll(tid: str, cursor: int = 0) -> JSONResponse:
+    async def assistant_poll(tid: str, request: Request, cursor: int = 0) -> JSONResponse:
+        if isinstance(_turn_or_404(tid, request), JSONResponse):
+            return JSONResponse({"error": "unknown turn"}, status_code=404)
         got = await relay.poll(tid, max(0, cursor))
         if got is None:
             return JSONResponse({"error": "unknown turn"}, status_code=404)
         return JSONResponse(got)
 
     @app.get("/api/assistant/turns/{tid}/stream")
-    async def assistant_stream(tid: str, cursor: int = 0, window: float = 20.0) -> Any:
+    async def assistant_stream(tid: str, request: Request, cursor: int = 0, window: float = 20.0) -> Any:
         """The turn's events from *cursor* as NDJSON, as they happen, for up
         to ``window`` seconds; the page reconnects from its cursor."""
-        if tid not in relay.turns:
+        if isinstance(_turn_or_404(tid, request), JSONResponse):
             return JSONResponse({"error": "unknown turn"}, status_code=404)
         return StreamingResponse(relay.stream(tid, max(0, cursor), max(1.0, min(window, 25.0))),
                                  media_type="application/x-ndjson",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.post("/api/assistant/turns/{tid}/stop")
-    async def assistant_stop(tid: str) -> JSONResponse:          # on the loop: stop() schedules a kill
-        if not relay.stop(tid):
+    async def assistant_stop(tid: str, request: Request) -> JSONResponse:   # on the loop: stop() schedules a kill
+        if isinstance(_turn_or_404(tid, request), JSONResponse) or not relay.stop(tid):
             return JSONResponse({"error": "unknown turn"}, status_code=404)
         return JSONResponse({"ok": True})
 

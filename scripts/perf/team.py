@@ -154,7 +154,7 @@ async def shots(b):
             await pg.wait_for_timeout(150)
             await pg.screenshot(path=f"{OUT}/account_menu_home_{tag}.png")
             problems[f"account_menu_home_{tag}"] = await pg.evaluate(GEOM)
-            pid = await pg.evaluate("async () => ((await (await fetch('/api/projects')).json()).projects[0] || {}).id")
+            pid = await pg.evaluate("async () => ((await (await fetch('/api/projects')).json()).projects.find(p => p.exists) || {}).id")
             if pid:
                 await pg.goto(f"{BASE}/p/{pid}")
                 await pg.wait_for_selector("#btn-account")

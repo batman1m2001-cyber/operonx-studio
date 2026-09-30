@@ -221,7 +221,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     running_turn  TEXT,
     preview       TEXT NOT NULL DEFAULT '',
     effort        TEXT,
-    claude_home   TEXT
+    claude_home   TEXT,
+    owner         TEXT
 );
 CREATE INDEX IF NOT EXISTS sessions_by_scope ON sessions (scope, archived, updated);
 CREATE TABLE IF NOT EXISTS turns (
@@ -296,6 +297,11 @@ class ChatStore:
                 self._db.execute("ALTER TABLE sessions ADD COLUMN effort TEXT")
             if "claude_home" not in cols:
                 self._db.execute("ALTER TABLE sessions ADD COLUMN claude_home TEXT")
+            # a conversation is its owner's (docs/TEAM_PLAN.md §2.3); stores
+            # from before owners get the column, and adopt() gives them one
+            if "owner" not in cols:
+                self._db.execute("ALTER TABLE sessions ADD COLUMN owner TEXT")
+            self._db.execute("CREATE INDEX IF NOT EXISTS sessions_by_owner ON sessions (owner, scope, archived, updated)")
 
     def _q(self, sql: str, args: Iterable[Any] = ()) -> List[sqlite3.Row]:
         with self._lock:
@@ -311,15 +317,31 @@ class ChatStore:
         out["running"] = bool(out.get("running_turn"))
         return out
 
-    def create_session(self, scope: str, *, model: Optional[str] = None, title: str = "",
+    def create_session(self, scope: str, *, owner: str, model: Optional[str] = None, title: str = "",
                        title_source: str = "", claude_session: Optional[str] = None,
                        effort: Optional[str] = None) -> Dict[str, Any]:
+        """A new conversation, *owner*'s (a user id) and no one else's."""
+        if not owner:
+            raise ValueError("a conversation needs an owner")
         sid = uuid.uuid4().hex[:16]
         now = _now()
-        self._q("INSERT INTO sessions (id, scope, title, title_source, created, updated, model, claude_session, effort)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (sid, scope, title, title_source, now, now, model, claude_session, effort))
+        self._q("INSERT INTO sessions (id, scope, title, title_source, created, updated, model, claude_session, effort,"
+                " owner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (sid, scope, title, title_source, now, now, model, claude_session, effort, owner))
         return self.session(sid)  # type: ignore[return-value]
+
+    def adopt(self, owner: str) -> int:
+        """Conversations with no owner — from before owners, or from an
+        auth-off studio (``local``) — become *owner*'s. How many moved."""
+        with self._lock:
+            got = self._db.execute("UPDATE sessions SET owner = ? WHERE (owner IS NULL OR owner = 'local')"
+                                   " AND ? != 'local'", (owner, owner)).rowcount
+            if owner == "local":
+                got = self._db.execute("UPDATE sessions SET owner = 'local' WHERE owner IS NULL").rowcount
+        return int(got)
+
+    def owned_by(self, owner: str) -> List[str]:
+        return [r["id"] for r in self._q("SELECT id FROM sessions WHERE owner = ?", (owner,))]
 
     # meta: small studio-wide facts (defaults, what the CLI resolved)
 
@@ -335,11 +357,12 @@ class ChatStore:
         rows = self._q("SELECT * FROM sessions WHERE id = ?", (sid,))
         return self._session(rows[0]) if rows else None
 
-    def sessions(self, scope: Optional[str] = None, *, q: str = "", archived: Optional[bool] = False,
+    def sessions(self, scope: Optional[str] = None, *, owner: str, q: str = "", archived: Optional[bool] = False,
                  limit: int = 200) -> List[Dict[str, Any]]:
-        """Newest first. ``scope`` None lists every scope; ``archived`` None
-        lists both; ``q`` matches titles and anything said in them."""
-        where, args = [], []
+        """*owner*'s conversations, newest first. ``scope`` None lists every
+        scope; ``archived`` None lists both; ``q`` matches titles and
+        anything said in them."""
+        where, args = ["s.owner = ?"], [owner]
         if scope is not None:
             where.append("s.scope = ?")
             args.append(scope)
@@ -351,7 +374,7 @@ class ChatStore:
             where.append("(s.title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM items i WHERE i.session = s.id"
                          " AND i.hidden = 0 AND i.text LIKE ? ESCAPE '\\'))")
             args += [like, like]
-        sql = "SELECT s.* FROM sessions s" + (" WHERE " + " AND ".join(where) if where else "")
+        sql = "SELECT s.* FROM sessions s WHERE " + " AND ".join(where)
         sql += " ORDER BY s.updated DESC LIMIT ?"
         args.append(max(1, min(int(limit), 1000)))
         return [self._session(r) for r in self._q(sql, args)]
@@ -566,6 +589,7 @@ class Relay:
         self.finished: List[Dict[str, Any]] = []   # recent turn endings, for the pulse
         self.finished_seq = 0
         self.on_finish: Optional[Any] = None        # called with the scope when a turn ends
+        self.name_of: Optional[Any] = None          # a user id -> the name a changes card shows
         # a turn's MCP config lives in a 0600 file here while it runs (it
         # carries the turn's agent token: on the command line, any local
         # user could read it from /proc). A studio that died left its
@@ -845,7 +869,8 @@ class Relay:
                         except Exception:  # noqa: BLE001 — the answer still stands
                             changed = None
                         if changed and changed["files"]:
-                            self._item(turn, "changes", **changed)
+                            others = self._overlapping(turn)
+                            self._item(turn, "changes", **changed, **({"overlap": others} if others else {}))
                 self._flush(turn)
             await proc.wait()
         finally:
@@ -860,6 +885,32 @@ class Relay:
             self._item(turn, "error", text=said, retry=True, **({"auth": True} if _AUTH_ERROR.search(said) else {}))
             return "failed"
         return state
+
+    def _overlapping(self, turn: Turn) -> List[str]:
+        """Who else's assistant worked in the same project while *turn* ran.
+        The snapshot diff can't tell two agents' edits apart (chat.py), so
+        the changes card says so instead of claiming them all (§2.3)."""
+        names: List[str] = []
+        for other in self.turns.values():
+            if other is turn or other.scope != turn.scope or other.owner == turn.owner:
+                continue
+            if other.done and other.ended is not None and other.ended < turn.started:
+                continue
+            if other.started > time.monotonic():
+                continue
+            name = other.owner or "someone"
+            if self.name_of is not None:
+                try:
+                    name = self.name_of(other.owner) or name
+                except Exception:  # noqa: BLE001 — a name is a courtesy
+                    pass
+            if name not in names:
+                names.append(name)
+        return names
+
+    def running(self) -> int:
+        """Turns running now, across the studio (the load cap counts these)."""
+        return sum(1 for t in self.turns.values() if not t.done)
 
     def _translate(self, turn: Turn, event: Dict[str, Any]) -> bool:
         """One stream-json event → items and client events. True on the result."""
@@ -1067,7 +1118,8 @@ class Relay:
         self.finished_seq += 1
         sess = self.store.session(turn.session) or {}
         self.finished.append({"turn": turn.id, "session": turn.session, "scope": turn.scope, "state": state,
-                              "title": sess.get("title") or "", "at": _now(), "seq": self.finished_seq})
+                              "title": sess.get("title") or "", "at": _now(), "seq": self.finished_seq,
+                              "owner": turn.owner})
         del self.finished[:-50]
         if turn.fresh is not None:
             turn.fresh.set()

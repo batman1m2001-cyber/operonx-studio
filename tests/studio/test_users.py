@@ -212,6 +212,8 @@ def test_a_demotion_stops_their_running_turn(team, tmp_path, monkeypatch):
     team.use(team.admin_token)
     res = c.patch(f"/api/admin/users/{ann['id']}", json={"role": "viewer"})
     assert res.json()["stopped_turns"] == 1
+    assert c.get(f"/api/assistant/turns/{turn}").status_code == 404      # the admin can't watch it (P3)
+    team.signin("ann", ann["password"])                                  # signed out by the demotion
     for _ in range(200):
         got = c.get(f"/api/assistant/turns/{turn}").json()
         if not got["alive"]:

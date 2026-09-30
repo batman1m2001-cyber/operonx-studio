@@ -2725,6 +2725,10 @@ body.ax-sheet #axstage { position: fixed; inset: 0; z-index: 90; padding: env(sa
 .themepick button:hover { color: var(--text); background: none; border: none; }
 .themepick button.on { background: var(--surface); color: var(--text); box-shadow: var(--sh-1); }
 
+/* a changes card whose turn overlapped another person's in the project */
+.ax-overlap { margin: 8px 0 2px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--warn-soft);
+  color: var(--warn); font-size: var(--fs-sm); line-height: 1.45; }
+
 /* ── who is signed in: the account menu (account.js) ─────────────── */
 .acct-wrap { position: relative; flex: none; }
 .acctbtn { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 10px 0 4px;

@@ -521,7 +521,7 @@ def test_old_browser_transcripts_import(client, project, fake):
 
 def test_a_restart_marks_the_turns_it_killed(tmp_path):
     store = ChatStore(tmp_path / "a.sqlite")
-    sess = store.create_session("home")
+    sess = store.create_session("home", owner="u1")
     store.add_turn("t1", sess["id"], message="long job", kind="message", claude_before=None)
     store.update_session(sess["id"], running_turn="t1")
     Relay(store)                                   # what a new studio process does on start
@@ -871,3 +871,186 @@ def test_a_turn_that_is_not_signed_in_asks_for_it(client, project, fake):
     _, events = _say(client, sid, "AUTHFAIL please")
     err = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "error")
     assert err["auth"] is True and "Please run /login" in err["text"]
+
+
+# ── P3: a conversation belongs to the person who started it ──────────────
+# (docs/TEAM_PLAN.md §2.3). A and B share one client and switch cookies: a
+# turn is a task on that client's loop.
+
+def _two(team, project):
+    """A (the admin, root) with a conversation, a finished turn and an image
+    in the project; B an editor. Returns the ids B must not reach."""
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    pid = _pid(c, project)
+    sid = _session(c, pid)["id"]
+    png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 64).decode()
+    aid = c.post(f"/api/assistant/sessions/{sid}/attachments",
+                 json={"mime": "image/png", "data": png, "name": "a.png"}).json()["attachment"]["id"]
+    tid, _ = _say(c, sid, "hello from A")
+    return {"b": b, "pid": pid, "sid": sid, "aid": aid, "tid": tid}
+
+
+def test_someone_elses_conversation_is_not_there(team, project, fake):
+    from operonx_studio.access import ACCESS
+
+    c = team.client
+    a = _two(team, project)
+    # every self route that names a conversation, a turn, an image or an item
+    routes = [(m, p) for (m, p), level in ACCESS.items() if level == "self"
+              and any(k in p for k in ("{sid}", "{tid}", "{aid}", "{seq}"))]
+    assert len(routes) == 11
+    team.use(a["b"]["token"])
+    assert [s["id"] for s in c.get("/api/assistant/sessions").json()["sessions"]] == []
+    assert [s["id"] for s in c.get("/api/assistant/sessions", params={"scope": a["pid"]}).json()["sessions"]] == []
+    for method, path in routes:
+        url = (path.replace("{sid}", a["sid"]).replace("{tid}", a["tid"]).replace("{aid}", a["aid"])
+               .replace("{seq}", "1"))
+        body = {"message": "mine now", "state": "kept", "title": "stolen", "mime": "image/png",
+                "data": base64.b64encode(b"x").decode()} if method in ("POST", "PATCH", "PUT") else None
+        res = c.request(method, url, json=body)
+        assert res.status_code == 404, (method, path, res.status_code, res.text[:200])
+    # nothing of A's changed
+    team.use(team.admin_token)
+    got = c.get(f"/api/assistant/sessions/{a['sid']}").json()
+    assert got["session"]["title"] != "stolen" and [i["text"] for i in got["items"] if i["kind"] == "user"] == ["hello from A"]
+    assert all(i.get("state") != "kept" for i in got["items"])
+    # B's own conversations work as ever, and A does not see them either
+    team.use(a["b"]["token"])
+    mine = _session(c, a["pid"])["id"]
+    _say(c, mine, "hello from B")
+    assert [s["id"] for s in c.get("/api/assistant/sessions").json()["sessions"]] == [mine]
+    team.use(team.admin_token)
+    assert mine not in [s["id"] for s in c.get("/api/assistant/sessions").json()["sessions"]]
+    assert c.get(f"/api/assistant/sessions/{mine}").status_code == 404      # admins don't read them either
+
+
+def test_the_home_page_and_the_pulse_show_only_your_own(team, project, fake):
+    import json as _json
+
+    c = team.client
+    a = _two(team, project)
+    boot = lambda html: _json.loads(html.split('<script id="home-boot" type="application/json">')[1].split("</script>")[0])
+    assert [s["id"] for s in boot(c.get("/").text)["sessions"]] == [a["sid"]]
+    ended = c.get(f"/api/p/{a['pid']}/pulse", params={"chat": 0, "hold": 0}).json()["chat_ended"]
+    assert [e["session"] for e in ended] == [a["sid"]]
+    assert ended[0]["owner"] == c.get("/api/me").json()["user"]["id"]
+    team.use(a["b"]["token"])
+    assert boot(c.get("/").text)["sessions"] == []
+    assert c.get(f"/api/p/{a['pid']}/pulse", params={"chat": 0, "hold": 0}).json()["chat_ended"] == []
+
+
+def test_screen_actions_reach_only_their_owners_screen(team, project, fake):
+    c = team.client
+    a = _two(team, project)
+    root_id = c.get("/api/me").json()["user"]["id"]
+    agent = c.app.state.agents.issue(root_id, 60)          # what A's turn's tools sign in with
+    team.use(agent)
+    assert c.post(f"/api/p/{a['pid']}/ui/action", json={"kind": "open_run", "args": {"run": "r1"}}).status_code == 200
+    team.use(team.admin_token)
+    mine = c.get(f"/api/p/{a['pid']}/pulse", params={"ui": 0, "hold": 0}).json()
+    assert [x["args"]["run"] for x in mine["actions"]] == ["r1"]
+    assert [x["args"]["run"] for x in c.get(f"/api/p/{a['pid']}/ui/actions").json()["actions"]] == ["r1"]
+    team.use(a["b"]["token"])
+    theirs = c.get(f"/api/p/{a['pid']}/pulse", params={"ui": 0, "hold": 0}).json()
+    assert theirs["actions"] == [] and theirs["ui_last"] == 0
+    assert c.get(f"/api/p/{a['pid']}/ui/actions").json()["actions"] == []
+
+
+def test_defaults_are_per_person_and_the_admin_keeps_the_studios(team, project, fake):
+    c = team.client
+    c.app.state.chat_store.set_meta("defaults", {"model": "sonnet"})     # what the single-login studio had
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    assert c.get("/api/assistant/models").json()["studio_defaults"] == {"model": "sonnet"}
+    assert c.put("/api/assistant/defaults", json={"model": "opus", "effort": "high"}).status_code == 200
+    team.use(b["token"])
+    got = c.get("/api/assistant/models").json()
+    assert got["studio_defaults"] == {} and got["new"] == {}
+    c.put("/api/assistant/defaults", json={"model": "haiku"})
+    assert _session(c, "home")["model"] == "haiku"
+    team.use(team.admin_token)
+    assert c.get("/api/assistant/models").json()["studio_defaults"] == {"model": "opus", "effort": "high"}
+    assert _session(c, "home")["model"] == "opus"
+
+
+def test_an_old_store_is_adopted_by_the_first_admin(tmp_path, auth_on, fake):
+    import sqlite3
+
+    state = tmp_path / "old"
+    state.mkdir()
+    db = sqlite3.connect(state / "assistant.sqlite")             # a store made before owners
+    db.executescript("CREATE TABLE sessions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',"
+                     " title_source TEXT NOT NULL DEFAULT '', created REAL NOT NULL, updated REAL NOT NULL,"
+                     " archived INTEGER NOT NULL DEFAULT 0, model TEXT, claude_session TEXT,"
+                     " usage TEXT NOT NULL DEFAULT '{}', running_turn TEXT, preview TEXT NOT NULL DEFAULT '');"
+                     "INSERT INTO sessions (id, scope, title, created, updated) VALUES ('old1', 'home', 'Before', 1, 1);")
+    db.commit()
+    db.close()
+    with TestClient(build_studio_app(Recents(state_file=state / "studio.json"))) as c:
+        c.post("/api/login", json={"username": "root", "password": "admin-pass-1"})
+        assert [s["id"] for s in c.get("/api/assistant/sessions").json()["sessions"]] == ["old1"]
+    # an auth-off studio's conversations ("local") go to the admin too, once there is one
+    store = ChatStore(state / "assistant.sqlite")
+    store.create_session("home", owner="local", title="From auth off")
+    with TestClient(build_studio_app(Recents(state_file=state / "studio.json"))) as c:
+        c.post("/api/login", json={"username": "root", "password": "admin-pass-1"})
+        assert {s["title"] for s in c.get("/api/assistant/sessions").json()["sessions"]} == {"Before", "From auth off"}
+
+
+def test_the_studio_runs_at_most_so_many_turns_at_once(team, project, fake, monkeypatch):
+    monkeypatch.setenv("OPERONX_STUDIO_CHAT_MAX_TURNS", "1")
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    slow = _session(c, "home")["id"]
+    running = c.post(f"/api/assistant/sessions/{slow}/turns", json={"message": "SLOW"}).json()["turn"]
+    team.use(b["token"])
+    sid = _session(c, "home")["id"]
+    busy = c.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "hi"})
+    assert busy.status_code == 429 and "busy" in busy.json()["error"]
+    team.use(team.admin_token)
+    c.post(f"/api/assistant/turns/{running}/stop")
+    _drain(c, running)
+    team.use(b["token"])
+    assert c.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "hi"}).status_code == 200
+
+
+def test_two_assistants_in_one_project_flag_their_changes(team, project, fake):
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A"], cwd=project, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=project, check=True)
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    pid = _pid(c, project)
+    team.use(b["token"])
+    theirs = _session(c, pid)["id"]
+    slow = c.post(f"/api/assistant/sessions/{theirs}/turns", json={"message": "SLOW"}).json()["turn"]
+    team.use(team.admin_token)
+    sid = _session(c, pid)["id"]
+    _, events = _say(c, sid, "EDIT please")
+    card = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "changes")
+    assert card["overlap"] == ["Bee"]                               # whose turn ran beside it
+    team.use(b["token"])
+    c.post(f"/api/assistant/turns/{slow}/stop")
+    _drain(c, slow)
+    # alone, no note
+    team.use(team.admin_token)
+    (project / "added.py").unlink()
+    _, events = _say(c, sid, "EDIT again")
+    card = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "changes")
+    assert "overlap" not in card
+
+
+def test_deleting_someone_deletes_their_conversations(team, project, fake):
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(b["token"])
+    sid = _session(c, "home")["id"]
+    _say(c, sid, "hello")
+    folder = c.app.state.chat_store.files_dir(sid)
+    team.use(team.admin_token)
+    assert c.delete(f"/api/admin/users/{b['id']}").status_code == 200
+    assert c.app.state.chat_store.session(sid) is None and not folder.exists()
