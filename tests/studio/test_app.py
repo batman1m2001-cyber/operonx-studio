@@ -1105,9 +1105,10 @@ def test_jobs_list_runs_and_items_from_the_records(client, jobs_project):
     assert listed[0]["name"] == "shout_all" and listed[0]["runs"] == 0 and listed[0]["last"] is None
 
     # A run recorded the way operonx-run records it.
-    from operonx.app.jobs import Job
+    import importlib
+    import sys
 
-    import importlib, sys
+    from operonx.app.jobs import Job
     sys.path.insert(0, str(jobs_project))
     try:
         main = importlib.import_module("main")
@@ -1115,7 +1116,8 @@ def test_jobs_list_runs_and_items_from_the_records(client, jobs_project):
                   sink=jobs_project / "out.jsonl", key="id", record_dir=jobs_project / "jobs")
         run = job.run_sync()
     finally:
-        sys.path.remove(str(jobs_project)); sys.modules.pop("main", None)
+        sys.path.remove(str(jobs_project))
+        sys.modules.pop("main", None)
     assert run.status == "failed"
 
     listed = client.get(f"/api/p/{pid}/jobs").json()["jobs"]

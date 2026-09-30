@@ -14,8 +14,14 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from operonx_studio.users import (PasswordError, UserStore, check_password, hash_password, password_problem,
-                                  valid_username)
+from operonx_studio.users import (
+    PasswordError,
+    UserStore,
+    check_password,
+    hash_password,
+    password_problem,
+    valid_username,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -196,7 +202,7 @@ def test_demoting_or_disabling_ends_their_sessions_and_turns(team):
 
 
 def test_a_demotion_stops_their_running_turn(team, tmp_path, monkeypatch):
-    from test_auth import FAKE_AGENT      # the same fake (tests/studio is on sys.path)
+    from test_auth import FAKE_AGENT  # the same fake (tests/studio is on sys.path)
 
     binary = tmp_path / "fake-claude"
     binary.write_text(FAKE_AGENT, encoding="utf-8")

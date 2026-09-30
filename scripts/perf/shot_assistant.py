@@ -5,9 +5,8 @@ usage: shot_assistant.py <base> <outdir> <pid> [<session id in that project>]
 import asyncio
 import sys
 
-from playwright.async_api import async_playwright
-
 import studio_login
+from playwright.async_api import async_playwright
 
 BASE, OUT, PID = sys.argv[1], sys.argv[2], sys.argv[3]
 SID = sys.argv[4] if len(sys.argv) > 4 else ""

@@ -1220,3 +1220,29 @@ def test_a_viewers_turn_reads_with_deny_rules_and_no_project_servers(team, proje
     _say(c, sid2, "and you?")
     argv = _calls(fake)[-1]["argv"]
     assert "--disallowedTools" not in argv and "Bash" in argv and "notes" in _calls(fake)[-1]["mcp"]["mcpServers"]
+
+
+def test_a_viewer_is_never_offered_a_starter_it_cannot_act_on(team, tmp_path, fake):
+    """A viewer's assistant only reads (TEAM_PLAN D10), so "Try … and
+    report" and "Set up …" starters would only lead to a refusal."""
+    from test_app import JOBS_MAIN, JOBS_MANIFEST
+
+    project = tmp_path / "served"
+    project.mkdir()
+    (project / "main.py").write_text(JOBS_MAIN, encoding="utf-8")
+    (project / "operonx.toml").write_text(JOBS_MANIFEST, encoding="utf-8")
+    team.use(team.admin_token)
+    pid = team.client.post("/api/open", json={"path": str(project)}).json()["id"]
+    viewer = team.person("vi", "viewer")
+    editor = team.person("ed", "editor")
+
+    def kinds(token):
+        team.use(token)
+        return {s["kind"] for s in team.client.get(f"/api/p/{pid}/assistant/suggest").json()["suggestions"]}
+
+    deadline = time.time() + 60                                  # the first ask starts the scan
+    while "try" not in kinds(editor["token"]) and time.time() < deadline:
+        time.sleep(0.5)
+    assert "try" in kinds(editor["token"])                      # the project serves `shout`
+    offered = kinds(viewer["token"])
+    assert offered and not offered & {"setup", "try"}

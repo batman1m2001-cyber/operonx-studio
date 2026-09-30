@@ -1,5 +1,7 @@
 """audit.py's JSON lines as a table (stdin to stdout)."""
-import sys,json
+import json
+import sys
+
 for l in sys.stdin:
     try: d=json.loads(l)
     except: print(l.rstrip()[:300]); continue

@@ -15,8 +15,9 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from operonx_studio.users import UserStore
 from test_assistant import fake, project  # noqa: F401 — its fixtures: the fake claude, a project
+
+from operonx_studio.users import UserStore
 
 pytestmark = pytest.mark.unit
 

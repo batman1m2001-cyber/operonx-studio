@@ -982,8 +982,12 @@
   ];
   const START_ICON = {failure: "alert", eval: "evals", setup: "wand", try: "play", learn: "book", op: "graph"};
 
+  // a viewer's assistant only reads (the server filters project starters too)
+  const VIEWER = document.body.dataset.role === "viewer";
+  const VIEWER_CANNOT = new Set(["setup", "try"]);
+
   async function loadSuggestions() {
-    if (!PROJECT) return HOME_STARTS;
+    if (!PROJECT) return VIEWER ? HOME_STARTS.filter((s) => !VIEWER_CANNOT.has(s.kind)) : HOME_STARTS;
     const node = (W.__oxview || {}).node;
     try {
       const got = await call(`/api/p/${PROJECT}/assistant/suggest${node ? `?node=${encodeURIComponent(node)}` : ""}`);
@@ -997,7 +1001,7 @@
     const hello = el("div", "ax-hello");
     const mark = el("span", "ax-mark");
     mark.append(icon("spark"));
-    hello.append(mark, el("h2", null, PROJECT ? "What should we work on?" : "What do you want to build?"),
+    hello.append(mark, el("h2", null, PROJECT ? "What should we work on?" : VIEWER ? "What do you want to know?" : "What do you want to build?"),
       el("p", null, PROJECT
         ? "Describe a task in your own words. I can read and change this project, run its services and jobs, and dig through its runs."
         : "Describe it in your own words — I'll set up a working project from a template, or answer questions about the ones you have."));

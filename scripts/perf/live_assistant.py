@@ -10,9 +10,8 @@ import subprocess
 import sys
 import time
 
-from playwright.async_api import async_playwright
-
 import studio_login
+from playwright.async_api import async_playwright
 
 BASE, OUT, PID, ROOT = sys.argv[1:5]
 RESULTS = []

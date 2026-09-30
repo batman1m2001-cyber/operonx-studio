@@ -14,14 +14,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # pyproject's [tool.uv.sources] points operonx at a sibling ../Operon
+      # checkout for local development; the runner has none, so CI takes
+      # operonx from PyPI (the version pyproject pins).
       - name: Python tests
         run: |
-          uv sync --all-extras
-          uv run pytest -q
+          uv sync --all-extras --no-sources
+          uv run --no-sync pytest -q
       - name: Lint
-        run: uv run ruff check .
+        run: uv run --no-sync ruff check .
       - name: JS syntax
         run: |
           for f in operonx_studio/static/*.js; do node --check "$f"; done
       - name: JS tests
-        run: node --test tests/js/
+        run: node --test tests/js/*.test.mjs

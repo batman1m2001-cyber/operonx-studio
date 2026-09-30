@@ -64,8 +64,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _reset_password(name: str) -> int:
     """Recovery for someone locked out (decision D17). A running studio
-    sees it within 5 s; its sign-in throttle, being in memory, still
-    applies to the name until it lapses (15 minutes at most)."""
+    sees it within 5 s, and a sign-in lock on the name lifts with the new
+    password."""
     from operonx_studio.registry import state_dir
     from operonx_studio.users import UserStore
 

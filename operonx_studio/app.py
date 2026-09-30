@@ -21,12 +21,12 @@ means the tabs say so instead of guessing.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import subprocess
-import re
 import os
-import asyncio
+import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -505,6 +505,12 @@ def _dir_size(path: Path) -> int:
 # ── the app ─────────────────────────────────────────────────────────────
 
 
+#: Starter kinds that ask the assistant to change or run something — a
+#: viewer's assistant has read reach only (TEAM_PLAN D10), so it never
+#: offers them.
+VIEWER_CANNOT = frozenset({"setup", "try"})
+
+
 def build_studio_app(recents: Optional[Recents] = None):
     from fastapi import FastAPI
     from fastapi.responses import JSONResponse
@@ -515,10 +521,9 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     import hashlib
 
+    from fastapi import Depends
     from fastapi.middleware.gzip import GZipMiddleware
     from fastapi.responses import HTMLResponse
-
-    from fastapi import Depends
 
     from .access import AccessDenied, authorize, is_open_path, level_of, recorded, unclassified
 
@@ -696,7 +701,14 @@ def build_studio_app(recents: Optional[Recents] = None):
     #
     #   OPERONX_STUDIO_USER/PASS   the first admin, read once on a start with no accounts
     #   OPERONX_STUDIO_AUTH=off    no sign-in: everyone is the first admin (trusted networks, the tests)
-    from .users import AgentTokens, PasswordError, Throttle, UserStore, password_problem, check_password
+    from .users import (
+        AgentTokens,
+        PasswordError,
+        Throttle,
+        UserStore,
+        check_password,
+        password_problem,
+    )
 
     auth_on = os.environ.get("OPERONX_STUDIO_AUTH", "").lower() not in ("off", "0", "false")
     users = UserStore(recents.state_file.parent / "users.sqlite")
@@ -843,6 +855,12 @@ def build_studio_app(recents: Optional[Recents] = None):
         username = str(body.get("username") or "").strip().lower()[:64]
         password = str(body.get("password") or "")[:1024]
         keys = (f"user:{username}", f"addr:{_client(request)}")
+        # A password reset in another process (`--reset-password`) cannot
+        # reach this in-memory throttle; the stored hash can. A name locked
+        # under a password that has since changed is let through, once.
+        known = users.by_name(username)
+        if known is not None and throttle.password_changed(keys[0], known["pw"]):
+            throttle.clear(*keys)
         wait = throttle.locked(*keys)
         if wait > 0:
             secs = int(wait) + 1
@@ -855,7 +873,7 @@ def build_studio_app(recents: Optional[Recents] = None):
                         method="POST", route="/api/login", status=status, detail={"username": username[:64]})
 
         if user is None:
-            throttle.fail(*keys)
+            throttle.fail(*keys, pw=known["pw"] if known else None)
             # a wrong password is recorded against the person it tried (an admin
             # filters by them); a name no one has, against no one
             note(401, users.by_name(username))
@@ -2413,7 +2431,15 @@ def build_studio_app(recents: Optional[Recents] = None):
     # state beside them; operonx.telemetry.runs.alerts does the judging from
     # the run store's summaries. Webhooks are only ever called by a rule the
     # user wrote, or by the Test button.
-    from operonx.telemetry.runs.alerts import METRICS, Alert, AlertState, deliver, evaluate, message, step
+    from operonx.telemetry.runs.alerts import (
+        METRICS,
+        Alert,
+        AlertState,
+        deliver,
+        evaluate,
+        message,
+        step,
+    )
 
     def _alerts_file(root: Path) -> Path:
         return root / ".operonx" / "alerts.json"
@@ -3223,8 +3249,17 @@ def build_studio_app(recents: Optional[Recents] = None):
     # reload, another device or a studio restart finds them as they were.
     from fastapi.responses import StreamingResponse
 
-    from .assistant import (EFFORTS, IMAGE_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MODEL_INFO, MODELS,
-                            ChatStore, Relay, valid_model)
+    from .assistant import (
+        EFFORTS,
+        IMAGE_TYPES,
+        MAX_ATTACHMENT_BYTES,
+        MAX_ATTACHMENTS,
+        MODEL_INFO,
+        MODELS,
+        ChatStore,
+        Relay,
+        valid_model,
+    )
 
     chat_store = ChatStore(recents.state_file.parent / "assistant.sqlite")
     app.state.chat_store = chat_store
@@ -3453,6 +3488,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     # which sign-in the first admin's assistant runs under, known before the
     # first turn needs it (the check spawns the CLI: ~0.5 s)
     import threading as _threading
+
     from . import chat as _chat_boot
 
     _first_admin = users.first_admin()
@@ -3867,7 +3903,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"session": _session_out(chat_store.session(sess["id"])), "items": len(items)})
 
     @app.get("/api/p/{pid}/assistant/suggest")
-    def assistant_suggest(pid: str, node: str = "") -> JSONResponse:
+    def assistant_suggest(pid: str, request: Request, node: str = "") -> JSONResponse:
         """Starters built from the project's own state, most pressing first:
         what failed today, an eval that dropped, what is missing, what the
         user is pointing at — so an empty conversation offers the next
@@ -3922,6 +3958,9 @@ def build_studio_app(recents: Optional[Recents] = None):
         if not jobs and services:
             add("Add a nightly job", f"Add a job that runs `{services[0]['name']}`'s graph over a batch of saved "
                                      "cases every night and records the results.", "setup")
+        # a viewer's assistant only reads: never offer to build or drive
+        if (getattr(request.state, "user", None) or {}).get("role") == "viewer":
+            out = [s_ for s_ in out if s_["kind"] not in VIEWER_CANNOT]
         # the most pressing first, at most six, no two alike
         seen, uniq = set(), []
         for s_ in out:
