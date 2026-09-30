@@ -528,17 +528,28 @@ class Throttle:
                 wait = max(wait, st["until"] - now)
         return max(0.0, wait)
 
-    def fail(self, *keys: str) -> None:
+    def fail(self, *keys: str, pw: Optional[str] = None) -> None:
+        """*pw* is the stored hash the attempt was checked against, so a
+        later reset of that password can lift the lock (see
+        :meth:`password_changed`)."""
         now = time.monotonic()
         with self._lock:
             for key in keys:
                 st = self._keys.setdefault(key, {"fails": 0, "level": 0, "until": 0.0, "last": now})
                 st["fails"] += 1
                 st["last"] = now
+                if pw is not None:
+                    st["pw"] = pw
                 if st["fails"] >= self.LIMIT:
                     st["until"] = now + min(self.MOST, self.FIRST * (2 ** st["level"]))
                     st["level"] += 1
                     st["fails"] = 0
+
+    def password_changed(self, key: str, pw: str) -> bool:
+        """Whether *key* is locked under a password other than *pw*."""
+        with self._lock:
+            st = self._keys.get(key)
+            return bool(st and st["until"] > time.monotonic() and st.get("pw") not in (None, pw))
 
     def clear(self, *keys: str) -> None:
         with self._lock:

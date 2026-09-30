@@ -187,6 +187,29 @@ def test_five_failures_lock_the_name_then_the_lock_doubles(team, monkeypatch):
     assert team.client.post("/api/login", json={"username": "root", "password": ADMIN_PASS}).status_code == 200
 
 
+def test_a_cli_reset_lifts_the_lock_on_that_name(team):
+    """The throttle lives in the running studio's memory and the CLI reset
+    in another process, so a reset used to leave the name locked for up to
+    15 minutes — exactly when the person was told to sign in again."""
+    from operonx_studio.users import UserStore
+
+    team.use(None)
+    for _ in range(5):
+        team.client.post("/api/login", json={"username": "root", "password": "x"})
+    assert team.client.post("/api/login", json={"username": "root", "password": "x"}).status_code == 429
+    cli = UserStore(team.state / "users.sqlite")                  # what --reset-password opens
+    temp = cli.reset_password(cli.by_name("root")["id"])
+    signed = team.client.post("/api/login", json={"username": "root", "password": temp})
+    assert signed.status_code == 200 and signed.json()["must_change"] is True
+
+
+def test_the_lock_stays_when_the_password_did_not_change(team):
+    team.use(None)
+    for _ in range(5):
+        team.client.post("/api/login", json={"username": "root", "password": "x"})
+    assert team.client.post("/api/login", json={"username": "root", "password": ADMIN_PASS}).status_code == 429
+
+
 def test_one_address_guessing_many_names_is_locked_too(team):
     team.use(None)
     for i in range(5):
