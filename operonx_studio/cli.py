@@ -80,6 +80,8 @@ def _reset_password(name: str) -> int:
         print(f"error: no one called {name!r} (known: {known})")
         return 2
     password = store.reset_password(user["id"])
+    store.audit(user=user["id"], username=user["username"], via="cli", method="CLI", route="cli:reset-password",
+                status=200, detail={"username": user["username"]})
     print(f"temporary password for {user['username']}: {password}")
     print("they choose their own at the next sign-in; their sessions have ended")
     if user["disabled"]:

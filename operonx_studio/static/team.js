@@ -262,4 +262,144 @@
 
   document.getElementById("btn-add").onclick = add;
   load();
+
+  /* ── Activity (docs/TEAM_PLAN.md §2.6): every change and refusal, by
+   * person and project. The rows say what was acted on, never a secret. */
+  const WHAT = {
+    "POST /api/login": "Signed in",
+    "POST /api/me/password": "Changed their password",
+    "POST /api/open": "Opened a project",
+    "POST /api/forget": "Removed a project from the list",
+    "POST /api/new": "Created a project",
+    "POST /api/p/{pid}/edit": "Edited the flow",
+    "POST /api/p/{pid}/trace/{run}/delete": "Deleted a run",
+    "POST /api/p/{pid}/resources/price": "Set a price",
+    "POST /api/p/{pid}/settings/retention": "Changed retention",
+    "POST /api/p/{pid}/jobs/{name}/run": "Ran a job",
+    "POST /api/p/{pid}/services/start": "Started a service",
+    "POST /api/p/{pid}/services/stop": "Stopped a service",
+    "POST /api/p/{pid}/review/run/{run}": "Reviewed a run",
+    "POST /api/p/{pid}/review/run/{run}/dataset": "Added a run to a dataset",
+    "POST /api/p/{pid}/prompts/save": "Saved a prompt",
+    "POST /api/p/{pid}/alerts": "Saved an alert",
+    "DELETE /api/p/{pid}/alerts/{name}": "Deleted an alert",
+    "POST /api/p/{pid}/alerts/{name}/test": "Tested an alert",
+    "POST /api/p/{pid}/alerts/check": "Checked alerts",
+    "POST /api/p/{pid}/datasets/{name}/rows": "Added dataset cases",
+    "POST /api/p/{pid}/chat/undo": "Undid the assistant's changes",
+    "POST /api/p/{pid}/play/open": "Opened the playground",
+    "POST /api/p/{pid}/play/simulate": "Simulated a conversation",
+    "POST /api/p/{pid}/play/send": "Sent to the playground",
+    "POST /api/p/{pid}/play/end": "Ended a playground session",
+    "POST /api/p/{pid}/play/rerun": "Re-ran an op",
+    "POST /api/p/{pid}/play/restart": "Restarted the playground",
+    "POST /api/assistant/login": "Started a Claude sign-in",
+    "POST /api/assistant/login/{lid}/code": "Finished a Claude sign-in",
+    "POST /api/assistant/logout": "Signed out of Claude",
+    "POST /api/admin/users": "Added a person",
+    "PATCH /api/admin/users/{uid}": "Changed a person",
+    "POST /api/admin/users/{uid}/password": "Reset a password",
+    "DELETE /api/admin/users/{uid}": "Deleted a person",
+    "EDIT assistant:changes": "The assistant changed files",
+    "CLI cli:reset-password": "Password reset from the command line",
+  };
+  const views = {people: document.getElementById("view-people"), activity: document.getElementById("view-activity")};
+  const actList = document.getElementById("activity");
+  const fUser = document.getElementById("act-user");
+  const fPid = document.getElementById("act-pid");
+  const more = document.getElementById("act-more");
+  let lastId = 0;
+  let filled = false;
+
+  for (const b of document.querySelectorAll(".teamtabs button")) {
+    b.onclick = () => {
+      for (const o of document.querySelectorAll(".teamtabs button")) {
+        const on = o === b;
+        o.classList.toggle("on", on);
+        o.setAttribute("aria-selected", String(on));
+      }
+      for (const [k, v] of Object.entries(views)) v.hidden = k !== b.dataset.view;
+      document.getElementById("btn-add").hidden = b.dataset.view !== "people";
+      if (b.dataset.view === "activity") showActivity();
+      try { history.replaceState(null, "", b.dataset.view === "activity" ? "#activity" : location.pathname); } catch { /* fine */ }
+    };
+  }
+
+  function when(at) {
+    const d = new Date(at * 1000);
+    const today = new Date().toDateString() === d.toDateString();
+    return today ? d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})
+      : d.toLocaleDateString([], {month: "short", day: "numeric"}) + " " + d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  }
+
+  function describe(r) {
+    const bits = [];
+    const d = r.detail || {};
+    for (const [k, v] of Object.entries(r.params || {})) if (k !== "pid" && k !== "uid") bits.push(`${k} ${v}`);
+    for (const [k, v] of Object.entries(d)) {
+      if (k === "files") bits.push(`${v.length} file${v.length === 1 ? "" : "s"}: ${v.slice(0, 3).join(", ")}${v.length > 3 ? "…" : ""}`);
+      else if (!(r.route === "/api/login" && k === "username")) bits.push(`${k} ${Array.isArray(v) ? v.join(", ") : v}`);
+    }
+    return bits.join(" · ");
+  }
+
+  async function fillFilters() {
+    if (filled) return;
+    filled = true;
+    for (const p of people) {
+      const o = Account.el("option", null, p.name || p.username);
+      o.value = p.id;
+      fUser.append(o);
+    }
+    try {
+      const projects = (await Account.call("GET", "/api/projects")).projects;
+      for (const p of projects) {
+        const o = Account.el("option", null, p.name);
+        o.value = p.id;
+        fPid.append(o);
+      }
+    } catch { /* the filter stays at every project */ }
+  }
+
+  async function showActivity(older) {
+    await fillFilters();
+    if (!older) { actList.textContent = ""; lastId = 0; }
+    const q = new URLSearchParams({limit: "100"});
+    if (fUser.value) q.set("user", fUser.value);
+    if (fPid.value) q.set("pid", fPid.value);
+    if (older && lastId) q.set("before", String(lastId));
+    let rows;
+    try { rows = (await Account.call("GET", `/api/admin/activity?${q}`)).rows; }
+    catch (e) { actList.append(Account.el("div", "nomatch", e.message)); return; }
+    if (!older && !rows.length) actList.append(Account.el("div", "nomatch", "Nothing recorded yet."));
+    for (const r of rows) {
+      const row = Account.el("div", "actrow" + (r.status >= 400 ? " bad" : ""));
+      const who = Account.el("div", "actwho");
+      // a failed sign-in may name no one: say what was typed
+      const typed = (r.detail || {}).username;
+      who.append(Account.avatar({name: r.username || typed || "?"}),
+                 Account.el("span", "actname", r.username || (typed ? `“${typed}”` : "someone")));
+      if (r.via !== "web") who.append(Account.el("span", "tag via", r.via === "assistant" ? "assistant" : r.via));
+      const what = Account.el("div", "actwhat");
+      let label = WHAT[`${r.method} ${r.route}`] || `${r.method} ${r.route}`;
+      if (r.route === "/api/login" && r.status !== 200) {
+        label = r.status === 403 ? "Could not sign in: the account is disabled"
+          : r.username ? "Sign-in failed: wrong password" : "Sign-in failed: no such person";
+      }
+      what.append(Account.el("span", "actlabel", label));
+      if (r.route === "/api/login") { /* the label says it */ }
+      else if (r.status === 403) what.append(Account.el("span", "tag off", "refused"));
+      else if (r.status >= 400) what.append(Account.el("span", "tag wait", `failed ${r.status}`));
+      const sub = [r.project, describe(r)].filter(Boolean).join(" · ");
+      if (sub) what.append(Account.el("div", "actsub", sub));
+      row.append(Account.el("div", "actwhen", when(r.at)), who, what);
+      actList.append(row);
+    }
+    if (rows.length) lastId = rows[rows.length - 1].id;
+    more.hidden = rows.length < 100;
+  }
+  fUser.onchange = () => showActivity();
+  fPid.onchange = () => showActivity();
+  more.onclick = () => showActivity(true);
+  if (location.hash === "#activity") document.querySelector('.teamtabs [data-view="activity"]').click();
 })();

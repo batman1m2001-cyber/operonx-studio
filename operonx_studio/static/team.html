@@ -29,12 +29,28 @@
     </div>
     <div class="actions"><button id="btn-add" class="primary" type="button"><i data-icon="plus"></i><span>Add person</span></button></div>
   </div>
+  <div class="teamtabs" role="tablist" aria-label="Team">
+    <button type="button" role="tab" data-view="people" aria-selected="true" class="on">People</button>
+    <button type="button" role="tab" data-view="activity" aria-selected="false">Activity</button>
+  </div>
+  <section id="view-people">
   <div class="roleguide" aria-label="What each role may do">
     <div><b>Admin</b><span>People, and everything an editor does.</span></div>
     <div><b>Editor</b><span>Changes projects, runs jobs, services and the playground. That runs code on this machine: give it only to people you would give a shell.</span></div>
     <div><b>Viewer</b><span>Looks at flows, runs and evals; changes nothing.</span></div>
   </div>
   <div class="projlist teamlist" id="team" aria-live="polite"></div>
+  </section>
+  <section id="view-activity" hidden>
+    <div class="actfilters">
+      <label class="actfilter"><span>Person</span><select id="act-user" aria-label="Person"><option value="">Everyone</option></select></label>
+      <label class="actfilter"><span>Project</span><select id="act-pid" aria-label="Project"><option value="">Every project</option></select></label>
+      <span class="spacer"></span>
+      <span class="note actkept">Kept 180 days · never a password, code, webhook or message</span>
+    </div>
+    <div class="projlist actlist" id="activity" aria-live="polite"></div>
+    <div class="actmore"><button type="button" id="act-more" class="ghost" hidden>Older</button></div>
+  </section>
 </main>
 
 <script src="/static/icons.js"></script>

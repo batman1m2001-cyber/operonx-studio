@@ -520,9 +520,30 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     from fastapi import Depends
 
-    from .access import AccessDenied, authorize, is_open_path, unclassified
+    from .access import AccessDenied, authorize, is_open_path, level_of, recorded, unclassified
 
-    def _authorize(request: Request) -> None:
+    async def _authorize(request: Request) -> None:
+        # what the activity log needs (§2.6), noted before the table decides,
+        # so a refusal is recorded as well as a change
+        route = getattr(request.scope.get("route"), "path", None)
+        level = level_of(request.method, route)
+        detail: Dict[str, Any] = {}
+        if request.method not in ("GET", "HEAD", "OPTIONS") and \
+                recorded(request.method, route, level, 200):
+            from .users import audit_detail
+
+            try:
+                detail = audit_detail(json.loads(await request.body() or b"{}"))
+            except ValueError:
+                detail = {}
+        if "uid" in request.path_params and "username" not in detail:
+            # whom an admin acted on, by name: after a delete there is no one to look up
+            target = users.user(str(request.path_params["uid"]))
+            if target is not None:
+                detail["username"] = target["username"]
+        request.state.audit = {"route": route or request.url.path, "level": level,
+                               "params": {k: str(v)[:200] for k, v in request.path_params.items()},
+                               "detail": detail}
         authorize(request)
 
     # Every route passes the access table (operonx_studio/access.py) before
@@ -733,15 +754,32 @@ def build_studio_app(recents: Optional[Recents] = None):
             return fwd.split(",")[0].strip()
         return peer
 
+    def _log_activity(request: Any, status: int, route: Optional[str] = None) -> None:
+        """One activity row for this request, if it is one the log keeps."""
+        note = getattr(request.state, "audit", None) or {"route": route or request.url.path, "level": None,
+                                                         "params": {}, "detail": {}}
+        if not recorded(request.method, note["route"], note["level"], status) or note["route"] == "/api/login":
+            return                      # a sign-in is recorded by its handler, with the name it tried
+        who = getattr(request.state, "user", None) or {}
+        try:
+            users.audit(user=who.get("id"), username=who.get("username"), via=who.get("via") or "web",
+                        method=request.method, route=note["route"], status=status,
+                        pid=note["params"].get("pid"), params=note["params"], detail=note["detail"])
+        except Exception:  # noqa: BLE001 — the log never breaks a request
+            pass
+
     @app.middleware("http")
     async def _guard(request, call_next):
         path = request.url.path
         if request.method not in ("GET", "HEAD", "OPTIONS") and not _same_origin(request):
+            _log_activity(request, 403, route=path)
             return JSONResponse({"error": "cross-site request refused"}, status_code=403)
         if not auth_on:
             admin = users.first_admin()
             request.state.user = _person(admin, "web") if admin else dict(LOCAL, via="web")
-            return await call_next(request)
+            response = await call_next(request)
+            _log_activity(request, response.status_code)
+            return response
         user, session, touched = None, None, False
         token = request.cookies.get("oxsession") or ""
         if token:
@@ -764,12 +802,14 @@ def build_studio_app(recents: Optional[Recents] = None):
             return RedirectResponse("/login", status_code=302)
         if user is not None and user["must_change"] and not is_open_path(path) and path not in _MUST_CHANGE_OK:
             if path.startswith("/api/"):
+                _log_activity(request, 403, route=path)
                 return JSONResponse({"error": "choose a new password first", "must_change": True},
                                     status_code=403)
             from fastapi.responses import RedirectResponse
 
             return RedirectResponse("/login", status_code=302)
         response = await call_next(request)
+        _log_activity(request, response.status_code)
         if touched:
             # the session's 30 days moved on; so does the browser's copy
             _cookie(response, request, token)
@@ -809,12 +849,22 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": f"Too many attempts — try again in {secs} s", "retry_after": secs},
                                 status_code=429, headers={"Retry-After": str(secs)})
         user = users.check(username, password)
+
+        def note(status: int, who: Optional[Dict[str, Any]]) -> None:
+            users.audit(user=who["id"] if who else None, username=who["username"] if who else None, via="web",
+                        method="POST", route="/api/login", status=status, detail={"username": username[:64]})
+
         if user is None:
             throttle.fail(*keys)
+            # a wrong password is recorded against the person it tried (an admin
+            # filters by them); a name no one has, against no one
+            note(401, users.by_name(username))
             return JSONResponse({"error": "Wrong username or password."}, status_code=401)
         if user["disabled"]:
             # only someone who knew the password learns this
+            note(403, user)
             return JSONResponse({"error": "This account is disabled — ask an admin"}, status_code=403)
+        note(200, user)
         throttle.clear(*keys)
         token = users.start_session(user["id"], label=request.headers.get("user-agent", ""))
         response = JSONResponse({"ok": True, "must_change": user["must_change"],
@@ -896,6 +946,16 @@ def build_studio_app(recents: Optional[Recents] = None):
         if row is None:
             return JSONResponse({"error": "no such person"}, status_code=404)
         return row
+
+    @app.get("/api/admin/activity")
+    def admin_activity(user: str = "", pid: str = "", before: int = 0, limit: int = 200) -> JSONResponse:
+        """What was changed and refused, newest first (§2.6); filtered by
+        person and project; ``before`` an id pages back. Kept 180 days."""
+        rows = users.activity(user=user or None, pid=pid or None, before=before or None, limit=limit)
+        for r in rows:
+            ref = recents.get(r["pid"]) if r.get("pid") else None
+            r["project"] = ref.name if ref else None
+        return JSONResponse({"rows": rows, "days": 180})
 
     @app.get("/api/admin/users")
     def admin_users() -> JSONResponse:
@@ -3180,6 +3240,15 @@ def build_studio_app(recents: Optional[Recents] = None):
         return (user or {}).get("name") or (user or {}).get("username") or "someone"
 
     relay.name_of = _name_of
+
+    def _assistant_changed(turn: Any, files: List[str]) -> None:
+        """The assistant's file edits go in the log when its turn ends (§2.6)."""
+        users.audit(user=turn.owner, via="assistant", method="EDIT", route="assistant:changes", status=200,
+                    pid=turn.scope if turn.scope != "home" else None,
+                    detail={"files": [str(f)[:200] for f in files[:50]]})
+
+    relay.on_changes = _assistant_changed
+    users.prune_audit()
 
     def _my_defaults(me: str) -> Dict[str, Any]:
         """A person's own default model and effort. The first admin — today's

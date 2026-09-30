@@ -2812,6 +2812,41 @@ button.danger-fill:hover { background: #b0322a; border-color: #b0322a; }
     padding-bottom: max(18px, env(safe-area-inset-bottom)); }
 }
 
+/* the Team page's two views, and the activity log (§2.6) */
+.teamtabs { display: flex; gap: 4px; margin: -4px 0 16px; border-bottom: 1px solid var(--border); }
+.teamtabs button { border: none; background: none; border-radius: 0; min-height: 36px; padding: 0 12px;
+  color: var(--text-2); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.teamtabs button:hover { background: none; color: var(--text); }
+.teamtabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.actfilters { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.actfilter { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); color: var(--text-2); }
+.actfilter select { min-width: 170px; }
+.actkept { font-size: var(--fs-sm); }
+.actrow { display: grid; grid-template-columns: 110px 200px minmax(0, 1fr); gap: 12px; align-items: start;
+  padding: 11px 16px; border-bottom: 1px solid var(--border-soft); }
+.actrow:last-child { border-bottom: none; }
+.actwhen { color: var(--text-3); font-size: var(--fs-sm); padding-top: 4px; font-variant-numeric: tabular-nums; }
+.actwho { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.actwho .avatar { width: 24px; height: 24px; font-size: 11px; }
+.actname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.actwhat { min-width: 0; padding-top: 2px; }
+.actlabel { margin-right: 6px; }
+.actsub { color: var(--text-3); font-size: var(--fs-sm); margin-top: 2px; overflow-wrap: anywhere; }
+.actrow .tag { font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent-strong); }
+.actrow .tag.via { background: var(--signal-soft); color: var(--signal-strong); }
+.actrow .tag.off { background: var(--err-soft); color: var(--err); }
+.actrow .tag.wait { background: var(--warn-soft); color: var(--warn); }
+.actmore { text-align: center; margin-top: 10px; }
+@media (max-width: 760px) {
+  .actrow { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
+  .actwho { grid-column: 1; grid-row: 1; }
+  .actwhen { grid-column: 2; grid-row: 1; padding-top: 3px; }
+  .actwhat { grid-column: 1 / -1; }
+  .actfilter { flex: 1 1 140px; }
+  .actfilter select { min-width: 0; width: 100%; }
+}
+
 /* ── toast: one shared voice for action feedback ──────────────────── */
 #toast {
   position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 12px);

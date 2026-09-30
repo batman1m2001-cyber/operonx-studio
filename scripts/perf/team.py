@@ -136,6 +136,14 @@ async def flow(b):
     await admin.click(".modal button:has-text('Delete')")
     await admin.wait_for_selector(f".teamrow[data-user='{NAME}']", state="detached")
     ok("deleting takes them off the list", True)
+
+    # the activity log says what happened, newest first (P6)
+    await admin.click(".teamtabs [data-view=activity]")
+    await admin.wait_for_selector(".actrow")
+    log = await admin.locator("#activity").inner_text()
+    for said in ("Deleted a person", "Changed a person", "Added a person", "Signed in"):
+        ok(f"the activity log shows \"{said}\"", said in log)
+    ok("…and the refused demotion", "refused" in log or "failed 400" in log)
     ok("no page errors", not errors, "; ".join(errors[:3]))
     await admin.context.close()
     await other.context.close()
@@ -189,6 +197,11 @@ async def shots(b):
             await pg.click(".rowmenu .menuitem:has-text('Delete')")
             await pg.click(".modal button:has-text('Delete')")
             await pg.wait_for_timeout(300)
+            await pg.click(".teamtabs [data-view=activity]")
+            await pg.wait_for_selector(".actrow")
+            await pg.wait_for_timeout(2700)                 # the "deleted" toast fades first
+            await pg.screenshot(path=f"{OUT}/team_activity_{tag}.png")
+            problems[f"team_activity_{tag}"] = await pg.evaluate(GEOM)
             await ctx.close()
     bad = {k: v for k, v in problems.items() if v}
     ok("screenshots: no layout problems", not bad, json.dumps(bad)[:400])

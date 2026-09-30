@@ -63,6 +63,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     # ── people ──
     ("GET", "/team"): "admin",
     ("GET", "/api/admin/users"): "admin",
+    ("GET", "/api/admin/activity"): "admin",
     ("POST", "/api/admin/users"): "admin",
     ("PATCH", "/api/admin/users/{uid}"): "admin",
     ("POST", "/api/admin/users/{uid}/password"): "admin",
@@ -167,6 +168,23 @@ ACCESS: Dict[Tuple[str, str], str] = {
 
     **{key: "read" for key in READ_POSTS},
 }
+
+
+#: Self-level routes the activity log records anyway (§2.6): your password,
+#: and your Claude sign-in and sign-out.
+AUDIT_SELF = {("POST", "/api/me/password"), ("POST", "/api/assistant/login"),
+              ("POST", "/api/assistant/login/{lid}/code"), ("POST", "/api/assistant/logout")}
+
+
+def recorded(method: str, route: Optional[str], level: Optional[str], status: int) -> bool:
+    """Whether a request goes in the activity log: every change at edit or
+    admin level, the self routes above, and every refusal. Reading (a GET)
+    is not a change."""
+    if status == 403:
+        return True
+    if method in ("GET", "HEAD", "OPTIONS"):
+        return False
+    return level in ("edit", "admin") or (method, route or "") in AUDIT_SELF
 
 
 def level_of(method: str, path: Optional[str]) -> Optional[str]:

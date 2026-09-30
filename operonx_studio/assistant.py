@@ -594,6 +594,7 @@ class Relay:
         self.finished_seq = 0
         self.on_finish: Optional[Any] = None        # called with the scope when a turn ends
         self.name_of: Optional[Any] = None          # a user id -> the name a changes card shows
+        self.on_changes: Optional[Any] = None       # (turn, files) when a turn changed files: the activity log
         # a turn's MCP config lives in a 0600 file here while it runs (it
         # carries the turn's agent token: on the command line, any local
         # user could read it from /proc). A studio that died left its
@@ -887,6 +888,11 @@ class Relay:
                         if changed and changed["files"]:
                             others = self._overlapping(turn)
                             self._item(turn, "changes", **changed, **({"overlap": others} if others else {}))
+                            if self.on_changes is not None:
+                                try:
+                                    self.on_changes(turn, [f["path"] for f in changed["files"]])
+                                except Exception:  # noqa: BLE001 — the log never breaks a turn
+                                    pass
                 self._flush(turn)
             await proc.wait()
         finally:

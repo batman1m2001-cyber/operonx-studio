@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
@@ -134,7 +135,50 @@ CREATE TABLE IF NOT EXISTS web_sessions (
     label       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS web_sessions_by_user ON web_sessions (user);
+CREATE TABLE IF NOT EXISTS audit (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    at        REAL NOT NULL,
+    user      TEXT,
+    username  TEXT,
+    via       TEXT NOT NULL,
+    method    TEXT NOT NULL,
+    route     TEXT NOT NULL,
+    pid       TEXT,
+    params    TEXT NOT NULL DEFAULT '{}',
+    status    INTEGER,
+    detail    TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS audit_by_at ON audit (at);
+CREATE INDEX IF NOT EXISTS audit_by_user ON audit (user, id);
+CREATE INDEX IF NOT EXISTS audit_by_pid ON audit (pid, id);
 """
+
+#: The request-body keys the activity log keeps (docs/TEAM_PLAN.md §2.6): what
+#: was acted on, never what was said or any secret — a password, a sign-in
+#: code, a webhook, dataset rows, inputs and messages are never among them.
+#: username/role/disabled name who an admin acted on (P6: the Team page's rows).
+AUDIT_KEYS = ("name", "key", "action", "graph", "resource", "apply", "dry_run", "dataset", "service", "op",
+              "template", "path", "username", "role", "disabled")
+AUDIT_DAYS = 180
+
+
+def audit_detail(body: Any) -> Dict[str, Any]:
+    """The recordable part of a request body: the keys above, scalars only
+    (strings cut at 200), lists of scalars cut at 20."""
+    if not isinstance(body, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for key in AUDIT_KEYS:
+        if key not in body:
+            continue
+        v = body[key]
+        if isinstance(v, str):
+            out[key] = v[:200]
+        elif v is None or isinstance(v, (bool, int, float)):
+            out[key] = v
+        elif isinstance(v, list) and all(isinstance(x, (str, int, float, bool)) for x in v):
+            out[key] = [x[:200] if isinstance(x, str) else x for x in v[:20]]
+    return out
 
 _USER_FIELDS = ("name", "role", "must_change", "disabled", "machine_login", "claude_home", "claude_email")
 
@@ -163,6 +207,8 @@ class UserStore:
             self._db.execute("PRAGMA synchronous=NORMAL")
             self._db.executescript(_SCHEMA)
         self._cache: Dict[str, Tuple[float, Any]] = {}
+        # the studio prunes at start (app.py); after that, once a day as rows arrive
+        self._pruned = time.time()
 
     def _q(self, sql: str, args: Iterable[Any] = ()) -> List[sqlite3.Row]:
         with self._lock:
@@ -342,6 +388,51 @@ class UserStore:
     def session_counts(self) -> Dict[str, int]:
         rows = self._q("SELECT user, COUNT(*) AS n FROM web_sessions WHERE expires >= ? GROUP BY user", (time.time(),))
         return {r["user"]: int(r["n"]) for r in rows}
+
+    # ── the activity log (§2.6) ──
+
+    def audit(self, *, user: Optional[str], via: str, method: str, route: str, status: Optional[int],
+              username: Optional[str] = None, pid: Optional[str] = None, params: Optional[Dict[str, Any]] = None,
+              detail: Optional[Dict[str, Any]] = None, at: Optional[float] = None) -> None:
+        """One row: who (and how: web, assistant, cli) did what, where, and
+        how it ended. *detail* must already be filtered (audit_detail)."""
+        now = time.time()
+        if username is None and user:
+            row = self.cached_user(user)
+            username = row["username"] if row else None
+        self._q("INSERT INTO audit (at, user, username, via, method, route, pid, params, status, detail)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (at if at is not None else now, user, username, via, method, route, pid,
+                 json.dumps(params or {}), status, json.dumps(detail or {})))
+        if now - self._pruned > 86400:           # at most once a day, as rows are written
+            self.prune_audit()
+
+    def activity(self, *, user: Optional[str] = None, pid: Optional[str] = None, before: Optional[int] = None,
+                 limit: int = 200) -> List[Dict[str, Any]]:
+        """Newest first; *before* an id pages further back."""
+        where, args = [], []
+        for col, val in (("user", user), ("pid", pid)):
+            if val:
+                where.append(f"{col} = ?")
+                args.append(val)
+        if before:
+            where.append("id < ?")
+            args.append(int(before))
+        sql = "SELECT * FROM audit" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC LIMIT ?"
+        args.append(max(1, min(int(limit), 1000)))
+        out = []
+        for r in self._q(sql, args):
+            row = dict(r)
+            row["params"] = json.loads(row["params"] or "{}")
+            row["detail"] = json.loads(row["detail"] or "{}")
+            out.append(row)
+        return out
+
+    def prune_audit(self, days: int = AUDIT_DAYS) -> int:
+        """Rows older than *days* go; how many."""
+        self._pruned = time.time()
+        with self._lock:
+            return int(self._db.execute("DELETE FROM audit WHERE at < ?", (time.time() - days * 86400,)).rowcount)
 
     # ── the first start ──
 
