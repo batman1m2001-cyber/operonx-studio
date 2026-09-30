@@ -1183,3 +1183,40 @@ def test_signing_out_signs_out_only_your_own(team, project, fake):
     team.use(b["token"])
     assert c.get("/api/assistant/account", params={"fresh": 1}).json()["account"]["source"] == "studio"
     assert (_home_of(team, b["id"]) / ".fake-credentials").is_file()
+
+
+# ── P5: a viewer's assistant reads, and only what is theirs to read ───────
+
+def test_a_viewers_turn_reads_with_deny_rules_and_no_project_servers(team, project, fake, monkeypatch):
+    monkeypatch.setenv("OPERONX_STUDIO_CHAT_MODE", "full")               # the studio's reach: viewers still read
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": {"notes": {"command": "notes-server"}}}),
+                                       encoding="utf-8")
+    c = team.client
+    v = team.person("vee", "viewer")
+    team.use(team.admin_token)
+    pid = _pid(c, project)
+    team.use(v["token"])
+    _sign_in(c)
+    sid = _session(c, pid)["id"]
+    _say(c, sid, "what is here?")
+    argv = _calls(fake)[-1]["argv"]
+    allowed = argv[argv.index("--allowedTools") + 1:]
+    assert "Bash" not in argv and "Edit" not in allowed and "mcp__studio" not in allowed
+    assert "Read" in allowed and "mcp__studio__open_run" in allowed and "--permission-mode" not in argv
+    denied = argv[argv.index("--disallowedTools") + 1: argv.index("--allowedTools")]
+    state = str(team.state)
+    for tool in ("Read", "Grep", "Glob"):
+        assert f"{tool}(/{state}/**)" in denied and f"{tool}(~/.claude/**)" in denied and f"{tool}(**/.env*)" in denied
+    assert set(_calls(fake)[-1]["mcp"]["mcpServers"]) == {"studio"}       # no project servers
+    assert c.get(f"/api/assistant/sessions/{sid}").json()["agent"]["reach"] == "read"
+    # home-scope turns run in the viewer's own empty directory, not the server's home
+    home_sid = _session(c, "home")["id"]
+    _say(c, home_sid, "hello")
+    cwd = Path(_calls(fake)[-1]["cwd"])
+    assert cwd == team.state / "users" / v["id"] / "home" and list(cwd.iterdir()) == []
+    # an editor keeps the studio's reach and the project's servers
+    team.use(team.admin_token)
+    sid2 = _session(c, pid)["id"]
+    _say(c, sid2, "and you?")
+    argv = _calls(fake)[-1]["argv"]
+    assert "--disallowedTools" not in argv and "Bash" in argv and "notes" in _calls(fake)[-1]["mcp"]["mcpServers"]

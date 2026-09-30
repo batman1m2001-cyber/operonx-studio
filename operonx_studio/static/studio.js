@@ -118,7 +118,10 @@ async function api(path, body) {
     throw new Error(res.ok ? "The studio sent something unreadable"
       : `The studio is unreachable (${res.status}) — the tunnel may have dropped`);
   }
-  if (!res.ok) throw new Error(data.error || res.statusText);
+  if (!res.ok) {
+    if (window.Account) Account.refused(res.status, data.error);
+    throw new Error(data.error || res.statusText);
+  }
   return data;
 }
 
@@ -2474,9 +2477,10 @@ function literalEditor(node, inp) {
   field.type = "text";
   field.value = JSON.stringify(b.value);
   const bar = el("div", "apply");
-  const btn = el("button", null, "Preview change");
+  const btn = el("button", "needs-edit", "Preview change");
   const status = el("span", "srcline");
   bar.append(btn, status);
+  if (window.Account) Account.readonly(field);
   const diffBox = el("div", "diffbox");
   diffBox.style.display = "none";
   wrap.append(field, bar, diffBox);
@@ -2904,7 +2908,7 @@ function priceRow(name, det) {
   } else {
     val.textContent = `${fmt(pin || 0)} in · ${fmt(pout || 0)} out per 1M tokens`;
   }
-  const edit = el("button", "linkbtn", pin == null && pout == null ? "Set prices" : "Edit");
+  const edit = el("button", "linkbtn needs-edit", pin == null && pout == null ? "Set prices" : "Edit");
   edit.type = "button";
   line.append(val, edit);
   wrap.append(line);
@@ -3154,7 +3158,7 @@ function originLine(s) {
     // a real session its service recorded, or a playground one: send it again
     const md = s.metadata || {};
     const sent = (md.replay_script || md.playground_script || []).filter(m => m.kind === "text" || m.kind === "json");
-    if (sent.length && typeof PlayView !== "undefined" && md.toy !== "rerun") {
+    if (sent.length && typeof PlayView !== "undefined" && md.toy !== "rerun" && !(window.Account && Account.viewOnly)) {
       line.append(" · ");
       line.append(link("Replay in the Playground", `Send its ${sent.length} message${sent.length === 1 ? "" : "s"} again, to the current code`,
         () => PlayView.replayFrom(s.trace_id, {...md, service: s.service || s.name})));
@@ -3639,6 +3643,8 @@ function coverWhileFresh(elm) {
 }
 
 function switchTab(name, opts) {
+  // the playground runs a service's code: not a viewer's (D11); every way in stops here
+  if (name === "playground" && window.Account && Account.viewOnly) { Account.toast(Account.VIEW_ONLY, true); return; }
   // where the Flow tab was: a run's pane borrows the canvas, and moving
   // it resets its scroll (hiding it does not)
   if (state.tab === "flow" && !state.workflowOn && canvasShown()) {
@@ -4165,6 +4171,8 @@ async function pulse() {
       const got = await api(`/api/p/${PID}/pulse?${q}`);
       pulseMiss = 0;
       setLinkState(true);
+      // a role changed while this page was open: it redraws for the new one (§2.5)
+      if (got.role && window.Account && Account.me() && got.role !== Account.me().user.role) { location.reload(); return; }
       if (got.stamp !== state.stamp) await load(!state.ir);
       if (state.uiSeq < 0) state.uiSeq = got.ui_last;   // only what happens from now on
       if (state.chatSeq >= 0 && (got.chat_ended || []).length) {
@@ -4695,12 +4703,12 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
   refresh.onclick = () => showJobs(job.name, state.jobRun);
   bar.append(refresh);
   if (job.kind !== "runbook" && job.session !== "stream") {
-    const resume = Icons.button("resume", "Resume");
+    const resume = Icons.button("resume", "Resume", "needs-edit");
     resume.title = "Run only the keys the last run did not finish";
     resume.onclick = () => startJob(job.name, true);
     bar.append(resume);
   }
-  const run = Icons.button("play", "Run", "primary");
+  const run = Icons.button("play", "Run", "primary needs-edit");
   run.title = `operonx-run ${job.name} — under the project's interpreter`;
   run.onclick = () => startJob(job.name, false);
   bar.append(run);

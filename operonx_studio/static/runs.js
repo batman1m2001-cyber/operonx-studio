@@ -236,7 +236,7 @@ const RunsView = (() => {
     tr.append(cost);
     const acts = el("td", "runacts");
     if (r.source !== "langfuse") {
-      const rm = Icons.button("trash", undefined, "", "Delete this run");
+      const rm = Icons.button("trash", undefined, "needs-edit", "Delete this run");
       rm.onclick = async (ev) => {
         ev.stopPropagation();
         if (!window.confirm(`Delete run ${r.run}?`)) return;
@@ -259,7 +259,7 @@ const RunsView = (() => {
       ? [{label: "Show the last 30 days", icon: "clock", run: () => { v.range = "30d"; save(); render(); }}] : [];
     if (f.kind === "service") return paneNote("No runs in this range",
       `Every ${f.name} session is recorded here as it ends.`, null,
-      {actions: [{label: "Try it in the Playground", icon: "play", run: () => switchTab("playground")}, ...wider]});
+      {actions: [...((window.Account && Account.viewOnly) ? [] : [{label: "Try it in the Playground", icon: "play", run: () => switchTab("playground")}]), ...wider]});
     if (f.kind === "job" || f.kind === "runbook") return paneNote("No runs in this range",
       `${f.name}'s runs appear here as it runs.`, null,
       {actions: [{label: `Run ${f.name}`, icon: "play", run: () => { state.jobSel = f.name; switchTab("jobs"); }}, ...wider]});

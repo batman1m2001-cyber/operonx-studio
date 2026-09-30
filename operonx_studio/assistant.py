@@ -556,6 +556,8 @@ class Turn:
     owner: Optional[str] = None           # the person whose turn it is (their user id)
     claude: Dict[str, Any] = field(default_factory=dict)  # their sign-in: {home, machine} (chat._spawn_env)
     env: Optional[Dict[str, str]] = None  # what their Claude processes run with; None: not signed in
+    reach: Optional[str] = None           # read | edit | full for this turn; None: the studio's (a viewer: read)
+    deny: List[str] = field(default_factory=list)     # --disallowedTools rules (a viewer's)
     on_end: List[Any] = field(default_factory=list)       # called once the turn has ended
 
 
@@ -700,7 +702,8 @@ class Relay:
               mcp: Optional[Dict[str, Any]] = None, kind: str = "message", fork_from: Optional[str] = "",
               view: Optional[Dict[str, Any]] = None, attachments: Optional[List[Dict[str, Any]]] = None,
               extra_mcp: Optional[Dict[str, Any]] = None, owner: Optional[str] = None,
-              on_end: Optional[List[Any]] = None, claude: Optional[Dict[str, Any]] = None) -> Turn:
+              on_end: Optional[List[Any]] = None, claude: Optional[Dict[str, Any]] = None,
+              reach: Optional[str] = None, deny: Optional[List[str]] = None) -> Turn:
         """Begin a turn in session *sid*; returns at once (call from a loop).
 
         ``fork_from`` is the Claude session to continue: ``""`` means the
@@ -728,7 +731,7 @@ class Relay:
                     next_seq=self.store.next_seq(sid), fresh=asyncio.Event(), model=sess.get("model"),
                     requested=sess.get("model"), effort=sess.get("effort"), extra_mcp=dict(extra_mcp or {}),
                     account=account, reseed=reseed, cwd=str(cwd) if cwd else None, owner=owner,
-                    on_end=list(on_end or []), claude=claude, env=env)
+                    on_end=list(on_end or []), claude=claude, env=env, reach=reach, deny=list(deny or []))
         self.turns[turn.id] = turn
         refs = list(attachments or [])
         self.store.add_turn(turn.id, sid, message=message, kind=kind, claude_before=before, attachments=refs)
@@ -812,10 +815,12 @@ class Relay:
                 # (measured on 2.1.283: init 1.7-1.9 s vs 3.0-3.2 s).
                 if os.environ.get("OPERONX_STUDIO_CHAT_STRICT_MCP", "on").lower() not in ("off", "0", "false"):
                     cmd.append("--strict-mcp-config")
-            cmd += _chat._mode_args()
+            if turn.deny:
+                cmd += ["--disallowedTools", *turn.deny]
+            mode = (turn.reach or os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full")).strip().lower()
+            cmd += _chat._mode_args(mode)
             # --allowedTools ends the flags: a project server's tools join the
             # list where the reach allows more than reading
-            mode = os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full").strip().lower()
             if mcp and turn.extra_mcp and mode != "read":
                 cmd += [f"mcp__{name}" for name in turn.extra_mcp if name != "studio"]
             snap = _chat.snapshot(cwd) if (cwd is not None and turn.kind == "message") else None

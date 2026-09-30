@@ -86,7 +86,7 @@ const EvalsView = (() => {
       return;
     }
     if (!data.evals.find(e => e.name === v.name) && !v.dataset) v.name = (data.evals[0] || {}).name || "";
-    const runBtn = el("button", "primary", "Run eval");
+    const runBtn = el("button", "primary needs-edit", "Run eval");
     runBtn.type = "button";
     runBtn.disabled = !v.name || !!v.dataset;
     runBtn.onclick = () => runEval(v.name, runBtn);

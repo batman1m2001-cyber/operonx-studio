@@ -84,7 +84,10 @@
     let data;
     try { data = text ? JSON.parse(text) : {}; }
     catch { throw new Error(`The studio is unreachable (${res.status}) — the tunnel may have dropped`); }
-    if (!res.ok) { const e = new Error(data.error || res.statusText); e.status = res.status; throw e; }
+    if (!res.ok) {
+      if (W.Account) W.Account.refused(res.status, data.error);
+      const e = new Error(data.error || res.statusText); e.status = res.status; throw e;
+    }
     return data;
   }
 
@@ -790,7 +793,7 @@
     const acts = el("div", "ax-card-acts");
     const note = el("span", "ax-card-note");
     const keep = tbtn("Keep", "ax-btn");
-    const undo = tbtn("Undo", "ax-btn ax-btn-quiet", "resume");
+    const undo = tbtn("Undo", "ax-btn ax-btn-quiet needs-edit", "resume");
     undo.title = "Put these files back as they were before this turn";
     const paint = () => {
       card.dataset.state = item.state || "pending";
@@ -1489,10 +1492,12 @@
 
   /* The card, step by step: sign in on Claude's page; paste the code;
    * signed in. `why` says what brought it up (a failed turn, say). */
-  function openSignin(method, why) {
-    // the card lives in the assistant's box: bring the assistant into view
-    if (A.mode === "dock" && W.oxSide) W.oxSide.show("assistant");
-    else if (A.mode === "dock" && PHONE.matches) placement.openSheet();
+  function openSignin(method, why, quiet) {
+    // the card lives in the assistant's box: bring the assistant into view —
+    // unless the page is only loading (`quiet`): then the card waits in the
+    // box, and a phone's screen is not covered by it on every page
+    if (!quiet && A.mode === "dock" && W.oxSide) W.oxSide.show("assistant");
+    else if (!quiet && A.mode === "dock" && PHONE.matches) placement.openSheet();
     signin.textContent = "";
     signin.hidden = false;
     inputWrap.hidden = true;
@@ -2791,7 +2796,7 @@
       if (got.rate) takeRate(got.rate);
       A.account = got.account;
       // no sign-in anywhere (neither the studio's nor this machine's): the card first
-      if (A.account && A.account.logged_in === false && A.mode !== "hero") openSignin("claudeai");
+      if (A.account && A.account.logged_in === false && A.mode !== "hero") openSignin("claudeai", undefined, true);
     }).catch(() => {});
     root.classList.toggle("details", A.details);
     paintHead();

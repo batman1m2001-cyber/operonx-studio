@@ -49,6 +49,8 @@
   }
 
   async function preview(given) {
+    // a viewer saves nothing, so there is nothing to preview
+    if (window.Account && Account.viewOnly) return;
     const out = $("#retention-preview");
     const save = $("#retention-save");
     const policy = policyFromForm();
@@ -167,8 +169,13 @@
     const foot = el("div", "setfoot");
     const note = el("div", "setnote");
     note.id = "retention-preview";
-    const btn = el("button", "primary", "Save");
+    const btn = el("button", "primary needs-edit", "Save");
     btn.id = "retention-save";
+    if (window.Account && Account.viewOnly) {
+      Account.readonly(...form.querySelectorAll("input, select"));
+      foot.classList.add("viewonly");
+      note.textContent = Account.VIEW_ONLY;
+    }
     btn.type = "button";
     btn.onclick = save;
     foot.append(note, btn);

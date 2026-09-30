@@ -31,7 +31,7 @@ const Account = (() => {
     } catch { throw new Error("The studio did not answer — check the connection"); }
     if (res.status === 401) { location.href = "/login"; throw new Error("signed out"); }
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || res.statusText);
+    if (!res.ok) { refused(res.status, data.error); throw new Error(data.error || res.statusText); }
     return data;
   }
 
@@ -191,8 +191,40 @@ const Account = (() => {
     return wrap;
   }
 
-  const slot = document.getElementById("accountslot");
-  if (slot && me && me.user) slot.replaceWith(menu());
+  /* A viewer looks and changes nothing (docs/TEAM_PLAN.md §2.5): the server
+   * refuses every edit, the page hides what would ask (`.needs-edit`, by the
+   * role on <body>), and fields that stay on screen are read-only. */
+  const viewOnly = !!(me && me.user && me.user.role === "viewer");
+  const VIEW_ONLY = "View only — ask an admin for editor access";
 
-  return {me: () => me, call, toast, sheet, field, input, avatar, ROLE, el: mk};
+  function readonly(...fields) {
+    if (!viewOnly) return;
+    for (const f of fields) {
+      if (!f) continue;
+      f.disabled = true;
+      f.title = VIEW_ONLY;
+    }
+  }
+
+  // a refusal the page did not prevent (a forced request, a stale page)
+  function refused(status, error) {
+    if (status === 403 && String(error || "").startsWith("View only")) { toast(VIEW_ONLY, true); return true; }
+    return false;
+  }
+
+  const slot = document.getElementById("accountslot");
+  if (slot && me && me.user) {
+    const menuEl = menu();
+    slot.replaceWith(menuEl);
+    if (viewOnly) {
+      const pill = mk("span", "viewpill", "View only");
+      pill.title = VIEW_ONLY;
+      menuEl.before(pill);
+    }
+  }
+
+  return {me: () => me, call, toast, sheet, field, input, avatar, ROLE, el: mk, viewOnly, readonly, refused,
+          VIEW_ONLY};
 })();
+// a top-level const is not a window property: the other screens look for window.Account
+window.Account = Account;

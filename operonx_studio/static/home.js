@@ -25,7 +25,10 @@ async function api(path, body) {
   let data;
   try { data = text ? JSON.parse(text) : {}; }
   catch { throw new Error(`The studio is unreachable (${res.status}) — the tunnel may have dropped`); }
-  if (!res.ok) throw new Error(data.error || res.statusText);
+  if (!res.ok) {
+    if (window.Account) Account.refused(res.status, data.error);
+    throw new Error(data.error || res.statusText);
+  }
   return data;
 }
 
@@ -54,9 +57,9 @@ function emptyState() {
     "A project is a folder with an operonx.toml. Open one you already have, "
     + "or create a new one with a working example graph."));
   const row = el("div", "actions");
-  const neu = Icons.button("plus", "New project");
+  const neu = Icons.button("plus", "New project", "needs-edit");
   neu.onclick = () => $("#btn-new").click();
-  const open = Icons.button("folder", "Open project", "primary");
+  const open = Icons.button("folder", "Open project", "primary needs-edit");
   open.onclick = () => $("#btn-open").click();
   row.append(neu, open);
   box.append(row);
@@ -110,7 +113,7 @@ async function loadProjects() {
       sig.classList.add("bad");
       sig.textContent = "operonx.toml is gone — moved or deleted? Fix it, or remove it from this list.";
     }
-    const forget = Icons.button("x", undefined, "forget", "Remove from this list");
+    const forget = Icons.button("x", undefined, "forget needs-edit", "Remove from this list");
     forget.onclick = async (ev) => {
       ev.stopPropagation();
       await api("/api/forget", {id: p.id});

@@ -77,7 +77,16 @@ STUDIO_READ_TOOLS = ["mcp__studio__list_runs", "mcp__studio__open_run", "mcp__st
                      "mcp__studio__monitor", "mcp__studio__compare_runs", "mcp__studio__select_op"]
 
 
-def _mode_args() -> List[str]:
+def viewer_deny(state: Path) -> List[str]:
+    """What a viewer's assistant may never read (docs/TEAM_PLAN.md §2.5):
+    the studio's own state (accounts, conversations, everyone's Claude
+    sign-in), this machine's Claude Code, and any .env file. Claude Code's
+    rules: ``//`` starts an absolute path, ``~/`` the home directory."""
+    places = [f"/{Path(state).resolve()}/**", "~/.claude/**", "**/.env*"]
+    return [f"{tool}({where})" for tool in ("Read", "Grep", "Glob") for where in places]
+
+
+def _mode_args(mode: Optional[str] = None) -> List[str]:
     """Permission flags for the chosen reach.
 
     Headless sessions cannot prompt, so anything not pre-approved is
@@ -85,7 +94,7 @@ def _mode_args() -> List[str]:
     tools follow the same reach: reading runs is always allowed, starting
     a job or writing a price only where edits are.
     """
-    mode = os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full").strip().lower()
+    mode = (mode or os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full")).strip().lower()
     read_tools = ["Read", "Grep", "Glob", "LS", "Task",
                   "WebFetch", "WebSearch"]
     if mode == "read":

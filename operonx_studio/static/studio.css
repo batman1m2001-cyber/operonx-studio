@@ -2729,6 +2729,16 @@ body.ax-sheet #axstage { position: fixed; inset: 0; z-index: 90; padding: env(sa
 .ax-overlap { margin: 8px 0 2px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--warn-soft);
   color: var(--warn); font-size: var(--fs-sm); line-height: 1.45; }
 
+/* ── a viewer's page (docs/TEAM_PLAN.md §2.5): the role rides on <body>
+   from the server, so no edit control ever flashes ────────────────── */
+body[data-role="viewer"] .needs-edit { display: none !important; }
+.viewpill { flex: none; font-size: 11px; font-weight: 600; letter-spacing: .02em; padding: 3px 9px;
+  border-radius: 999px; background: var(--surface-3); color: var(--text-2); border: 1px solid var(--border);
+  white-space: nowrap; }
+.setfoot.viewonly .setnote { color: var(--text-3); }
+/* a phone's project bar has no room: the account menu says "Viewer" there */
+@media (max-width: 760px) { header.bar > .viewpill { display: none; } }
+
 /* ── who is signed in: the account menu (account.js) ─────────────── */
 .acct-wrap { position: relative; flex: none; }
 .acctbtn { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 10px 0 4px;

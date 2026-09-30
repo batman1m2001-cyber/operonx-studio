@@ -179,3 +179,49 @@ def test_editors_pass_edit_routes_and_everyone_passes_read_and_self(people):
     for method, path in _by_level(team, "read", "self"):
         res = _call(team.client, method, _url(path, "x"), people["tmp"])
         assert res.status_code not in (401, 403), (method, path, res.status_code)
+
+
+# ── P5: a viewer is refused before anything happens ──────────────────────
+
+def test_a_viewer_is_refused_before_the_handler_runs_and_an_editor_is_not(people):
+    from test_runs import _trace
+
+    from operonx.telemetry.runs.files import FilesRunStore
+
+    team, pid, tmp = people["team"], people["pid"], people["tmp"]
+    c = team.client
+    proj = tmp / "proj"
+    FilesRunStore(root=proj / ".operonx" / "runs", refresh_every=0).consume(_trace("r-keep", origin="service", service="s"))
+    toml = (proj / "operonx.toml").read_text()
+    parent = tmp / "newhome"
+    parent.mkdir()
+    runs = lambda: [r["run"] for r in c.get(f"/api/p/{pid}/runs").json()["runs"]]
+    team.use(people["viewer"]["token"])
+    assert runs() == ["r-keep"]                                        # a viewer reads
+    for method, url, body in (
+        ("POST", "/api/new", {"path": str(parent), "name": "made-by-viewer"}),
+        ("POST", f"/api/p/{pid}/trace/r-keep/delete", {}),
+        ("POST", f"/api/p/{pid}/settings/retention", {"retention": {"service": 1}}),
+    ):
+        res = c.request(method, url, json=body)
+        assert res.status_code == 403 and "View only" in res.json()["error"], url
+    assert not (parent / "made-by-viewer").exists()                     # no directory
+    assert runs() == ["r-keep"]                                         # the run survives
+    assert (proj / "operonx.toml").read_text() == toml                  # retention unchanged
+    team.use(people["editor"]["token"])
+    assert c.post("/api/new", json={"path": str(parent), "name": "made-by-editor"}).status_code == 200
+    assert (parent / "made-by-editor" / "operonx.toml").is_file()
+    assert c.post(f"/api/p/{pid}/settings/retention", json={"retention": {"service": 1}}).status_code == 200
+    assert c.post(f"/api/p/{pid}/trace/r-keep/delete", json={}).status_code == 200
+    assert runs() == []
+
+
+def test_the_page_and_the_pulse_carry_the_role(people):
+    team, pid = people["team"], people["pid"]
+    c = team.client
+    team.use(people["viewer"]["token"])
+    assert '<body data-tab="flow" data-role="viewer"' in c.get(f"/p/{pid}").text
+    assert '<body class="page" data-role="viewer"' in c.get("/").text
+    assert c.get(f"/api/p/{pid}/pulse", params={"hold": 0}).json()["role"] == "viewer"
+    team.use(people["editor"]["token"])
+    assert c.get(f"/api/p/{pid}/pulse", params={"hold": 0}).json()["role"] == "editor"

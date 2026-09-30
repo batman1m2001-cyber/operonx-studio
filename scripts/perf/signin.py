@@ -75,9 +75,9 @@ async def two_people(b):
             await pg.goto(f"{BASE}/p/{PID}")
             await pg.wait_for_selector(".node")
             if size == "phone":
-                await pg.wait_for_selector(".ax-askbar:visible, .ax-signin:not([hidden])")
-                if await pg.locator(".ax-askbar:visible").count():
-                    await pg.click(".ax-askbar")
+                # the card waits in the sheet: a page load never covers the phone with it
+                await pg.wait_for_selector(".ax-askbar", state="visible")
+                await pg.click(".ax-askbar")
             else:
                 await pg.evaluate("oxSide && oxSide.show('assistant')")
             # with nobody signed in, the panel opens on the sign-in card itself

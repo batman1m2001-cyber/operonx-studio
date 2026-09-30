@@ -605,6 +605,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         text, _ = _built(name)
         who = getattr(getattr(request, "state", None), "user", None) if request is not None else None
         if who is not None:
+            # the role before the first paint: a viewer never sees an edit control flash (§2.5)
+            text = re.sub(r"<body([^>]*)>", lambda m: f'<body{m.group(1)} data-role="{who["role"]}">', text, count=1)
             me = {"user": {k: who[k] for k in ("id", "username", "name", "role")}, "auth": auth_on}
             boot = ('<script id="me-boot" type="application/json">'
                     + json.dumps(me).replace("</", "<\\/") + "</script>" + boot)
@@ -2800,7 +2802,9 @@ def build_studio_app(recents: Optional[Recents] = None):
                                      "actions": [a for a in queue if a["seq"] > ui] if ui >= 0 else [],
                                      "newest": newest, "newest_info": info,
                                      "chat_last": relay.finished_seq, "chat_ended": ended,
-                                     "assistant_rate": _rate_of(me)})
+                                     "assistant_rate": _rate_of(me),
+                                     # a role changed while the page is open reloads it
+                                     "role": request.state.user["role"]})
             until = time.monotonic() + min(1.0 if not follow else 2.0, left)
             while time.monotonic() < until and bells.get(pid, 0) == rung:
                 await asyncio.sleep(0.1)
@@ -3193,9 +3197,28 @@ def build_studio_app(recents: Optional[Recents] = None):
         ref = recents.get(scope)
         return "Home" if scope == "home" else (ref.name if ref else scope)
 
+    def _viewer(request: Any) -> bool:
+        return request.state.user["role"] == "viewer"
+
+    def _limits(request: Any) -> Dict[str, Any]:
+        """How far this person's assistant reaches (§2.5): a viewer's reads,
+        whatever OPERONX_STUDIO_CHAT_MODE says, is denied the studio's state,
+        ~/.claude and .env files, and gets no project tool servers. The agent
+        token carries the role too, so the studio refuses its mutating tools."""
+        if not _viewer(request):
+            return {}
+        from . import chat as _chat_mod
+
+        return {"reach": "read", "deny": _chat_mod.viewer_deny(recents.state_file.parent)}
+
     def _turn_env(scope: str, view: Any, request: Request) -> Any:
         if scope == "home":
-            return Path.home(), _home_briefing(), _studio_mcp("home", request)
+            cwd = Path.home()
+            if _viewer(request):
+                # never the server's home: an empty directory of their own
+                cwd = recents.state_file.parent / "users" / request.state.user["id"] / "home"
+                cwd.mkdir(parents=True, exist_ok=True, mode=0o700)
+            return cwd, _home_briefing(), _studio_mcp("home", request)
         cwd, context = _chat_briefing(scope)
         if cwd is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
@@ -3554,9 +3577,10 @@ def build_studio_app(recents: Optional[Recents] = None):
         running = relay.running_items(sid)
         if running is not None:
             items = [it for it in items if it.get("turn") != running["id"]] + running.pop("items")
-        mode = os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full").strip().lower() or "full"
+        mode = _limits(request).get("reach") or os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full").strip().lower() or "full"
         if sess["scope"] == "home":
-            where = str(Path.home())
+            where = str(recents.state_file.parent / "users" / request.state.user["id"] / "home") \
+                if _viewer(request) else str(Path.home())
         else:
             owner = _watcher(sess["scope"])
             where = str(owner.root) if owner is not None else ""
@@ -3695,9 +3719,9 @@ def build_studio_app(recents: Optional[Recents] = None):
         try:
             turn = relay.start(sid, message, cwd=cwd, context=context, mcp=mcp, fork_from=fork_from,
                                view=body.get("view") if isinstance(body.get("view"), dict) else None,
-                               attachments=refs, extra_mcp=_project_mcp(sess["scope"]),
+                               attachments=refs, extra_mcp={} if _viewer(request) else _project_mcp(sess["scope"]),
                                owner=request.state.user["id"], on_end=[_revoker(mcp)],
-                               claude=_claude_of(request.state.user["id"]))
+                               claude=_claude_of(request.state.user["id"]), **_limits(request))
         except RuntimeError as exc:
             _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
@@ -3721,7 +3745,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         try:
             turn = relay.start(sid, "/compact", cwd=cwd, context=context, mcp=mcp, kind="compact",
                                owner=request.state.user["id"], on_end=[_revoker(mcp)],
-                               claude=_claude_of(request.state.user["id"]))
+                               claude=_claude_of(request.state.user["id"]), **_limits(request))
         except RuntimeError as exc:
             _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)

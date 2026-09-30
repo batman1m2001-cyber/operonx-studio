@@ -123,6 +123,7 @@ const ReviewView = (() => {
     good.onclick = () => { verdict = verdict === "good" ? null : "good"; paint(); };
     bad.onclick = () => { verdict = verdict === "bad" ? null : "bad"; paint(); };
     vb.append(good, bad);
+    vb.classList.add("needs-edit");
     const labels = el("input", "mono");
     labels.placeholder = "labels, comma separated — e.g. wrong-intent, too-slow";
     labels.value = (rev.labels || []).join(", ");
@@ -137,6 +138,8 @@ const ReviewView = (() => {
     const ds = el("button", null, "Add to dataset…");
     ds.type = "button";
     acts.append(saveBtn, ds);
+    acts.classList.add("needs-edit");
+    if (window.Account) Account.readonly(labels, note);
     const who = el("div", "note", rev.user ? `Last reviewed by ${rev.user} · ${fmtAgo(rev.at * 1000)}` : "");
     form.append(vb, labels, note, acts, who);
     main.append(form);
