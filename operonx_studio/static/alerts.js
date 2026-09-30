@@ -27,10 +27,10 @@ const AlertsView = (() => {
     box.textContent = "";
     const head = el("div", "panehead");
     head.append(el("h2", null, "Alerts"));
-    const add = el("button", "primary", "New alert");
+    const add = el("button", "primary needs-edit", "New alert");
     add.type = "button";
     add.onclick = () => { editing = {}; show(); };
-    const check = el("button", null, "Check now");
+    const check = el("button", "needs-edit", "Check now");
     check.type = "button";
     check.onclick = async () => {
       check.disabled = true;
@@ -56,7 +56,7 @@ const AlertsView = (() => {
       const state = !a.enabled ? ["paused", "s-idle"] : n.firing ? ["firing", "s-bad"] : judged ? ["ok", "s-ok"] : ["not judged", "s-idle"];
       top.append(el("span", `status ${state[1]}`, state[0]), el("b", null, a.name));
       const acts = el("span", "svcacts");
-      const edit = el("button", "linkbtn", "Edit"); edit.type = "button";
+      const edit = el("button", "linkbtn needs-edit", "Edit"); edit.type = "button";
       edit.onclick = () => { editing = {...a, webhook: ""}; show(); };
       const runs = el("button", "linkbtn", "Open the runs"); runs.type = "button";
       runs.onclick = () => {
@@ -65,17 +65,18 @@ const AlertsView = (() => {
       };
       acts.append(edit, runs);
       if (a.webhook_set) {
-        const t = el("button", "linkbtn", "Send a test"); t.type = "button";
+        const t = el("button", "linkbtn needs-edit", "Send a test"); t.type = "button";
         t.onclick = async () => {
           try { const r = await api(`/api/p/${PID}/alerts/${encodeURIComponent(a.name)}/test`, {}); toast(`The webhook answered ${r.status}`); }
           catch (err) { toast(err.message, true); }
         };
         acts.append(t);
       }
-      const del = el("button", "linkbtn danger", "Delete"); del.type = "button";
+      const del = el("button", "linkbtn danger needs-edit", "Delete"); del.type = "button";
       del.onclick = async () => {
         if (!confirm(`Delete the alert “${a.name}”?`)) return;
-        await fetch(`/api/p/${PID}/alerts/${encodeURIComponent(a.name)}`, {method: "DELETE"});
+        const res = await fetch(`/api/p/${PID}/alerts/${encodeURIComponent(a.name)}`, {method: "DELETE"});
+        if (!res.ok && window.Account) Account.refused(res.status, (await res.json().catch(() => ({}))).error);
         show();
       };
       acts.append(del);

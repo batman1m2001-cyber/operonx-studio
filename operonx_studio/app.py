@@ -22,6 +22,7 @@ means the tabs say so instead of guessing.
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import re
 import os
@@ -48,6 +49,7 @@ from operonx_studio.registry import MANIFEST, ProjectRef, Recents
 __all__ = ["build_studio_app", "serve_studio"]
 
 STATIC = Path(__file__).parent / "static"
+_LOG = logging.getLogger(__name__)
 
 
 # ── project-side helpers ────────────────────────────────────────────────
@@ -516,7 +518,39 @@ def build_studio_app(recents: Optional[Recents] = None):
     from fastapi.middleware.gzip import GZipMiddleware
     from fastapi.responses import HTMLResponse
 
-    app = FastAPI(title="operonx studio", docs_url=None, redoc_url=None)
+    from fastapi import Depends
+
+    from .access import AccessDenied, authorize, is_open_path, level_of, recorded, unclassified
+
+    async def _authorize(request: Request) -> None:
+        # what the activity log needs (§2.6), noted before the table decides,
+        # so a refusal is recorded as well as a change
+        route = getattr(request.scope.get("route"), "path", None)
+        level = level_of(request.method, route)
+        detail: Dict[str, Any] = {}
+        if request.method not in ("GET", "HEAD", "OPTIONS") and \
+                recorded(request.method, route, level, 200):
+            from .users import audit_detail
+
+            try:
+                detail = audit_detail(json.loads(await request.body() or b"{}"))
+            except ValueError:
+                detail = {}
+        if "uid" in request.path_params and "username" not in detail:
+            # whom an admin acted on, by name: after a delete there is no one to look up
+            target = users.user(str(request.path_params["uid"]))
+            if target is not None:
+                detail["username"] = target["username"]
+        request.state.audit = {"route": route or request.url.path, "level": level,
+                               "params": {k: str(v)[:200] for k, v in request.path_params.items()},
+                               "detail": detail}
+        authorize(request)
+
+    # Every route passes the access table (operonx_studio/access.py) before
+    # its handler runs. No /openapi.json: it is not an APIRoute, so the
+    # table could not guard it, and nothing reads it.
+    app = FastAPI(title="operonx studio", docs_url=None, redoc_url=None, openapi_url=None,
+                  dependencies=[Depends(_authorize)])
     app.state.recents = recents
     app.state.watchers = watchers
     # IR payloads carry every binding, source snippet and layout — tens to
@@ -584,10 +618,19 @@ def build_studio_app(recents: Optional[Recents] = None):
         pages[name] = (version, text, bundle)
         return text, bundle
 
-    def _page(name: str, boot: str = "") -> HTMLResponse:
+    def _page(name: str, boot: str = "", request: Any = None) -> HTMLResponse:
         """A page, its scripts bundled; ``boot`` (inline markup, e.g. a
-        JSON data island) goes in just before the bundle."""
+        JSON data island) goes in just before the bundle. With *request*,
+        who is signed in rides along too (``#me-boot``): the account menu
+        draws at once, never a flash of the wrong name."""
         text, _ = _built(name)
+        who = getattr(getattr(request, "state", None), "user", None) if request is not None else None
+        if who is not None:
+            # the role before the first paint: a viewer never sees an edit control flash (§2.5)
+            text = re.sub(r"<body([^>]*)>", lambda m: f'<body{m.group(1)} data-role="{who["role"]}">', text, count=1)
+            me = {"user": {k: who[k] for k in ("id", "username", "name", "role")}, "auth": auth_on}
+            boot = ('<script id="me-boot" type="application/json">'
+                    + json.dumps(me).replace("</", "<\\/") + "</script>" + boot)
         if boot:
             at = text.find("<script src=")
             text = text[:at] + boot + "\n" + text[at:] if at >= 0 else text + boot
@@ -644,66 +687,382 @@ def build_studio_app(recents: Optional[Recents] = None):
                 if "v" in request.query_params else "no-cache")
         return response
 
-    # ── authentication ──────────────────────────────────────────────
-    # The studio rides a public tunnel; an open door there is an open
-    # door to the filesystem browser and the param editor. Simple by
-    # design: one user/pass (root/123 unless configured), a signed
-    # session cookie that survives restarts, and an off switch.
+    # ── authentication: people, sessions, the agent's token ─────────────
+    # The studio rides a public tunnel; an open door there is an open door
+    # to the filesystem browser and the param editor. Accounts live in
+    # <state>/users.sqlite (operonx_studio/users.py); the middleware below
+    # resolves who is asking (request.state.user) and the access table
+    # decides what they may do (operonx_studio/access.py).
     #
-    #   OPERONX_STUDIO_USER=...   (default "root")
-    #   OPERONX_STUDIO_PASS=...   (default "123")
-    #   OPERONX_STUDIO_AUTH=off   (no auth at all — trusted networks)
-    auth: Optional[Dict[str, str]] = None
-    if os.environ.get("OPERONX_STUDIO_AUTH", "").lower() not in ("off", "0", "false"):
-        import hmac as _hmac
+    #   OPERONX_STUDIO_USER/PASS   the first admin, read once on a start with no accounts
+    #   OPERONX_STUDIO_AUTH=off    no sign-in: everyone is the first admin (trusted networks, the tests)
+    from .users import AgentTokens, PasswordError, Throttle, UserStore, password_problem, check_password
 
-        _user = os.environ.get("OPERONX_STUDIO_USER", "root")
-        _pass = os.environ.get("OPERONX_STUDIO_PASS", "123")
-        _key = hashlib.sha256(f"oxstudio:{_user}:{_pass}".encode()).digest()
-        auth = {"user": _user, "pass": _pass,
-                "token": _hmac.new(_key, b"session-v1", hashlib.sha256).hexdigest()}
+    auth_on = os.environ.get("OPERONX_STUDIO_AUTH", "").lower() not in ("off", "0", "false")
+    users = UserStore(recents.state_file.parent / "users.sqlite")
+    agents = AgentTokens()
+    throttle = Throttle()
+    app.state.users = users
+    app.state.agents = agents
+    if auth_on:
+        from . import chat as _chat_first
+
+        users.ensure_first_admin(os.environ.get("OPERONX_STUDIO_USER", "root"),
+                                 os.environ.get("OPERONX_STUDIO_PASS", "123"),
+                                 claude_home=str(_chat_first.claude_home()))
+
+    #: who everyone is with auth off and no accounts yet
+    LOCAL = {"id": "local", "username": "local", "name": "local", "role": "admin", "must_change": False,
+             "disabled": False, "machine_login": True}
+
+    def _person(user: Dict[str, Any], via: str) -> Dict[str, Any]:
+        """What a request carries about who sent it: never the hash."""
+        return {"id": user["id"], "username": user["username"], "name": user.get("name") or user["username"],
+                "role": user["role"], "must_change": bool(user.get("must_change")), "via": via}
+
+    #: what someone who must choose a password may still reach
+    _MUST_CHANGE_OK = ("/api/me", "/api/me/password", "/api/logout")
+
+    def _cookie(response: Any, request: Any, token: str) -> None:
+        # Secure when the tunnel says the browser spoke https to it
+        secure = (request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+                  or request.url.scheme == "https")
+        response.set_cookie("oxsession", token, httponly=True, samesite="lax", secure=secure,
+                            max_age=30 * 86400)
+
+    def _same_origin(request: Any) -> bool:
+        """A state change from another site's page is refused (decision D15).
+        No Origin (curl, the assistant's tools, old browsers on same-origin
+        GETs) is not a browser request from elsewhere."""
+        origin = request.headers.get("origin")
+        if origin is None:
+            return True
+        from urllib.parse import urlsplit
+
+        host = urlsplit(origin).netloc.lower()
+        allowed = {h.strip().lower() for h in (request.headers.get("host", ""),
+                                               request.headers.get("x-forwarded-host", "")) if h.strip()}
+        return bool(host) and host in allowed
+
+    def _client(request: Any) -> str:
+        """Who is knocking, for the throttle. Behind the tunnel every request
+        comes from loopback, so a loopback peer's X-Forwarded-For is trusted;
+        anyone else's is not (it would let them pick their own key)."""
+        peer = request.client.host if request.client else ""
+        fwd = request.headers.get("x-forwarded-for", "")
+        if fwd and peer in ("127.0.0.1", "::1", "localhost"):
+            return fwd.split(",")[0].strip()
+        return peer
+
+    def _log_activity(request: Any, status: int, route: Optional[str] = None) -> None:
+        """One activity row for this request, if it is one the log keeps."""
+        note = getattr(request.state, "audit", None) or {"route": route or request.url.path, "level": None,
+                                                         "params": {}, "detail": {}}
+        if not recorded(request.method, note["route"], note["level"], status) or note["route"] == "/api/login":
+            return                      # a sign-in is recorded by its handler, with the name it tried
+        who = getattr(request.state, "user", None) or {}
+        try:
+            users.audit(user=who.get("id"), username=who.get("username"), via=who.get("via") or "web",
+                        method=request.method, route=note["route"], status=status,
+                        pid=note["params"].get("pid"), params=note["params"], detail=note["detail"])
+        except Exception:  # noqa: BLE001 — the log never breaks a request
+            pass
 
     @app.middleware("http")
     async def _guard(request, call_next):
-        if auth is not None:
-            path = request.url.path
-            is_open = (path == "/login" or path == "/api/login"
-                       or path.startswith("/static"))
-            if not is_open and request.cookies.get("oxsession") != auth["token"]:
-                if path.startswith("/api/"):
-                    return JSONResponse({"error": "authentication required"},
-                                        status_code=401)
-                from fastapi.responses import RedirectResponse
+        path = request.url.path
+        if request.method not in ("GET", "HEAD", "OPTIONS") and not _same_origin(request):
+            _log_activity(request, 403, route=path)
+            return JSONResponse({"error": "cross-site request refused"}, status_code=403)
+        if not auth_on:
+            admin = users.first_admin()
+            request.state.user = _person(admin, "web") if admin else dict(LOCAL, via="web")
+            response = await call_next(request)
+            _log_activity(request, response.status_code)
+            return response
+        user, session, touched = None, None, False
+        token = request.cookies.get("oxsession") or ""
+        if token:
+            uid = agents.resolve(token)
+            if uid is not None:
+                got = users.cached_user(uid)
+                if got is not None and not got["disabled"]:
+                    user = _person(got, "assistant")
+            else:
+                got, session, touched = users.resolve(token)
+                if got is not None:
+                    user = _person(got, "web")
+        request.state.user = user
+        request.state.session = session
+        if user is None and not is_open_path(path):
+            if path.startswith("/api/"):
+                return JSONResponse({"error": "authentication required"}, status_code=401)
+            from fastapi.responses import RedirectResponse
 
-                return RedirectResponse("/login", status_code=302)
-        return await call_next(request)
+            return RedirectResponse("/login", status_code=302)
+        if user is not None and user["must_change"] and not is_open_path(path) and path not in _MUST_CHANGE_OK:
+            if path.startswith("/api/"):
+                _log_activity(request, 403, route=path)
+                return JSONResponse({"error": "choose a new password first", "must_change": True},
+                                    status_code=403)
+            from fastapi.responses import RedirectResponse
 
-    @app.get("/login")
-    def login_page() -> HTMLResponse:
-        return _page("login.html")
-
-    @app.post("/api/login")
-    def login(body: Dict[str, Any]) -> JSONResponse:
-        if auth is None:
-            return JSONResponse({"ok": True})
-        import hmac as _hmac
-
-        good = (_hmac.compare_digest(str(body.get("username") or ""), auth["user"])
-                and _hmac.compare_digest(str(body.get("password") or ""), auth["pass"]))
-        if not good:
-            return JSONResponse({"error": "wrong username or password"}, status_code=401)
-        response = JSONResponse({"ok": True})
-        response.set_cookie("oxsession", auth["token"], httponly=True,
-                            samesite="lax", max_age=30 * 86400)
+            return RedirectResponse("/login", status_code=302)
+        response = await call_next(request)
+        _log_activity(request, response.status_code)
+        if touched:
+            # the session's 30 days moved on; so does the browser's copy
+            _cookie(response, request, token)
         return response
 
+    @app.exception_handler(AccessDenied)
+    async def _denied(request, exc: AccessDenied):
+        if not request.url.path.startswith("/api/"):
+            # a page someone may not open sends them somewhere they may
+            from fastapi.responses import RedirectResponse
+
+            return RedirectResponse("/login" if exc.status == 401 else "/", status_code=302)
+        return JSONResponse({"error": exc.message}, status_code=exc.status)
+
+    @app.get("/login")
+    def login_page(request: Request) -> HTMLResponse:
+        # someone signed in with a temporary or default password lands on
+        # the "choose your password" step, without a flash of the form
+        me = getattr(request.state, "user", None)
+        boot = ""
+        if auth_on and me is not None and me["must_change"] and me["via"] == "web":
+            boot = ('<script id="login-boot" type="application/json">'
+                    + json.dumps({"step": "password", "username": me["username"]}).replace("</", "<\\/")
+                    + "</script>")
+        return _page("login.html", boot)
+
+    @app.post("/api/login")
+    def login(body: Dict[str, Any], request: Request) -> JSONResponse:
+        if not auth_on:
+            return JSONResponse({"ok": True, "must_change": False})
+        username = str(body.get("username") or "").strip().lower()[:64]
+        password = str(body.get("password") or "")[:1024]
+        keys = (f"user:{username}", f"addr:{_client(request)}")
+        wait = throttle.locked(*keys)
+        if wait > 0:
+            secs = int(wait) + 1
+            return JSONResponse({"error": f"Too many attempts — try again in {secs} s", "retry_after": secs},
+                                status_code=429, headers={"Retry-After": str(secs)})
+        user = users.check(username, password)
+
+        def note(status: int, who: Optional[Dict[str, Any]]) -> None:
+            users.audit(user=who["id"] if who else None, username=who["username"] if who else None, via="web",
+                        method="POST", route="/api/login", status=status, detail={"username": username[:64]})
+
+        if user is None:
+            throttle.fail(*keys)
+            # a wrong password is recorded against the person it tried (an admin
+            # filters by them); a name no one has, against no one
+            note(401, users.by_name(username))
+            return JSONResponse({"error": "Wrong username or password."}, status_code=401)
+        if user["disabled"]:
+            # only someone who knew the password learns this
+            note(403, user)
+            return JSONResponse({"error": "This account is disabled — ask an admin"}, status_code=403)
+        note(200, user)
+        throttle.clear(*keys)
+        token = users.start_session(user["id"], label=request.headers.get("user-agent", ""))
+        response = JSONResponse({"ok": True, "must_change": user["must_change"],
+                                 "user": _person(user, "web")})
+        _cookie(response, request, token)
+        return response
+
+    def _end_this_session(request: Any) -> None:
+        token = request.cookies.get("oxsession") or ""
+        if token and agents.resolve(token) is None:
+            users.end_session(token)
+
     @app.get("/logout")
-    def logout():
+    def logout(request: Request):
         from fastapi.responses import RedirectResponse
 
+        _end_this_session(request)
         response = RedirectResponse("/login", status_code=302)
         response.delete_cookie("oxsession")
         return response
+
+    @app.post("/api/logout")
+    def api_logout(request: Request) -> JSONResponse:
+        _end_this_session(request)
+        response = JSONResponse({"ok": True})
+        response.delete_cookie("oxsession")
+        return response
+
+    def _me_out(user: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: user.get(k) for k in ("id", "username", "name", "role", "must_change", "disabled",
+                                          "machine_login", "claude_email", "created", "last_seen")}
+
+    @app.get("/api/me")
+    def me(request: Request) -> JSONResponse:
+        who = request.state.user
+        row = users.user(who["id"]) if who["id"] != "local" else None
+        return JSONResponse({"user": {**(_me_out(row) if row else {}), **who}, "auth": auth_on})
+
+    @app.post("/api/me/password")
+    def me_password(body: Dict[str, Any], request: Request) -> JSONResponse:
+        """Choose your own password. The current one is asked for, except on
+        the first sign-in with a temporary one (you just typed it). Your
+        other sessions end; this one stays."""
+        who = request.state.user
+        row = users.user(who["id"]) if who["id"] != "local" else None
+        if row is None:
+            return JSONResponse({"error": "There are no accounts yet — auth is off"}, status_code=400)
+        new = str(body.get("new") or "")
+        if not row["must_change"] and not check_password(str(body.get("current") or ""), row["pw"]):
+            return JSONResponse({"error": "Your current password is not right"}, status_code=400)
+        problem = password_problem(new, row["username"])
+        if problem is None and check_password(new, row["pw"]):
+            problem = "Choose a password different from the one you have."
+        if problem:
+            return JSONResponse({"error": problem}, status_code=400)
+        users.set_password(row["id"], new, must_change=False)
+        ended = users.end_sessions(row["id"], keep=getattr(request.state, "session", None))
+        return JSONResponse({"ok": True, "ended_sessions": ended})
+
+    # ── people (admins): the Team page and its API ──
+
+    @app.get("/team")
+    def team_page(request: Request) -> HTMLResponse:
+        return _page("team.html", "", request)
+
+    def _stop_turns_of(uid: str) -> int:
+        stopped = 0
+        for turn in list(relay.turns.values()):
+            if turn.owner == uid and not turn.done:
+                relay.stop(turn.id, reason="access")
+                stopped += 1
+        return stopped
+
+    def _user_out(user: Dict[str, Any], counts: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+        return {**_me_out(user), "sessions": (counts or {}).get(user["id"], 0)}
+
+    def _target(uid: str, request: Any) -> Any:
+        row = users.user(uid)
+        if row is None:
+            return JSONResponse({"error": "no such person"}, status_code=404)
+        return row
+
+    @app.get("/api/admin/activity")
+    def admin_activity(user: str = "", pid: str = "", before: int = 0, limit: int = 200) -> JSONResponse:
+        """What was changed and refused, newest first (§2.6); filtered by
+        person and project; ``before`` an id pages back. Kept 180 days."""
+        rows = users.activity(user=user or None, pid=pid or None, before=before or None, limit=limit)
+        for r in rows:
+            ref = recents.get(r["pid"]) if r.get("pid") else None
+            r["project"] = ref.name if ref else None
+        return JSONResponse({"rows": rows, "days": 180})
+
+    @app.get("/api/admin/users")
+    def admin_users() -> JSONResponse:
+        counts = users.session_counts()
+        return JSONResponse({"users": [_user_out(u, counts) for u in users.users()], "roles": ["admin", "editor", "viewer"]})
+
+    @app.post("/api/admin/users")
+    def admin_add(body: Dict[str, Any]) -> JSONResponse:
+        """Someone new, with a temporary password shown once."""
+        try:
+            user, password = users.create(str(body.get("username") or ""), name=str(body.get("name") or ""),
+                                          role=str(body.get("role") or "editor"), must_change=True)
+        except PasswordError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"user": _user_out(user), "password": password})
+
+    @app.patch("/api/admin/users/{uid}")
+    async def admin_update(uid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        row = _target(uid, request)
+        if isinstance(row, JSONResponse):
+            return row
+        me_id = request.state.user["id"]
+        update: Dict[str, Any] = {}
+        if "name" in body:
+            update["name"] = str(body.get("name") or "").strip()[:80]
+        if "role" in body and body["role"] != row["role"]:
+            if uid == me_id:
+                return JSONResponse({"error": "You can't change your own role"}, status_code=400)
+            if body["role"] not in ("admin", "editor", "viewer"):
+                return JSONResponse({"error": "A role is admin, editor or viewer"}, status_code=400)
+            update["role"] = body["role"]
+        if "disabled" in body and bool(body["disabled"]) != row["disabled"]:
+            if uid == me_id:
+                return JSONResponse({"error": "You can't disable yourself"}, status_code=400)
+            update["disabled"] = bool(body["disabled"])
+        rank = {"viewer": 0, "editor": 1, "admin": 2}
+        demoted = "role" in update and rank[update["role"]] < rank[row["role"]]
+        disabled = bool(update.get("disabled"))
+        if (demoted or disabled) and row["role"] == "admin" and not row["disabled"] and users.active_admins() <= 1:
+            return JSONResponse({"error": "They are the last active admin"}, status_code=400)
+        user = users.update(uid, **update)
+        stopped = 0
+        if demoted or disabled:
+            # decision D16: a demotion or a disable holds from the next request
+            users.end_sessions(uid)
+            agents.revoke_user(uid)
+            stopped = _stop_turns_of(uid)
+        return JSONResponse({"user": _user_out(user), "stopped_turns": stopped})
+
+    @app.post("/api/admin/users/{uid}/password")
+    def admin_reset(uid: str, request: Request) -> JSONResponse:
+        """A temporary password, shown once; they choose their own at the
+        next sign-in, and every session of theirs ends now."""
+        row = _target(uid, request)
+        if isinstance(row, JSONResponse):
+            return row
+        if uid == request.state.user["id"]:
+            return JSONResponse({"error": "Change your own password from your account"}, status_code=400)
+        password = users.reset_password(uid)
+        agents.revoke_user(uid)
+        return JSONResponse({"user": _user_out(users.user(uid)), "password": password})
+
+    @app.delete("/api/admin/users/{uid}")
+    async def admin_delete(uid: str, request: Request) -> JSONResponse:
+        """Someone leaves: their sessions and turns end, their conversations
+        are deleted, their own Claude sign-in is signed out and removed."""
+        row = _target(uid, request)
+        if isinstance(row, JSONResponse):
+            return row
+        if uid == request.state.user["id"]:
+            return JSONResponse({"error": "You can't delete yourself"}, status_code=400)
+        if row["role"] == "admin" and not row["disabled"] and users.active_admins() <= 1:
+            return JSONResponse({"error": "They are the last active admin"}, status_code=400)
+        users.end_sessions(uid)
+        agents.revoke_user(uid)
+        stopped = _stop_turns_of(uid)
+        for sid in chat_store.owned_by(uid):
+            chat_store.delete_session(sid)
+        await _forget_claude_home(row)
+        users.delete(uid)
+        return JSONResponse({"deleted": uid, "stopped_turns": stopped})
+
+    async def _forget_claude_home(row: Dict[str, Any]) -> None:
+        """Sign their own Claude directory out, then remove it — only when
+        it lies inside this studio's state directory: a directory the
+        studio did not make (a real ~/.claude named by an env variable) is
+        never touched."""
+        import shutil
+
+        from . import chat as _chat_mod
+
+        home = Path(_claude_of(row["id"])["home"]).resolve()
+        state = recents.state_file.parent.resolve()
+        if state not in home.parents or not home.is_dir():
+            return
+        binary = _chat_mod.find_claude()
+        if binary is not None:
+            env = _chat_mod.base_env()
+            env["CLAUDE_CONFIG_DIR"] = str(home)
+            proc = await asyncio.create_subprocess_exec(
+                binary, "auth", "logout", env=env, stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=30)
+            except asyncio.TimeoutError:
+                proc.kill()
+        shutil.rmtree(home, ignore_errors=True)
 
     def _watcher(pid: str) -> Optional[ProjectWatcher]:
         if pid in watchers:
@@ -745,15 +1104,16 @@ def build_studio_app(recents: Optional[Recents] = None):
     # ── home ────────────────────────────────────────────────────────────
 
     @app.get("/")
-    def home():
+    def home(request: Request):
         # the list and its signal ride in the page: two tunnel round trips
         # (~1.5 s) traded for ~0.2 s of server time (measured, 25 projects)
         boot = json.dumps({"projects": [r.as_dict() for r in recents.ordered()],
                            "health": _projects_health(),
-                           "sessions": [_session_out(x) for x in chat_store.sessions(None, limit=6)]},
+                           "sessions": [_session_out(x) for x in
+                                        chat_store.sessions(None, owner=request.state.user["id"], limit=6)]},
                           separators=(",", ":"), default=str)
         return _page("home.html", '<script id="home-boot" type="application/json">'
-                     + boot.replace("</", "<\\/") + "</script>")
+                     + boot.replace("</", "<\\/") + "</script>", request)
 
     @app.get("/api/projects")
     def projects() -> JSONResponse:
@@ -906,7 +1266,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     # ── one project ─────────────────────────────────────────────────────
 
     @app.get("/p/{pid}")
-    def project_page(pid: str) -> Any:
+    def project_page(pid: str, request: Request) -> Any:
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
@@ -920,7 +1280,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             payload = json.dumps(_ir_payload(pid, watcher), separators=(",", ":"))
             boot = ('<script id="ir-boot" type="application/json">'
                     + payload.replace("</", "<\\/") + "</script>")
-        return _page("project.html", boot)
+        return _page("project.html", boot, request)
 
     def _declared_roles(
         root: Path, graphs: List[Dict[str, Any]], services: List[Dict[str, Any]] = ()
@@ -1834,9 +2194,8 @@ def build_studio_app(recents: Optional[Recents] = None):
     # ── the review queue: runs read as conversations, judged, labelled ──
     from .review import ReviewLog, conversation
 
-    def _reviewer() -> str:
-        # one login today; a team server returns real accounts here
-        return (auth or {}).get("user") or "local"
+    def _reviewer(request: Any) -> str:
+        return request.state.user["username"]
 
     def _egress_ops(watcher: ProjectWatcher) -> set:
         names: set = set()
@@ -1902,7 +2261,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         return got if isinstance(got, JSONResponse) else JSONResponse(got)
 
     @app.post("/api/p/{pid}/review/run/{run}")
-    def review_save(pid: str, run: str, body: Dict[str, Any]) -> JSONResponse:
+    def review_save(pid: str, run: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
@@ -1911,7 +2270,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             labels = [x for x in labels.split(",")]
         try:
             rec = ReviewLog(watcher.root).put(run, verdict=body.get("verdict") or None, labels=labels,
-                                              note=str(body.get("note") or ""), user=_reviewer())
+                                              note=str(body.get("note") or ""), user=_reviewer(request))
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse(rec)
@@ -2413,7 +2772,9 @@ def build_studio_app(recents: Optional[Recents] = None):
     # ── the assistant's hands: UI actions and undo ──────────────────────
     # The studio tool server (operonx_studio.mcp) posts what it opened;
     # the page polls and shows it, so the user watches the agent work.
-    ui_actions: Dict[str, List[Dict[str, Any]]] = {}
+    # keyed by (project, person): what one person's assistant opens shows on
+    # that person's screen only (the agent token says whose turn it is)
+    ui_actions: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
     # bumped whenever something a waiting pulse cares about happens. A
     # plain counter, not an asyncio.Event: an Event binds to one event
     # loop, and a waiter checking an int every 100 ms costs nothing.
@@ -2423,11 +2784,11 @@ def build_studio_app(recents: Optional[Recents] = None):
         bells[pid] = bells.get(pid, 0) + 1
 
     @app.post("/api/p/{pid}/ui/action")
-    async def ui_action(pid: str, body: Dict[str, Any]) -> JSONResponse:
+    async def ui_action(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         kind = str(body.get("kind") or "")
         if kind not in ("open_run", "open_monitor", "compare", "select_op", "open_jobs", "open_tab", "open_eval"):
             return JSONResponse({"error": f"unknown action {kind!r}"}, status_code=400)
-        queue = ui_actions.setdefault(pid, [])
+        queue = ui_actions.setdefault((pid, request.state.user["id"]), [])
         seq = (queue[-1]["seq"] + 1) if queue else 1
         queue.append({"seq": seq, "kind": kind, "args": dict(body.get("args") or {}), "at": time.time()})
         del queue[:-50]
@@ -2471,8 +2832,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             return None
 
     @app.get("/api/p/{pid}/pulse")
-    async def pulse(pid: str, stamp: float = 0.0, ui: int = -1, follow: str = "", chat: Optional[int] = None,
-                    hold: float = 8.0) -> JSONResponse:
+    async def pulse(request: Request, pid: str, stamp: float = 0.0, ui: int = -1, follow: str = "",
+                    chat: Optional[int] = None, hold: float = 8.0) -> JSONResponse:
         """``stamp``: the IR the page has; ``ui``: the last assistant action
         it performed (-1: none yet — answer at once with the latest seq);
         ``follow``: the newest run it knows, when it follows new runs;
@@ -2481,16 +2842,18 @@ def build_studio_app(recents: Optional[Recents] = None):
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
+        me = request.state.user["id"]
         end = time.monotonic() + max(0.0, min(hold, 8.0))
         while True:
             rung = bells.get(pid, 0)
             cur, ok = await _stamp_now(pid, watcher)
-            queue = ui_actions.get(pid, [])
+            queue = ui_actions.get((pid, me), [])
             last = queue[-1]["seq"] if queue else 0
             info = await _newest_run(pid) if follow else None
             newest = info["run"] if info else None
             listening = chat is not None and chat >= 0
-            ended = [f for f in relay.finished if f["scope"] == pid and f["seq"] > chat] if listening else []
+            ended = [f for f in relay.finished
+                     if f["scope"] == pid and f["seq"] > chat and f.get("owner") == me] if listening else []
             changed = (abs(cur - stamp) > 1e-6 or ui < 0 or last > ui or (follow and newest and newest != follow)
                        or (chat is not None and chat < 0) or bool(ended))
             left = end - time.monotonic()
@@ -2499,14 +2862,16 @@ def build_studio_app(recents: Optional[Recents] = None):
                                      "actions": [a for a in queue if a["seq"] > ui] if ui >= 0 else [],
                                      "newest": newest, "newest_info": info,
                                      "chat_last": relay.finished_seq, "chat_ended": ended,
-                                     "assistant_rate": chat_store.get_meta("last_rate", None)})
+                                     "assistant_rate": _rate_of(me),
+                                     # a role changed while the page is open reloads it
+                                     "role": request.state.user["role"]})
             until = time.monotonic() + min(1.0 if not follow else 2.0, left)
             while time.monotonic() < until and bells.get(pid, 0) == rung:
                 await asyncio.sleep(0.1)
 
     @app.get("/api/p/{pid}/ui/actions")
-    def ui_actions_since(pid: str, after: int = 0) -> JSONResponse:
-        queue = ui_actions.get(pid, [])
+    def ui_actions_since(request: Request, pid: str, after: int = 0) -> JSONResponse:
+        queue = ui_actions.get((pid, request.state.user["id"]), [])
         return JSONResponse({"actions": [a for a in queue if a["seq"] > after],
                              "last": queue[-1]["seq"] if queue else 0})
 
@@ -2818,11 +3183,32 @@ def build_studio_app(recents: Optional[Recents] = None):
 
         server = request.scope.get("server") or ("127.0.0.1", 8765)
         host = "127.0.0.1" if server[0] in ("0.0.0.0", "::", None) else server[0]
+        # a token for this turn's owner alone, revoked when the turn ends
+        # (decision D12); the shared login cookie it replaced never expired
+        ttl = (float(os.environ.get("OPERONX_STUDIO_CHAT_MAX_MIN") or 60) + 5) * 60
+        token = agents.issue(request.state.user["id"], ttl)
         env = {"OPERONX_STUDIO_URL": f"http://{host}:{server[1]}", "OPERONX_STUDIO_PID": pid,
-               "OPERONX_STUDIO_TOKEN": auth["token"] if auth else ""}
+               "OPERONX_STUDIO_TOKEN": token}
         if os.environ.get("PYTHONPATH"):
             env["PYTHONPATH"] = os.environ["PYTHONPATH"]
         return {"type": "stdio", "command": _sys.executable, "args": ["-m", "operonx_studio.mcp"], "env": env}
+
+    def _busy() -> Optional[JSONResponse]:
+        """At most OPERONX_STUDIO_CHAT_MAX_TURNS turns run at once across the
+        studio (default 6, decision D14): each is a Claude Code process."""
+        try:
+            cap = int(os.environ.get("OPERONX_STUDIO_CHAT_MAX_TURNS") or 6)
+        except ValueError:
+            cap = 6
+        if relay.running() >= max(1, cap):
+            return JSONResponse({"error": f"The studio is busy — {cap} assistant turns are running. "
+                                          "Try again when one ends."}, status_code=429)
+        return None
+
+    def _revoker(mcp: Dict[str, Any]):
+        """Ends the turn's agent token (run when the turn ends)."""
+        token = ((mcp or {}).get("env") or {}).get("OPERONX_STUDIO_TOKEN") or ""
+        return lambda: agents.revoke(token)
 
     def _home_briefing() -> str:
         roster = "\n".join(f"- {r.name}: {r.root}" for r in recents.ordered() if r.exists)
@@ -2841,8 +3227,37 @@ def build_studio_app(recents: Optional[Recents] = None):
                             ChatStore, Relay, valid_model)
 
     chat_store = ChatStore(recents.state_file.parent / "assistant.sqlite")
+    app.state.chat_store = chat_store
+    # conversations from before owners (or from an auth-off studio) are the
+    # first admin's: today's single login is that admin (decision D3)
+    _first = users.first_admin()
+    chat_store.adopt(_first["id"] if _first else "local")
     relay = Relay(chat_store)
     relay.on_finish = _ring      # a waiting pulse on that project hears it
+
+    def _name_of(uid: Optional[str]) -> str:
+        user = users.cached_user(uid) if uid and uid != "local" else None
+        return (user or {}).get("name") or (user or {}).get("username") or "someone"
+
+    relay.name_of = _name_of
+
+    def _assistant_changed(turn: Any, files: List[str]) -> None:
+        """The assistant's file edits go in the log when its turn ends (§2.6)."""
+        users.audit(user=turn.owner, via="assistant", method="EDIT", route="assistant:changes", status=200,
+                    pid=turn.scope if turn.scope != "home" else None,
+                    detail={"files": [str(f)[:200] for f in files[:50]]})
+
+    relay.on_changes = _assistant_changed
+    users.prune_audit()
+
+    def _my_defaults(me: str) -> Dict[str, Any]:
+        """A person's own default model and effort. The first admin — today's
+        single login — starts from what the studio-wide setting was."""
+        got = chat_store.get_meta(f"defaults:{me}", None)
+        if got is None:
+            first = users.first_admin()
+            got = chat_store.get_meta("defaults", {}) if (first and first["id"] == me) or me == "local" else {}
+        return dict(got or {})
 
     def _scope_ok(scope: str) -> bool:
         return scope == "home" or (recents.get(scope) is not None and _watcher(scope) is not None)
@@ -2851,9 +3266,28 @@ def build_studio_app(recents: Optional[Recents] = None):
         ref = recents.get(scope)
         return "Home" if scope == "home" else (ref.name if ref else scope)
 
+    def _viewer(request: Any) -> bool:
+        return request.state.user["role"] == "viewer"
+
+    def _limits(request: Any) -> Dict[str, Any]:
+        """How far this person's assistant reaches (§2.5): a viewer's reads,
+        whatever OPERONX_STUDIO_CHAT_MODE says, is denied the studio's state,
+        ~/.claude and .env files, and gets no project tool servers. The agent
+        token carries the role too, so the studio refuses its mutating tools."""
+        if not _viewer(request):
+            return {}
+        from . import chat as _chat_mod
+
+        return {"reach": "read", "deny": _chat_mod.viewer_deny(recents.state_file.parent)}
+
     def _turn_env(scope: str, view: Any, request: Request) -> Any:
         if scope == "home":
-            return Path.home(), _home_briefing(), _studio_mcp("home", request)
+            cwd = Path.home()
+            if _viewer(request):
+                # never the server's home: an empty directory of their own
+                cwd = recents.state_file.parent / "users" / request.state.user["id"] / "home"
+                cwd.mkdir(parents=True, exist_ok=True, mode=0o700)
+            return cwd, _home_briefing(), _studio_mcp("home", request)
         cwd, context = _chat_briefing(scope)
         if cwd is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
@@ -2876,11 +3310,11 @@ def build_studio_app(recents: Optional[Recents] = None):
         return {str(k): v for k, v in servers.items()
                 if isinstance(v, dict) and k != "studio" and re.fullmatch(r"[\w-]{1,64}", str(k))}
 
-    def _assistant_defaults(scope: str) -> Dict[str, Any]:
+    def _assistant_defaults(scope: str, me: str) -> Dict[str, Any]:
         """A new conversation's model and effort: the project's
         ``[studio.assistant]`` if it sets them, else the studio's own default
         (the menu's "Use for new conversations"), else the CLI's."""
-        studio = dict(chat_store.get_meta("defaults", {}) or {})
+        studio = _my_defaults(me)
         owner = _watcher(scope) if scope != "home" else None
         project = dict((_studio_table(Path(owner.root)).get("assistant") or {}) if owner is not None else {})
         out = {}
@@ -2896,29 +3330,32 @@ def build_studio_app(recents: Optional[Recents] = None):
         return {**sess, "scope_name": _scope_name(sess["scope"])}
 
     @app.get("/api/assistant/sessions")
-    def assistant_sessions(scope: str = "", q: str = "", archived: str = "0", limit: int = 100) -> JSONResponse:
+    def assistant_sessions(request: Request, scope: str = "", q: str = "", archived: str = "0",
+                           limit: int = 100) -> JSONResponse:
         """Newest first; ``scope`` a project id or ``home`` (empty: every
         scope); ``archived`` 0 | 1 | all; ``q`` searches titles and text."""
         arch = None if archived == "all" else archived in ("1", "true")
-        rows = chat_store.sessions(scope or None, q=q, archived=arch, limit=limit)
+        rows = chat_store.sessions(scope or None, owner=request.state.user["id"], q=q, archived=arch, limit=limit)
         return JSONResponse({"sessions": [_session_out(r) for r in rows], "models": list(MODELS)})
 
     @app.post("/api/assistant/sessions")
-    def assistant_new(body: Dict[str, Any]) -> JSONResponse:
+    def assistant_new(body: Dict[str, Any], request: Request) -> JSONResponse:
         scope = str(body.get("scope") or "home")
         if not _scope_ok(scope):
             return JSONResponse({"error": "unknown project"}, status_code=404)
-        pick = _assistant_defaults(scope)
+        me = request.state.user["id"]
+        pick = _assistant_defaults(scope, me)
         model = (body["model"] or None) if "model" in body else pick.get("model")
         effort = (body["effort"] or None) if "effort" in body else pick.get("effort")
         if not valid_model(model):
             return JSONResponse({"error": f"model is one of {', '.join(MODELS)}, or a full claude-… id"}, status_code=400)
         if effort is not None and effort not in EFFORTS:
             return JSONResponse({"error": f"effort is one of {', '.join(EFFORTS)}"}, status_code=400)
-        return JSONResponse({"session": _session_out(chat_store.create_session(scope, model=model, effort=effort))})
+        return JSONResponse({"session": _session_out(chat_store.create_session(scope, owner=me, model=model,
+                                                                                    effort=effort))})
 
     @app.get("/api/assistant/models")
-    def assistant_models(scope: str = "home") -> JSONResponse:
+    def assistant_models(request: Request, scope: str = "home") -> JSONResponse:
         """What the model menu offers: each model with what it is good for,
         what the CLI resolves it to and its context window (as last seen);
         the effort levels; and the defaults a new conversation takes."""
@@ -2931,60 +3368,109 @@ def build_studio_app(recents: Optional[Recents] = None):
         default_full = resolved.get("default")
         return JSONResponse({"models": models, "efforts": list(EFFORTS),
                              "default": {"full": default_full, "window": windows.get(default_full) if default_full else None},
-                             "studio_defaults": dict(chat_store.get_meta("defaults", {}) or {}),
-                             "new": _assistant_defaults(scope if _scope_ok(scope) else "home")})
+                             "studio_defaults": _my_defaults(request.state.user["id"]),
+                             "new": _assistant_defaults(scope if _scope_ok(scope) else "home",
+                                                        request.state.user["id"])})
 
-    # the account the assistant's Claude runs as: `claude auth status --json`,
-    # read at most every 30 s (it spawns the CLI)
-    _account_cache: Dict[str, Any] = {"at": 0.0, "value": None}
+    # ── each person's Claude sign-in (docs/TEAM_PLAN.md §2.4) ────────────
+    # Everyone's assistant runs under their own Claude account, in their own
+    # config directory; only the machine login's owner falls back to this
+    # machine's login (decision D8). Who that is, their directory and
+    # whether it is signed in come from here.
 
-    async def _account(fresh: bool = False) -> Dict[str, Any]:
-        """Who the assistant's Claude runs as: the studio's own sign-in when it
-        has one (``source: studio``), else this machine's (``machine``)."""
-        if not fresh and _account_cache["value"] is not None and time.monotonic() - _account_cache["at"] < 30:
-            return _account_cache["value"]
+    def _claude_of(uid: str) -> Dict[str, Any]:
+        """A person's sign-in: ``{"home": their directory, "machine": may they
+        fall back to this machine's login}``. The directory is the one the
+        account names (the first admin keeps the single-login one, D3), else
+        ``<state>/users/<uid>/claude``."""
         from . import chat as _chat_mod
 
-        studio = await asyncio.to_thread(_chat_mod.home_signed_in, fresh)
+        row = users.cached_user(uid) if uid != "local" else None
+        if row is None:            # auth off with no accounts: the single-login studio
+            return {"home": _chat_mod.claude_home(), "machine": True}
+        home = Path(row["claude_home"]) if row.get("claude_home") else \
+            recents.state_file.parent / "users" / uid / "claude"
+        return {"home": home, "machine": bool(row.get("machine_login"))}
+
+    # who a person's Claude runs as: `claude auth status --json`, read at
+    # most every 30 s per person (it spawns the CLI)
+    _account_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+    async def _account(me: str, fresh: bool = False) -> Dict[str, Any]:
+        """Who *me*'s assistant runs as: their own sign-in (``source: studio``),
+        this machine's for its owner (``machine``), or nobody yet (``none``)."""
+        got = _account_cache.get(me)
+        if not fresh and got is not None and time.monotonic() - got[0] < 30:
+            return dict(got[1], login=_login_state(me))
+        from . import chat as _chat_mod
+
+        claude = _claude_of(me)
+        own = await asyncio.to_thread(_chat_mod.home_signed_in, claude["home"], fresh)
+        env = _chat_mod._spawn_env(**claude)
         binary = _chat_mod.find_claude()
         out: Dict[str, Any] = {"logged_in": None}
-        if binary is not None:
+        if env is None:
+            out = {"logged_in": False}
+        elif binary is not None:
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    binary, "auth", "status", "--json", env=_chat_mod._spawn_env(),
+                    binary, "auth", "status", "--json", env=env,
                     stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
                 raw, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
-                got = json.loads(raw.decode() or "{}")
+                got_ = json.loads(raw.decode() or "{}")
                 # what the card shows; never a token or an id
-                out = {"logged_in": bool(got.get("loggedIn")), "method": got.get("authMethod"),
-                       "email": got.get("email"), "org": got.get("orgName"), "plan": got.get("subscriptionType"),
-                       "provider": got.get("apiProvider")}
+                out = {"logged_in": bool(got_.get("loggedIn")), "method": got_.get("authMethod"),
+                       "email": got_.get("email"), "org": got_.get("orgName"), "plan": got_.get("subscriptionType"),
+                       "provider": got_.get("apiProvider")}
             except Exception:  # noqa: BLE001 — no account line is better than a broken card
                 out = {"logged_in": None}
-        out.update(source="studio" if studio else "machine", home=str(_chat_mod.claude_home()),
-                   login=_login_state())
-        _account_cache.update(at=time.monotonic(), value=out)
-        return out
+        out.update(source="studio" if own else ("machine" if env is not None else "none"),
+                   home=str(claude["home"]))
+        if own and out.get("email") and me != "local":
+            # the Team page shows which Claude account each person uses — never a token
+            row = users.cached_user(me)
+            if row is not None and row.get("claude_email") != out["email"]:
+                users.update(me, claude_email=out["email"])
+        _account_cache[me] = (time.monotonic(), out)
+        return dict(out, login=_login_state(me))
 
-    # ── signing the assistant in (docs/ASSISTANT_NEXT_PLAN.md §3) ─────────
-    # `claude auth login` in the studio's own config directory, driven over
+    def _rate_of(me: str) -> Optional[Dict[str, Any]]:
+        """The plan's limits for *me*'s account, as last reported: an
+        account's, shared by its conversations — never another person's."""
+        from . import chat as _chat_mod
+
+        key = _chat_mod.account_key(**_claude_of(me))
+        return chat_store.get_meta(f"last_rate:{key}", None) if key else None
+
+    # ── signing in (docs/ASSISTANT_NEXT_PLAN.md §3, per person since P4) ──
+    # `claude auth login` in the person's own config directory, driven over
     # pipes: it prints the sign-in link, then reads the code the page shows
-    # after signing in. One at a time; ten minutes at most. The code is
-    # written to the CLI and never kept or logged; the token stays the CLI's.
+    # after signing in. One at a time per person; ten minutes at most. The
+    # code is written to the CLI and never kept or logged; the token stays
+    # the CLI's.
     logins: Dict[str, Any] = {}
 
-    # which sign-in the assistant runs under, known before the first turn
-    # needs it (the check spawns the CLI: ~0.5 s)
+    # which sign-in the first admin's assistant runs under, known before the
+    # first turn needs it (the check spawns the CLI: ~0.5 s)
     import threading as _threading
     from . import chat as _chat_boot
 
-    _threading.Thread(target=_chat_boot.home_signed_in, daemon=True).start()
+    _first_admin = users.first_admin()
+    _threading.Thread(target=_chat_boot.home_signed_in, daemon=True,
+                      args=(_claude_of(_first_admin["id"] if _first_admin else "local")["home"],)).start()
 
-    def _login_state() -> Optional[Dict[str, Any]]:
+    def _login_state(me: str) -> Optional[Dict[str, Any]]:
         for lid, lg in logins.items():
-            if lg["proc"].returncode is None:
+            if lg["owner"] == me and lg["proc"].returncode is None:
                 return {"id": lid, "method": lg["method"], "url": lg["url"], "started": lg["started"]}
         return None
+
+    def _login_or_404(lid: str, request: Any) -> Any:
+        """The sign-in, if it is the asker's: someone else's is not there."""
+        lg = logins.get(lid)
+        if lg is None or lg["owner"] != request.state.user["id"] or lg["proc"].returncode is not None:
+            return JSONResponse({"error": "That sign-in has ended — start again"}, status_code=404)
+        return lg
 
     async def _end_login(lid: str) -> None:
         lg = logins.pop(lid, None)
@@ -3000,20 +3486,22 @@ def build_studio_app(recents: Optional[Recents] = None):
                 pass
 
     @app.post("/api/assistant/login")
-    async def assistant_login(body: Dict[str, Any]) -> JSONResponse:
+    async def assistant_login(body: Dict[str, Any], request: Request) -> JSONResponse:
         from . import chat as _chat_mod
 
+        me = request.state.user["id"]
         method = str(body.get("method") or "claudeai")
         if method not in ("claudeai", "console", "sso"):
             return JSONResponse({"error": "method is claudeai, console or sso"}, status_code=400)
-        for lid in list(logins):          # one at a time: a new one replaces a stale one
+        for lid in [k for k, v in logins.items() if v["owner"] == me]:   # yours replaces yours, no one else's
             await _end_login(lid)
         binary = _chat_mod.find_claude()
         if binary is None:
             return JSONResponse({"error": "No claude binary found on this machine"}, status_code=500)
-        home = _chat_mod.claude_home()
+        home = Path(_claude_of(me)["home"])
         home.mkdir(parents=True, exist_ok=True, mode=0o700)
-        env = _chat_mod._spawn_env(home=False)
+        os.chmod(home, 0o700)
+        env = _chat_mod.base_env()
         env["CLAUDE_CONFIG_DIR"] = str(home)
         env["BROWSER"] = "true"          # never a browser on the studio's own machine: the page opens the link
         flags = {"claudeai": ["--claudeai"], "console": ["--console"], "sso": ["--sso"]}[method]
@@ -3042,18 +3530,19 @@ def build_studio_app(recents: Optional[Recents] = None):
 
         lid = _uuid.uuid4().hex[:12]
         loop = asyncio.get_running_loop()
-        logins[lid] = {"proc": proc, "method": method, "url": url, "started": time.time(),
+        logins[lid] = {"proc": proc, "method": method, "url": url, "started": time.time(), "owner": me,
                        "timer": loop.call_later(600, lambda: asyncio.ensure_future(_end_login(lid)))}
-        _account_cache["value"] = None
+        _account_cache.pop(me, None)
         return JSONResponse({"login_id": lid, "url": url, "method": method})
 
     @app.post("/api/assistant/login/{lid}/code")
-    async def assistant_login_code(lid: str, body: Dict[str, Any]) -> JSONResponse:
+    async def assistant_login_code(lid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         from . import chat as _chat_mod
 
-        lg = logins.get(lid)
-        if lg is None or lg["proc"].returncode is not None:
-            return JSONResponse({"error": "That sign-in has ended — start again"}, status_code=404)
+        lg = _login_or_404(lid, request)
+        if isinstance(lg, JSONResponse):
+            return lg
+        me = request.state.user["id"]
         code = str(body.get("code") or "").strip()
         if not code or len(code) > 2000 or "\n" in code:
             return JSONResponse({"error": "Paste the code the sign-in page showed"}, status_code=400)
@@ -3067,8 +3556,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             pass
         rc = proc.returncode
         await _end_login(lid)
-        signed = await asyncio.to_thread(_chat_mod.home_signed_in, True)
-        account = await _account(fresh=True)
+        signed = await asyncio.to_thread(_chat_mod.home_signed_in, _claude_of(me)["home"], True)
+        account = await _account(me, fresh=True)
         if rc == 0 and signed:
             return JSONResponse({"ok": True, "account": account})
         # the CLI's own words ("Login failed: …"), never the code
@@ -3077,21 +3566,24 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"ok": False, "error": why, "account": account}, status_code=400)
 
     @app.delete("/api/assistant/login/{lid}")
-    async def assistant_login_cancel(lid: str) -> JSONResponse:
+    async def assistant_login_cancel(lid: str, request: Request) -> JSONResponse:
+        if lid not in logins or logins[lid]["owner"] != request.state.user["id"]:
+            return JSONResponse({"error": "That sign-in has ended — start again"}, status_code=404)
         await _end_login(lid)
-        _account_cache["value"] = None
+        _account_cache.pop(request.state.user["id"], None)
         return JSONResponse({"cancelled": lid})
 
     @app.post("/api/assistant/logout")
-    async def assistant_logout() -> JSONResponse:
-        """Sign the studio's own sign-in out. Never this machine's: the
-        assistant then goes back to it."""
+    async def assistant_logout(request: Request) -> JSONResponse:
+        """Sign your own Claude sign-in out. Never this machine's, nor
+        anyone else's: the machine login's owner goes back to it."""
         from . import chat as _chat_mod
 
+        me = request.state.user["id"]
+        home = Path(_claude_of(me)["home"])
         binary = _chat_mod.find_claude()
-        home = _chat_mod.claude_home()
         if binary is not None and home.is_dir():
-            env = _chat_mod._spawn_env(home=False)
+            env = _chat_mod.base_env()
             env["CLAUDE_CONFIG_DIR"] = str(home)
             proc = await asyncio.create_subprocess_exec(
                 binary, "auth", "logout", env=env, stdin=asyncio.subprocess.DEVNULL,
@@ -3100,22 +3592,23 @@ def build_studio_app(recents: Optional[Recents] = None):
                 await asyncio.wait_for(proc.wait(), timeout=30)
             except asyncio.TimeoutError:
                 proc.kill()
-        await asyncio.to_thread(_chat_mod.home_signed_in, True)
-        return JSONResponse({"account": await _account(fresh=True)})
+        await asyncio.to_thread(_chat_mod.home_signed_in, home, True)
+        return JSONResponse({"account": await _account(me, fresh=True)})
 
     @app.get("/api/assistant/account")
-    async def assistant_account(fresh: int = 0) -> JSONResponse:
-        return JSONResponse({"account": await _account(fresh=bool(fresh))})
+    async def assistant_account(request: Request, fresh: int = 0) -> JSONResponse:
+        return JSONResponse({"account": await _account(request.state.user["id"], fresh=bool(fresh))})
 
     @app.get("/api/assistant/usage")
-    async def assistant_usage() -> JSONResponse:
-        """The plan's limits as last reported (they are the account's, shared
-        by every conversation), with when; and the account."""
-        rate = chat_store.get_meta("last_rate", None)
-        return JSONResponse({"rate": rate, "as_of": (rate or {}).get("at"), "account": await _account()})
+    async def assistant_usage(request: Request) -> JSONResponse:
+        """Your plan's limits as last reported (they are your account's,
+        shared by your conversations), with when; and your account."""
+        me = request.state.user["id"]
+        rate = _rate_of(me)
+        return JSONResponse({"rate": rate, "as_of": (rate or {}).get("at"), "account": await _account(me)})
 
     @app.put("/api/assistant/defaults")
-    def assistant_set_defaults(body: Dict[str, Any]) -> JSONResponse:
+    def assistant_set_defaults(body: Dict[str, Any], request: Request) -> JSONResponse:
         """The studio's own default model and effort for new conversations
         (a project's ``[studio.assistant]`` still wins for its own)."""
         model = body.get("model") or None
@@ -3124,27 +3617,39 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": f"model is one of {', '.join(MODELS)}, or a full claude-… id"}, status_code=400)
         if effort is not None and effort not in EFFORTS:
             return JSONResponse({"error": f"effort is one of {', '.join(EFFORTS)}"}, status_code=400)
-        chat_store.set_meta("defaults", {k: v for k, v in (("model", model), ("effort", effort)) if v})
-        return JSONResponse({"studio_defaults": chat_store.get_meta("defaults", {})})
+        me = request.state.user["id"]
+        chat_store.set_meta(f"defaults:{me}", {k: v for k, v in (("model", model), ("effort", effort)) if v})
+        return JSONResponse({"studio_defaults": _my_defaults(me)})
 
-    def _session_or_404(sid: str) -> Any:
+    def _session_or_404(sid: str, request: Any) -> Any:
+        """The conversation, if it is the asker's. Someone else's answers
+        exactly like one that does not exist (admins included, D7)."""
         sess = chat_store.session(sid)
-        return sess if sess is not None else JSONResponse({"error": "no such conversation"}, status_code=404)
+        if sess is None or sess.get("owner") != request.state.user["id"]:
+            return JSONResponse({"error": "no such conversation"}, status_code=404)
+        return sess
+
+    def _turn_or_404(tid: str, request: Any) -> Any:
+        turn = relay.turns.get(tid)
+        if turn is None or turn.owner != request.state.user["id"]:
+            return JSONResponse({"error": "unknown turn"}, status_code=404)
+        return turn
 
     @app.get("/api/assistant/sessions/{sid}")
-    def assistant_session(sid: str) -> JSONResponse:
+    def assistant_session(sid: str, request: Request) -> JSONResponse:
         """A conversation as it stands: its items, and — when a turn is
         running — that turn's live items and the cursor to follow it from."""
-        sess = _session_or_404(sid)
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         items = chat_store.items(sid)
         running = relay.running_items(sid)
         if running is not None:
             items = [it for it in items if it.get("turn") != running["id"]] + running.pop("items")
-        mode = os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full").strip().lower() or "full"
+        mode = _limits(request).get("reach") or os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full").strip().lower() or "full"
         if sess["scope"] == "home":
-            where = str(Path.home())
+            where = str(recents.state_file.parent / "users" / request.state.user["id"] / "home") \
+                if _viewer(request) else str(Path.home())
         else:
             owner = _watcher(sess["scope"])
             where = str(owner.root) if owner is not None else ""
@@ -3154,8 +3659,8 @@ def build_studio_app(recents: Optional[Recents] = None):
                                        "model": os.environ.get("OPERONX_STUDIO_CHAT_MODEL") or None}})
 
     @app.patch("/api/assistant/sessions/{sid}")
-    def assistant_patch(sid: str, body: Dict[str, Any]) -> JSONResponse:
-        sess = _session_or_404(sid)
+    def assistant_patch(sid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         update: Dict[str, Any] = {}
@@ -3181,14 +3686,14 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"session": _session_out(chat_store.session(sid))})
 
     @app.post("/api/assistant/sessions/{sid}/attachments")
-    def assistant_attach(sid: str, body: Dict[str, Any]) -> JSONResponse:
+    def assistant_attach(sid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         """An image for a message: base64 in, a reference out. The browser has
         already resized it (a 1568 px long edge); the bytes are kept beside
         the store, named by their content, and deleted with the conversation."""
         import base64 as _b64
         import binascii
 
-        sess = _session_or_404(sid)
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         mime = str(body.get("mime") or "")
@@ -3208,9 +3713,11 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"attachment": ref})
 
     @app.get("/api/assistant/sessions/{sid}/attachments/{aid}")
-    def assistant_attachment(sid: str, aid: str) -> Any:
+    def assistant_attachment(sid: str, aid: str, request: Request) -> Any:
         from fastapi.responses import FileResponse
 
+        if isinstance(_session_or_404(sid, request), JSONResponse):
+            return JSONResponse({"error": "no such attachment"}, status_code=404)
         ref = chat_store.attachment(sid, aid)
         path = chat_store.attachment_path(sid, ref) if ref else None
         if ref is None or path is None or not path.is_file():
@@ -3220,8 +3727,8 @@ def build_studio_app(recents: Optional[Recents] = None):
                             headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
     @app.delete("/api/assistant/sessions/{sid}")
-    async def assistant_delete(sid: str) -> JSONResponse:
-        sess = _session_or_404(sid)
+    async def assistant_delete(sid: str, request: Request) -> JSONResponse:
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         if sess.get("running_turn"):
@@ -3235,7 +3742,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         text for an earlier message) name a turn: it and everything after
         it leave the transcript, and the conversation forks from just
         before it."""
-        sess = _session_or_404(sid)
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         message = str(body.get("message") or "").strip()
@@ -3269,6 +3776,10 @@ def build_studio_app(recents: Optional[Recents] = None):
         if isinstance(env, JSONResponse):
             return env
         cwd, context, mcp = env
+        busy = _busy()
+        if busy is not None:
+            _revoker(mcp)()
+            return busy
         if redo:
             running = sess.get("running_turn")
             if running and running in relay.turns and not relay.turns[running].done:
@@ -3277,14 +3788,17 @@ def build_studio_app(recents: Optional[Recents] = None):
         try:
             turn = relay.start(sid, message, cwd=cwd, context=context, mcp=mcp, fork_from=fork_from,
                                view=body.get("view") if isinstance(body.get("view"), dict) else None,
-                               attachments=refs, extra_mcp=_project_mcp(sess["scope"]))
+                               attachments=refs, extra_mcp={} if _viewer(request) else _project_mcp(sess["scope"]),
+                               owner=request.state.user["id"], on_end=[_revoker(mcp)],
+                               claude=_claude_of(request.state.user["id"]), **_limits(request))
         except RuntimeError as exc:
+            _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse({"turn": turn.id, "cursor": 0})
 
     @app.post("/api/assistant/sessions/{sid}/compact")
     async def assistant_compact(sid: str, request: Request) -> JSONResponse:
-        sess = _session_or_404(sid)
+        sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         if not sess.get("claude_session"):
@@ -3293,15 +3807,24 @@ def build_studio_app(recents: Optional[Recents] = None):
         if isinstance(env, JSONResponse):
             return env
         cwd, context, mcp = env
+        busy = _busy()
+        if busy is not None:
+            _revoker(mcp)()
+            return busy
         try:
-            turn = relay.start(sid, "/compact", cwd=cwd, context=context, mcp=mcp, kind="compact")
+            turn = relay.start(sid, "/compact", cwd=cwd, context=context, mcp=mcp, kind="compact",
+                               owner=request.state.user["id"], on_end=[_revoker(mcp)],
+                               claude=_claude_of(request.state.user["id"]), **_limits(request))
         except RuntimeError as exc:
+            _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse({"turn": turn.id, "cursor": 0})
 
     @app.post("/api/assistant/sessions/{sid}/items/{seq}")
-    def assistant_item(sid: str, seq: int, body: Dict[str, Any]) -> JSONResponse:
+    def assistant_item(sid: str, seq: int, body: Dict[str, Any], request: Request) -> JSONResponse:
         """Record what the user did with a changes card: kept, or undone."""
+        if isinstance(_session_or_404(sid, request), JSONResponse):
+            return JSONResponse({"error": "no such item"}, status_code=404)
         state = body.get("state")
         if state not in ("kept", "undone"):
             return JSONResponse({"error": "state is kept or undone"}, status_code=400)
@@ -3312,7 +3835,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"item": item})
 
     @app.post("/api/assistant/import")
-    def assistant_import(body: Dict[str, Any]) -> JSONResponse:
+    def assistant_import(body: Dict[str, Any], request: Request) -> JSONResponse:
         """A conversation the old panel kept in the browser, carried over
         once: its items become a session that continues the same Claude
         session."""
@@ -3323,7 +3846,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         from .assistant import title_from
 
         first = next((str(x.get("text") or "") for x in log if isinstance(x, dict) and x.get("w") == "me"), "")
-        sess = chat_store.create_session(scope, title=title_from(first) if first else "Earlier conversation",
+        sess = chat_store.create_session(scope, owner=request.state.user["id"],
+                                         title=title_from(first) if first else "Earlier conversation",
                                          title_source="first", claude_session=str(body.get("session") or "") or None)
         kinds = {"me": "user", "bot": "text", "tool": "tool", "changes": "changes", "err": "error", "meta": "note"}
         items = []
@@ -3407,29 +3931,35 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"suggestions": uniq[:6]})
 
     @app.get("/api/assistant/turns/{tid}")
-    async def assistant_poll(tid: str, cursor: int = 0) -> JSONResponse:
+    async def assistant_poll(tid: str, request: Request, cursor: int = 0) -> JSONResponse:
+        if isinstance(_turn_or_404(tid, request), JSONResponse):
+            return JSONResponse({"error": "unknown turn"}, status_code=404)
         got = await relay.poll(tid, max(0, cursor))
         if got is None:
             return JSONResponse({"error": "unknown turn"}, status_code=404)
         return JSONResponse(got)
 
     @app.get("/api/assistant/turns/{tid}/stream")
-    async def assistant_stream(tid: str, cursor: int = 0, window: float = 20.0) -> Any:
+    async def assistant_stream(tid: str, request: Request, cursor: int = 0, window: float = 20.0) -> Any:
         """The turn's events from *cursor* as NDJSON, as they happen, for up
         to ``window`` seconds; the page reconnects from its cursor."""
-        if tid not in relay.turns:
+        if isinstance(_turn_or_404(tid, request), JSONResponse):
             return JSONResponse({"error": "unknown turn"}, status_code=404)
         return StreamingResponse(relay.stream(tid, max(0, cursor), max(1.0, min(window, 25.0))),
                                  media_type="application/x-ndjson",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.post("/api/assistant/turns/{tid}/stop")
-    async def assistant_stop(tid: str) -> JSONResponse:          # on the loop: stop() schedules a kill
-        if not relay.stop(tid):
+    async def assistant_stop(tid: str, request: Request) -> JSONResponse:   # on the loop: stop() schedules a kill
+        if isinstance(_turn_or_404(tid, request), JSONResponse) or not relay.stop(tid):
             return JSONResponse({"error": "unknown turn"}, status_code=404)
         return JSONResponse({"ok": True})
 
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+    # closed by default: a route the table has no rule for answers 403
+    for method, path in unclassified(app.routes):
+        _LOG.warning("operonx studio: %s %s has no access rule (operonx_studio/access.py) — it answers 403",
+                     method, path)
     return app
 
 

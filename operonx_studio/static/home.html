@@ -18,7 +18,7 @@
   </a>
   <span class="spacer"></span>
   <span id="themeslot"></span>
-  <a class="btn ghost small" href="/logout"><i data-icon="logout"></i><span>Sign out</span></a>
+  <span id="accountslot"></span>
 </header>
 
 <main class="home">
@@ -31,8 +31,8 @@
       <div class="homehead">
         <h2 id="projects-title">Projects</h2>
         <div class="actions">
-          <button id="btn-new" type="button"><i data-icon="plus"></i><span>New project</span></button>
-          <button id="btn-open" type="button"><i data-icon="folder"></i><span>Open project</span></button>
+          <button id="btn-new" class="needs-edit" type="button"><i data-icon="plus"></i><span>New project</span></button>
+          <button id="btn-open" class="needs-edit" type="button"><i data-icon="folder"></i><span>Open project</span></button>
         </div>
       </div>
       <label class="searchfield" id="filterwrap" hidden>
@@ -52,6 +52,7 @@
 
 <script src="/static/icons.js"></script>
 <script src="/static/theme.js"></script>
+<script src="/static/account.js"></script>
 <script src="/static/home.js"></script>
 <script src="/static/values.js"></script>
 <script src="/static/paste.js"></script>

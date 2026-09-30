@@ -5,11 +5,13 @@ usage: render_cost.py <base> <pid> [<pid> ...]
 """
 import asyncio, sys, json
 from playwright.async_api import async_playwright
+
+import studio_login
 BASE = sys.argv[1]
 async def main():
     async with async_playwright() as p:
         b = await p.chromium.launch(); pg = await (await b.new_context(viewport={"width":1440,"height":900})).new_page()
-        await pg.goto(f"{BASE}/login"); await pg.fill("#login-user","root"); await pg.fill("#login-pass","123"); await pg.keyboard.press("Enter"); await pg.wait_for_url(f"{BASE}/")
+        await studio_login.login(pg, BASE)
         for pid in sys.argv[2:]:
             await pg.goto(f"{BASE}/p/{pid}"); await pg.wait_for_selector(".node", timeout=90000); await pg.wait_for_timeout(500)
             r = await pg.evaluate("""() => {

@@ -84,7 +84,10 @@
     let data;
     try { data = text ? JSON.parse(text) : {}; }
     catch { throw new Error(`The studio is unreachable (${res.status}) — the tunnel may have dropped`); }
-    if (!res.ok) { const e = new Error(data.error || res.statusText); e.status = res.status; throw e; }
+    if (!res.ok) {
+      if (W.Account) W.Account.refused(res.status, data.error);
+      const e = new Error(data.error || res.statusText); e.status = res.status; throw e;
+    }
     return data;
   }
 
@@ -758,6 +761,12 @@
     const top = el("div", "ax-card-head");
     top.append(icon("file"), el("b", null, `Changed ${files.length} file${files.length === 1 ? "" : "s"}`),
       el("span", "ax-add", `+${plus}`), el("span", "ax-del", `−${minus}`));
+    // another person's assistant worked in this project at the same time:
+    // the diff can't tell whose edit is whose, so the card says so (§2.3)
+    const overlap = (item.overlap || []).length
+      ? el("p", "ax-overlap", `${item.overlap.join(", ")}'s assistant was working in this project at the same time — `
+                              + "some of these changes may be theirs. Check the diff before you undo.")
+      : null;
     const flist = el("div", "ax-files");
     for (const f of files) {
       const r = el("div", "ax-file");
@@ -784,7 +793,7 @@
     const acts = el("div", "ax-card-acts");
     const note = el("span", "ax-card-note");
     const keep = tbtn("Keep", "ax-btn");
-    const undo = tbtn("Undo", "ax-btn ax-btn-quiet", "resume");
+    const undo = tbtn("Undo", "ax-btn ax-btn-quiet needs-edit", "resume");
     undo.title = "Put these files back as they were before this turn";
     const paint = () => {
       card.dataset.state = item.state || "pending";
@@ -813,7 +822,7 @@
       }
     };
     acts.append(note, el("span", "ax-spacer"), undo, keep);
-    card.append(top, flist, fold, acts);
+    card.append(...[top, overlap, flist, fold, acts].filter(Boolean));
     paint();
     A.nodes.set(item.seq, card);
     return card;
@@ -1419,10 +1428,11 @@
   }
   document.addEventListener("oxrate", (ev) => { if (ev.detail) takeRate(ev.detail); });
 
-  /* ── the assistant's own Claude sign-in (plan §3) ──────────────────────
-   * The studio signs in to Claude in its own place (~/.operonx/claude), so
-   * this machine's Claude Code is never touched. Until it has, the
-   * machine's login is used — and the account says so. Signing in is the
+  /* ── your own Claude sign-in (plan §3; per person since TEAM_PLAN P4) ───
+   * Each person signs in to Claude in their own place on the studio, so
+   * this machine's Claude Code — and everyone else's sign-in — is never
+   * touched. Only the machine login's owner falls back to it until they
+   * sign in; anyone else is asked to. Signing in is the
    * Claude Code extension's flow: the sign-in page opens in a new tab, and
    * the code it shows afterwards is pasted back here. */
   const who = (a) => [a.email || a.org || "Claude", PLAN_NAME[a.plan] || (a.method === "console" ? "API account" : a.plan || "")]
@@ -1453,7 +1463,8 @@
       box.append(acts);
       return box;
     } else {
-      line.textContent = "Not signed in";
+      line.textContent = a.source === "none" ? "Not signed in — the assistant runs under your own Claude account"
+        : "Not signed in";
       act("Sign in with Claude", "primary", () => openSignin("claudeai"));
     }
     box.append(line, acts);
@@ -1462,7 +1473,7 @@
 
   async function signOut() {
     const a = A.account || {};
-    if (!confirm(`Sign the assistant out of ${a.email || "its Claude account"}?\n\nIt goes back to this machine's login, if there is one. This machine's Claude Code isn't touched.`)) return;
+    if (!confirm(`Sign your assistant out of ${a.email || "its Claude account"}?\n\nOnly your own sign-in on this studio; this machine's Claude Code isn't touched.`)) return;
     try {
       A.account = (await call("/api/assistant/logout", {})).account;
       toast(A.account.logged_in ? `Signed out — using this machine's login (${A.account.email || "Claude"})` : "Signed out");
@@ -1481,10 +1492,12 @@
 
   /* The card, step by step: sign in on Claude's page; paste the code;
    * signed in. `why` says what brought it up (a failed turn, say). */
-  function openSignin(method, why) {
-    // the card lives in the assistant's box: bring the assistant into view
-    if (A.mode === "dock" && W.oxSide) W.oxSide.show("assistant");
-    else if (A.mode === "dock" && PHONE.matches) placement.openSheet();
+  function openSignin(method, why, quiet) {
+    // the card lives in the assistant's box: bring the assistant into view —
+    // unless the page is only loading (`quiet`): then the card waits in the
+    // box, and a phone's screen is not covered by it on every page
+    if (!quiet && A.mode === "dock" && W.oxSide) W.oxSide.show("assistant");
+    else if (!quiet && A.mode === "dock" && PHONE.matches) placement.openSheet();
     signin.textContent = "";
     signin.hidden = false;
     inputWrap.hidden = true;
@@ -1498,7 +1511,7 @@
     const machine = A.account && A.account.logged_in && A.account.source !== "studio";
     const step1 = (err) => {
       body.textContent = "";
-      body.append(el("p", null, why || "Sign in with your Claude account. It is the studio's own sign-in: this machine's Claude Code stays as it is."));
+      body.append(el("p", null, why || "Sign in with your own Claude account. It is yours alone on this studio: no one else's assistant uses it, and this machine's Claude Code stays as it is."));
       if (err) body.append(el("p", "ax-signin-err", err));
       const go = tbtn("Sign in with Claude", "ax-btn primary");
       go.onclick = () => start("claudeai");
@@ -2783,7 +2796,7 @@
       if (got.rate) takeRate(got.rate);
       A.account = got.account;
       // no sign-in anywhere (neither the studio's nor this machine's): the card first
-      if (A.account && A.account.logged_in === false && A.mode !== "hero") openSignin("claudeai");
+      if (A.account && A.account.logged_in === false && A.mode !== "hero") openSignin("claudeai", undefined, true);
     }).catch(() => {});
     root.classList.toggle("details", A.details);
     paintHead();

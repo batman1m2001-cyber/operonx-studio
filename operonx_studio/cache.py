@@ -36,8 +36,11 @@ class DiskCache:
     """One JSON file per key, under a directory the env may override."""
 
     def __init__(self, directory: Optional[Path] = None):
-        self._dir = directory or Path(
-            os.environ.get("OPERONX_IR_CACHE", str(Path.home() / ".operonx" / "ircache")))
+        if directory is None:
+            from .registry import state_dir
+
+            directory = Path(os.environ.get("OPERONX_IR_CACHE") or state_dir() / "ircache")
+        self._dir = directory
 
     def _file(self, key: str) -> Path:
         digest = hashlib.sha1(key.encode()).hexdigest()[:20]

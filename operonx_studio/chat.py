@@ -77,7 +77,16 @@ STUDIO_READ_TOOLS = ["mcp__studio__list_runs", "mcp__studio__open_run", "mcp__st
                      "mcp__studio__monitor", "mcp__studio__compare_runs", "mcp__studio__select_op"]
 
 
-def _mode_args() -> List[str]:
+def viewer_deny(state: Path) -> List[str]:
+    """What a viewer's assistant may never read (docs/TEAM_PLAN.md §2.5):
+    the studio's own state (accounts, conversations, everyone's Claude
+    sign-in), this machine's Claude Code, and any .env file. Claude Code's
+    rules: ``//`` starts an absolute path, ``~/`` the home directory."""
+    places = [f"/{Path(state).resolve()}/**", "~/.claude/**", "**/.env*"]
+    return [f"{tool}({where})" for tool in ("Read", "Grep", "Glob") for where in places]
+
+
+def _mode_args(mode: Optional[str] = None) -> List[str]:
     """Permission flags for the chosen reach.
 
     Headless sessions cannot prompt, so anything not pre-approved is
@@ -85,7 +94,7 @@ def _mode_args() -> List[str]:
     tools follow the same reach: reading runs is always allowed, starting
     a job or writing a price only where edits are.
     """
-    mode = os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full").strip().lower()
+    mode = (mode or os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full")).strip().lower()
     read_tools = ["Read", "Grep", "Glob", "LS", "Task",
                   "WebFetch", "WebSearch"]
     if mode == "read":
@@ -178,17 +187,39 @@ def undo(repo: Path, sha: str, files: List[str], new_files: List[str]) -> List[s
     return done
 
 
-# ── the assistant's own sign-in (docs/ASSISTANT_NEXT_PLAN.md §3) ─────────
-# The studio keeps its own Claude sign-in in its own config directory
+# ── each person's own Claude sign-in (docs/TEAM_PLAN.md §2.4) ────────────
+# A person's Claude sign-in lives in their own config directory
 # (CLAUDE_CONFIG_DIR), so signing in or out there never touches this
-# machine's Claude Code. Until one exists, the machine's login is used.
+# machine's Claude Code, nor anyone else's sign-in. The machine's own login
+# is its owner's alone (decision D8): only a person marked `machine_login`
+# falls back to it while their own directory is not signed in. Everyone
+# else is asked to sign in, and no Claude process starts for them.
 
 def claude_home() -> Path:
+    """The single-login studio's sign-in directory: the first admin keeps
+    it (decision D3), and an auth-off studio's everyone uses it."""
+    from .registry import state_dir
+
     raw = os.environ.get("OPERONX_STUDIO_CLAUDE_HOME")
-    return Path(raw).expanduser() if raw else Path.home() / ".operonx" / "claude"
+    return Path(raw).expanduser() if raw else state_dir() / "claude"
 
 
-_home = {"checked": False, "signed_in": False, "email": None}
+#: what `claude auth status` said per directory: {path: {signed_in, email}},
+#: read once and again on every sign-in and sign-out there
+_homes: Dict[str, Dict[str, Any]] = {}
+
+
+def base_env(*, keep_anthropic: bool = False) -> Dict[str, str]:
+    """This process's environment for a Claude child, minus what would
+    confuse it or leak another sign-in into it."""
+    # The studio itself is often launched from inside a Claude Code
+    # session; the inherited CLAUDE_* vars would make the child believe
+    # it is a nested/SDK session and misbehave. HOME must survive — the
+    # OAuth credentials live under it. ANTHROPIC_* is the host's own key:
+    # only the machine login's owner runs with it.
+    return {k: v for k, v in os.environ.items()
+            if not k.startswith("CLAUDE") and k not in ("CLAUDECODE", "AI_AGENT")
+            and (keep_anthropic or not k.startswith("ANTHROPIC"))}
 
 
 def _status(home: Optional[Path]) -> Dict[str, Any]:
@@ -196,7 +227,7 @@ def _status(home: Optional[Path]) -> Dict[str, Any]:
     binary = find_claude()
     if binary is None:
         return {}
-    env = _spawn_env(home=False)
+    env = base_env(keep_anthropic=home is None)
     if home is not None:
         env["CLAUDE_CONFIG_DIR"] = str(home)
     try:
@@ -207,33 +238,41 @@ def _status(home: Optional[Path]) -> Dict[str, Any]:
         return {}
 
 
-def home_signed_in(refresh: bool = False) -> bool:
-    """Whether the studio's own sign-in exists (then every Claude process
-    runs under it). Checked once, then on every sign-in and sign-out."""
-    if refresh or not _home["checked"]:
-        home = claude_home()
+def home_signed_in(home: Optional[Path] = None, refresh: bool = False) -> bool:
+    """Whether the sign-in directory *home* (default: the single-login
+    one) is signed in. Checked once, then on every sign-in and sign-out."""
+    home = Path(home) if home is not None else claude_home()
+    st = _homes.get(str(home))
+    if refresh or st is None:
         got = _status(home) if home.is_dir() else {}
-        _home.update(checked=True, signed_in=bool(got.get("loggedIn")), email=got.get("email"))
-    return bool(_home["signed_in"])
+        st = _homes[str(home)] = {"signed_in": bool(got.get("loggedIn")), "email": got.get("email")}
+    return bool(st["signed_in"])
 
 
-def account_key() -> str:
-    """Which sign-in a Claude session belongs to: a session can't be resumed
-    under another one."""
-    return f"studio:{_home['email'] or ''}" if home_signed_in() else "machine"
+def home_email(home: Path) -> Optional[str]:
+    home_signed_in(home)
+    return _homes[str(Path(home))].get("email")
 
 
-def _spawn_env(home: Optional[bool] = None) -> Dict[str, str]:
-    # The studio itself is often launched from inside a Claude Code
-    # session; the inherited CLAUDE_* vars would make the child believe
-    # it is a nested/SDK session and misbehave. HOME must survive — the
-    # OAuth credentials live under it.
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith("CLAUDE") and k not in ("CLAUDECODE", "AI_AGENT")}
-    # the studio's own sign-in, once there is one (home=False: the machine's)
-    if home_signed_in() if home is None else home:
-        env["CLAUDE_CONFIG_DIR"] = str(claude_home())
-    return env
+def account_key(home: Path, machine: bool = False) -> Optional[str]:
+    """Which sign-in a person's Claude sessions belong to — a session can't
+    be resumed under another. None: they have none (not signed in, and
+    not the machine login's owner)."""
+    if home_signed_in(home):
+        return f"studio:{home_email(home) or ''}"
+    return "machine" if machine else None
+
+
+def _spawn_env(home: Optional[Path] = None, machine: bool = True) -> Optional[Dict[str, str]]:
+    """The environment a person's Claude processes run in: their own
+    directory when it is signed in; the machine's login for its owner
+    (*machine*) when it is not; None — start nothing — for anyone else."""
+    home = Path(home) if home is not None else claude_home()
+    if home_signed_in(home):
+        env = base_env()
+        env["CLAUDE_CONFIG_DIR"] = str(home)
+        return env
+    return base_env(keep_anthropic=True) if machine else None
 
 
 def _tool_hint(block: Dict[str, Any]) -> str:

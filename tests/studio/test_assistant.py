@@ -47,7 +47,8 @@ if argv[:1] == ["auth"]:
     log = os.environ.get("OX_FAKE_LOG")
     if log:
         with open(log, "a") as f:
-            f.write(json.dumps({"auth": argv[1], "config_dir": home}) + "\n")
+            f.write(json.dumps({"auth": argv[1], "config_dir": home,
+                                "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY"))}) + "\n")
 if argv[:2] == ["auth", "status"]:
     # the machine's login is you@example.com; a config dir is signed in once
     # its login finished
@@ -87,10 +88,18 @@ if "--input-format" in argv and argv[argv.index("--input-format") + 1] == "strea
 else:
     msg = argv[argv.index("-p") + 1] if "-p" in argv else ""
 log = os.environ.get("OX_FAKE_LOG")
+# the MCP config is a file (it carries the turn's agent token): what it
+# held, and who could read it, while the turn ran
+mcp, mcp_mode = None, None
+if "--mcp-config" in argv:
+    cfg = argv[argv.index("--mcp-config") + 1]
+    mcp_mode = oct(os.stat(cfg).st_mode & 0o777)
+    mcp = json.load(open(cfg))
 if log:
     with open(log, "a") as f:
         f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "msg": msg, "images": images,
-                            "config_dir": home}) + "\n")
+                            "config_dir": home, "mcp": mcp, "mcp_mode": mcp_mode,
+                            "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY"))}) + "\n")
 
 if "--output-format" in argv and argv[argv.index("--output-format") + 1] == "json":
     print(json.dumps({"type": "result", "result": "Fake title here"}))
@@ -190,7 +199,7 @@ def fake(tmp_path: Path, monkeypatch):
     # the studio's own sign-in lives here, never in the real ~/.operonx/claude
     monkeypatch.setenv("OPERONX_STUDIO_CLAUDE_HOME", str(tmp_path / "claude-home"))
     from operonx_studio import chat as _chat_mod
-    _chat_mod._home.update(checked=False, signed_in=False, email=None)
+    _chat_mod._homes.clear()
     monkeypatch.setenv("OPERONX_STUDIO_RETENTION", "off")
     # the model-made title runs after a turn, in the background: on only
     # where a test waits for it, so no test ends with one in flight
@@ -298,7 +307,7 @@ def test_a_turn_becomes_items_that_persist_and_restore(client, project, fake):
     assert call["cwd"] == str(project) and "--resume" not in call["argv"]
     prompt = call["argv"][call["argv"].index("--append-system-prompt") + 1]
     assert "Project briefing: chatty-demo" in prompt and "selected op: `shout`" in prompt
-    mcp = json.loads(call["argv"][call["argv"].index("--mcp-config") + 1])
+    mcp = call["mcp"]
     assert mcp["mcpServers"]["studio"]["env"]["OPERONX_STUDIO_PID"] == pid
     assert "--strict-mcp-config" in call["argv"]       # the studio's tools, not the host's connectors
 
@@ -514,7 +523,7 @@ def test_old_browser_transcripts_import(client, project, fake):
 
 def test_a_restart_marks_the_turns_it_killed(tmp_path):
     store = ChatStore(tmp_path / "a.sqlite")
-    sess = store.create_session("home")
+    sess = store.create_session("home", owner="u1")
     store.add_turn("t1", sess["id"], message="long job", kind="message", claude_before=None)
     store.update_session(sess["id"], running_turn="t1")
     Relay(store)                                   # what a new studio process does on start
@@ -551,8 +560,7 @@ def test_home_turns_brief_the_roster_and_carry_home_tools(client, project, fake)
     call = fake()[0]
     prompt = call["argv"][call["argv"].index("--append-system-prompt") + 1]
     assert "No project is open" in prompt and "chatty-demo" in prompt and "rag-qa" in prompt
-    mcp = json.loads(call["argv"][call["argv"].index("--mcp-config") + 1])
-    assert mcp["mcpServers"]["studio"]["env"]["OPERONX_STUDIO_PID"] == "home"
+    assert call["mcp"]["mcpServers"]["studio"]["env"]["OPERONX_STUDIO_PID"] == "home"
 
 
 def test_the_pulse_hears_a_turn_end(client, project, fake):
@@ -766,7 +774,7 @@ def test_a_projects_own_tool_servers_join_the_studios(client, project, fake):
     sid = _session(client, pid)["id"]
     _say(client, sid, "hello")
     argv = fake()[-1]["argv"]
-    servers = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]
+    servers = fake()[-1]["mcp"]["mcpServers"]
     assert set(servers) == {"notes", "studio"} and servers["notes"]["command"] == "notes-server"
     assert servers["studio"]["args"] == ["-m", "operonx_studio.mcp"]
     assert "--strict-mcp-config" in argv                   # the host's personal connectors stay out
@@ -865,3 +873,350 @@ def test_a_turn_that_is_not_signed_in_asks_for_it(client, project, fake):
     _, events = _say(client, sid, "AUTHFAIL please")
     err = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "error")
     assert err["auth"] is True and "Please run /login" in err["text"]
+
+
+# ── P3: a conversation belongs to the person who started it ──────────────
+# (docs/TEAM_PLAN.md §2.3). A and B share one client and switch cookies: a
+# turn is a task on that client's loop.
+
+def _two(team, project):
+    """A (the admin, root) with a conversation, a finished turn and an image
+    in the project; B an editor. Returns the ids B must not reach."""
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    pid = _pid(c, project)
+    sid = _session(c, pid)["id"]
+    png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 64).decode()
+    aid = c.post(f"/api/assistant/sessions/{sid}/attachments",
+                 json={"mime": "image/png", "data": png, "name": "a.png"}).json()["attachment"]["id"]
+    tid, _ = _say(c, sid, "hello from A")
+    return {"b": b, "pid": pid, "sid": sid, "aid": aid, "tid": tid}
+
+
+def test_someone_elses_conversation_is_not_there(team, project, fake):
+    from operonx_studio.access import ACCESS
+
+    c = team.client
+    a = _two(team, project)
+    # every self route that names a conversation, a turn, an image or an item
+    routes = [(m, p) for (m, p), level in ACCESS.items() if level == "self"
+              and any(k in p for k in ("{sid}", "{tid}", "{aid}", "{seq}"))]
+    assert len(routes) == 11
+    team.use(a["b"]["token"])
+    assert [s["id"] for s in c.get("/api/assistant/sessions").json()["sessions"]] == []
+    assert [s["id"] for s in c.get("/api/assistant/sessions", params={"scope": a["pid"]}).json()["sessions"]] == []
+    for method, path in routes:
+        url = (path.replace("{sid}", a["sid"]).replace("{tid}", a["tid"]).replace("{aid}", a["aid"])
+               .replace("{seq}", "1"))
+        body = {"message": "mine now", "state": "kept", "title": "stolen", "mime": "image/png",
+                "data": base64.b64encode(b"x").decode()} if method in ("POST", "PATCH", "PUT") else None
+        res = c.request(method, url, json=body)
+        assert res.status_code == 404, (method, path, res.status_code, res.text[:200])
+    # nothing of A's changed
+    team.use(team.admin_token)
+    got = c.get(f"/api/assistant/sessions/{a['sid']}").json()
+    assert got["session"]["title"] != "stolen" and [i["text"] for i in got["items"] if i["kind"] == "user"] == ["hello from A"]
+    assert all(i.get("state") != "kept" for i in got["items"])
+    # B's own conversations work as ever, and A does not see them either
+    team.use(a["b"]["token"])
+    mine = _session(c, a["pid"])["id"]
+    _say(c, mine, "hello from B")
+    assert [s["id"] for s in c.get("/api/assistant/sessions").json()["sessions"]] == [mine]
+    team.use(team.admin_token)
+    assert mine not in [s["id"] for s in c.get("/api/assistant/sessions").json()["sessions"]]
+    assert c.get(f"/api/assistant/sessions/{mine}").status_code == 404      # admins don't read them either
+
+
+def test_the_home_page_and_the_pulse_show_only_your_own(team, project, fake):
+    import json as _json
+
+    c = team.client
+    a = _two(team, project)
+    boot = lambda html: _json.loads(html.split('<script id="home-boot" type="application/json">')[1].split("</script>")[0])
+    assert [s["id"] for s in boot(c.get("/").text)["sessions"]] == [a["sid"]]
+    ended = c.get(f"/api/p/{a['pid']}/pulse", params={"chat": 0, "hold": 0}).json()["chat_ended"]
+    assert [e["session"] for e in ended] == [a["sid"]]
+    assert ended[0]["owner"] == c.get("/api/me").json()["user"]["id"]
+    team.use(a["b"]["token"])
+    assert boot(c.get("/").text)["sessions"] == []
+    assert c.get(f"/api/p/{a['pid']}/pulse", params={"chat": 0, "hold": 0}).json()["chat_ended"] == []
+
+
+def test_screen_actions_reach_only_their_owners_screen(team, project, fake):
+    c = team.client
+    a = _two(team, project)
+    root_id = c.get("/api/me").json()["user"]["id"]
+    agent = c.app.state.agents.issue(root_id, 60)          # what A's turn's tools sign in with
+    team.use(agent)
+    assert c.post(f"/api/p/{a['pid']}/ui/action", json={"kind": "open_run", "args": {"run": "r1"}}).status_code == 200
+    team.use(team.admin_token)
+    mine = c.get(f"/api/p/{a['pid']}/pulse", params={"ui": 0, "hold": 0}).json()
+    assert [x["args"]["run"] for x in mine["actions"]] == ["r1"]
+    assert [x["args"]["run"] for x in c.get(f"/api/p/{a['pid']}/ui/actions").json()["actions"]] == ["r1"]
+    team.use(a["b"]["token"])
+    theirs = c.get(f"/api/p/{a['pid']}/pulse", params={"ui": 0, "hold": 0}).json()
+    assert theirs["actions"] == [] and theirs["ui_last"] == 0
+    assert c.get(f"/api/p/{a['pid']}/ui/actions").json()["actions"] == []
+
+
+def test_defaults_are_per_person_and_the_admin_keeps_the_studios(team, project, fake):
+    c = team.client
+    c.app.state.chat_store.set_meta("defaults", {"model": "sonnet"})     # what the single-login studio had
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    assert c.get("/api/assistant/models").json()["studio_defaults"] == {"model": "sonnet"}
+    assert c.put("/api/assistant/defaults", json={"model": "opus", "effort": "high"}).status_code == 200
+    team.use(b["token"])
+    got = c.get("/api/assistant/models").json()
+    assert got["studio_defaults"] == {} and got["new"] == {}
+    c.put("/api/assistant/defaults", json={"model": "haiku"})
+    assert _session(c, "home")["model"] == "haiku"
+    team.use(team.admin_token)
+    assert c.get("/api/assistant/models").json()["studio_defaults"] == {"model": "opus", "effort": "high"}
+    assert _session(c, "home")["model"] == "opus"
+
+
+def test_an_old_store_is_adopted_by_the_first_admin(tmp_path, auth_on, fake):
+    import sqlite3
+
+    state = tmp_path / "old"
+    state.mkdir()
+    db = sqlite3.connect(state / "assistant.sqlite")             # a store made before owners
+    db.executescript("CREATE TABLE sessions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',"
+                     " title_source TEXT NOT NULL DEFAULT '', created REAL NOT NULL, updated REAL NOT NULL,"
+                     " archived INTEGER NOT NULL DEFAULT 0, model TEXT, claude_session TEXT,"
+                     " usage TEXT NOT NULL DEFAULT '{}', running_turn TEXT, preview TEXT NOT NULL DEFAULT '');"
+                     "INSERT INTO sessions (id, scope, title, created, updated) VALUES ('old1', 'home', 'Before', 1, 1);")
+    db.commit()
+    db.close()
+    with TestClient(build_studio_app(Recents(state_file=state / "studio.json"))) as c:
+        c.post("/api/login", json={"username": "root", "password": "admin-pass-1"})
+        assert [s["id"] for s in c.get("/api/assistant/sessions").json()["sessions"]] == ["old1"]
+    # an auth-off studio's conversations ("local") go to the admin too, once there is one
+    store = ChatStore(state / "assistant.sqlite")
+    store.create_session("home", owner="local", title="From auth off")
+    with TestClient(build_studio_app(Recents(state_file=state / "studio.json"))) as c:
+        c.post("/api/login", json={"username": "root", "password": "admin-pass-1"})
+        assert {s["title"] for s in c.get("/api/assistant/sessions").json()["sessions"]} == {"Before", "From auth off"}
+
+
+def test_the_studio_runs_at_most_so_many_turns_at_once(team, project, fake, monkeypatch):
+    monkeypatch.setenv("OPERONX_STUDIO_CHAT_MAX_TURNS", "1")
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    slow = _session(c, "home")["id"]
+    running = c.post(f"/api/assistant/sessions/{slow}/turns", json={"message": "SLOW"}).json()["turn"]
+    team.use(b["token"])
+    sid = _session(c, "home")["id"]
+    busy = c.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "hi"})
+    assert busy.status_code == 429 and "busy" in busy.json()["error"]
+    team.use(team.admin_token)
+    c.post(f"/api/assistant/turns/{running}/stop")
+    _drain(c, running)
+    team.use(b["token"])
+    assert c.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "hi"}).status_code == 200
+
+
+def test_two_assistants_in_one_project_flag_their_changes(team, project, fake):
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A"], cwd=project, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"], cwd=project, check=True)
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    pid = _pid(c, project)
+    team.use(b["token"])
+    _sign_in(c)                                                     # B runs under B's own sign-in (P4)
+    theirs = _session(c, pid)["id"]
+    slow = c.post(f"/api/assistant/sessions/{theirs}/turns", json={"message": "SLOW"}).json()["turn"]
+    team.use(team.admin_token)
+    sid = _session(c, pid)["id"]
+    _, events = _say(c, sid, "EDIT please")
+    card = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "changes")
+    assert card["overlap"] == ["Bee"]                               # whose turn ran beside it
+    team.use(b["token"])
+    c.post(f"/api/assistant/turns/{slow}/stop")
+    _drain(c, slow)
+    # alone, no note
+    team.use(team.admin_token)
+    (project / "added.py").unlink()
+    _, events = _say(c, sid, "EDIT again")
+    card = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "changes")
+    assert "overlap" not in card
+
+
+def test_deleting_someone_deletes_their_conversations(team, project, fake):
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(b["token"])
+    sid = _session(c, "home")["id"]
+    _say(c, sid, "hello")
+    folder = c.app.state.chat_store.files_dir(sid)
+    team.use(team.admin_token)
+    assert c.delete(f"/api/admin/users/{b['id']}").status_code == 200
+    assert c.app.state.chat_store.session(sid) is None and not folder.exists()
+
+
+# ── P4: each person's own Claude sign-in (docs/TEAM_PLAN.md §2.4) ─────────
+
+def _home_of(team, uid):
+    return team.state / "users" / uid / "claude"
+
+
+def _sign_in(c, email_check=True):
+    """The whole sign-in, through the studio, with the fake's good code."""
+    got = c.post("/api/assistant/login", json={"method": "claudeai"}).json()
+    res = c.post(f"/api/assistant/login/{got['login_id']}/code", json={"code": "good-code#fake"}).json()
+    assert res["ok"], res
+    return res["account"]
+
+
+def test_someone_not_signed_in_is_asked_to_and_no_claude_starts(team, project, fake, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-key")
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(b["token"])
+    acc = c.get("/api/assistant/account").json()["account"]
+    assert acc["logged_in"] is False and acc["source"] == "none"          # never the machine's login
+    sid = _session(c, "home")["id"]
+    _, events = _say(c, sid, "hello")
+    err = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "error")
+    assert err["auth"] is True and "your own Claude account" in err["text"]
+    assert _calls(fake) == []                                               # no process started
+
+
+def test_each_person_runs_in_their_own_directory(team, project, fake, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-key")
+    monkeypatch.setenv("OPERONX_STUDIO_CHAT_TITLES", "on")
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(b["token"])
+    acc = _sign_in(c)
+    home = _home_of(team, b["id"])
+    assert acc["source"] == "studio" and acc["email"] == "studio@example.com"
+    assert (home / ".fake-credentials").is_file() and oct(home.stat().st_mode & 0o777) == "0o700"
+    sid = _session(c, "home")["id"]
+    _say(c, sid, "hello from B")
+    turn = _calls(fake)[-1]
+    assert turn["config_dir"] == str(home) and turn["anthropic"] is False   # the host's key never leaks in
+    for _ in range(100):                                                   # the title, in the background
+        titles = [x for x in _calls(fake) if "--output-format" in x["argv"] and "json" in x["argv"]]
+        if titles:
+            break
+        time.sleep(0.05)
+    assert titles and titles[-1]["config_dir"] == str(home) and titles[-1]["anthropic"] is False
+    # a conversation carried over from elsewhere is re-seeded with a summary: under B's sign-in too
+    got = c.post("/api/assistant/import", json={"scope": "home", "session": "old-claude-9",
+                                                "log": [{"w": "me", "text": "earlier"}, {"w": "bot", "text": "yes"}]})
+    _say(c, got.json()["session"]["id"], "and now?")
+    summary = [x for x in _calls(fake) if "<conversation>" in " ".join(x["argv"]) and "Summary:" in " ".join(x["argv"])]
+    assert summary and all(x["config_dir"] == str(home) for x in summary)
+    # the Team page knows which Claude account they use, never a token
+    team.use(team.admin_token)
+    row = next(u for u in c.get("/api/admin/users").json()["users"] if u["username"] == "bee")
+    assert row["claude_email"] == "studio@example.com"
+
+
+def test_only_the_owner_of_the_machine_login_falls_back_to_it(team, project, fake, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-key")
+    c = team.client
+    team.use(team.admin_token)                                              # root: machine_login (D8)
+    acc = c.get("/api/assistant/account").json()["account"]
+    assert acc["source"] == "machine" and acc["email"] == "you@example.com"
+    sid = _session(c, "home")["id"]
+    _say(c, sid, "hello from root")
+    assert _calls(fake)[-1]["config_dir"] is None and _calls(fake)[-1]["anthropic"] is True
+    # once root signs in to their own directory, that wins
+    acc = _sign_in(c)
+    assert acc["source"] == "studio"
+    _say(c, sid, "again")
+    root_home = _calls(fake)[-1]["config_dir"]
+    assert root_home and _calls(fake)[-1]["anthropic"] is False
+
+
+def test_one_sign_in_per_person_and_no_one_else_can_finish_or_cancel_it(team, project, fake):
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    la = c.post("/api/assistant/login", json={"method": "claudeai"}).json()["login_id"]
+    team.use(b["token"])
+    lb = c.post("/api/assistant/login", json={"method": "claudeai"}).json()["login_id"]
+    assert c.post(f"/api/assistant/login/{la}/code", json={"code": "good-code#fake"}).status_code == 404
+    assert c.delete(f"/api/assistant/login/{la}").status_code == 404
+    assert c.get("/api/assistant/account").json()["account"]["login"]["id"] == lb
+    team.use(team.admin_token)
+    assert c.get("/api/assistant/account").json()["account"]["login"]["id"] == la   # B's did not cancel A's
+    res = c.post(f"/api/assistant/login/{la}/code", json={"code": "good-code#fake"}).json()
+    assert res["ok"]
+    team.use(b["token"])
+    assert c.delete(f"/api/assistant/login/{lb}").status_code == 200
+    assert c.get("/api/assistant/account", params={"fresh": 1}).json()["account"]["logged_in"] is False
+
+
+def test_account_and_usage_are_each_persons(team, project, fake):
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    sid = _session(c, "home")["id"]
+    _say(c, sid, "hello")                                                   # a rate reading, under the machine login
+    assert c.get("/api/assistant/usage").json()["rate"]["five_hour"]["used"] == 0.05
+    team.use(b["token"])
+    got = c.get("/api/assistant/usage").json()
+    assert got["rate"] is None and got["account"]["source"] == "none"       # not the machine's limits
+    _sign_in(c)
+    assert c.get("/api/assistant/usage").json()["account"]["email"] == "studio@example.com"
+    team.use(team.admin_token)
+    assert c.get("/api/assistant/usage").json()["account"]["email"] == "you@example.com"
+
+
+def test_signing_out_signs_out_only_your_own(team, project, fake):
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(b["token"])
+    _sign_in(c)
+    team.use(team.admin_token)
+    _sign_in(c)
+    out = c.post("/api/assistant/logout").json()["account"]
+    assert out["source"] == "machine"                                       # root falls back to the machine
+    team.use(b["token"])
+    assert c.get("/api/assistant/account", params={"fresh": 1}).json()["account"]["source"] == "studio"
+    assert (_home_of(team, b["id"]) / ".fake-credentials").is_file()
+
+
+# ── P5: a viewer's assistant reads, and only what is theirs to read ───────
+
+def test_a_viewers_turn_reads_with_deny_rules_and_no_project_servers(team, project, fake, monkeypatch):
+    monkeypatch.setenv("OPERONX_STUDIO_CHAT_MODE", "full")               # the studio's reach: viewers still read
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": {"notes": {"command": "notes-server"}}}),
+                                       encoding="utf-8")
+    c = team.client
+    v = team.person("vee", "viewer")
+    team.use(team.admin_token)
+    pid = _pid(c, project)
+    team.use(v["token"])
+    _sign_in(c)
+    sid = _session(c, pid)["id"]
+    _say(c, sid, "what is here?")
+    argv = _calls(fake)[-1]["argv"]
+    allowed = argv[argv.index("--allowedTools") + 1:]
+    assert "Bash" not in argv and "Edit" not in allowed and "mcp__studio" not in allowed
+    assert "Read" in allowed and "mcp__studio__open_run" in allowed and "--permission-mode" not in argv
+    denied = argv[argv.index("--disallowedTools") + 1: argv.index("--allowedTools")]
+    state = str(team.state)
+    for tool in ("Read", "Grep", "Glob"):
+        assert f"{tool}(/{state}/**)" in denied and f"{tool}(~/.claude/**)" in denied and f"{tool}(**/.env*)" in denied
+    assert set(_calls(fake)[-1]["mcp"]["mcpServers"]) == {"studio"}       # no project servers
+    assert c.get(f"/api/assistant/sessions/{sid}").json()["agent"]["reach"] == "read"
+    # home-scope turns run in the viewer's own empty directory, not the server's home
+    home_sid = _session(c, "home")["id"]
+    _say(c, home_sid, "hello")
+    cwd = Path(_calls(fake)[-1]["cwd"])
+    assert cwd == team.state / "users" / v["id"] / "home" and list(cwd.iterdir()) == []
+    # an editor keeps the studio's reach and the project's servers
+    team.use(team.admin_token)
+    sid2 = _session(c, pid)["id"]
+    _say(c, sid2, "and you?")
+    argv = _calls(fake)[-1]["argv"]
+    assert "--disallowedTools" not in argv and "Bash" in argv and "notes" in _calls(fake)[-1]["mcp"]["mcpServers"]

@@ -94,7 +94,7 @@ const PromptsView = (() => {
         saveRow.hidden = !(k in edits) || typeof val !== "string";
       };
       saveRow.hidden = true;
-      const sb = el("button", "linkbtn", "Save this text where it lives…");
+      const sb = el("button", "linkbtn needs-edit", "Save this text where it lives…");
       sb.type = "button";
       sb.onclick = () => saveText(saveRow, v.op, k, val, inp.value);
       saveRow.append(sb);
@@ -130,7 +130,7 @@ const PromptsView = (() => {
       table.append(row);
     });
     const acts = el("div", "priceacts");
-    const go = el("button", "primary", `Try it on ${picks.size}`);
+    const go = el("button", "primary needs-edit", `Try it on ${picks.size}`);
     go.type = "button";
     acts.append(go);
     ss.append(acts, table);
@@ -183,7 +183,7 @@ const PromptsView = (() => {
     }
     const diff = el("div", "diffbox");
     for (const ln of got.diff.split("\n")) diff.append(el("span", ln.startsWith("+") && !ln.startsWith("+++") ? "add" : ln.startsWith("-") && !ln.startsWith("---") ? "del" : "", ln + "\n"));
-    const apply = el("button", "primary", `Write ${got.file}`);
+    const apply = el("button", "primary needs-edit", `Write ${got.file}`);
     apply.type = "button";
     apply.onclick = async () => {
       try { await api(`/api/p/${PID}/prompts/save`, {original, updated, apply: true}); toast(`Saved to ${got.file}`); show(); }

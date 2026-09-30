@@ -63,7 +63,7 @@ const ServicesView = (() => {
       }
       const acts = el("span", "svcacts");
       if (l.managed || (!l.running && !l.starting)) {
-        const btn = el("button", l.managed ? "" : "primary", l.managed ? "Stop" : "Start");
+        const btn = el("button", (l.managed ? "" : "primary") + " needs-edit", l.managed ? "Stop" : "Start");
         btn.type = "button";
         btn.onclick = async () => {
           btn.disabled = true;
@@ -97,7 +97,7 @@ const ServicesView = (() => {
         if (s.description) row.append(el("div", "svcdesc", s.description));
         const links = el("div", "svclinks");
         if (s.kind !== "asgi") {
-          const play = el("button", "linkbtn", "Playground");
+          const play = el("button", "linkbtn needs-edit", "Playground");
           play.type = "button";
           play.onclick = () => { const k = `play:${PID}`; const pv = recall(k, {}); pv.service = s.name; store(k, pv); switchTab("playground"); };
           const mon = el("button", "linkbtn", "Monitor");

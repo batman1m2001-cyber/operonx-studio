@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1115" media="(prefers-color-scheme: dark)">
+<title>Team — operonx studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%23c9940f'/%3E%3Ccircle cx='12' cy='12' r='5.2' fill='none' stroke='white' stroke-width='2.4'/%3E%3Ccircle cx='18.3' cy='5.7' r='1.7' fill='white'/%3E%3C/svg%3E">
+<script>/* the theme before the first paint (theme.js keeps it in step) */try{var t=localStorage.getItem("ox:theme")||"system";if(t==="system")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/static/studio.css">
+</head>
+<body class="page">
+<header class="topbar">
+  <a class="brand" href="/" aria-label="operonx studio — all projects">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6"/><circle cx="12" cy="12" r="5.2"/><circle class="dot" cx="18.3" cy="5.7" r="1.7"/></svg>
+    <span class="brand-name">operonx</span><span class="brand-sub">studio</span>
+  </a>
+  <span class="spacer"></span>
+  <span id="themeslot"></span>
+  <span id="accountslot"></span>
+</header>
+
+<main class="home teampage">
+  <div class="homehead">
+    <div>
+      <h1>Team</h1>
+      <p class="sub">Who can use this studio, and what each person may do.</p>
+    </div>
+    <div class="actions"><button id="btn-add" class="primary" type="button"><i data-icon="plus"></i><span>Add person</span></button></div>
+  </div>
+  <div class="teamtabs" role="tablist" aria-label="Team">
+    <button type="button" role="tab" data-view="people" aria-selected="true" class="on">People</button>
+    <button type="button" role="tab" data-view="activity" aria-selected="false">Activity</button>
+  </div>
+  <section id="view-people">
+  <div class="roleguide" aria-label="What each role may do">
+    <div><b>Admin</b><span>People, and everything an editor does.</span></div>
+    <div><b>Editor</b><span>Changes projects, runs jobs, services and the playground. That runs code on this machine: give it only to people you would give a shell.</span></div>
+    <div><b>Viewer</b><span>Looks at flows, runs and evals; changes nothing.</span></div>
+  </div>
+  <div class="projlist teamlist" id="team" aria-live="polite"></div>
+  </section>
+  <section id="view-activity" hidden>
+    <div class="actfilters">
+      <label class="actfilter"><span>Person</span><select id="act-user" aria-label="Person"><option value="">Everyone</option></select></label>
+      <label class="actfilter"><span>Project</span><select id="act-pid" aria-label="Project"><option value="">Every project</option></select></label>
+      <span class="spacer"></span>
+      <span class="note actkept">Kept 180 days · never a password, code, webhook or message</span>
+    </div>
+    <div class="projlist actlist" id="activity" aria-live="polite"></div>
+    <div class="actmore"><button type="button" id="act-more" class="ghost" hidden>Older</button></div>
+  </section>
+</main>
+
+<script src="/static/icons.js"></script>
+<script src="/static/theme.js"></script>
+<script src="/static/account.js"></script>
+<script src="/static/team.js"></script>
+</body>
+</html>

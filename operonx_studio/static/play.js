@@ -412,7 +412,7 @@ const PlayView = (() => {
         }
         // one message in, the reply out: that is a case for an eval
         if ((md.playground_script || []).filter(m => m.kind !== "bytes").length === 1 && r.status !== "error") {
-          const add = el("button", "linkbtn", "Add to dataset"); add.type = "button";
+          const add = el("button", "linkbtn needs-edit", "Add to dataset"); add.type = "button";
           add.onclick = () => addForm(row, r.trace_id, add);
           acts.append(add);
         }

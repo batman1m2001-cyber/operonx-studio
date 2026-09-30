@@ -7,6 +7,8 @@ import sys
 
 from playwright.async_api import async_playwright
 
+import studio_login
+
 BASE, OUT, PID = sys.argv[1], sys.argv[2], sys.argv[3]
 
 
@@ -20,10 +22,7 @@ async def main():
             pg.on("pageerror", lambda e: print("PAGEERROR", e))
             await pg.goto(f"{BASE}/login")
             await pg.screenshot(path=f"{OUT}/{name}_login.png")
-            await pg.fill("#login-user", "root")
-            await pg.fill("#login-pass", "123")
-            await pg.keyboard.press("Enter")
-            await pg.wait_for_url(f"{BASE}/")
+            await studio_login.submit(pg, BASE)
             await pg.wait_for_timeout(800)
             await pg.screenshot(path=f"{OUT}/{name}_home.png")
             await pg.goto(f"{BASE}/p/{PID}")
@@ -32,7 +31,7 @@ async def main():
             await pg.screenshot(path=f"{OUT}/{name}_flow.png")
             # the assistant
             if mob:
-                await pg.click(".chat-fab")
+                await pg.click(".ax-askbar")        # the phone's Ask bar (the old chat button went in R3)
             else:
                 await pg.evaluate("window.oxSide && window.oxSide.show('assistant')")
             await pg.wait_for_timeout(500)
