@@ -90,6 +90,7 @@ class PlayBridge:
             raise BridgeError(f"could not start the playground bridge: {exc}") from None
         self.started_at = time.time()
         self.live.clear()
+        self.stderr.clear()  # a failure to start is explained by this process's output alone
         loop.create_task(self._read_out(self.proc))
         loop.create_task(self._read_err(self.proc))
         try:
@@ -140,18 +141,24 @@ class PlayBridge:
                     fut.set_result(event)
             self._push(event)
         await proc.wait()
+        if proc is not self.proc:
+            # stopped — and maybe already replaced by a restart, whose own
+            # `ready`, sessions and waiters this old process must not touch:
+            # failing the new `ready` here reported the old process's last
+            # traceback as the restarted bridge's error
+            return
         if self.ready is not None and not self.ready.done():
             self.ready.set_exception(BridgeError(_explain("\n".join(self.stderr))))
-        if proc is self.proc:  # died on its own
-            self._push({"t": "bridge_exit", "code": proc.returncode, "text": _explain("\n".join(self.stderr))})
-            self.proc = None
-            for sid in list(self.live):
-                self._push({"t": "ended", "sid": sid, "status": "error", "error": "the bridge exited"})
-            self.live.clear()
-            for fut in self.waiters.values():
-                if not fut.done():
-                    fut.set_exception(BridgeError(_explain("\n".join(self.stderr))))
-            self.waiters.clear()
+        # died on its own
+        self._push({"t": "bridge_exit", "code": proc.returncode, "text": _explain("\n".join(self.stderr))})
+        self.proc = None
+        for sid in list(self.live):
+            self._push({"t": "ended", "sid": sid, "status": "error", "error": "the bridge exited"})
+        self.live.clear()
+        for fut in self.waiters.values():
+            if not fut.done():
+                fut.set_exception(BridgeError(_explain("\n".join(self.stderr))))
+        self.waiters.clear()
 
     async def _read_err(self, proc: asyncio.subprocess.Process) -> None:
         assert proc.stderr is not None
