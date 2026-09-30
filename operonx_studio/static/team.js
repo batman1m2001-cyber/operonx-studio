@@ -59,6 +59,9 @@
       const bits = [p.username, ago(p.last_seen)];
       if (p.sessions) bits.push(`${p.sessions} session${p.sessions > 1 ? "s" : ""}`);
       main.append(mk("div", "sig", bits.join(" · ")));
+      // the Claude account their assistant runs under, as last seen: never a token (§2.4)
+      main.append(mk("div", "sig claude", p.claude_email ? `Claude: ${p.claude_email}`
+        : p.machine_login ? "Claude: this machine's login" : "Claude: not signed in yet"));
       if (lastAdmin) main.append(mk("div", "sig guard", "The last active admin: can't be demoted, disabled or deleted"));
       row.append(main);
 

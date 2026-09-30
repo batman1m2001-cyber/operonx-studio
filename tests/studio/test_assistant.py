@@ -47,7 +47,8 @@ if argv[:1] == ["auth"]:
     log = os.environ.get("OX_FAKE_LOG")
     if log:
         with open(log, "a") as f:
-            f.write(json.dumps({"auth": argv[1], "config_dir": home}) + "\n")
+            f.write(json.dumps({"auth": argv[1], "config_dir": home,
+                                "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY"))}) + "\n")
 if argv[:2] == ["auth", "status"]:
     # the machine's login is you@example.com; a config dir is signed in once
     # its login finished
@@ -97,7 +98,8 @@ if "--mcp-config" in argv:
 if log:
     with open(log, "a") as f:
         f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "msg": msg, "images": images,
-                            "config_dir": home, "mcp": mcp, "mcp_mode": mcp_mode}) + "\n")
+                            "config_dir": home, "mcp": mcp, "mcp_mode": mcp_mode,
+                            "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY"))}) + "\n")
 
 if "--output-format" in argv and argv[argv.index("--output-format") + 1] == "json":
     print(json.dumps({"type": "result", "result": "Fake title here"}))
@@ -197,7 +199,7 @@ def fake(tmp_path: Path, monkeypatch):
     # the studio's own sign-in lives here, never in the real ~/.operonx/claude
     monkeypatch.setenv("OPERONX_STUDIO_CLAUDE_HOME", str(tmp_path / "claude-home"))
     from operonx_studio import chat as _chat_mod
-    _chat_mod._home.update(checked=False, signed_in=False, email=None)
+    _chat_mod._homes.clear()
     monkeypatch.setenv("OPERONX_STUDIO_RETENTION", "off")
     # the model-made title runs after a turn, in the background: on only
     # where a test waits for it, so no test ends with one in flight
@@ -1026,6 +1028,7 @@ def test_two_assistants_in_one_project_flag_their_changes(team, project, fake):
     team.use(team.admin_token)
     pid = _pid(c, project)
     team.use(b["token"])
+    _sign_in(c)                                                     # B runs under B's own sign-in (P4)
     theirs = _session(c, pid)["id"]
     slow = c.post(f"/api/assistant/sessions/{theirs}/turns", json={"message": "SLOW"}).json()["turn"]
     team.use(team.admin_token)
@@ -1054,3 +1057,129 @@ def test_deleting_someone_deletes_their_conversations(team, project, fake):
     team.use(team.admin_token)
     assert c.delete(f"/api/admin/users/{b['id']}").status_code == 200
     assert c.app.state.chat_store.session(sid) is None and not folder.exists()
+
+
+# ── P4: each person's own Claude sign-in (docs/TEAM_PLAN.md §2.4) ─────────
+
+def _home_of(team, uid):
+    return team.state / "users" / uid / "claude"
+
+
+def _sign_in(c, email_check=True):
+    """The whole sign-in, through the studio, with the fake's good code."""
+    got = c.post("/api/assistant/login", json={"method": "claudeai"}).json()
+    res = c.post(f"/api/assistant/login/{got['login_id']}/code", json={"code": "good-code#fake"}).json()
+    assert res["ok"], res
+    return res["account"]
+
+
+def test_someone_not_signed_in_is_asked_to_and_no_claude_starts(team, project, fake, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-key")
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(b["token"])
+    acc = c.get("/api/assistant/account").json()["account"]
+    assert acc["logged_in"] is False and acc["source"] == "none"          # never the machine's login
+    sid = _session(c, "home")["id"]
+    _, events = _say(c, sid, "hello")
+    err = next(e["item"] for e in events if e["t"] == "item" and e["item"]["kind"] == "error")
+    assert err["auth"] is True and "your own Claude account" in err["text"]
+    assert _calls(fake) == []                                               # no process started
+
+
+def test_each_person_runs_in_their_own_directory(team, project, fake, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-key")
+    monkeypatch.setenv("OPERONX_STUDIO_CHAT_TITLES", "on")
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(b["token"])
+    acc = _sign_in(c)
+    home = _home_of(team, b["id"])
+    assert acc["source"] == "studio" and acc["email"] == "studio@example.com"
+    assert (home / ".fake-credentials").is_file() and oct(home.stat().st_mode & 0o777) == "0o700"
+    sid = _session(c, "home")["id"]
+    _say(c, sid, "hello from B")
+    turn = _calls(fake)[-1]
+    assert turn["config_dir"] == str(home) and turn["anthropic"] is False   # the host's key never leaks in
+    for _ in range(100):                                                   # the title, in the background
+        titles = [x for x in _calls(fake) if "--output-format" in x["argv"] and "json" in x["argv"]]
+        if titles:
+            break
+        time.sleep(0.05)
+    assert titles and titles[-1]["config_dir"] == str(home) and titles[-1]["anthropic"] is False
+    # a conversation carried over from elsewhere is re-seeded with a summary: under B's sign-in too
+    got = c.post("/api/assistant/import", json={"scope": "home", "session": "old-claude-9",
+                                                "log": [{"w": "me", "text": "earlier"}, {"w": "bot", "text": "yes"}]})
+    _say(c, got.json()["session"]["id"], "and now?")
+    summary = [x for x in _calls(fake) if "<conversation>" in " ".join(x["argv"]) and "Summary:" in " ".join(x["argv"])]
+    assert summary and all(x["config_dir"] == str(home) for x in summary)
+    # the Team page knows which Claude account they use, never a token
+    team.use(team.admin_token)
+    row = next(u for u in c.get("/api/admin/users").json()["users"] if u["username"] == "bee")
+    assert row["claude_email"] == "studio@example.com"
+
+
+def test_only_the_owner_of_the_machine_login_falls_back_to_it(team, project, fake, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-host-key")
+    c = team.client
+    team.use(team.admin_token)                                              # root: machine_login (D8)
+    acc = c.get("/api/assistant/account").json()["account"]
+    assert acc["source"] == "machine" and acc["email"] == "you@example.com"
+    sid = _session(c, "home")["id"]
+    _say(c, sid, "hello from root")
+    assert _calls(fake)[-1]["config_dir"] is None and _calls(fake)[-1]["anthropic"] is True
+    # once root signs in to their own directory, that wins
+    acc = _sign_in(c)
+    assert acc["source"] == "studio"
+    _say(c, sid, "again")
+    root_home = _calls(fake)[-1]["config_dir"]
+    assert root_home and _calls(fake)[-1]["anthropic"] is False
+
+
+def test_one_sign_in_per_person_and_no_one_else_can_finish_or_cancel_it(team, project, fake):
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    la = c.post("/api/assistant/login", json={"method": "claudeai"}).json()["login_id"]
+    team.use(b["token"])
+    lb = c.post("/api/assistant/login", json={"method": "claudeai"}).json()["login_id"]
+    assert c.post(f"/api/assistant/login/{la}/code", json={"code": "good-code#fake"}).status_code == 404
+    assert c.delete(f"/api/assistant/login/{la}").status_code == 404
+    assert c.get("/api/assistant/account").json()["account"]["login"]["id"] == lb
+    team.use(team.admin_token)
+    assert c.get("/api/assistant/account").json()["account"]["login"]["id"] == la   # B's did not cancel A's
+    res = c.post(f"/api/assistant/login/{la}/code", json={"code": "good-code#fake"}).json()
+    assert res["ok"]
+    team.use(b["token"])
+    assert c.delete(f"/api/assistant/login/{lb}").status_code == 200
+    assert c.get("/api/assistant/account", params={"fresh": 1}).json()["account"]["logged_in"] is False
+
+
+def test_account_and_usage_are_each_persons(team, project, fake):
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(team.admin_token)
+    sid = _session(c, "home")["id"]
+    _say(c, sid, "hello")                                                   # a rate reading, under the machine login
+    assert c.get("/api/assistant/usage").json()["rate"]["five_hour"]["used"] == 0.05
+    team.use(b["token"])
+    got = c.get("/api/assistant/usage").json()
+    assert got["rate"] is None and got["account"]["source"] == "none"       # not the machine's limits
+    _sign_in(c)
+    assert c.get("/api/assistant/usage").json()["account"]["email"] == "studio@example.com"
+    team.use(team.admin_token)
+    assert c.get("/api/assistant/usage").json()["account"]["email"] == "you@example.com"
+
+
+def test_signing_out_signs_out_only_your_own(team, project, fake):
+    c = team.client
+    b = team.person("bee", "editor")
+    team.use(b["token"])
+    _sign_in(c)
+    team.use(team.admin_token)
+    _sign_in(c)
+    out = c.post("/api/assistant/logout").json()["account"]
+    assert out["source"] == "machine"                                       # root falls back to the machine
+    team.use(b["token"])
+    assert c.get("/api/assistant/account", params={"fresh": 1}).json()["account"]["source"] == "studio"
+    assert (_home_of(team, b["id"]) / ".fake-credentials").is_file()

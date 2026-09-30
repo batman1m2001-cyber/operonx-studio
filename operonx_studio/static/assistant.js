@@ -1425,10 +1425,11 @@
   }
   document.addEventListener("oxrate", (ev) => { if (ev.detail) takeRate(ev.detail); });
 
-  /* ── the assistant's own Claude sign-in (plan §3) ──────────────────────
-   * The studio signs in to Claude in its own place (~/.operonx/claude), so
-   * this machine's Claude Code is never touched. Until it has, the
-   * machine's login is used — and the account says so. Signing in is the
+  /* ── your own Claude sign-in (plan §3; per person since TEAM_PLAN P4) ───
+   * Each person signs in to Claude in their own place on the studio, so
+   * this machine's Claude Code — and everyone else's sign-in — is never
+   * touched. Only the machine login's owner falls back to it until they
+   * sign in; anyone else is asked to. Signing in is the
    * Claude Code extension's flow: the sign-in page opens in a new tab, and
    * the code it shows afterwards is pasted back here. */
   const who = (a) => [a.email || a.org || "Claude", PLAN_NAME[a.plan] || (a.method === "console" ? "API account" : a.plan || "")]
@@ -1459,7 +1460,8 @@
       box.append(acts);
       return box;
     } else {
-      line.textContent = "Not signed in";
+      line.textContent = a.source === "none" ? "Not signed in — the assistant runs under your own Claude account"
+        : "Not signed in";
       act("Sign in with Claude", "primary", () => openSignin("claudeai"));
     }
     box.append(line, acts);
@@ -1468,7 +1470,7 @@
 
   async function signOut() {
     const a = A.account || {};
-    if (!confirm(`Sign the assistant out of ${a.email || "its Claude account"}?\n\nIt goes back to this machine's login, if there is one. This machine's Claude Code isn't touched.`)) return;
+    if (!confirm(`Sign your assistant out of ${a.email || "its Claude account"}?\n\nOnly your own sign-in on this studio; this machine's Claude Code isn't touched.`)) return;
     try {
       A.account = (await call("/api/assistant/logout", {})).account;
       toast(A.account.logged_in ? `Signed out — using this machine's login (${A.account.email || "Claude"})` : "Signed out");
@@ -1504,7 +1506,7 @@
     const machine = A.account && A.account.logged_in && A.account.source !== "studio";
     const step1 = (err) => {
       body.textContent = "";
-      body.append(el("p", null, why || "Sign in with your Claude account. It is the studio's own sign-in: this machine's Claude Code stays as it is."));
+      body.append(el("p", null, why || "Sign in with your own Claude account. It is yours alone on this studio: no one else's assistant uses it, and this machine's Claude Code stays as it is."));
       if (err) body.append(el("p", "ax-signin-err", err));
       const go = tbtn("Sign in with Claude", "ax-btn primary");
       go.onclick = () => start("claudeai");

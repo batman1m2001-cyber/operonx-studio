@@ -206,6 +206,7 @@ def test_a_demotion_stops_their_running_turn(team, tmp_path, monkeypatch):
     monkeypatch.setenv("OPERONX_STUDIO_CHAT_TITLES", "off")
     c = team.client
     ann = team.person("ann", "editor")
+    c.app.state.users.update(ann["id"], machine_login=True)   # so a turn runs without a sign-in (P4)
     team.use(ann["token"])
     sid = c.post("/api/assistant/sessions", json={"scope": "home"}).json()["session"]["id"]
     turn = c.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "SLOW"}).json()["turn"]

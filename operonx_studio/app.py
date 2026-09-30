@@ -985,16 +985,13 @@ def build_studio_app(recents: Optional[Recents] = None):
 
         from . import chat as _chat_mod
 
-        raw = row.get("claude_home")
-        if not raw:
-            return
-        home = Path(raw).resolve()
+        home = Path(_claude_of(row["id"])["home"]).resolve()
         state = recents.state_file.parent.resolve()
         if state not in home.parents or not home.is_dir():
             return
         binary = _chat_mod.find_claude()
         if binary is not None:
-            env = _chat_mod._spawn_env(home=False)
+            env = _chat_mod.base_env()
             env["CLAUDE_CONFIG_DIR"] = str(home)
             proc = await asyncio.create_subprocess_exec(
                 binary, "auth", "logout", env=env, stdin=asyncio.subprocess.DEVNULL,
@@ -2803,7 +2800,7 @@ def build_studio_app(recents: Optional[Recents] = None):
                                      "actions": [a for a in queue if a["seq"] > ui] if ui >= 0 else [],
                                      "newest": newest, "newest_info": info,
                                      "chat_last": relay.finished_seq, "chat_ended": ended,
-                                     "assistant_rate": chat_store.get_meta("last_rate", None)})
+                                     "assistant_rate": _rate_of(me)})
             until = time.monotonic() + min(1.0 if not follow else 2.0, left)
             while time.monotonic() < until and bells.get(pid, 0) == rung:
                 await asyncio.sleep(0.1)
@@ -3283,57 +3280,105 @@ def build_studio_app(recents: Optional[Recents] = None):
                              "new": _assistant_defaults(scope if _scope_ok(scope) else "home",
                                                         request.state.user["id"])})
 
-    # the account the assistant's Claude runs as: `claude auth status --json`,
-    # read at most every 30 s (it spawns the CLI)
-    _account_cache: Dict[str, Any] = {"at": 0.0, "value": None}
+    # ── each person's Claude sign-in (docs/TEAM_PLAN.md §2.4) ────────────
+    # Everyone's assistant runs under their own Claude account, in their own
+    # config directory; only the machine login's owner falls back to this
+    # machine's login (decision D8). Who that is, their directory and
+    # whether it is signed in come from here.
 
-    async def _account(fresh: bool = False) -> Dict[str, Any]:
-        """Who the assistant's Claude runs as: the studio's own sign-in when it
-        has one (``source: studio``), else this machine's (``machine``)."""
-        if not fresh and _account_cache["value"] is not None and time.monotonic() - _account_cache["at"] < 30:
-            return _account_cache["value"]
+    def _claude_of(uid: str) -> Dict[str, Any]:
+        """A person's sign-in: ``{"home": their directory, "machine": may they
+        fall back to this machine's login}``. The directory is the one the
+        account names (the first admin keeps the single-login one, D3), else
+        ``<state>/users/<uid>/claude``."""
         from . import chat as _chat_mod
 
-        studio = await asyncio.to_thread(_chat_mod.home_signed_in, fresh)
+        row = users.cached_user(uid) if uid != "local" else None
+        if row is None:            # auth off with no accounts: the single-login studio
+            return {"home": _chat_mod.claude_home(), "machine": True}
+        home = Path(row["claude_home"]) if row.get("claude_home") else \
+            recents.state_file.parent / "users" / uid / "claude"
+        return {"home": home, "machine": bool(row.get("machine_login"))}
+
+    # who a person's Claude runs as: `claude auth status --json`, read at
+    # most every 30 s per person (it spawns the CLI)
+    _account_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+    async def _account(me: str, fresh: bool = False) -> Dict[str, Any]:
+        """Who *me*'s assistant runs as: their own sign-in (``source: studio``),
+        this machine's for its owner (``machine``), or nobody yet (``none``)."""
+        got = _account_cache.get(me)
+        if not fresh and got is not None and time.monotonic() - got[0] < 30:
+            return dict(got[1], login=_login_state(me))
+        from . import chat as _chat_mod
+
+        claude = _claude_of(me)
+        own = await asyncio.to_thread(_chat_mod.home_signed_in, claude["home"], fresh)
+        env = _chat_mod._spawn_env(**claude)
         binary = _chat_mod.find_claude()
         out: Dict[str, Any] = {"logged_in": None}
-        if binary is not None:
+        if env is None:
+            out = {"logged_in": False}
+        elif binary is not None:
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    binary, "auth", "status", "--json", env=_chat_mod._spawn_env(),
+                    binary, "auth", "status", "--json", env=env,
                     stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
                 raw, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
-                got = json.loads(raw.decode() or "{}")
+                got_ = json.loads(raw.decode() or "{}")
                 # what the card shows; never a token or an id
-                out = {"logged_in": bool(got.get("loggedIn")), "method": got.get("authMethod"),
-                       "email": got.get("email"), "org": got.get("orgName"), "plan": got.get("subscriptionType"),
-                       "provider": got.get("apiProvider")}
+                out = {"logged_in": bool(got_.get("loggedIn")), "method": got_.get("authMethod"),
+                       "email": got_.get("email"), "org": got_.get("orgName"), "plan": got_.get("subscriptionType"),
+                       "provider": got_.get("apiProvider")}
             except Exception:  # noqa: BLE001 — no account line is better than a broken card
                 out = {"logged_in": None}
-        out.update(source="studio" if studio else "machine", home=str(_chat_mod.claude_home()),
-                   login=_login_state())
-        _account_cache.update(at=time.monotonic(), value=out)
-        return out
+        out.update(source="studio" if own else ("machine" if env is not None else "none"),
+                   home=str(claude["home"]))
+        if own and out.get("email") and me != "local":
+            # the Team page shows which Claude account each person uses — never a token
+            row = users.cached_user(me)
+            if row is not None and row.get("claude_email") != out["email"]:
+                users.update(me, claude_email=out["email"])
+        _account_cache[me] = (time.monotonic(), out)
+        return dict(out, login=_login_state(me))
 
-    # ── signing the assistant in (docs/ASSISTANT_NEXT_PLAN.md §3) ─────────
-    # `claude auth login` in the studio's own config directory, driven over
+    def _rate_of(me: str) -> Optional[Dict[str, Any]]:
+        """The plan's limits for *me*'s account, as last reported: an
+        account's, shared by its conversations — never another person's."""
+        from . import chat as _chat_mod
+
+        key = _chat_mod.account_key(**_claude_of(me))
+        return chat_store.get_meta(f"last_rate:{key}", None) if key else None
+
+    # ── signing in (docs/ASSISTANT_NEXT_PLAN.md §3, per person since P4) ──
+    # `claude auth login` in the person's own config directory, driven over
     # pipes: it prints the sign-in link, then reads the code the page shows
-    # after signing in. One at a time; ten minutes at most. The code is
-    # written to the CLI and never kept or logged; the token stays the CLI's.
+    # after signing in. One at a time per person; ten minutes at most. The
+    # code is written to the CLI and never kept or logged; the token stays
+    # the CLI's.
     logins: Dict[str, Any] = {}
 
-    # which sign-in the assistant runs under, known before the first turn
-    # needs it (the check spawns the CLI: ~0.5 s)
+    # which sign-in the first admin's assistant runs under, known before the
+    # first turn needs it (the check spawns the CLI: ~0.5 s)
     import threading as _threading
     from . import chat as _chat_boot
 
-    _threading.Thread(target=_chat_boot.home_signed_in, daemon=True).start()
+    _first_admin = users.first_admin()
+    _threading.Thread(target=_chat_boot.home_signed_in, daemon=True,
+                      args=(_claude_of(_first_admin["id"] if _first_admin else "local")["home"],)).start()
 
-    def _login_state() -> Optional[Dict[str, Any]]:
+    def _login_state(me: str) -> Optional[Dict[str, Any]]:
         for lid, lg in logins.items():
-            if lg["proc"].returncode is None:
+            if lg["owner"] == me and lg["proc"].returncode is None:
                 return {"id": lid, "method": lg["method"], "url": lg["url"], "started": lg["started"]}
         return None
+
+    def _login_or_404(lid: str, request: Any) -> Any:
+        """The sign-in, if it is the asker's: someone else's is not there."""
+        lg = logins.get(lid)
+        if lg is None or lg["owner"] != request.state.user["id"] or lg["proc"].returncode is not None:
+            return JSONResponse({"error": "That sign-in has ended — start again"}, status_code=404)
+        return lg
 
     async def _end_login(lid: str) -> None:
         lg = logins.pop(lid, None)
@@ -3349,20 +3394,22 @@ def build_studio_app(recents: Optional[Recents] = None):
                 pass
 
     @app.post("/api/assistant/login")
-    async def assistant_login(body: Dict[str, Any]) -> JSONResponse:
+    async def assistant_login(body: Dict[str, Any], request: Request) -> JSONResponse:
         from . import chat as _chat_mod
 
+        me = request.state.user["id"]
         method = str(body.get("method") or "claudeai")
         if method not in ("claudeai", "console", "sso"):
             return JSONResponse({"error": "method is claudeai, console or sso"}, status_code=400)
-        for lid in list(logins):          # one at a time: a new one replaces a stale one
+        for lid in [k for k, v in logins.items() if v["owner"] == me]:   # yours replaces yours, no one else's
             await _end_login(lid)
         binary = _chat_mod.find_claude()
         if binary is None:
             return JSONResponse({"error": "No claude binary found on this machine"}, status_code=500)
-        home = _chat_mod.claude_home()
+        home = Path(_claude_of(me)["home"])
         home.mkdir(parents=True, exist_ok=True, mode=0o700)
-        env = _chat_mod._spawn_env(home=False)
+        os.chmod(home, 0o700)
+        env = _chat_mod.base_env()
         env["CLAUDE_CONFIG_DIR"] = str(home)
         env["BROWSER"] = "true"          # never a browser on the studio's own machine: the page opens the link
         flags = {"claudeai": ["--claudeai"], "console": ["--console"], "sso": ["--sso"]}[method]
@@ -3391,18 +3438,19 @@ def build_studio_app(recents: Optional[Recents] = None):
 
         lid = _uuid.uuid4().hex[:12]
         loop = asyncio.get_running_loop()
-        logins[lid] = {"proc": proc, "method": method, "url": url, "started": time.time(),
+        logins[lid] = {"proc": proc, "method": method, "url": url, "started": time.time(), "owner": me,
                        "timer": loop.call_later(600, lambda: asyncio.ensure_future(_end_login(lid)))}
-        _account_cache["value"] = None
+        _account_cache.pop(me, None)
         return JSONResponse({"login_id": lid, "url": url, "method": method})
 
     @app.post("/api/assistant/login/{lid}/code")
-    async def assistant_login_code(lid: str, body: Dict[str, Any]) -> JSONResponse:
+    async def assistant_login_code(lid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         from . import chat as _chat_mod
 
-        lg = logins.get(lid)
-        if lg is None or lg["proc"].returncode is not None:
-            return JSONResponse({"error": "That sign-in has ended — start again"}, status_code=404)
+        lg = _login_or_404(lid, request)
+        if isinstance(lg, JSONResponse):
+            return lg
+        me = request.state.user["id"]
         code = str(body.get("code") or "").strip()
         if not code or len(code) > 2000 or "\n" in code:
             return JSONResponse({"error": "Paste the code the sign-in page showed"}, status_code=400)
@@ -3416,8 +3464,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             pass
         rc = proc.returncode
         await _end_login(lid)
-        signed = await asyncio.to_thread(_chat_mod.home_signed_in, True)
-        account = await _account(fresh=True)
+        signed = await asyncio.to_thread(_chat_mod.home_signed_in, _claude_of(me)["home"], True)
+        account = await _account(me, fresh=True)
         if rc == 0 and signed:
             return JSONResponse({"ok": True, "account": account})
         # the CLI's own words ("Login failed: …"), never the code
@@ -3426,21 +3474,24 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"ok": False, "error": why, "account": account}, status_code=400)
 
     @app.delete("/api/assistant/login/{lid}")
-    async def assistant_login_cancel(lid: str) -> JSONResponse:
+    async def assistant_login_cancel(lid: str, request: Request) -> JSONResponse:
+        if lid not in logins or logins[lid]["owner"] != request.state.user["id"]:
+            return JSONResponse({"error": "That sign-in has ended — start again"}, status_code=404)
         await _end_login(lid)
-        _account_cache["value"] = None
+        _account_cache.pop(request.state.user["id"], None)
         return JSONResponse({"cancelled": lid})
 
     @app.post("/api/assistant/logout")
-    async def assistant_logout() -> JSONResponse:
-        """Sign the studio's own sign-in out. Never this machine's: the
-        assistant then goes back to it."""
+    async def assistant_logout(request: Request) -> JSONResponse:
+        """Sign your own Claude sign-in out. Never this machine's, nor
+        anyone else's: the machine login's owner goes back to it."""
         from . import chat as _chat_mod
 
+        me = request.state.user["id"]
+        home = Path(_claude_of(me)["home"])
         binary = _chat_mod.find_claude()
-        home = _chat_mod.claude_home()
         if binary is not None and home.is_dir():
-            env = _chat_mod._spawn_env(home=False)
+            env = _chat_mod.base_env()
             env["CLAUDE_CONFIG_DIR"] = str(home)
             proc = await asyncio.create_subprocess_exec(
                 binary, "auth", "logout", env=env, stdin=asyncio.subprocess.DEVNULL,
@@ -3449,19 +3500,20 @@ def build_studio_app(recents: Optional[Recents] = None):
                 await asyncio.wait_for(proc.wait(), timeout=30)
             except asyncio.TimeoutError:
                 proc.kill()
-        await asyncio.to_thread(_chat_mod.home_signed_in, True)
-        return JSONResponse({"account": await _account(fresh=True)})
+        await asyncio.to_thread(_chat_mod.home_signed_in, home, True)
+        return JSONResponse({"account": await _account(me, fresh=True)})
 
     @app.get("/api/assistant/account")
-    async def assistant_account(fresh: int = 0) -> JSONResponse:
-        return JSONResponse({"account": await _account(fresh=bool(fresh))})
+    async def assistant_account(request: Request, fresh: int = 0) -> JSONResponse:
+        return JSONResponse({"account": await _account(request.state.user["id"], fresh=bool(fresh))})
 
     @app.get("/api/assistant/usage")
-    async def assistant_usage() -> JSONResponse:
-        """The plan's limits as last reported (they are the account's, shared
-        by every conversation), with when; and the account."""
-        rate = chat_store.get_meta("last_rate", None)
-        return JSONResponse({"rate": rate, "as_of": (rate or {}).get("at"), "account": await _account()})
+    async def assistant_usage(request: Request) -> JSONResponse:
+        """Your plan's limits as last reported (they are your account's,
+        shared by your conversations), with when; and your account."""
+        me = request.state.user["id"]
+        rate = _rate_of(me)
+        return JSONResponse({"rate": rate, "as_of": (rate or {}).get("at"), "account": await _account(me)})
 
     @app.put("/api/assistant/defaults")
     def assistant_set_defaults(body: Dict[str, Any], request: Request) -> JSONResponse:
@@ -3644,7 +3696,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             turn = relay.start(sid, message, cwd=cwd, context=context, mcp=mcp, fork_from=fork_from,
                                view=body.get("view") if isinstance(body.get("view"), dict) else None,
                                attachments=refs, extra_mcp=_project_mcp(sess["scope"]),
-                               owner=request.state.user["id"], on_end=[_revoker(mcp)])
+                               owner=request.state.user["id"], on_end=[_revoker(mcp)],
+                               claude=_claude_of(request.state.user["id"]))
         except RuntimeError as exc:
             _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
@@ -3667,7 +3720,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             return busy
         try:
             turn = relay.start(sid, "/compact", cwd=cwd, context=context, mcp=mcp, kind="compact",
-                               owner=request.state.user["id"], on_end=[_revoker(mcp)])
+                               owner=request.state.user["id"], on_end=[_revoker(mcp)],
+                               claude=_claude_of(request.state.user["id"]))
         except RuntimeError as exc:
             _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)

@@ -36,6 +36,91 @@ async def account(pg):
     return await pg.evaluate("fetch('/api/assistant/account?fresh=1').then(r => r.json()).then(j => j.account)")
 
 
+FAKE_CODE = "good-code#fake"      # what the suite's fake `claude` accepts; a real CLI never does
+
+
+async def two_people(b):
+    import time as _time
+
+    a_ctx = await b.new_context(viewport={"width": 1440, "height": 900})
+    await a_ctx.route("https://**claude.com/**", lambda r: r.abort())
+    a = await a_ctx.new_page()
+    await login(a)
+    name = f"signin{int(_time.time()) % 100000}"
+    made = await a.evaluate("""async (name) => (await fetch('/api/admin/users', {method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({username: name, name: 'Bea Signin', role: 'editor'})})).json()""", name)
+    for size, (w, h) in {"desktop": (1440, 900), "phone": (390, 844)}.items():
+        for theme in ("light", "dark"):
+            ctx = await b.new_context(viewport={"width": w, "height": h}, color_scheme=theme,
+                                      device_scale_factor=2 if size == "phone" else 1)
+            await ctx.route("https://**claude.com/**", lambda r: r.abort())
+            pg = await ctx.new_page()
+            await pg.goto(f"{BASE}/login")
+            await pg.fill("#login-user", name)
+            if size == "desktop" and theme == "light":
+                await pg.fill("#login-pass", made["password"])
+                await pg.keyboard.press("Enter")
+                await pg.wait_for_selector("#step-password:not([hidden])")
+                await pg.fill("#pw-new", "bea-own-pass-1")
+                await pg.fill("#pw-again", "bea-own-pass-1")
+            else:
+                await pg.fill("#login-pass", "bea-own-pass-1")
+            await pg.keyboard.press("Enter")
+            await pg.wait_for_url(f"{BASE}/")
+            acc = await account(pg)
+            if size == "desktop" and theme == "light":
+                ok("B is not signed in, and never runs on the machine's login", acc["source"] == "none" and not acc["logged_in"],
+                   f"{acc['source']} {acc['logged_in']}")
+            await pg.goto(f"{BASE}/p/{PID}")
+            await pg.wait_for_selector(".node")
+            if size == "phone":
+                await pg.wait_for_selector(".ax-askbar:visible, .ax-signin:not([hidden])")
+                if await pg.locator(".ax-askbar:visible").count():
+                    await pg.click(".ax-askbar")
+            else:
+                await pg.evaluate("oxSide && oxSide.show('assistant')")
+            # with nobody signed in, the panel opens on the sign-in card itself
+            await pg.wait_for_selector(".ax-signin:not([hidden])", timeout=15000)
+            await pg.wait_for_timeout(600)
+            card = await pg.locator(".ax-signin").inner_text()
+            ok(f"B's assistant asks B to sign in with B's own account ({size} {theme})",
+               "your own Claude account" in card and "machine's login" not in card, card.replace("\n", " ")[:90])
+            await pg.screenshot(path=f"{OUT}/p4_b_account_{size}_{theme}.png")
+            sw = await pg.evaluate("""() => { const c = document.querySelector('.ax-signin').getBoundingClientRect();
+                return document.documentElement.scrollWidth <= innerWidth && c.left >= 0 && c.right <= innerWidth; }""")
+            ok(f"…and it fits ({size} {theme})", sw)
+            if size == "desktop" and theme == "light":
+                # A starts a sign-in; B's own does not cancel it
+                la = await a.evaluate("""async () => (await (await fetch('/api/assistant/login', {method: 'POST',
+                    headers: {'content-type': 'application/json'}, body: '{"method": "claudeai"}'})).json()).login_id""")
+                async with ctx.expect_page() as tab_info:
+                    await pg.locator(".ax-signin button", has_text="Sign in with Claude").click()
+                await (await tab_info.value).close()
+                await pg.wait_for_selector(".ax-signin-code", timeout=30000)
+                still = await account(a)
+                ok("B's sign-in leaves A's running", (still.get("login") or {}).get("id") == la, str(still.get("login")))
+                steal = await pg.evaluate("async (lid) => (await fetch('/api/assistant/login/' + lid, {method: 'DELETE'})).status", la)
+                ok("B can't cancel A's sign-in", steal == 404, str(steal))
+                await pg.fill(".ax-signin-code", FAKE_CODE)
+                await pg.keyboard.press("Enter")
+                await pg.wait_for_timeout(2500)
+                acc = await account(pg)
+                if acc.get("source") == "studio":
+                    ok("B signed in to B's own directory", "/users/" in acc["home"], acc["home"][-60:])
+                    ok("…and A is still on the machine's login", (await account(a))["source"] == "machine")
+                    await pg.screenshot(path=f"{OUT}/p4_b_signed_in_{size}_{theme}.png")
+                    # back to not signed in, so the other screenshots show the ask
+                    await pg.evaluate("fetch('/api/assistant/logout', {method: 'POST'})")
+                    await pg.wait_for_timeout(800)
+                else:
+                    print("SKIP finishing B's sign-in: this studio's claude is not the fake one", flush=True)
+                await a.evaluate("async (lid) => fetch('/api/assistant/login/' + lid, {method: 'DELETE'})", la)
+            await ctx.close()
+    await a.evaluate("async (id) => fetch('/api/admin/users/' + id, {method: 'DELETE'})", made["user"]["id"])
+    await a_ctx.close()
+
+
 async def main():
     async with async_playwright() as p:
         b = await p.chromium.launch()
@@ -156,6 +241,13 @@ async def main():
         await pg.screenshot(path=f"{OUT}/a5_phone.png")
         await pg.locator(".ax-signin button", has_text="Not now").click()
         await ctx.close()
+
+        # 7. two people (docs/TEAM_PLAN.md P4): B is not the machine login's
+        # owner, so B's assistant is not signed in until B signs in — in B's
+        # own directory; B's sign-in does not cancel A's; each account is its
+        # own. Finishing needs the fake CLI's code (FAKE_CODE); with a real
+        # CLI the section stops at the link, like the steps above.
+        await two_people(b)
         await b.close()
     passed = sum(1 for _, c, _ in RESULTS if c)
     print(f"\n{passed}/{len(RESULTS)} passed")
