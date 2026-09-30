@@ -43,6 +43,9 @@ const state = {
   errIdx: 0,          // cycling cursor for the "error →" jump
 };
 
+// the canvas in motion (defined further down; used by render and leaveWorkflow)
+let liveCanvas = null;
+
 /* What the user is looking at, for anyone who asks — the assistant
  * sends it along with every chat message. */
 function pushView() {
@@ -50,9 +53,14 @@ function pushView() {
   window.__oxview = {
     node: it ? it.node.name : null,
     kind: it ? it.node.kind : null,
-    run: state.run ? state.run.run : null,
+    run: state.run ? state.run.run : (state._tlrun || null),
     tab: state.tab,
+    lens: state.run ? (state.lens || "path") : null,
+    exec: state.execSel || null,
+    runs_filter: state.tab === "traces" ? (recall(`runsView:${PID}`, null) ? JSON.stringify(recall(`runsView:${PID}`, null)) : null) : null,
+    monitor: state.tab === "monitor" ? JSON.stringify(recall(`monitor:${PID}`, {})) : null,
   };
+  document.dispatchEvent(new CustomEvent("oxview"));
 }
 
 /* One shared voice for action feedback: applied, painted, copied. */
@@ -81,12 +89,35 @@ function recall(key, fallback) {
   } catch { return fallback; }
 }
 
+/* Every call to the studio. A body that is not JSON (the tunnel's own
+ * "no tunnel here" page, a proxy's 502) becomes a readable error instead
+ * of a JSON parse exception; a signed-out session goes to the login; a
+ * GET that never reached the server is tried once more. */
 async function api(path, body) {
-  const res = await fetch(path, body === undefined ? {} : {
+  const opts = body === undefined ? {} : {
     method: "POST", headers: {"content-type": "application/json"},
     body: JSON.stringify(body),
-  });
-  const data = await res.json();
+  };
+  let res;
+  try {
+    res = await fetch(path, opts);
+  } catch (err) {
+    if (body !== undefined) throw new Error("The studio did not answer — check the connection");
+    await new Promise(r => setTimeout(r, 600));
+    try { res = await fetch(path, opts); }
+    catch { throw new Error("The studio did not answer — check the connection"); }
+  }
+  if (res.status === 401) {
+    location.href = "/login";
+    throw new Error("signed out");
+  }
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; }
+  catch {
+    throw new Error(res.ok ? "The studio sent something unreadable"
+      : `The studio is unreachable (${res.status}) — the tunnel may have dropped`);
+  }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
@@ -213,7 +244,8 @@ function withBoundaries(model, key, depth) {
     if (it.node.end) edges.push({src: it.node.id, dst: "__end__", boundary: true});
   }
   model.items.push(start, end);
-  return {items: model.items, edges, w: model.w, h: end.y + KB / 2};
+  // the knobs stay centred over the content; a loop's room widens the box
+  return {items: model.items, edges, w: model.w + (model.loopRoom || 0), h: end.y + KB / 2};
 }
 
 function placeGraph(g, prefix, depth) {
@@ -254,7 +286,23 @@ function placeGraph(g, prefix, depth) {
     maxX = Math.max(maxX, it.x + it.w);
     maxY = Math.max(maxY, it.y + it.h);
   }
-  return {items, edges: g.edges || [], w: maxX + 48, h: maxY + 48};
+  // An opened graph holds its own loops: a return bulges right of its
+  // cards (returnPath: 56 px + 8% of its height, a card may grow 25 px
+  // past its slot) with its "↺ loop" label beyond. Its box keeps room
+  // for both, or the wire left the container (ex09's loop). The top
+  // level has the extent's margin instead.
+  let loopRoom = 0;
+  if (depth > 0) {
+    const byId = new Map(items.map(it => [it.node.id, it]));
+    for (const e of g.edges || []) {
+      const a = e.back && byId.get(e.src), b = e.back && byId.get(e.dst);
+      if (!a || !b) continue;
+      const dy = Math.abs((a.y + a.h / 2) - (b.y + b.h / 2));
+      const need = Math.max(a.x + a.w, b.x + b.w) + 25 + 56 + dy * 0.08 + 34;
+      loopRoom = Math.max(loopRoom, Math.ceil(need - (maxX + 48)));
+    }
+  }
+  return {items, edges: g.edges || [], w: maxX + 48, h: maxY + 48, loopRoom};
 }
 
 function flattenModel(model, ox, oy, out) {
@@ -336,10 +384,20 @@ function _rects(obstacles, a, b) {
   const inside = (o, it) => it && it.x >= o.x - 1 && it.y >= o.y - 1
     && it.x + it.w <= o.x + o.w + 1 && it.y + it.h <= o.y + o.h + 1;
   const out = [];
+  let holder = null;
   for (const o of obstacles) {
     if (o === a || o === b) continue;
-    if (o.inner && (inside(o, a) || inside(o, b))) continue;
+    if (o.inner && (inside(o, a) || inside(o, b))) {
+      if (!holder || o.w * o.h < holder.w * holder.h) holder = o;
+      continue;
+    }
     out.push({l: o.x - 6, r: o.x + o.w + 6, t: o.y - 6, b: o.y + o.h + 6});
+  }
+  // ...and a wire between members stays in their box: its side walls are
+  // obstacles too, so no detour swings out through them (ex05's agent)
+  if (holder) {
+    out.push({l: -1e6, r: holder.x + 4, t: -1e6, b: 1e6, wall: true});
+    out.push({l: holder.x + holder.w - 4, r: 1e6, t: -1e6, b: 1e6, wall: true});
   }
   return out;
 }
@@ -416,22 +474,146 @@ function routeAvoiding(a, b, obstacles) {
       + ` L ${lane} ${y2 - 100}`
       + ` C ${lane} ${y2 - 46}, ${x2} ${y2 - 46}, ${x2} ${y2}`;
   };
+  // A short near-vertical hop blocked by a card in its own column steps
+  // aside just past that card and back. The bow is one symmetric curve:
+  // to clear an op sitting low in a short gap (a loop's router tying to
+  // END over the op beneath it) it swung ~270 px out, and out of its
+  // container.
+  const sideStep = () => {
+    if (Math.abs(x2 - x1) >= 40) return null;
+    const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
+    const block = rects.filter(o => !o.wall && o.l < hi + 8 && o.r > lo - 8 && o.b > y1 && o.t < y2);
+    if (!block.length) return null;
+    const bt = Math.min(...block.map(o => o.t)), bb = Math.max(...block.map(o => o.b));
+    if (bt - y1 < 16 || y2 - bb < 16) return null;   // no room to turn
+    const lane = _clearLaneX(rects, bt, bb, (x1 + x2) / 2);
+    if (lane === null) return null;
+    const q1 = (bt - y1) / 2, q2 = (y2 - bb) / 2;
+    if (_hits(_sampleCubic(x1, y1, x1, y1 + q1, lane, bt - q1, lane, bt), rects)
+        || _hits(_sampleCubic(lane, bb, lane, bb + q2, x2, y2 - q2, x2, y2), rects)) {
+      _lanes.v.pop();   // the turns are blocked: give the lane back
+      return null;
+    }
+    return `M ${x1} ${y1} C ${x1} ${y1 + q1}, ${lane} ${bt - q1}, ${lane} ${bt}`
+      + ` L ${lane} ${bb}`
+      + ` C ${lane} ${bb + q2}, ${x2} ${y2 - q2}, ${x2} ${y2}`;
+  };
   const shortHop = y2 - y1 < 480;
-  return (shortHop ? (bow() ?? laneRoute()) : (laneRoute() ?? bow()))
+  return (shortHop ? (sideStep() ?? bow() ?? laneRoute()) : (laneRoute() ?? bow()))
     ?? bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
 }
 
-function returnPath(a, b) {
-  // A loop's return edge: out of the source's right flank, bowing up
-  // the right margin, back into the target's right flank. Drawn
-  // differently from a forward edge on purpose — this is the arrow that
-  // makes an agent while-loop look like what the author wrote instead of
-  // one opaque compiler box.
-  const x1 = a.x + a.w, y1 = a.y + a.h / 2;
+function returnPath(a, b, from) {
+  // A loop's return edge: out of the source's right flank (or, from a
+  // decision card, out of its own row's dot: `from`), bowing up the right
+  // margin, back into the target's right flank. Drawn differently from a
+  // forward edge on purpose — this is the arrow that makes an agent
+  // while-loop look like what the author wrote instead of one opaque
+  // compiler box.
+  const x1 = from ? from.x : a.x + a.w, y1 = from ? from.y : a.y + a.h / 2;
   const x2 = b.x + b.w, y2 = b.y + b.h / 2;
   const bulge = Math.max(x1, x2) + 56 + Math.abs(y1 - y2) * 0.08;
   return `M ${x1} ${y1} C ${bulge} ${y1}, ${bulge} ${y2}, ${x2} ${y2}`;
 }
+
+// where a decision card's condition row puts its wire: the row's dot,
+// in canvas coordinates
+function rowDot(A, port) {
+  return {x: A.x + (port.x != null ? port.x : (port.side > 0 ? A.w : 0)), y: A.y + port.y};
+}
+
+/* A wire out of a decision card's condition row to a port at (x2, y2):
+ * it departs AT the row's dot, horizontal tangent out, vertical tangent
+ * in; control distances scale with the actual gap, so a near neighbour
+ * gets a tight elbow, not a balloon. */
+function rowWirePath(A, port, x2, y2) {
+  const side = port.side;
+  const {x: x1, y: y1} = rowDot(A, port);
+  const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5));
+  const c2 = Math.max(26, Math.min(72, Math.max(1, y2 - y1) * 0.5));
+  // tangent tilts slightly toward the target, so the wire reads
+  // "leaving this row, heading there" instead of bowing sideways
+  const dip = Math.max(4, Math.min(22, (y2 - y1) * 0.15));
+  const bottom = A.y + A.h;
+  if (y2 > bottom && x2 > A.x - 12 && x2 < A.x + A.w + 12) {
+    // the target lies under the card: one curve from the dot to it
+    // bent back through the card's own lower rows. Step out beside
+    // the card and below its bottom first, then drop into the
+    // target — every point of the second half is under the card.
+    const lx = side > 0 ? A.x + A.w + 14 : A.x - 14;
+    const yb = bottom + Math.min(18, Math.max(6, (y2 - bottom) * 0.3));
+    const k = (y2 - yb) / 2;
+    return `M ${x1} ${y1} C ${lx} ${y1}, ${lx} ${y1}, ${lx} ${yb}`
+      + ` C ${lx} ${yb + k}, ${x2} ${y2 - k}, ${x2} ${y2}`;
+  }
+  return `M ${x1} ${y1} C ${x1 + side * c1} ${y1 + dip}, ${x2} ${y2 - c2}, ${x2} ${y2}`;
+}
+
+/* A wire that starts at a row's dot starts INSIDE its card — but edges
+ * paint beneath the cards. Repaint exactly the over-card stretch above
+ * the card, masked to its rect: identical paths, so there is no seam and
+ * dashed elses stay in phase. The mask also cuts a hole under every
+ * condition dot: the repaint sits ABOVE the card, so without the hole a
+ * 12px glow starting at the dot's centre painted right over it. */
+function overCard(A, made) {
+  const top = $("#edgetop");
+  const cid = "rowmask-" + A.key.replace(/[^A-Za-z0-9_-]/g, "_");
+  if (!top.querySelector(`#${cid}`)) {
+    const mk = document.createElementNS(SVGNS, "mask");
+    mk.setAttribute("id", cid);
+    mk.setAttribute("maskUnits", "userSpaceOnUse");
+    mk.setAttribute("x", A.x - 4); mk.setAttribute("y", A.y - 4);
+    mk.setAttribute("width", A.w + 8); mk.setAttribute("height", A.h + 8);
+    const r = document.createElementNS(SVGNS, "rect");
+    r.setAttribute("x", A.x - 4); r.setAttribute("y", A.y - 4);
+    r.setAttribute("width", A.w + 8); r.setAttribute("height", A.h + 8);
+    r.setAttribute("fill", "#fff");
+    mk.append(r);
+    for (const d of (A.condDots || [])) {
+      const hole = document.createElementNS(SVGNS, "circle");
+      hole.setAttribute("cx", A.x + d.x); hole.setAttribute("cy", A.y + d.y);
+      hole.setAttribute("r", 7.5);
+      hole.setAttribute("fill", "#000");
+      mk.append(hole);
+    }
+    top.append(mk);
+  }
+  const g2 = document.createElementNS(SVGNS, "g");
+  g2.setAttribute("mask", `url(#${cid})`);
+  const over = made.map(m => m.cloneNode(false));
+  for (const m of over) g2.append(m);
+  top.append(g2);
+  made.push(...over);
+}
+
+/* A tie out of a decision card's row into END: out of the row's dot,
+ * down a clear lane beside the card, along above END and down into its
+ * port, like every wire. It stays off the cards between: a straight fall
+ * ran under the op beneath the router, and the router's bow swung 250 px
+ * wide. The lane steps outward past anything in its way; if none is
+ * clear, the tie routes like any other. */
+function rowTiePath(A, port, b, obstacles) {
+  const {x: x0, y: y0} = rowDot(A, port);
+  const rects = _rects(obstacles, A, b);
+  const x2 = portCX(b), y2 = b.y;
+  const clear = (l, r, t, bt) => !rects.some(q => q.l < r && q.r > l && q.t < bt && q.b > t);
+  for (let step = 0; step < 6; step++) {
+    const lx = port.side > 0 ? A.x + A.w + 14 + 24 * step : A.x - 14 - 24 * step;
+    const dir = x2 >= lx ? 1 : -1, r = Math.min(14, Math.abs(x2 - lx) / 2);
+    const yh = y2 - r - 6;
+    if (r < 4 || yh - r < y0 + 14) break;
+    if (!clear(lx - 2, lx + 2, y0 + 14, yh) || !clear(Math.min(lx, x2), Math.max(lx, x2), yh - 2, yh + 2)) continue;
+    return `M ${x0} ${y0} C ${lx} ${y0}, ${lx} ${y0}, ${lx} ${y0 + 14} L ${lx} ${yh - r}`
+      + ` C ${lx} ${yh - r * 0.45}, ${lx + dir * r * 0.45} ${yh}, ${lx + dir * r} ${yh} L ${x2 - dir * r} ${yh}`
+      + ` C ${x2 - dir * r * 0.45} ${yh}, ${x2} ${yh + r * 0.45}, ${x2} ${yh + r} L ${x2} ${y2}`;
+  }
+  const v = {x: (port.side > 0 ? A.x + A.w + 14 : A.x - 14) - 1, y: y0 + 14, w: 2, h: 0, node: {}};
+  const rest = routeAvoiding(v, b, obstacles).replace(/^M\s*-?[\d.]+[\s,]+-?[\d.]+/, "");
+  return `M ${x0} ${y0} C ${v.x + 1} ${y0}, ${v.x + 1} ${y0}, ${v.x + 1} ${y0 + 14}${rest}`;
+}
+
+// a decision card's row for a route into END: its tie leaves that row
+const exitRow = (it) => (it && it.node.routes && it.condPorts ? it.condPorts.__END__ || null : null);
 
 function consumeOf(edge, a, b) {
   // `.parallel()` / `.collect()` live on the CONSUMER's binding: find the
@@ -470,7 +652,8 @@ function bouton(svg, x, y, cls) {
 /* An edge is a beam of energy: a wide soft glow, a bright core, and
  * spark particles frozen mid-flight — each with a smaller trailing dot
  * behind it, so the comet shape says which way the energy flows without
- * a frame of animation. */
+ * a frame of animation. Nothing here moves: a run in progress is the
+ * only motion (liveCanvas, which lights the core and sends particles). */
 function energyEdge(svg, d, cls, made) {
   const glow = document.createElementNS(SVGNS, "path");
   glow.setAttribute("d", d);
@@ -489,15 +672,57 @@ function energyEdge(svg, d, cls, made) {
   return core;
 }
 
+/* Points along a wire without asking the browser. The router draws with
+ * absolute M, L and C only, so a wire's length and points are sampled
+ * here: getTotalLength/getPointAtLength cost ~0.2 ms a call, 58 of the
+ * 224 ms a 302-op render took (measured, docs/ASSISTANT_NEXT_PLAN.md §8).
+ * Any other command returns null, and the caller asks the DOM. */
+function pathSampler(d) {
+  const tok = String(d).match(/[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g);
+  if (!tok) return null;
+  const pts = [];
+  let i = 0, x = 0, y = 0, cmd = null;
+  const num = () => parseFloat(tok[i++]);
+  while (i < tok.length) {
+    if (/[A-Za-z]/.test(tok[i])) cmd = tok[i++];
+    if (cmd === "M" || cmd === "L") {
+      x = num(); y = num();
+      pts.push(x, y);
+      if (cmd === "M") cmd = "L";          // pairs after a moveto are linetos
+    } else if (cmd === "C") {
+      const x1 = num(), y1 = num(), x2 = num(), y2 = num(), x3 = num(), y3 = num();
+      for (let k = 1; k <= 16; k++) {
+        const t = k / 16, u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, e = t * t * t;
+        pts.push(a * x + b * x1 + c * x2 + e * x3, a * y + b * y1 + c * y2 + e * y3);
+      }
+      x = x3; y = y3;
+    } else return null;
+  }
+  if (pts.length < 4 || pts.some(Number.isNaN)) return null;
+  const cum = [0];
+  for (let k = 2; k < pts.length; k += 2) cum.push(cum[cum.length - 1] + Math.hypot(pts[k] - pts[k - 2], pts[k + 1] - pts[k - 1]));
+  const len = cum[cum.length - 1];
+  const at = (v) => {
+    let k = 1;
+    while (k < cum.length - 1 && cum[k] < v) k += 1;
+    const seg = cum[k] - cum[k - 1] || 1, f = Math.max(0, Math.min(1, (v - cum[k - 1]) / seg));
+    return {x: pts[2 * k - 2] + (pts[2 * k] - pts[2 * k - 2]) * f, y: pts[2 * k - 1] + (pts[2 * k + 1] - pts[2 * k - 1]) * f};
+  };
+  return {len, at};
+}
+
 function energySparks(svg, path, cls) {
-  let len;
-  try { len = path.getTotalLength(); } catch { return; }
+  let s = pathSampler(path.getAttribute("d") || "");
+  if (!s) {
+    try { s = {len: path.getTotalLength(), at: (v) => path.getPointAtLength(v)}; } catch { return; }
+  }
+  const len = s.len;
   if (!len || len < 130) return;
   const count = Math.max(1, Math.min(3, Math.round(len / 240)));
   for (let i = 0; i < count; i++) {
     const at = ((i + 0.5) / count) * len;
-    const pt = path.getPointAtLength(at);
-    const tail = path.getPointAtLength(Math.max(0, at - 7));
+    const pt = s.at(at);
+    const tail = s.at(Math.max(0, at - 7));
     const t = document.createElementNS(SVGNS, "circle");
     t.setAttribute("cx", tail.x); t.setAttribute("cy", tail.y); t.setAttribute("r", 1.6);
     t.setAttribute("class", ("espark tailspark " + cls).trim());
@@ -534,8 +759,36 @@ function serveNodesFor(graph) {
 
 /* ── rendering ────────────────────────────────────────────────────── */
 
+/* A canvas that is not on screen (another tab, the assistant in focus)
+ * measures every card as 0 × 0: laid out then, decision wires left from
+ * the cards' top-left corners, names kept their guessed widths, and
+ * nothing redrew when the canvas came back (docs/LAYOUT_HOTFIX_PLAN.md).
+ * So a render while hidden only marks the canvas stale; it is drawn the
+ * moment it shows again. */
+const canvasShown = () => $("#stage").getClientRects().length > 0;
+function flushCanvas() {
+  if (!canvasShown()) return;
+  if (state.renderPending) render();
+  // the Flow tab's view, never inside a run's pane (which fits its own):
+  // exactly as it was left when a run's pane borrowed the canvas, else
+  // the saved or landing view
+  if (state.viewPending && !state.workflowOn) {
+    state.viewPending = false;
+    const v = state.flowView;
+    if (!v) { initView(); return; }
+    state.view.scale = v.scale;
+    applyView();
+    $("#stage").scrollLeft = v.x;
+    $("#stage").scrollTop = v.y;
+  }
+}
+
 function render() {
   const g = state.graph;
+  const gname = $("#graph-name");
+  if (gname) gname.textContent = g ? g.name : "no graph";
+  if (!canvasShown()) { state.renderPending = true; return; }
+  state.renderPending = false;
   const nodesBox = $("#nodes");
   const svg = $("#edges");
   nodesBox.textContent = "";
@@ -597,43 +850,81 @@ function render() {
   // (positive) or spare (negative); the card resizes by that amount,
   // clamped, and KEEPS ITS SLOT CENTER so the layout's spacing holds —
   // slack between 316px slots absorbs growth up to the cap.
+  //
+  // Reads and writes are BATCHED: measuring card by card (write a style,
+  // read a width, write it back, read again) forced a full layout of the
+  // canvas twice per card — 202 forced layouts, ~85 of the 108 ms a render
+  // of callbot took (measured, docs/REFACTOR_PHASE2.md P4). One class
+  // switches every measured line to max-content at once; all widths are
+  // read in one layout, all laid-out widths in a second, and only then is
+  // anything written.
+  const measured = [];
   for (const it of flat.nodes) {
     if (it.inner || it.node.kind === "__boundary__") continue;
     const card = state.cardEls.get(it.key);
-    if (!card || !card.offsetHeight) continue;
-    const els = [...card.querySelectorAll(".ntext, .brcond")];
-    if (!els.length) {
-      // gates: plain name line, plus the transport line below it
-      for (const sel of [".nname", ".nkind"]) {
-        const e = card.querySelector(sel);
-        if (e) els.push(e);
-      }
-    }
-    if (els.length) {
-      // scrollWidth never reads below clientWidth, so a stretched flex
-      // span hides how little it truly needs — pin it to max-content
-      // for one frame to get the intrinsic width
-      const intrinsic = (e) => {
-        const saved = e.style.cssText;
-        e.style.flex = "none"; e.style.width = "max-content";
-        const w = e.offsetWidth;
-        e.style.cssText = saved;
-        return w;
-      };
-      const need = Math.max(...els.map(e => intrinsic(e) - e.clientWidth));
-      const newW = Math.max(180, Math.min(310, Math.ceil(it.w + need + 8)));
-      if (newW !== it.w) {
-        it.x += (it.w - newW) / 2;
-        it.w = newW;
-        card.style.width = `${newW}px`;
-        card.style.left = `${it.x}px`;
+    if (!card) continue;
+    let els = [...card.querySelectorAll(".ntext, .brcond")];
+    // gates: plain name line, plus the transport line below it
+    if (!els.length) els = [".nname", ".nkind"].map(sel => card.querySelector(sel)).filter(Boolean);
+    measured.push({it, card, els});
+  }
+  nodesBox.classList.add("measuring");
+  const natural = measured.map(m => m.els.map(e => e.offsetWidth));
+  nodesBox.classList.remove("measuring");
+  const laidOut = measured.map(m => ({shown: !!m.card.offsetHeight, widths: m.els.map(e => e.clientWidth)}));
+  const resize = (m, w) => {
+    const it = m.it;
+    if (w === it.w) return;
+    it.x += (it.w - w) / 2;
+    it.w = w;
+    m.card.style.width = `${w}px`;
+    m.card.style.left = `${it.x}px`;
+  };
+  measured.forEach((m, i) => {
+    if (!laidOut[i].shown || !m.els.length) return;
+    const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
+    const want = Math.ceil(m.it.w + need + 8);
+    m.capped = want > 310;
+    resize(m, Math.max(180, Math.min(310, want)));
+  });
+  // Two neighbours both grown to the cap stood 6 px apart (310 wide in
+  // 316 px slots). A row keeps 16 px between its cards: the wider ones
+  // give width back about their centres, never below the slot's own
+  // 260, which leaves the grid's 56.
+  const rowsOf = new Map();
+  for (const m of measured) {
+    const k = `${m.it.key.split("/").slice(0, -1).join("/")}|${Math.round(m.it.y)}`;
+    if (!rowsOf.has(k)) rowsOf.set(k, []);
+    rowsOf.get(k).push(m);
+  }
+  for (const row of rowsOf.values()) {
+    row.sort((p, q) => p.it.x - q.it.x);
+    for (let i = 1; i < row.length; i++) {
+      const a = row[i - 1], b = row[i];
+      const need = 16 - (b.it.x - (a.it.x + a.it.w));
+      if (need <= 0) continue;
+      for (const m of [a, b]) {
+        const w = Math.min(m.it.w, Math.max(NODE_W, m.it.w - need));
+        if (w < m.it.w) { resize(m, w); m.capped = true; }
       }
     }
   }
+  // a name cut short says itself in full on hover
+  for (const m of measured) {
+    if (!m.capped) continue;
+    m.card.dataset.capped = "";
+    for (const e of m.els) if (e.classList.contains("ntext")) e.title = e.textContent;
+  }
+  // heights and the decision rows' port dots: all read first (one
+  // layout), the rows' sides written after
+  const sides = [];
   for (const it of flat.nodes) {
     if (it.inner || it.node.kind === "__boundary__") continue;
     const card = state.cardEls.get(it.key);
-    if (card && card.offsetHeight) it.h = Math.max(it.h, card.offsetHeight);
+    // the card's real height, both ways: the layout's 64 px is a guess,
+    // and a card slimmer than it (50 px at the landing zoom) kept the
+    // guess — every wire out of it then started 14 px below its port
+    if (card && card.offsetHeight) it.h = card.offsetHeight;
     if (card && it.node.routes && it.node.routes.length) {
       // each condition row is a wired exit: record where the wire
       // leaves (first row per target decides), and put the row's port
@@ -641,29 +932,33 @@ function render() {
       // exactly at the dot, never from the blind side of the card
       it.condPorts = {};
       it.condDots = [];
+      // a route that is the loop's return leaves on the right, where
+      // returns bow up the margin
+      const backTo = new Set(flat.edges.filter(fe => fe.a === it && fe.e.back).map(fe => fe.b.node.name));
       for (const rrow of card.querySelectorAll(".brrow")) {
         const t = rrow.dataset.target;
         const tgt = flat.nodes.find(o => o.depth === it.depth
           && o.node.name === t && o !== it);
-        const side = tgt && portCX(tgt) < it.x + it.w / 2 ? -1 : 1;
-        rrow.classList.toggle("left", side < 0);
+        // a route into END leaves on the left: the right margin is where
+        // loop returns bow
+        const side = t === "__END__" ? -1 : !backTo.has(t) && tgt && portCX(tgt) < it.x + it.w / 2 ? -1 : 1;
+        sides.push([rrow, side < 0]);
+        const left = rrow.offsetLeft, top = rrow.offsetTop, w = rrow.offsetWidth, h = rrow.offsetHeight;
+        // a row that is not laid out has no port: its wire leaves the
+        // card's bottom rather than the card's top-left corner
+        if (!w) continue;
         // every row's dot, card-relative — the wire repaint above the
         // card is masked out under each one, so the dot stays the
         // terminal the wire emerges FROM, never a bead the wire buries
-        it.condDots.push({
-          x: side < 0 ? rrow.offsetLeft - 1 : rrow.offsetLeft + rrow.offsetWidth + 1,
-          y: rrow.offsetTop + rrow.offsetHeight / 2});
-        if (!(t in it.condPorts)) {
-          // x/y of the row's own DOT (card-relative): the wire must
-          // emerge from the condition box itself, not the card border
-          it.condPorts[t] = {
-            x: side < 0 ? rrow.offsetLeft - 1
-                        : rrow.offsetLeft + rrow.offsetWidth + 1,
-            y: rrow.offsetTop + rrow.offsetHeight / 2, side};
-        }
+        const dot = {x: side < 0 ? left - 1 : left + w + 1, y: top + h / 2};
+        it.condDots.push(dot);
+        // x/y of the row's own DOT (card-relative): the wire must
+        // emerge from the condition box itself, not the card border
+        if (!(t in it.condPorts)) it.condPorts[t] = {...dot, side};
       }
     }
   }
+  for (const [rrow, left] of sides) rrow.classList.toggle("left", left);
 
   // Rows part for real heights: semantic zoom grows cards, and a
   // fixed pitch would let them collide. Runs INSIDE every opened
@@ -720,6 +1015,16 @@ function render() {
       // the END knob rode any shift with its row — the container's
       // bottom edge follows the knob's centre, never the other way
       const endKnob = kids.find(k => k.node.boundary === "end");
+      // ... but a knob standing in the gap between two members shares no
+      // column with them, so a push that moved them down left it on their
+      // row, and the members hung out of the container's bottom (ex05's
+      // graded, under a tall decision card). END keeps withBoundaries'
+      // rule: under the lowest member.
+      if (endKnob) {
+        const lowest = Math.max(...kids.filter(k => k !== endKnob).map(k => k.y + k.h));
+        const floor = lowest + 22 - KB / 2;
+        if (endKnob.y < floor) shiftTree(endKnob, floor - endKnob.y);
+      }
       const newH = Math.max(c.h, endKnob
         ? (endKnob.y + endKnob.h / 2) - c.y
         : bottom + 18 - c.y);
@@ -743,16 +1048,45 @@ function render() {
   const at = (name) => flat.nodes.find(it => it.depth === 0 && it.node.name === name);
   const entryTies = (g.entries || []).map(at).filter(Boolean);
   const exitTies = (g.exits || []).map(at).filter(Boolean);
+  // The terminals are placed here, before the extent. Each is centred over
+  // its ops and 96 px away from them — and clear of every card in its
+  // column. An exit with ops beneath it (a loop's router, whose ops
+  // after it loop back) used to put END on top of one of them.
+  const pill = (which, x, y) => ({key: `__main/__${which}`, depth: 0, inner: null,
+                                  x, y, w: B_W, h: B_H,
+                                  node: {id: `__${which}__`, name: which.toUpperCase(),
+                                         kind: "__boundary__", boundary: which}});
+  const over = (items) => items.reduce((s, it) => s + portCX(it), 0) / items.length - B_W / 2;
+  const clearOf = (x, y, dir) => {
+    const tops = flat.nodes.filter(o => o.depth === 0);
+    for (let moved = true, n = 0; moved && n < tops.length; n++) {
+      moved = false;
+      for (const o of tops) {
+        if (o.x < x + B_W + 12 && o.x + o.w > x - 12 && o.y < y + B_H + 30 && o.y + o.h + 30 > y) {
+          y = dir > 0 ? o.y + o.h + 30 : o.y - 30 - B_H;
+          moved = true;
+        }
+      }
+    }
+    return y;
+  };
+  let startIt = null, endIt = null;
+  if (entryTies.length) {
+    const x = over(entryTies);
+    startIt = pill("start", x, clearOf(x, Math.min(...entryTies.map(it => it.y)) - 96, -1));
+  }
+  if (exitTies.length) {
+    const x = over(exitTies);
+    endIt = pill("end", x, clearOf(x, Math.max(...exitTies.map(it => it.y + it.h)) + 96, 1));
+  }
+  // where the flow begins: a view that cannot show it all lands here
+  state.startAt = startIt ? {x: startIt.x + startIt.w / 2, y: startIt.y} : null;
   let minY = gatesIn.length
     ? Math.min(...gatesIn.map(x => x.y)) - 70
     : -NODE_H - 140;
-  if (entryTies.length) {
-    minY = Math.min(minY, Math.min(...entryTies.map(it => it.y)) - 96 - 40);
-  }
+  if (startIt) minY = Math.min(minY, startIt.y - 40);
   let bottom = maxY + 175;
-  if (exitTies.length) {
-    bottom = Math.max(bottom, Math.max(...exitTies.map(it => it.y + it.h)) + 96 + B_H + 40);
-  }
+  if (endIt) bottom = Math.max(bottom, endIt.y + B_H + 40);
   // width includes the right margin where loop returns bulge
   state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: bottom};
 
@@ -812,36 +1146,25 @@ function render() {
   // exits. With the client stubs gone, ties land dead-centre on every
   // card, doors included.
   if (flat.nodes.length) {
-    // entryTies / exitTies were resolved above, where the extent needed them
-    const over = (items) => items.reduce((s, it) => s + portCX(it), 0)
-      / items.length - B_W / 2;
-    const tie = (x1, y1, x2, y2) => {
+    // the pills were placed above, where the extent needed them; a tie
+    // routes around a card in its way like any wire (an exit's tie ran
+    // straight through the ops beneath it)
+    const tie = (a, b) => {
       const p = document.createElementNS(SVGNS, "path");
-      p.setAttribute("d", bezier(x1, y1, x2, y2));
+      // a decision card's route into END leaves that route's row
+      const row = exitRow(a);
+      p.setAttribute("d", row ? rowTiePath(a, row, b, flat.nodes) : routeAvoiding(a, b, flat.nodes));
       p.setAttribute("class", "bedge");
       svg.append(p);
+      if (row) overCard(a, [p]);
     };
-    if (entryTies.length) {
-      const topY = Math.min(...entryTies.map(it => it.y)) - 96;
-      const startIt = {key: "__main/__start", depth: 0, inner: null,
-                       x: over(entryTies), y: topY, w: B_W, h: B_H,
-                       node: {id: "__start__", name: "START",
-                              kind: "__boundary__", boundary: "start"}};
+    if (startIt) {
       nodesBox.append(boundaryCard(startIt));
-      for (const t of entryTies) {
-        tie(startIt.x + B_W / 2, startIt.y + B_H, t.x + t.w / 2, t.y);
-      }
+      for (const t of entryTies) tie(startIt, t.bIn || t);
     }
-    if (exitTies.length) {
-      const endY = Math.max(...exitTies.map(it => it.y + it.h)) + 96;
-      const endIt = {key: "__main/__end", depth: 0, inner: null,
-                     x: over(exitTies), y: endY, w: B_W, h: B_H,
-                     node: {id: "__end__", name: "END",
-                            kind: "__boundary__", boundary: "end"}};
+    if (endIt) {
       nodesBox.append(boundaryCard(endIt));
-      for (const t of exitTies) {
-        tie(t.x + t.w / 2, t.y + t.h, endIt.x + B_W / 2, endIt.y);
-      }
+      for (const t of exitTies) tie(t.bOut || t, endIt);
     }
   }
 
@@ -877,10 +1200,18 @@ function render() {
     // exits → END. Structural, quiet — not an energy beam.
     if (e.boundary) {
       const bp = document.createElementNS(SVGNS, "path");
-      bp.setAttribute("d", bezier(portCX(a), a.y + a.h, portCX(b), b.y));
+      // around the members in its way, not through them (ex05: a loop's
+      // router ties to END straight through the op beneath it); an opened
+      // member ties from its own END knob, like every other wire; a
+      // decision card's route into END leaves that route's row
+      const row = !a.bOut && exitRow(a);
+      const tb = b.bIn || b;
+      bp.setAttribute("d", row ? rowTiePath(a, row, tb, obstacles) : routeAvoiding(a.bOut || a, tb, obstacles));
       bp.setAttribute("class", "bedge");
       svg.append(bp);
-      state.edgeEls.push({a: a.key, b: b.key, els: [bp]});
+      const els = [bp];
+      if (row) overCard(a, els);
+      state.edgeEls.push({a: a.key, b: b.key, els});
       continue;
     }
     // an expanded container's pills stand in for its rim: edges from
@@ -901,33 +1232,23 @@ function render() {
       isElse = condLabels.length > 0 && condLabels.every(c => c === "else");
     }
     if (e.back) {
-      p.setAttribute("d", returnPath(A, B));
+      // a router's route that is the return leaves from its own row's dot
+      const backRow = a.node.routes && A.condPorts ? A.condPorts[b.node.name] : null;
+      const from = backRow ? rowDot(A, backRow) : null;
+      p.setAttribute("d", returnPath(A, B, from));
+      if (from) p.dataset.fromRow = "1";
       cls += " back";
       if (!e.soft) sheath = "back";
-      const bulge = Math.max(A.x + A.w, B.x + B.w) + 56
-        + Math.abs((A.y + A.h / 2) - (B.y + B.h / 2)) * 0.08;
-      addGlyph(bulge + 4, (A.y + A.h / 2 + B.y + B.h / 2) / 2, "↺ loop", "back-label");
+      const fx = from ? from.x : A.x + A.w, fy = from ? from.y : A.y + A.h / 2;
+      const bulge = Math.max(fx, B.x + B.w) + 56 + Math.abs(fy - (B.y + B.h / 2)) * 0.08;
+      addGlyph(bulge + 4, (fy + B.y + B.h / 2) / 2, "↺ loop", "back-label");
     } else {
       // a condition edge leaves ITS OWN ROW on the decision card — the
       // wire starts beside the condition that fires it
       const rowPort = condLabels.length && A.condPorts
         ? A.condPorts[b.node.name] : null;
       if (rowPort != null) {
-        // departs AT the row's dot, horizontal tangent out, vertical
-        // tangent in — control distances scale with the actual gap so
-        // a near neighbour gets a tight elbow, not a balloon
-        const side = rowPort.side;
-        const x1 = A.x + (rowPort.x != null ? rowPort.x
-                                            : (side > 0 ? A.w : 0));
-        const y1 = A.y + rowPort.y;
-        const x2 = portCX(B), y2 = B.y;
-        const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5));
-        const c2 = Math.max(26, Math.min(72, Math.max(1, y2 - y1) * 0.5));
-        // tangent tilts slightly toward the target, so the wire reads
-        // "leaving this row, heading there" instead of bowing sideways
-        const dip = Math.max(4, Math.min(22, (y2 - y1) * 0.15));
-        p.setAttribute("d",
-          `M ${x1} ${y1} C ${x1 + side * c1} ${y1 + dip}, ${x2} ${y2 - c2}, ${x2} ${y2}`);
+        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y));
         p.dataset.fromRow = "1";
       } else {
         p.setAttribute("d", routeAvoiding(A, B, obstacles));
@@ -946,43 +1267,8 @@ function render() {
       svg.append(p);
       made.push(p);
     }
-    // a decision wire starts INSIDE the card, at its condition row's
-    // dot — but edges paint beneath the cards. Repaint exactly the
-    // over-card stretch above the card, masked to its rect: identical
-    // paths, so there is no seam and dashed elses stay in phase. The
-    // mask also cuts a hole under every condition dot: the repaint
-    // sits ABOVE the card, so without the hole a 12px glow starting at
-    // the dot's centre painted right over it.
-    if (p.dataset.fromRow === "1") {
-      const top = $("#edgetop");
-      const cid = "rowmask-" + A.key.replace(/[^A-Za-z0-9_-]/g, "_");
-      if (!top.querySelector(`#${cid}`)) {
-        const mk = document.createElementNS(SVGNS, "mask");
-        mk.setAttribute("id", cid);
-        mk.setAttribute("maskUnits", "userSpaceOnUse");
-        mk.setAttribute("x", A.x - 4); mk.setAttribute("y", A.y - 4);
-        mk.setAttribute("width", A.w + 8); mk.setAttribute("height", A.h + 8);
-        const r = document.createElementNS(SVGNS, "rect");
-        r.setAttribute("x", A.x - 4); r.setAttribute("y", A.y - 4);
-        r.setAttribute("width", A.w + 8); r.setAttribute("height", A.h + 8);
-        r.setAttribute("fill", "#fff");
-        mk.append(r);
-        for (const d of (A.condDots || [])) {
-          const hole = document.createElementNS(SVGNS, "circle");
-          hole.setAttribute("cx", A.x + d.x); hole.setAttribute("cy", A.y + d.y);
-          hole.setAttribute("r", 7.5);
-          hole.setAttribute("fill", "#000");
-          mk.append(hole);
-        }
-        top.append(mk);
-      }
-      const g2 = document.createElementNS(SVGNS, "g");
-      g2.setAttribute("mask", `url(#${cid})`);
-      const over = made.map(m => m.cloneNode(false));
-      for (const m of over) g2.append(m);
-      top.append(g2);
-      made.push(...over);
-    }
+    // a decision wire starts INSIDE the card, at its condition row's dot
+    if (p.dataset.fromRow === "1") overCard(A, made);
     if (faded) for (const el2 of made) el2.classList.add("dorm");
     // selection highlights and ←/→ walking work off this ledger, so a
     // click never needs to redraw the whole canvas
@@ -1042,8 +1328,28 @@ function render() {
   // flatten order still draws a container before its members, so
   // members paint on top of their box without z-index bookkeeping)
 
+  // A wire can bow past every card (a tie routed around an op at the
+  // flow's left edge): the world grows to hold what was actually drawn,
+  // so no stretch of wire sits where the canvas cannot scroll.
+  try {
+    const bb = svg.getBBox();
+    if (bb.width || bb.height) {
+      const ex = state.extent;
+      ex.minX = Math.min(ex.minX, Math.floor(bb.x) - 16);
+      ex.minY = Math.min(ex.minY, Math.floor(bb.y) - 16);
+      ex.maxX = Math.max(ex.maxX, Math.ceil(bb.x + bb.width) + 16);
+      ex.maxY = Math.max(ex.maxY, Math.ceil(bb.y + bb.height) + 16);
+    }
+  } catch { /* nothing drawn */ }
+
+  // a very big graph keeps its membranes but not their soft blurred
+  // shadows: a zoom re-rasters every visible cell each frame, and on the
+  // 302-op graph the blur cost 26 ms a frame against 19 without
+  // (measured, docs/ASSISTANT_NEXT_PLAN.md §8). Graphs of real size keep all of it.
+  $("#world").classList.toggle("big", state.cardEls.size >= BIG_GRAPH_CELLS);
   refreshSelection();
   applyView();
+  if (liveCanvas) liveCanvas.reindex();
 }
 
 /* Selection is a class toggle, not a redraw — clicking around a big
@@ -1067,9 +1373,23 @@ function deselect() {
  * graph is, its doors, and the painted run if any. */
 function renderFlowInfo() {
   if (state.sel) return;
+  // an execution is open in the run's tree: a code reload (the assistant
+  // editing, say) must not wipe the panel the user is working in
+  if (state.tab === "traces" && !state.workflowOn && state.execPanelRun && state.execPanelRun === state._tlrun) return;
   const panel = $("#inspector");
   panel.textContent = "";
   panel.scrollTop = 0;
+  // the Traces list (or a run's tree) has no flow on screen: say what
+  // the panel will show instead of describing a canvas nobody sees
+  if (state.tab === "traces" && !state.workflowOn) {
+    const hint = el("div", "sidehint");
+    hint.append(el("div", "sidehint-title", "Nothing selected"));
+    hint.append(el("p", null, state._tlrun
+      ? "Pick an execution in the tree to see what went in, what came out, and what fed it."
+      : "Open a run to read it as a tree, or as the flow with its values painted on every card."));
+    panel.append(hint);
+    return;
+  }
   const g = state.graph;
   if (!g) return;
 
@@ -1235,6 +1555,95 @@ function nameChips(n) {
   return box.childNodes.length ? box : null;
 }
 
+/* With a run painted, a card says ONE thing — the lens decides which.
+ * path: nothing but lit / faded. time: the op's total time in the run,
+ * the three slowest ranked, the border warmer with its share. errors:
+ * only failures, with their error. cost: only ops that cost money.
+ * values: executions and average, and the show-key values. */
+/* An op's numbers in the painted run — a nested graph's are its members'
+ * summed (a container never executes under its own name). */
+function runNumbers(n) {
+  const rolls = state.runRollups || new Map();
+  if (!n.graph) {
+    const info = state.run && state.run.ops[n.name];
+    return info ? {info, roll: rolls.get(n.name) || null} : null;
+  }
+  const acc = {runs: 0, total_ms: 0, max_ms: 0, errors: 0, last_error: null};
+  const roll = {count: 0, total_ms: 0, cost_usd: null, unpriced: 0, tokens_in: 0, tokens_out: 0};
+  let any = false;
+  (function walk(g) {
+    for (const m of (g && g.nodes) || []) {
+      if (m.graph) { walk(m.graph); continue; }
+      const i = state.run.ops[m.name];
+      if (!i) continue;
+      any = true;
+      acc.runs += i.runs; acc.total_ms += i.total_ms; acc.max_ms = Math.max(acc.max_ms, i.max_ms);
+      acc.errors += i.errors; acc.last_error = i.last_error || acc.last_error;
+      const r = rolls.get(m.name);
+      if (r) {
+        roll.count += r.count; roll.total_ms += r.total_ms; roll.unpriced += r.unpriced;
+        roll.tokens_in += r.tokens_in; roll.tokens_out += r.tokens_out;
+        if (r.cost_usd != null) roll.cost_usd = (roll.cost_usd || 0) + r.cost_usd;
+      }
+    }
+  })(n.graph);
+  return any ? {info: acc, roll} : null;
+}
+
+function lensBadge(card, badges, n) {
+  const lens = state.lens || "path";
+  const got = runNumbers(n);
+  const runinfo = got && got.info;
+  const roll = got && got.roll;
+  if (!runinfo) {
+    if (lens !== "path" && lens !== "values") card.classList.add("quiet");
+    return;
+  }
+  if (lens === "time") {
+    const runMs = (state.run.wall_s || 0) * 1000;
+    if (roll && RunView.background(roll, runMs)) {
+      const chip = el("span", "badge run", "whole run");
+      chip.title = `Spans the session (${fmtMs(runinfo.total_ms)}) — its time is the call's length, not work`;
+      badges.append(chip);
+      return;
+    }
+    const ranked = [...(state.runRollups || new Map()).values()]
+      .filter(r => !RunView.background(r, runMs)).slice(0, 3).map(r => r.op);
+    const place = ranked.indexOf(n.name);
+    const chip = el("span", "badge run", fmtMs(runinfo.total_ms));
+    chip.title = `${runinfo.runs} execution${runinfo.runs > 1 ? "s" : ""} · max ${fmtMs(runinfo.max_ms)}`;
+    if (place >= 0) {
+      const r = el("span", "badge rank", `#${place + 1}`);
+      r.title = `${["Slowest", "Second slowest", "Third slowest"][place]} op in this run`;
+      badges.append(r);
+    }
+    badges.append(chip);
+    const top = Math.max(1, ...[...(state.runRollups || new Map()).values()]
+      .filter(r => !RunView.background(r, runMs)).map(r => r.total_ms));
+    card.style.setProperty("--heat", Math.min(1, runinfo.total_ms / top).toFixed(2));
+    card.classList.add("heated");
+  } else if (lens === "errors") {
+    if (!runinfo.errors) { card.classList.add("quiet"); return; }
+    const last = String(runinfo.last_error || "failed").trim().split("\n").pop();
+    const chip = el("span", "badge err errline", `${runinfo.errors}✗ ${last}`);
+    chip.title = String(runinfo.last_error || "");
+    badges.append(chip);
+    card.classList.add("errorlit");
+  } else if (lens === "cost") {
+    if (!roll || (roll.cost_usd == null && !roll.unpriced)) { card.classList.add("quiet"); return; }
+    const chip = el("span", "badge run cost", RunView.money(roll.cost_usd, roll.unpriced));
+    chip.title = `${roll.tokens_in} in / ${roll.tokens_out} out tokens`;
+    badges.append(chip);
+  } else if (lens === "values") {
+    const avg = runinfo.runs ? (runinfo.total_ms / runinfo.runs) : 0;
+    const chip = el("span", "badge run",
+      `${runinfo.runs}× ${avg < 10 ? avg.toFixed(1) : Math.round(avg)}ms`
+      + (runinfo.errors ? ` · ${runinfo.errors}✗` : ""));
+    if (runinfo.errors) chip.classList.add("err");
+    badges.append(chip);
+  }
+}
+
 function opCard(it) {
   const n = it.node;
   if (n.kind === "__boundary__") return boundaryCard(it);
@@ -1266,7 +1675,7 @@ function opCard(it) {
     const line = el("div", "nname nline");
     line.append(el("span", "nicon", kindIcon(n)));
     line.append(el("span", "ntext", n.name));
-    const chips = nameChips(n);
+    const chips = state.run ? null : nameChips(n);
     if (chips) line.append(chips);
     card.append(line);
     card.title = n.kind + (n.bound ? ` · ${n.bound}` : "");
@@ -1289,7 +1698,7 @@ function opCard(it) {
     card.append(el("span", "iconband", kindIcon(n)));
     const line = el("div", "nname nline");
     line.append(el("span", "ntext", n.name));
-    const chips = nameChips(n);
+    const chips = state.run ? null : nameChips(n);
     if (chips) line.append(chips);
     card.append(line);
     // the kind line was card noise at fit-zoom; it lives in the
@@ -1303,7 +1712,7 @@ function opCard(it) {
     // or two outputs that stand for it. With a run painted the same
     // line carries the last execution's value, cut to a card's width.
     const det = el("div", "detail");
-    const keys = (n.show_keys || []).slice(0, 2);
+    const keys = (state.run && (state.lens || "path") !== "values") ? [] : (n.show_keys || []).slice(0, 2);
     const turnExec = state.run && state.runTurn && state.runByOpTurn
       && state.runByOpTurn.get(n.name) && state.runByOpTurn.get(n.name).get(state.runTurn);
     const vals = turnExec ? turnExec.outputs
@@ -1338,19 +1747,12 @@ function opCard(it) {
   }
 
   if (state.run && !ranInRun(n)) card.classList.add("dormant");
-  const runinfo = state.run && state.run.ops[n.name];
-  if (runinfo) {
-    const avg = runinfo.runs ? (runinfo.total_ms / runinfo.runs) : 0;
-    const chip = el("span", "badge run",
-      `${runinfo.runs}× ${avg < 10 ? avg.toFixed(1) : Math.round(avg)}ms`
-      + (runinfo.errors ? ` · ${runinfo.errors}✗` : ""));
-    if (runinfo.errors) { chip.classList.add("err"); card.classList.add("errorlit"); }
-    badges.append(chip);
-    // heat: the slow op should be findable without reading a number
-    if (!runinfo.errors && state.heatMax > 0) {
-      card.style.setProperty("--heat", Math.min(1, avg / state.heatMax).toFixed(2));
-      card.classList.add("heated");
-    }
+  if (state.run) lensBadge(card, badges, n);
+  if (state.changedOps && state.changedOps.has(n.name)) {
+    card.classList.add("changed");
+    const b = el("span", "badge changedbadge", "changed");
+    b.title = "Its code changed in the last edit";
+    badges.append(b);
   }
   card.append(badges);
   card.append(el("span", "port in"));
@@ -1368,6 +1770,8 @@ function opCard(it) {
  * shrinks a big flow into confetti. */
 
 const VIEW_PAD = 36;
+
+const BIG_GRAPH_CELLS = 120;
 
 function applyView() {
   const s = state.view.scale, ex = state.extent;
@@ -1413,30 +1817,62 @@ function stageCenter() {
 }
 
 function fit() {
-  // fit the WIDTH: the whole flow across, reading down by scroll — a
-  // both-axes fit shrank every tall flow into confetti
-  const ex = state.extent;
-  if (!ex) return;
-  const stage = $("#stage");
-  const r = stage.getBoundingClientRect();
-  state.view.scale = Math.min(1.2,
-    (r.width - 70) / Math.max(1, ex.maxX - ex.minX));
-  applyView();
-  stage.scrollLeft = 0;
-  stage.scrollTop = 0;
+  // back to the landing view: the whole flow, or its width at a readable
+  // scale — and forget the view the user had saved
+  store(viewKey(), null);
+  initView();
 }
 
-/* the landing view: real size, top of the flow, spine centred */
-function initView() {
+/* The landing view: the whole flow when it fits at a readable scale;
+ * otherwise across its width (never below 70% — at 55% a name was 7px on
+ * screen), from the top, centred. It used to open at 100% on the
+ * top-left, so a wide flow (callbot) showed a fragment with cards cut
+ * at the edge. A view the user sets — pan, zoom — is remembered per
+ * project and graph, and wins on the next visit. */
+const viewKey = () => `view:${PID}:${state.graph ? state.graph.name : ""}`;
+function initView(fresh) {
   const ex = state.extent;
   if (!ex) return;
   const stage = $("#stage");
-  state.view.scale = 1;
-  applyView();
   const r = stage.getBoundingClientRect();
+  // fresh: the landing view for this box, leaving the saved one alone
+  const saved = fresh ? null : recall(viewKey(), null);
+  if (saved && saved.scale > 0) {
+    state.view.scale = saved.scale;
+    applyView();
+    stage.scrollLeft = saved.x || 0;
+    stage.scrollTop = saved.y || 0;
+    return;
+  }
+  const w = Math.max(1, ex.maxX - ex.minX), h = Math.max(1, ex.maxY - ex.minY);
+  const room = (n) => n - VIEW_PAD * 2 - 24;
+  const all = Math.min(room(r.width) / w, room(r.height) / h);
+  state.view.scale = all >= 0.7 ? Math.min(1, all) : Math.min(1, Math.max(0.7, room(r.width) / w));
+  applyView();
+  const wide = w * state.view.scale + VIEW_PAD * 2;
+  // a flow wider than the box lands on its START, where reading begins
+  // (a phone at the readable 70% used to open on the middle, sides cut)
+  const start = state.startAt;
+  const x = start && wide > r.width ? (start.x - ex.minX) * state.view.scale + VIEW_PAD - r.width / 2
+    : (wide - r.width) / 2;
+  stage.scrollLeft = Math.max(0, Math.min(wide - r.width, x));
   stage.scrollTop = 0;
-  stage.scrollLeft = Math.max(0, (ex.maxX - ex.minX) / 2 + VIEW_PAD - r.width / 2);
 }
+// the user's own view, remembered once they stop moving it
+let _viewSave = 0;
+$("#stage").addEventListener("scroll", () => {
+  if (state.tab !== "flow" || !state.extent || state.workflowOn) return;
+  clearTimeout(_viewSave);
+  _viewSave = setTimeout(() => {
+    // a run opened in the meantime: its pane's scroll is not the Flow view
+    if (state.tab !== "flow" || state.workflowOn) return;
+    const st = $("#stage");
+    store(viewKey(), {scale: state.view.scale, x: Math.round(st.scrollLeft), y: Math.round(st.scrollTop)});
+  }, 500);
+}, {passive: true});
+// however the canvas comes back (leaving the assistant's focus, say), a
+// stale one is drawn as it shows — the tab switch flushes on its own
+new ResizeObserver(() => flushCanvas()).observe($("#stage"));
 
 /* ── inspector ────────────────────────────────────────────────────── */
 
@@ -1457,7 +1893,8 @@ function select(key) {
   if (!it) { state.sel = null; renderFlowInfo(); return; }
   const n = it.node;
   // an op was picked on the canvas: its detail is the point, bring the tab forward
-  if (recall("panelRight", true) && recall("sideTab", "inspect") !== "inspect") showSide("inspect");
+  // (on a phone the panel is a sheet that only a selection opens)
+  if (MOBILE.matches || (panelWanted() && recall("sideTab", "assistant") !== "inspect")) showSide("inspect");
   panel.textContent = "";
   panel.scrollTop = 0;
 
@@ -1475,7 +1912,14 @@ function select(key) {
       .join(" › ");
     head.append(el("div", "crumbpath mono", trail + " ›"));
   }
-  head.append(el("h3", null, n.name));
+  const titleRow = el("div", "ptitle-row");
+  titleRow.append(el("h3", null, n.name));
+  if (window.oxAssistant) {
+    const ask = Icons.button("spark", "Ask", "askbtn", `Ask the assistant about ${n.name}`);
+    ask.onclick = () => window.oxAssistant.focus();
+    titleRow.append(ask);
+  }
+  head.append(titleRow);
   const chips = el("div", "chips");
   const kindChip = el("span", "chip kindchip", n.kind);
   kindChip.style.setProperty("--kind", kindColor(n));
@@ -1506,6 +1950,20 @@ function select(key) {
   if (state.run && !ranInRun(n)) {
     panel.append(el("div", "rolenote dormnote",
       `— did not execute in ${state.run.run}. The values below are its wiring, not a recording.`));
+  }
+  // with a run painted, the op's verdict in that run comes first
+  const inRun = state.run && state.run.ops[n.name];
+  if (inRun) {
+    const roll = state.runRollups ? state.runRollups.get(n.name) : null;
+    const total = Math.max(1, (state.run.wall_s || 0) * 1000);
+    const v = el("div", "execverdict");
+    v.append(el("span", "status " + (inRun.errors ? "s-bad" : "s-ok"), inRun.errors ? `${inRun.errors} failed` : "ok"));
+    v.append(el("span", "vsep", "·"), el("span", "strong", fmtMs(inRun.total_ms)));
+    v.append(el("span", "vsep", "·"), el("span", null, `${inRun.runs} run${inRun.runs > 1 ? "s" : ""}`));
+    if (state.run.wall_s) v.append(el("span", "vsep", "·"), el("span", null, `${Math.round(100 * inRun.total_ms / total)}% of the run`));
+    const cost = roll ? RunView.money(roll.cost_usd, roll.unpriced) : null;
+    if (cost) v.append(el("span", "vsep", "·"), el("span", null, cost));
+    panel.append(v);
   }
   if (n.serve_role) {
     panel.append(el("div", "rolenote",
@@ -2128,12 +2586,12 @@ function traceValue(v, depth = 0) {
 
 /* the run's inputs and outputs as the two familiar port zones — blue
  * in, warm out — every variable a labelled block, every value open */
-function valueZones(box, inputs, outputs, scratchKeyOf = {}) {
+function valueZones(box, inputs, outputs, scratchKeyOf = {}, opts = {}) {
   const zone = (label, values, cls) => {
     const z = el("div", `pzone ${cls}`);
     z.append(el("div", "tvhead", label));
     const entries = values && typeof values === "object"
-      ? Object.entries(values) : [];
+      ? Object.entries(values).filter(([k]) => !(opts.hide || []).includes(k)) : [];
     if (!entries.length) z.append(el("div", "tvempty", "none recorded"));
     for (const [k, v] of entries) {
       const varbox = el("div", "tvvar");
@@ -2149,8 +2607,13 @@ function valueZones(box, inputs, outputs, scratchKeyOf = {}) {
     }
     box.append(z);
   };
-  zone("inputs", inputs, "pzin");
-  zone("outputs", outputs, "pzout");
+  if (opts.outputsFirst) {
+    zone("output", outputs, "pzout");
+    zone("input", inputs, "pzin");
+  } else {
+    zone("inputs", inputs, "pzin");
+    zone("outputs", outputs, "pzout");
+  }
 }
 
 function executionsSection(n, execP) {
@@ -2288,7 +2751,8 @@ function executionsSection(n, execP) {
 function inspectServe(serve) {
   const panel = $("#inspector");
   panel.classList.add("open");
-  if (recall("panelRight", true) && recall("sideTab", "inspect") !== "inspect") showSide("inspect");
+  // (on a phone the panel is a sheet that only a selection opens)
+  if (MOBILE.matches || (panelWanted() && recall("sideTab", "assistant") !== "inspect")) showSide("inspect");
   panel.textContent = "";
   panel.append(el("h3", null, `serve · ${serve.kind}`));
   panel.append(el("div", "kind mono", serve.path || ""));
@@ -2314,9 +2778,12 @@ async function showResources() {
   box.textContent = "";
   const res = state.ir.resources || {};
   const details = res.details || {};
-  box.append(el("h2", "reshead", "Resource hub"));
-  box.append(el("div", "note",
-    "declared in the project's resource files — secret fields never leave the server"));
+  const head = el("div", "panehead");
+  head.append(el("h2", null, "Resources"));
+  box.append(head);
+  box.append(el("p", "panesub",
+    "The backing services this project declares, which ops use them, and whether the "
+    + "environment they need is set. Secret fields never leave the server."));
 
   // reverse index: resource name → the ops that lean on it — including
   // ops nested inside GraphOps, which carry their graph inline
@@ -2336,11 +2803,17 @@ async function showResources() {
     const c = det.category || "other";
     (cats[c] = cats[c] || []).push([name, det]);
   }
+  if (!Object.keys(cats).length && !(res.keys || []).length) {
+    box.append(paneNote("No resources declared",
+      "Resources are the LLMs, stores and services ops call by name. Declare them in a resources file next to operonx.toml."));
+  }
   for (const cat of Object.keys(cats).sort()) {
-    box.append(el("div", "rescat", cat));
+    box.append(el("h3", "rescat", cat));
+    const grid = el("div", "resgrid");
+    box.append(grid);
     for (const [name, det] of cats[cat].sort((a, b) => a[0].localeCompare(b[0]))) {
       const card = el("div", "rescard");
-      card.append(el("div", "resname mono", `⛁ ${name}`));
+      card.append(el("div", "resname", name));
       const provider = det.category === "llm"
         ? llmProvider({kind: "LLMOp", resource: name}) : null;
       if (provider) {
@@ -2350,8 +2823,9 @@ async function showResources() {
           `${LLM_PROVIDERS[provider].icon} ${LLM_PROVIDERS[provider].label}`));
         card.append(row);
       }
+      if (det.category === "llm") card.append(priceRow(name, det));
       for (const [k, v] of Object.entries(det)) {
-        if (k === "category") continue;
+        if (k === "category" || k === "cost_per_input_token" || k === "cost_per_output_token") continue;
         const row = el("div", "resrow");
         row.append(el("span", "reskey", k));
         row.append(envValue(v));
@@ -2361,7 +2835,7 @@ async function showResources() {
       urow.append(el("span", "reskey", "used by"));
       const val = el("span", "usedby");
       const u = uses[name] || [];
-      if (!u.length) val.append(el("span", "note", "no op names it"));
+      if (!u.length) val.append(el("span", "note", "No op uses it"));
       for (const use of u) {
         const c = el("button", "pchip pref", use.node.name);
         c.title = `${use.graph.name} · ${use.node.kind} — jump to it`;
@@ -2370,22 +2844,22 @@ async function showResources() {
       }
       urow.append(val);
       card.append(urow);
-      box.append(card);
+      grid.append(card);
     }
   }
   const covered = new Set([...Object.keys(details),
     ...Object.values(details).map(d => d.category)]);
   const loose = (res.keys || []).filter(k => !covered.has(k));
   if (loose.length) {
-    box.append(el("div", "rescat", "declared, details not parsed"));
-    const card = el("div", "rescard");
-    for (const k of loose) card.append(el("span", "chip", `⛁ ${k}`));
+    box.append(el("h3", "rescat", "declared, details not parsed"));
+    const card = el("div", "rescard usedby");
+    for (const k of loose) card.append(el("span", "chip", k));
     box.append(card);
   }
 
   // the env contract, with a health light per variable
-  box.append(el("div", "rescat", "environment contract"));
-  const envBox = el("div");
+  box.append(el("h3", "rescat", "Environment"));
+  const envBox = el("div", "envlist");
   box.append(envBox);
   try {
     const h = await api(`/api/p/${PID}/env-health`);
@@ -2395,23 +2869,98 @@ async function showResources() {
       rows.push([name, h.env[name] || "missing", null]);
     for (const [name, dflt] of Object.entries(env.optional || {}))
       rows.push([name, h.env[name] || "default", dflt]);
-    if (!rows.length) envBox.append(el("div", "note", "no variables demanded"));
+    if (!rows.length) envBox.append(el("div", "envrow note", "The project asks for no environment variables."));
     for (const [name, stat, dflt] of rows) {
       const row = el("div", "envrow");
       row.append(el("span", `envdot ${stat}`));
       row.append(el("span", "envname mono", name));
       row.append(el("span", `envstat ${stat}`,
-        stat === "set" ? "set" : stat === "missing"
-          ? "MISSING — required, and nothing sets it" : "unset · default applies"));
+        stat === "set" ? "Set" : stat === "missing"
+          ? "Missing — required, and nothing sets it" : "Not set — the default applies"));
       if (dflt != null && stat === "default")
         row.append(el("span", "envdflt mono", String(dflt)));
       envBox.append(row);
     }
-    if (!h.dotenv) envBox.append(el("div", "note",
-      "no .env file in the project root — variables can only come from the process environment"));
+    if (!h.dotenv) envBox.append(el("div", "envrow note",
+      "No .env file in the project root — variables can only come from the process environment."));
   } catch {
-    envBox.append(el("div", "note", "env health unavailable"));
+    envBox.append(el("div", "envrow note", "Environment status is unavailable."));
   }
+}
+
+/* An LLM resource's prices, and an editor that writes them to the
+ * resources file — shown as a diff first, applied on confirm. A price of
+ * 0 is a declared zero (an in-house model); no price is "unpriced". */
+function priceRow(name, det) {
+  const wrap = el("div", "pricerow");
+  const perM = (v) => (v == null || v === "" ? null : Number(v) * 1e6);
+  const fmt = (v) => (v === 0 ? "$0" : `$${Number(v.toPrecision(6))}`);
+  const pin = perM(det.cost_per_input_token), pout = perM(det.cost_per_output_token);
+  const line = el("div", "resrow");
+  line.append(el("span", "reskey", "price"));
+  const val = el("span", "resval priceval");
+  if (pin == null && pout == null) {
+    val.append(el("span", "unpriced", "Not priced"), " — calls show as unpriced in Runs and Monitor");
+  } else {
+    val.textContent = `${fmt(pin || 0)} in · ${fmt(pout || 0)} out per 1M tokens`;
+  }
+  const edit = el("button", "linkbtn", pin == null && pout == null ? "Set prices" : "Edit");
+  edit.type = "button";
+  line.append(val, edit);
+  wrap.append(line);
+
+  const form = el("div", "priceform");
+  form.hidden = true;
+  const field = (label, value) => {
+    const f = el("label", "pricefield");
+    f.append(el("span", null, label));
+    const i = el("input");
+    i.type = "number"; i.min = "0"; i.step = "0.01"; i.inputMode = "decimal";
+    i.value = value == null ? "" : String(Number(value.toPrecision(6)));
+    i.placeholder = "0";
+    f.append(i, el("span", "priceunit", "USD / 1M tokens"));
+    return [f, i];
+  };
+  const [fIn, iIn] = field("Input", pin);
+  const [fOut, iOut] = field("Output", pout);
+  const diff = el("pre", "diffbox");
+  diff.hidden = true;
+  const err = el("div", "err");
+  const acts = el("div", "priceacts");
+  const cancel = el("button", "small", "Cancel");
+  cancel.type = "button";
+  const preview = el("button", "small", "Preview change");
+  preview.type = "button";
+  const apply = el("button", "small primary", "Save to resources file");
+  apply.type = "button";
+  apply.hidden = true;
+  acts.append(cancel, preview, apply);
+  form.append(fIn, fOut, el("p", "note pricehint", "For an in-house model, 0 declares it free — different from leaving it unpriced."), diff, err, acts);
+  wrap.append(form);
+
+  const body = () => ({resource: name, input_per_1m: iIn.value || 0, output_per_1m: iOut.value || 0});
+  edit.onclick = () => { form.hidden = !form.hidden; };
+  cancel.onclick = () => { form.hidden = true; diff.hidden = true; apply.hidden = true; err.textContent = ""; };
+  preview.onclick = async () => {
+    err.textContent = "";
+    try {
+      const r = await api(`/api/p/${PID}/resources/price`, body());
+      diff.textContent = "";
+      for (const ln of (r.diff || "No change.").split("\n")) {
+        diff.append(el("div", ln.startsWith("+") && !ln.startsWith("+++") ? "add" : ln.startsWith("-") && !ln.startsWith("---") ? "del" : null, ln));
+      }
+      diff.hidden = false;
+      apply.hidden = !r.changed;
+    } catch (e) { err.textContent = e.message; }
+  };
+  apply.onclick = async () => {
+    try {
+      await api(`/api/p/${PID}/resources/price`, {...body(), apply: true});
+      toast("Prices saved — new calls are priced from now on");
+      form.hidden = true;
+    } catch (e) { err.textContent = e.message; }
+  };
+  return wrap;
 }
 
 function jumpToOp(graph, node) {
@@ -2436,96 +2985,89 @@ function jumpToOp(graph, node) {
   if (it) { select(it.key); centerOn(it); }
 }
 
-async function showTraces() {
-  leaveWorkflow();
-  const box = $("#traces");
-  box.textContent = "";
-  const mine = (state.tracesView = {});
-  let data;
-  try { data = await api(`/api/p/${PID}/traces`); }
-  catch (e) { box.append(el("div", "errbox", e.message)); return; }
-  if (state.tracesView !== mine) return;   // another view took the pane meanwhile
-  if (!data.configured) {
-    box.append(el("div", "note",
-      'No trace directory declared. Add to operonx.toml:\n\n[studio]\ntraces = "/path/your/consumer/writes"'));
-    box.querySelector(".note").style.whiteSpace = "pre-wrap";
-    return;
+/* A pane's "nothing here yet" — what is missing and the exact lines
+ * that fix it, instead of a grey sentence. */
+/* A screen that could not load: what went wrong in one line, and a way
+ * to try again — a dropped tunnel is the usual reason, and it passes. */
+function loadError(err, retry) {
+  const box = el("div", "errbox loaderr");
+  box.append(el("div", "errhead", "This could not load"),
+    el("div", "note", err && err.message ? err.message : String(err)));
+  if (retry) {
+    const b = Icons.button("refresh", "Try again", "small");
+    b.onclick = retry;
+    box.append(b);
   }
-  if (data.missing) {
-    box.append(el("div", "note", `Declared traces dir does not exist yet: ${data.missing}`));
-    return;
-  }
-  if (data.langfuse_error) {
-    box.append(el("div", "note", `Langfuse (${data.langfuse}) unreachable: ${data.langfuse_error}`));
-  }
-  // follow-latest: repaint whenever a newer local run lands
-  const topbar = el("div", "tracebar");
-  const followBar = el("label", "followpin");
-  const pin = el("input");
-  pin.type = "checkbox";
-  pin.checked = state.follow;
-  pin.onchange = () => { state.follow = pin.checked; store("follow", state.follow); };
-  followBar.append(pin, " auto-paint the newest run as it arrives");
-  topbar.append(followBar);
-  const refresh = el("button", null, "⟳ refresh");
-  refresh.onclick = showTraces;
-  topbar.append(refresh);
-  box.append(topbar);
+  return box;
+}
 
-  if (!data.runs.length) {
-    box.append(el("div", "note", `No runs recorded yet${data.root ? " in " + data.root : ""}`));
-    return;
+/* An empty or stuck screen: what is (not) here, and the ONE action that
+ * fixes it — usually the assistant doing it — before any manual recipe.
+ * opts.ask = {label, prompt}: a button that hands the assistant the task.
+ * opts.actions = [{label, icon, run}]: plain buttons beside it. A code
+ * recipe, when given, folds under "Or do it by hand". */
+function paneNote(title, text, code, opts) {
+  opts = opts || {};
+  const box = el("div", "panenote");
+  box.append(el("h3", null, title));
+  box.append(el("div", null, text));
+  const acts = el("div", "noteacts");
+  if (opts.ask && window.oxAsk) {
+    const b = Icons.button("spark", opts.ask.label, "primary noteask");
+    b.title = "The assistant does it, and shows you what it changed";
+    b.onclick = () => window.oxAsk(opts.ask.prompt);
+    acts.append(b);
   }
-  const table = el("table");
-  const thead = el("thead");
-  const hr = el("tr");
-  for (const h of ["run", "recorded", "activity", "source", ""]) hr.append(el("th", null, h));
-  thead.append(hr); table.append(thead);
-  const tbody = el("tbody");
-  for (const r of data.runs) {
-    const tr = el("tr", "run-row");
-    tr.append(el("td", "mono", r.name || r.run));
-    tr.append(el("td", null, r.mtime ? new Date(r.mtime * 1000).toLocaleString() : ""));
-    const act = el("td");
-    if (r.records !== undefined) {
-      act.append(el("span", "chip", `${r.ops} ops`));
-      act.append(el("span", "chip", `${r.records} rec`));
-      if (r.wall_s != null) act.append(el("span", "chip", `${r.wall_s.toFixed(1)}s`));
-      if (r.errors) act.append(el("span", "chip cbad", `${r.errors} err`));
-    }
-    tr.append(act);
-    tr.append(el("td", null,
-      r.source === "langfuse" ? "langfuse"
-        : `local${r.also_langfuse ? " + langfuse" : ""} · ${(r.size / 1024).toFixed(1)} KB`));
-    const actions = el("td", "runacts");
-    const tree = el("button", null, "tree");
-    tree.title = "the run as a tree: what ran for what, in order";
-    tree.onclick = (ev) => { ev.stopPropagation(); showRunTree(r.run); };
-    const wf = el("button", null, "workflow");
-    wf.title = "the flow with this run's values on every card";
-    wf.onclick = (ev) => { ev.stopPropagation(); showRunWorkflow(r.run); };
-    actions.append(tree, wf);
-    if (r.source !== "langfuse") {
-      const rm = el("button", "danger", "✕");
-      rm.title = "delete this recorded run from disk";
-      rm.onclick = async (ev) => {
-        ev.stopPropagation();
-        if (!window.confirm(`Delete run ${r.run} from disk?`)) return;
-        try {
-          await api(`/api/p/${PID}/trace/${encodeURIComponent(r.run)}/delete`, {});
-          toast(`deleted ${r.run}`);
-          if (state.run && state.run.run === r.run) leaveWorkflow();
-          showTraces();
-        } catch (e) { toast(e.message, true); }
-      };
-      actions.append(rm);
-    }
-    tr.append(actions);
-    tr.onclick = () => showRunTree(r.run);
-    tbody.append(tr);
+  for (const a of opts.actions || []) {
+    const b = Icons.button(a.icon || "right", a.label, opts.ask ? "" : "primary");
+    b.onclick = a.run;
+    acts.append(b);
   }
-  table.append(tbody);
-  box.append(table);
+  if (acts.childNodes.length) box.append(acts);
+  if (code) {
+    if (acts.childNodes.length) {
+      const fold = el("details", "notehand");
+      fold.append(el("summary", null, "Or do it by hand"), el("pre", null, code));
+      box.append(fold);
+    } else box.append(el("pre", null, code));
+  }
+  return box;
+}
+
+/* The runs list is the Runs screen (runs.js): origin tree, filters,
+ * the runs in the chosen folder. Everything that used to "go back to the
+ * list" still calls this. */
+function showTraces() {
+  return RunsView.show();
+}
+
+/* Time, the way a person reads it: "3h ago" first, the exact local
+ * time beside it. Anything that does not parse is shown as given. */
+function fmtWhen(t) {
+  const d = t instanceof Date ? t : new Date(t);
+  if (isNaN(d.getTime())) return String(t || "");
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false});
+  if (sameDay) return `Today ${time}`;
+  return `${d.toLocaleDateString([], {month: "short", day: "numeric"})}, ${time}`;
+}
+function fmtAgo(t) {
+  const d = t instanceof Date ? t : new Date(t);
+  if (isNaN(d.getTime())) return "";
+  const s = (Date.now() - d.getTime()) / 1000;
+  if (s < 45) return "just now";
+  if (s < 5400) return `${Math.max(1, Math.round(s / 60))} min ago`;
+  if (s < 129600) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+}
+function fmtSpan(a, b) {
+  const s = (new Date(b).getTime() - new Date(a).getTime()) / 1000;
+  if (!isFinite(s) || s < 0) return "";
+  if (s < 1) return `${Math.round(s * 1000)}ms`;
+  if (s < 60) return `${s < 10 ? s.toFixed(1) : Math.round(s)}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+  return `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
 }
 
 /* ── the run, two ways (Traces tab) ─────────────────────────────────
@@ -2572,26 +3114,54 @@ function execValues(node, outputs, max) {
 const execsOf = (rows) => rows.filter(r => r.kind === "record");
 
 function runHeader(run, data, mode, extras) {
-  const head = el("div", "tlhead");
-  const back = el("button", null, "← runs");
-  back.onclick = () => showTraces();
-  head.append(back, el("span", "tltitle mono", run));
-  const modes = el("span", "tlmodes");
-  const bt = el("button", mode === "tree" ? "on" : "", "tree");
-  bt.title = "the run as a tree: what ran for what, in order";
-  bt.onclick = () => showRunTree(run);
-  const bf = el("button", mode === "workflow" ? "on" : "", "workflow");
-  bf.title = "the flow with this run's values on every card; pick a turn to read one exchange";
-  bf.onclick = () => showRunWorkflow(run);
-  modes.append(bt, bf);
-  head.append(modes);
-  for (const x of extras || []) head.append(x);
-  const recs = execsOf(data.rows);
-  head.append(el("span", "chip", `${recs.length} executions`));
-  head.append(el("span", "chip", `${fmtMs(data.total_ms)} span`));
-  const errs = recs.filter(r => r.status === "error").length;
-  if (errs) head.append(el("span", "chip cbad", `${errs} errors`));
-  return head;
+  return RunView.header(run, data, mode, extras);
+}
+
+/* Where a run came from, as links back: the job run and item it was, the
+ * service that answered, the runbook run that grouped it — the other
+ * direction of the Jobs pane's Trace links. */
+function originLine(s) {
+  if (!s || !s.origin || s.origin === "adhoc") return null;
+  const line = el("div", "tlorigin");
+  const link = (text, title, onclick) => {
+    const b = el("button", "linkbtn", text);
+    b.type = "button";
+    b.title = title;
+    b.onclick = onclick;
+    return b;
+  };
+  if (s.origin === "job" || s.origin === "eval") {
+    line.append(`${s.origin === "eval" ? "Eval" : "Job"} `);
+    line.append(link(s.job, `All traces of ${s.job}`, () => RunsView.openFolder({kind: s.origin, name: s.job})));
+    if (s.key) line.append(` · item ${s.key}`);
+    if (s.job_run) {
+      line.append(" of run ");
+      line.append(link(s.job_run, "Open this job run in Jobs", () => {
+        state.jobSel = s.job; state.jobRun = s.job_run; switchTab("jobs"); showJobs(s.job, s.job_run);
+      }));
+    }
+    if (s.runbook) {
+      line.append(" · runbook ");
+      line.append(link(s.runbook, "Every trace of this runbook run",
+        () => RunsView.openFolder({kind: "runbook", name: s.runbook, runbook_run: s.runbook_run})));
+    }
+  } else if (s.origin === "service" || s.origin === "playground") {
+    line.append(s.origin === "playground" ? "Playground · " : "Service ");
+    line.append(link(s.service || s.name, "Every run of this service",
+      () => RunsView.openFolder({kind: s.origin, name: s.service || s.name})));
+    if (s.transport) line.append(` · ${s.transport}`);
+    if (s.session_id) line.append(` · session ${s.session_id}`);
+    // a real session its service recorded, or a playground one: send it again
+    const md = s.metadata || {};
+    const sent = (md.replay_script || md.playground_script || []).filter(m => m.kind === "text" || m.kind === "json");
+    if (sent.length && typeof PlayView !== "undefined" && md.toy !== "rerun") {
+      line.append(" · ");
+      line.append(link("Replay in the Playground", `Send its ${sent.length} message${sent.length === 1 ? "" : "s"} again, to the current code`,
+        () => PlayView.replayFrom(s.trace_id, {...md, service: s.service || s.name})));
+    }
+  }
+  if (s.version) line.append(` · code @${String(s.version).slice(0, 7)}${s.version_dirty ? " (uncommitted changes)" : ""}`);
+  return line;
 }
 
 async function loadRunTree(run) {
@@ -2604,13 +3174,16 @@ async function showRunTree(run) {
   box.textContent = "";
   const mine = (state.tracesView = {});
   let data;
+  state.execPanelRun = null;
+  state.execSel = null;
   try { data = await loadRunTree(run); } catch (e) { box.append(el("div", "note", e.message)); return; }
   if (state.tracesView !== mine) return;
+  state.runSummary = data.summary || null;
   box.append(runHeader(run, data, "tree"));
   const rows = data.rows, total = Math.max(1, data.total_ms), execs = execsOf(rows);
   const tree = el("div", "rtree");
   const hdr = el("div", "rhdr");
-  for (const h of ["observation", "value", "when · how long"]) hdr.append(el("span", null, h));
+  for (const h of ["Observation", "Value", "When · how long"]) hdr.append(el("span", null, h));
   tree.append(hdr);
   const els = [];
   rows.forEach((r, i) => {
@@ -2663,6 +3236,8 @@ async function showRunTree(run) {
     };
     if (r.kind === "record") {
       r.el = row;
+      row.classList.add("record");
+      row.dataset.op = r.op || "";
       row.onclick = () => {
         for (const o of els) o.classList.remove("sel");
         row.classList.add("sel");
@@ -2672,51 +3247,86 @@ async function showRunTree(run) {
   });
   box.append(tree);
   state._tlrun = run;
+  renderFlowInfo();
 }
 
+/* One execution, in the order it is read: the verdict (how it went, how
+ * it ranks among this op's runs, what stands out), what it produced,
+ * what it received, what it cost, its other runs, and what fed it. */
 async function renderExecPanel(run, e, execs) {
+  state.execSel = `${e.op} @ ${e.ctx || "main"} (+${fmtMs(e.start_ms)})`;
+  state.execPanelRun = run;
+  pushView();
   const panel = $("#inspector");
+  // picking an execution is asking to read it: bring the panel forward
+  const ps = panelState();
+  if (!ps.on || ps.tab !== "inspect") showSide("inspect");
   panel.classList.remove("off");
   panel.textContent = "";
+  panel.scrollTop = 0;
+  const mine = execs.filter(x => x.op === e.op);
+
+  // ── verdict ──
   const head = el("div", "phead");
   head.append(el("h3", null, e.op));
-  const chips = el("div", "chips");
-  chips.append(el("span", "chip", e.ctx || "main"));
-  chips.append(el("span", `chip ${e.status === "error" ? "cbad" : ""}`, e.status));
-  chips.append(el("span", "chip", `+${fmtMs(e.start_ms)}`));
-  chips.append(el("span", "chip", fmtMs(e.dur_ms)));
+  const verdict = el("div", "execverdict");
+  verdict.append(el("span", "status " + (e.status === "error" ? "s-bad" : "s-ok"), e.status === "error" ? "failed" : "ok"));
+  verdict.append(el("span", "vsep", "·"), el("span", "strong", fmtMs(e.dur_ms)));
+  const rank = RunView.rank(e, mine);
+  if (rank) verdict.append(el("span", "vsep", "·"), el("span", null, rank));
+  head.append(verdict);
+  const when = el("div", "execwhen");
+  when.append(`at +${fmtMs(e.start_ms)}`);
   if (e.wall_start) {
     // the recorder's wall clock, so a card can be matched to a log line
     const at = new Date(e.wall_start * 1000);
-    const c = el("span", "chip mono", at.toLocaleTimeString([], {hour12: false}) + "." + String(at.getMilliseconds()).padStart(3, "0"));
-    c.title = at.toISOString();
-    chips.append(c);
+    const t = el("span", "mono", " · " + at.toLocaleTimeString([], {hour12: false}) + "." + String(at.getMilliseconds()).padStart(3, "0"));
+    t.title = at.toISOString();
+    when.append(t);
   }
-  head.append(chips);
+  if (e.ctx && e.ctx !== "main") when.append(el("span", "mono", ` · ${e.ctx}`));
+  head.append(when);
   panel.append(head);
-  if (e.error) panel.append(el("div", "rolenote dormnote", e.error));
 
-  // every run of THIS op, the selected one marked — a generator's fan
-  const mine = execs.filter(x => x.op === e.op);
+  const flags = RunView.anomalies(e, mine);
+  if (e.error) {
+    const err = el("div", "errcard");
+    const lines = String(e.error).trim().split("\n");
+    err.append(el("div", "errcard-head", lines[lines.length - 1]));
+    if (lines.length > 1) {
+      const fold = el("details");
+      fold.append(el("summary", null, "Traceback"), el("pre", "mono", String(e.error)));
+      err.append(fold);
+    }
+    panel.append(err);
+  }
+  const notes = flags.filter(([k]) => k !== "bad");
+  if (notes.length) {
+    const box = el("div", "flags");
+    for (const [kind, text] of notes) box.append(el("div", `flag ${kind}`, text));
+    panel.append(box);
+  }
+
+  // ── output, input, cost ── fetched per op, matched to this execution
+  const vsec = el("section");
+  const vbox = el("div", null, "Loading values…");
+  vsec.append(vbox);
+  panel.append(vsec);
+  const costSec = el("section");
+  panel.append(costSec);
+
+  // ── its other runs ──
   if (mine.length > 1) {
     const sec = el("section");
-    sec.append(el("div", "stitle", `Runs · ${mine.length}`));
-    for (const x of mine.slice(0, 60)) {
-      const row = el("button", "runrow" + (x === e ? " on" : "")
-        + (x.status === "error" ? " bad" : ""));
-      row.append(el("span", "mono", `+${fmtMs(x.start_ms)}`));
-      row.append(el("span", null, fmtMs(x.dur_ms)));
-      row.append(el("span", "mono", x.ctx || ""));
-      row.onclick = () => {
-        x.el?.scrollIntoView({block: "center", behavior: "smooth"});
-        x.el?.click();
-      };
-      sec.append(row);
-    }
+    sec.append(el("div", "stitle", `This op's ${mine.length} runs`));
+    sec.append(RunView.dots(e, mine, (x) => {
+      x.el?.scrollIntoView({block: "center", behavior: "smooth"});
+      x.el?.click();
+    }));
     panel.append(sec);
   }
 
-  // provenance: which executions fed this one
+  // ── what fed it ──
   if ((e.upstreams || []).length) {
     const sec = el("section");
     sec.append(el("div", "stitle", "Fed by"));
@@ -2737,12 +3347,6 @@ async function renderExecPanel(run, e, execs) {
     panel.append(sec);
   }
 
-  // the values — fetched per op, matched to this execution by start
-  const sec = el("section");
-  sec.append(el("div", "stitle", "Values"));
-  const vbox = el("div", null, "…");
-  sec.append(vbox);
-  panel.append(sec);
   try {
     const got = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`
       + `/op/${encodeURIComponent(e.op)}?limit=200`);
@@ -2752,15 +3356,11 @@ async function renderExecPanel(run, e, execs) {
           || String(Array.isArray(x.ctx) ? x.ctx.join(".") : x.ctx) === String(e.ctx)))
       || (got.executions || [])[0];
     vbox.textContent = "";
-    if (!match) { vbox.append(el("div", "note", "values were not kept for this execution")); return; }
-    // which inputs came out of SCRATCH cells — the IR knows the
-    // binding, the record knows the value: together they are the
-    // OBSERVED state reads of this step. (Full state-per-step needs
-    // recorder events — see TRACES_REFACTOR_PLAN P0: imperative
-    // writes exist, replay alone would lie.)
+    if (!match) { vbox.append(el("div", "note", "Values were not kept for this execution.")); return; }
+    // which inputs came out of SCRATCH cells — the IR knows the binding
     const scratchKeyOf = {};
     (function walk(g) {
-      for (const nn of g.nodes || []) {
+      for (const nn of (g && g.nodes) || []) {
         if (nn.name === e.op) {
           for (const inp of nn.inputs || []) {
             if (inp.binding && inp.binding.kind === "scratch")
@@ -2770,7 +3370,26 @@ async function renderExecPanel(run, e, execs) {
         if (nn.graph) walk(nn.graph);
       }
     })(state.graph);
-    valueZones(vbox, match.inputs, match.outputs, scratchKeyOf);
+    const outs = match.outputs && typeof match.outputs === "object" ? match.outputs : {};
+    const priced = "cost_usd" in outs || "usage" in outs;
+    valueZones(vbox, match.inputs, match.outputs, scratchKeyOf,
+               {outputsFirst: true, hide: priced ? ["usage", "cost_usd", "model_used"] : []});
+    // the op again, with these inputs, in the current code
+    const sm = state.runSummary;
+    if (typeof PlayView !== "undefined" && sm && (sm.service || sm.job) && state._tlrun === run) {
+      panel.insertBefore(PlayView.rerunSection(run, e, match), costSec.nextSibling);
+    }
+    if (priced) {
+      costSec.append(el("div", "stitle", "Cost and usage"));
+      const u = outs.usage || {};
+      const facts = el("div", "facts compact");
+      const fact = (k, v) => { const r = el("div", "factrow"); r.append(el("div", "factkey", k), el("div", "factval", v)); facts.append(r); };
+      if (outs.model_used) fact("Model", String(outs.model_used));
+      fact("Tokens in", String(u.prompt_tokens ?? "—") + (u.cached_tokens ? ` (${u.cached_tokens} cached)` : ""));
+      fact("Tokens out", String(u.completion_tokens ?? "—"));
+      fact("Cost", RunView.money(outs.cost_usd, outs.cost_usd == null ? 1 : 0) || "—");
+      costSec.append(facts);
+    }
   } catch (err) {
     vbox.textContent = "";
     vbox.append(el("div", "note", err.message));
@@ -2782,6 +3401,29 @@ async function renderExecPanel(run, e, execs) {
  * values, a turn picker to read one exchange. The paint lives only
  * here: leaving the view moves the canvas home and clears it, so the
  * Flow tab is always the clean flow. */
+/* The graph a run ran. A run records its engine's name ("engine",
+ * "params"), not the graph's, so it is matched on evidence: the project
+ * graph whose ops (nested ones included) cover the ops the run executed.
+ * Ties go to the graph with fewer ops the run never touched, then to the
+ * one on screen. Null when no graph covers half of them. */
+function graphForRun(data) {
+  const ran = Object.keys((data && data.ops) || {});
+  if (!ran.length) return state.graph;
+  const opsOf = (g, out = new Set()) => {
+    for (const n of (g && g.nodes) || []) { out.add(n.name); if (n.graph) opsOf(n.graph, out); }
+    return out;
+  };
+  let best = null;
+  for (const g of state.ir.graphs || []) {
+    const names = opsOf(g);
+    const hits = ran.filter(o => names.has(o)).length;
+    const cand = {g, score: hits / ran.length, extra: names.size - hits, here: g === state.graph ? 0 : 1};
+    if (!best || cand.score > best.score
+        || (cand.score === best.score && (cand.extra < best.extra || (cand.extra === best.extra && cand.here < best.here)))) best = cand;
+  }
+  return best && best.score >= 0.5 ? best.g : null;
+}
+
 async function showRunWorkflow(run) {
   if (state.tab !== "traces") switchTab("traces", {quiet: true});
   leaveWorkflow();
@@ -2810,32 +3452,64 @@ async function showRunWorkflow(run) {
   state.heatMax = Math.max(0, ...Object.values(data.ops || {})
     .map(o => o.runs ? o.total_ms / o.runs : 0));
 
-  const pick = el("select", "turnpick");
-  pick.title = "which turn's values the cards show";
-  const whole = el("option", null, "whole run · last values");
-  whole.value = "";
-  pick.append(whole);
-  for (const t of state.runTurns) {
-    const o = el("option", null, `${t.label} · ${t.count}`);
-    o.value = t.key;
-    pick.append(o);
+  state.runRollups = new Map((tree.rollups || []).map(r => [r.op, r]));
+
+  // the canvas shows the graph this run ran: another of the project's
+  // graphs is switched to (and said so); one the studio does not draw
+  // gets a note and the tree, never a canvas of unrelated faded cards
+  const ranGraph = graphForRun(data);
+  const workflowName = ((data.summary || tree.summary || {}).workflow) || "?";
+  if (!ranGraph) {
+    box.append(runHeader(run, tree, "workflow", []));
+    const note = el("div", "wfnote wfmissing");
+    const said = el("span");
+    said.append("This run's graph (", el("code", null, workflowName), ") isn't drawn here.");
+    const ops = Object.keys(data.ops || {});
+    if (ops.length) said.append(el("span", "wfops", ` It ran ${ops.slice(0, 6).join(", ")}${ops.length > 6 ? "…" : ""}.`));
+    note.append(said);
+    const tb = el("button", "small", "Open as tree");
+    tb.type = "button";
+    tb.onclick = () => showRunTree(run);
+    note.append(tb);
+    box.append(note);
+    state.run = null;
+    pushView();
+    return;
   }
-  pick.onchange = () => { state.runTurn = pick.value || null; render(); renderFlowInfo(); };
-  const extras = [pick];
-  if (data.errors) {
-    const eb = el("button", "cbad", "error →");
-    eb.title = "select the errored ops one by one";
-    eb.onclick = walkErrors;
-    extras.push(eb);
+  let switched = null;
+  if (ranGraph !== state.graph) {
+    switched = state.graph ? state.graph.name : null;
+    state.graph = ranGraph;
+    $("#graph-pick").value = ranGraph.name;
+    state.sel = null;
+    state.expanded.clear();
+    state.flowView = null;      // the Flow tab's remembered view was another graph's
   }
+  const extras = [RunView.lensBar(), replayControl(run)];
   box.append(runHeader(run, tree, "workflow", extras));
+  if (switched) {
+    const note = el("div", "wfnote");
+    const said = el("span");
+    said.append("Showing ", el("code", null, ranGraph.name), ", the graph this run ran",
+      el("span", "wfops", switched ? ` (the canvas had ${switched})` : ""));
+    note.append(said);
+    box.append(note);
+  }
+  box.append(RunView.timeline(state.runTurns, tree.total_ms, (key) => {
+    state.runTurn = key; render(); renderFlowInfo();
+  }));
   box.classList.add("workflow");
   const stage = $("#stage");
   if (!state._stageHome) state._stageHome = {parent: stage.parentNode, next: stage.nextSibling};
   stage.style.display = "";
   box.append(stage);
   state.workflowOn = true;
+  syncChrome();
   render();
+  // moving the canvas into the run's pane reset its scroll to the top-left
+  // corner (a phone showed 3 of 27 cards, at the edge): the run opens
+  // fitted to its own, smaller box — the Flow tab's saved view untouched
+  initView(true);
   pushView();
   renderFlowInfo();
 }
@@ -2861,8 +3535,12 @@ function walkErrors() {
 // the canvas goes home and the paint comes off — the Flow tab never
 // shows a run
 function leaveWorkflow() {
+  // not quiet: a quiet stop left the "Replaying … done" pill riding back
+  // to the Flow tab with the canvas
+  if (liveCanvas) liveCanvas.stop();
   if (!state.workflowOn) return;
   state.workflowOn = false;
+  syncChrome();
   const stage = $("#stage");
   $("#traces").classList.remove("workflow");
   const home = state._stageHome;
@@ -2871,8 +3549,12 @@ function leaveWorkflow() {
   state.run = null;
   state.runTurn = null;
   state.runByOpTurn = null;
+  state.runRollups = null;
   state.heatMax = 0;
   render();
+  // ... and coming home it lost the Flow tab's view: it comes back once
+  // the canvas shows at its full size (flushCanvas)
+  state.viewPending = true;
   renderFlowInfo();
 }
 
@@ -2894,41 +3576,156 @@ $("#btn-expand").onclick = () => {
   const anyOpen = state.expanded.size > 0;
   const count = expandAll(!anyOpen);
   if (!count) toast("no nested graphs here");
-  $("#btn-expand").textContent = anyOpen || !count ? "⊞" : "⊟";
+  const opened = !anyOpen && !!count;
+  Icons.set($("#btn-expand"), opened ? "fold" : "unfold");
+  $("#btn-expand").classList.toggle("active", opened);
+  $("#btn-expand").setAttribute("aria-label", opened ? "Close every nested graph" : "Open every nested graph");
 };
 
 $("#btn-find").onclick = () => openFind();
 
 /* ── tabs, graph switch, pan/zoom, live reload ────────────────────── */
 
+/* Screens other files add (settings.js, runs.js, …): each registers
+ * {el, show} here and switchTab shows and hides it like the built-ins. */
+const PANES = {};
+function registerPane(name, pane) { PANES[name] = pane; }
+
+/* A revisited screen shows its last picture at once, and refreshes under
+ * it. Through the tunnel a screen's data is a request away (~0.75 s), and
+ * Runs, Monitor, Settings and the Playground used to go blank or say
+ * "Loading…" for that long on every revisit (measured). The picture is a
+ * copy laid over the screen, inert, while the screen rebuilds beneath it
+ * at its real size; once what is underneath has settled (nothing still
+ * loading) the copy lifts, and rows the copy did not have are marked. */
+const LOADING = /Loading|Starting the|Connecting/;
+const covers = new Set();            // the lift of every cover up: leaving a screen lifts its cover
+function coverWhileFresh(elm) {
+  if (!elm || elm.hidden || !(elm.textContent || "").trim() || elm._cover) return;
+  const parent = elm.offsetParent;
+  if (!parent) return;
+  const cover = elm.cloneNode(true);
+  cover.removeAttribute("id");
+  for (const n of cover.querySelectorAll("[id]")) n.removeAttribute("id");
+  cover.classList.add("revisit-cover");
+  cover.inert = true;
+  cover.setAttribute("aria-hidden", "true");
+  Object.assign(cover.style, {position: "absolute", left: `${elm.offsetLeft}px`, top: `${elm.offsetTop}px`,
+    width: `${elm.offsetWidth}px`, height: `${elm.offsetHeight}px`, margin: "0"});
+  const seen = new Set([...elm.querySelectorAll("[data-key]")].map(n => n.dataset.key));
+  const scroll = elm.scrollTop;
+  elm.after(cover);
+  cover.scrollTop = scroll;
+  elm._cover = cover;
+  let frame = 0;
+  const settled = () => (elm.textContent || "").trim().length > 40 && !LOADING.test(elm.textContent);
+  const lift = () => {
+    covers.delete(lift);
+    if (elm._cover !== cover) return;
+    observer.disconnect();
+    clearTimeout(cap);
+    elm._cover = null;
+    elm.scrollTop = scroll;
+    cover.remove();
+    // what the last picture did not have: marked, quietly, for a moment
+    if (seen.size) for (const n of elm.querySelectorAll("[data-key]")) if (!seen.has(n.dataset.key)) n.classList.add("fresh");
+  };
+  const check = () => { frame = 0; if (settled()) lift(); };
+  const observer = new MutationObserver(() => { if (!frame) frame = requestAnimationFrame(check); });
+  observer.observe(elm, {childList: true, subtree: true, characterData: true});
+  const cap = setTimeout(lift, 6000);
+  covers.add(lift);
+  requestAnimationFrame(() => requestAnimationFrame(check));
+}
+
 function switchTab(name, opts) {
+  // where the Flow tab was: a run's pane borrows the canvas, and moving
+  // it resets its scroll (hiding it does not)
+  if (state.tab === "flow" && !state.workflowOn && canvasShown()) {
+    const st = $("#stage");
+    state.flowView = {scale: state.view.scale, x: st.scrollLeft, y: st.scrollTop};
+  }
   leaveWorkflow();
+  for (const lift of [...covers]) lift();
   state.tab = name;
-  for (const b of document.querySelectorAll(".tabs button"))
-    b.classList.toggle("active", b.dataset.tab === name);
+  if (name !== "traces") { state.execPanelRun = null; state.execSel = null; }
+  if (window.oxRailLabel) window.oxRailLabel(name);
+  for (const b of document.querySelectorAll(".tabs button[data-tab], [data-tabbtn]")) {
+    const on = (b.dataset.tab || b.dataset.tabbtn) === name;
+    b.classList.toggle("active", on);
+    b.setAttribute(b.dataset.tab ? "aria-selected" : "aria-pressed", String(on));
+  }
   $("#stage").style.display = name === "flow" ? "" : "none";
   $("#traces").hidden = name !== "traces";
   $("#jobs").hidden = name !== "jobs";
   $("#resources").hidden = name !== "resources";
+  for (const [n, p] of Object.entries(PANES)) p.el.hidden = n !== name;
+  // a revisit: the last picture while the screen refreshes (not for a run
+  // the caller is about to open, nor the canvas)
+  if (!(opts && opts.quiet)) coverWhileFresh(PANES[name] ? PANES[name].el : name === "traces" ? $("#traces") : null);
+  if (PANES[name]) PANES[name].show(opts);
   // quiet: the caller is about to fill the Traces pane itself
   if (name === "traces" && !(opts && opts.quiet)) showTraces();
   if (name === "jobs") showJobs(state.jobSel);
   if (name === "resources") showResources();
+  // on a phone the sheet belongs to the screen it was opened on
+  if (MOBILE.matches && recall("sideTab", "assistant") === "inspect") store(panelKey(), false);
+  syncChrome();
+  applyPanels();
+  // a canvas left stale while hidden is drawn now, at its final size —
+  // callers read it right after this
+  if (name === "flow") flushCanvas();
+  // the inspector speaks about what is on screen: a canvas selection
+  // does not follow the user into the Traces list
+  if (name !== "flow" && state.sel) { state.sel = null; refreshSelection(); }
+  renderFlowInfo();
   pushView();
+}
+
+/* The chrome follows what is on screen: the body carries the tab, and
+ * `data-stage` while the canvas shows (the Flow tab, or a run's workflow
+ * view) — the canvas toolbar appears only then. */
+function syncChrome() {
+  document.body.dataset.tab = state.tab;
+  const stageOn = state.tab === "flow" || !!state.workflowOn;
+  if (stageOn) document.body.dataset.stage = "";
+  else delete document.body.dataset.stage;
+  if (!stageOn) { $("#find").hidden = true; $("#legend").hidden = true; }
 }
 
 /* ── the side panel: one panel on the right, two tabs ──────────────
    Inspect is the project summary or the selected op; Assistant is the
    chat. The panel is optional; the tab is remembered. Selecting an op
-   brings the Inspect tab forward, the chat bubble brings Assistant. */
+   brings the Inspect tab forward, the chat bubble brings Assistant.
+   On a phone the panel is a bottom sheet over the canvas: closed by
+   default, opened by a selection, remembered on its own key so a
+   desktop preference never covers a phone screen. Where there is
+   nothing to inspect (Jobs, Resources) the panel is the assistant's or
+   nobody's — an inspector with nothing in it only costs width. */
+
+const MOBILE = window.matchMedia("(max-width: 760px)");
+const panelKey = () => (MOBILE.matches ? "panelRightM" : "panelRight");
+// open by default only where it fits beside the content (a tablet gets
+// it as an overlay, opened from the Ask bar)
+const WIDE = window.matchMedia("(min-width: 1100px)");
+const panelWanted = () => recall(panelKey(), WIDE.matches);
+const inspectable = () => state.tab === "flow" || state.tab === "traces";
+
+function panelState() {
+  const tab = recall("sideTab", "assistant");
+  const on = panelWanted() && !(tab === "inspect" && !inspectable());
+  return {on, tab};
+}
 
 function applyPanels() {
-  const on = recall("panelRight", true);
-  const tab = recall("sideTab", "inspect");
+  const {on, tab} = panelState();
   $("#sidebar").classList.toggle("off", !on);
   $("#btn-right").classList.toggle("active", on);
-  for (const b of document.querySelectorAll("#sidetabs button"))
+  $("#btn-right").setAttribute("aria-pressed", String(on));
+  for (const b of document.querySelectorAll("#sidetabs button[data-side]")) {
     b.classList.toggle("active", b.dataset.side === tab);
+    b.setAttribute("aria-selected", String(b.dataset.side === tab));
+  }
   $("#inspector").hidden = tab !== "inspect";
   // `on`: the chat is showing; `panel`: the sidebar is open at all — the
   // floating bubble stays away whenever the panel is open, since the
@@ -2936,24 +3733,36 @@ function applyPanels() {
   document.dispatchEvent(new CustomEvent("oxdock", {detail: {on: on && tab === "assistant", panel: on}}));
 }
 function showSide(tab) {
-  store("panelRight", true);
+  store(panelKey(), true);
   store("sideTab", tab);
+  applyPanels();
+}
+function hideSide() {
+  store(panelKey(), false);
   applyPanels();
 }
 window.oxSide = {
   show: showSide,
-  toggle: () => { store("panelRight", !recall("panelRight", true)); applyPanels(); },
+  hide: (tab) => { if (tab) store("sideTab", tab); hideSide(); },
+  state: panelState,
+  toggle: () => {
+    const {on, tab} = panelState();
+    if (on) hideSide();
+    else showSide(tab === "inspect" && !inspectable() ? "assistant" : tab);
+  },
 };
 $("#btn-right").onclick = window.oxSide.toggle;
-for (const b of document.querySelectorAll("#sidetabs button"))
+$("#side-close").onclick = () => { hideSide(); if (state.sel) deselect(); };
+for (const b of document.querySelectorAll("#sidetabs button[data-side]"))
   b.onclick = () => showSide(b.dataset.side);
+MOBILE.addEventListener("change", applyPanels);
 
 /* ── the legend: the visual language, written down on screen ──────── */
 
 function legendSample(cls, dash) {
   const svg = document.createElementNS(SVGNS, "svg");
   svg.setAttribute("viewBox", "0 0 64 12");
-  svg.setAttribute("class", "lsample");
+  svg.setAttribute("class", "wires lsample");
   const d = "M 2 6 L 62 6";
   if (dash) {
     const p = document.createElementNS(SVGNS, "path");
@@ -2970,7 +3779,7 @@ function buildLegend() {
   const box = $("#legend");
   box.textContent = "";
   const title = el("div", "ltitle", "Reading the canvas");
-  const close = el("button", "chat-close", "✕");
+  const close = Icons.button("x", undefined, "chat-close", "Close");
   close.onclick = () => { box.hidden = true; };
   title.append(close);
   box.append(title);
@@ -2984,7 +3793,7 @@ function buildLegend() {
   row(legendSample("cond"), "if/else route — the condition sits in its own row on the router card, and the wire leaves that row");
   row(legendSample("ecore cond relse", true), "else — fires only when no condition matched");
   row(legendSample("soft", true), "soft merge — may not fire at all");
-  row(el("span", "lglyph", "↺"), "a loop returns underneath, back to where the author's cycle begins");
+  row(el("span", "lglyph", "↺"), "a loop returns up the right margin, back to where the author's cycle begins — from its router's row when the route itself is the return");
   row(el("span", "lglyph", "⚡"), "generator: one call, many yields — consumers run per yield");
   row(el("span", "lglyph", "≋ ∥ ⧉"), "streaming edge · parallel fan-out · collect-into-list");
   row(el("span", "lglyph", "▣"), "a nested graph — click its badge (or double-click) to open it in place");
@@ -3008,33 +3817,74 @@ $("#btn-legend").onclick = () => {
 
 $("#pname").onclick = async () => {
   const menu = $("#switcher");
-  if (!menu.hidden) { menu.hidden = true; return; }
+  if (!menu.hidden) { menu.hidden = true; $("#pname").setAttribute("aria-expanded", "false"); return; }
+  $("#pmenu").hidden = true;
   menu.textContent = "";
   try {
     const {projects} = await api("/api/projects");
     for (const p of projects.filter(x => x.exists)) {
       const item = el("button", "switchrow" + (p.id === PID ? " here" : ""));
+      item.setAttribute("role", "menuitem");
       item.append(el("span", "name", p.name));
       item.append(el("span", "path mono", p.root));
       item.onclick = () => { if (p.id !== PID) location.href = `/p/${p.id}`; };
       menu.append(item);
     }
+    const all = el("button", "switchrow switchall", "All projects");
+    all.onclick = () => { location.href = "/"; };
+    menu.append(all);
   } catch (e) { menu.append(el("div", "note", e.message)); }
   menu.hidden = false;
+  $("#pname").setAttribute("aria-expanded", "true");
 };
 document.addEventListener("click", (ev) => {
-  if (!ev.target.closest("#switcher") && !ev.target.closest("#pname"))
+  if (!ev.target.closest("#switcher") && !ev.target.closest("#pname")) {
     $("#switcher").hidden = true;
+    $("#pname").setAttribute("aria-expanded", "false");
+  }
 });
-for (const b of document.querySelectorAll(".tabs button"))
+for (const b of document.querySelectorAll(".tabs button[data-tab]"))
   b.onclick = () => switchTab(b.dataset.tab);
+
+/* The rail: the screens grouped by what they are for. Slim (icons) below
+ * 1200px unless the user chose; on a phone a drawer the header's screen
+ * button opens, which closes again once a screen is picked. */
+(function rail() {
+  const r = $("#rail"), shade = $("#railshade"), btn = $("#btn-screen");
+  const SLIM = window.matchMedia("(max-width: 1199px)");
+  const apply = () => {
+    const pref = recall("railSlim", null);
+    document.body.classList.toggle("railslim", !MOBILE.matches && (pref ?? SLIM.matches));
+    const slim = document.body.classList.contains("railslim");
+    $("#rail-slim").title = slim ? "Expand the menu" : "Collapse the menu";
+    $("#rail-slim").setAttribute("aria-label", $("#rail-slim").title);
+  };
+  $("#rail-slim").onclick = () => { store("railSlim", !document.body.classList.contains("railslim")); apply(); };
+  SLIM.addEventListener("change", apply);
+  MOBILE.addEventListener("change", apply);
+  apply();
+  const close = () => { document.body.classList.remove("railopen"); shade.hidden = true; btn.setAttribute("aria-expanded", "false"); };
+  btn.onclick = () => {
+    const open = !document.body.classList.contains("railopen");
+    document.body.classList.toggle("railopen", open);
+    shade.hidden = !open;
+    btn.setAttribute("aria-expanded", String(open));
+  };
+  shade.onclick = close;
+  for (const b of r.querySelectorAll(".tabs button[data-tab]")) b.addEventListener("click", close);
+  window.oxRailLabel = (name) => {
+    const b = r.querySelector(`.tabs button[data-tab="${name}"] span`);
+    $("#screen-label").textContent = b ? b.textContent : name === "settings" ? "Settings" : name;
+  };
+})();
 
 $("#graph-pick").onchange = (ev) => {
   state.graph = state.ir.graphs.find(g => g.name === ev.target.value);
   state.sel = null;
   state.expanded.clear();
   $("#inspector").classList.remove("open");
-  render(); fit();
+  // the side panel speaks about the graph on screen, not the last one
+  render(); fit(); renderFlowInfo(); pushView();
 };
 
 $("#btn-fit").onclick = fit;
@@ -3160,11 +4010,17 @@ function centerOn(item) {
     if (ev.key !== "Enter") return;
     const q = input.value.trim().toLowerCase();
     if (!q) return;
-    // shallowest match wins — the top-level op, not a container's twin
+    // the exact name first, then a name that starts with it, then any
+    // that contains it ("out" found "router" before "out"); among equals
+    // the shallowest wins — the top-level op, not a container's twin
+    const rank = (item) => {
+      const name = item.node.name.toLowerCase();
+      return (name === q ? 0 : name.startsWith(q) ? 1 : 2) * 100 + item.depth;
+    };
     let best = null;
     for (const [, item] of state.rendered) {
       if (!item.node.name.toLowerCase().includes(q)) continue;
-      if (!best || item.depth < best.depth) best = item;
+      if (!best || rank(item) < rank(best)) best = item;
     }
     if (best) { closeFind(); select(best.key); centerOn(state.rendered.get(best.key)); }
   });
@@ -3190,21 +4046,33 @@ function centerOn(item) {
     panel.style.width = `${width}px`;
   });
   bar.addEventListener("pointerup", () => {
+    if (!dragging) return;
     dragging = false;
     document.body.classList.remove("resizing");
-    store("panelW", parseInt(panel.style.width, 10) || 340);
+    // a click without a drag leaves no width behind (it used to store 340px)
+    if (panel.style.width) store("panelW", parseInt(panel.style.width, 10));
   });
+  // back to the default: 380px, 420px on a large screen (studio.css)
   bar.addEventListener("dblclick", () => {
-    panel.style.width = "380px";
-    store("panelW", 380);
+    panel.style.width = "";
+    store("panelW", null);
   });
 })();
 
+syncChrome();
 applyPanels();
 
 async function load(first) {
-  const data = await api(`/api/p/${PID}/ir`);
-  $("#pname").textContent = data.name || "project";
+  // the first picture rides in the page itself (app.py project_page)
+  const boot = first ? document.getElementById("ir-boot") : null;
+  let data = null;
+  if (boot) {
+    try { data = JSON.parse(boot.textContent); } catch { data = null; }
+    boot.remove();
+  }
+  if (!data) data = await api(`/api/p/${PID}/ir`);
+  $("#pname").textContent = "";
+  $("#pname").append(el("span", null, data.name || "project"));
   document.title = `${data.name} — operonx studio`;
   if (data.error) {
     $("#nodes").textContent = "";
@@ -3225,13 +4093,34 @@ async function load(first) {
     box.style.maxWidth = "700px";
     $("#stage").append(box);
     $("#live").classList.add("stale");
-    $("#live-text").textContent = "extraction failed";
+    $("#live-text").textContent = "Extraction failed";
     state.stamp = data.stamp;
     return;
   }
   for (const b of document.querySelectorAll("#stage .errbox")) b.remove();
   $("#live").classList.remove("stale");
-  $("#live-text").textContent = "live";
+  $("#live-text").textContent = "Live";
+  // which ops' code changed since the last extraction — the canvas
+  // outlines them for a while, so an edit (the assistant's or anyone's)
+  // shows where it landed
+  if (state.ir && !first) {
+    const codeOf = (ir) => {
+      const m = new Map();
+      for (const g of ir.graphs || []) (function walk(gr) {
+        for (const n of (gr && gr.nodes) || []) { m.set(n.name, n.code || ""); if (n.graph) walk(n.graph); }
+      })(g);
+      return m;
+    };
+    const before = codeOf(state.ir), after = codeOf(data);
+    const changed = [...after].filter(([k, c]) => before.has(k) ? before.get(k) !== c : true).map(([k]) => k);
+    if (changed.length) document.dispatchEvent(new CustomEvent("oxflowchanged", {detail: {ops: changed}}));
+    if (changed.length && changed.length < 40) {
+      state.changedOps = new Set(changed);
+      clearTimeout(state._changedTimer);
+      state._changedTimer = setTimeout(() => { state.changedOps = null; render(); }, 60000);
+      toast(`${changed.length} op${changed.length > 1 ? "s" : ""} changed: ${changed.slice(0, 3).join(", ")}${changed.length > 3 ? "…" : ""}`);
+    }
+  }
   state.ir = data;
   state.stamp = data.stamp;
 
@@ -3248,34 +4137,403 @@ async function load(first) {
   // choice that does not exist. The picker returns if a project ever
   // declares extra unserved [[graph]] entries.
   pick.hidden = data.graphs.length <= 1;
+  // one graph: on a phone the header gives its room to the project's name
+  document.body.classList.toggle("onegraph", data.graphs.length <= 1);
   state.graph = data.graphs.find(g => g.name === current) || data.graphs[0];
   if (state.graph) pick.value = state.graph.name;
   $("#btn-project").title = `${data.graphs.length} operons · ${(data.services || []).length} services · ${(data.jobs || []).length} jobs`;
   render();
-  if (first) initView();
+  // opened on a hidden canvas (the assistant in focus): fit it when it shows
+  if (first) { if (state.renderPending) state.viewPending = true; else initView(); }
   pushView();
   renderFlowInfo();
 }
 
-let pollN = 0;
-async function poll() {
-  pollN += 1;
-  try {
-    const {stamp} = await api(`/api/p/${PID}/stamp`);
-    if (stamp !== state.stamp) await load(false);
-    // follow-latest, throttled — a directory scan every 6s, never the
-    // remote Langfuse API
-    if (state.follow && pollN % 4 === 0) {
-      const t = await api(`/api/p/${PID}/traces?local_only=1`);
-      const newest = (t.runs || []).find(r => r.source === "local");
-      if (newest && (!state.run || state.run.run !== newest.run)) await showRunWorkflow(newest.run);
+/* The pulse (app.py): one held request that answers the moment the
+ * code changes, the assistant opens something, or — when following —
+ * a newer run lands. It replaced two polls every 1.5 s. */
+state.uiSeq = -1;
+state.chatSeq = -1;
+let pulseMiss = 0;
+async function pulse() {
+  for (;;) {
+    try {
+      const q = new URLSearchParams({stamp: String(state.stamp || 0), ui: String(state.uiSeq),
+                                     chat: String(state.chatSeq)});
+      if (state.follow) q.set("follow", (state.run && state.run.run) || "-");
+      else if (state.tab === "flow" && flowLive.on) q.set("follow", flowLive.newest || "-");
+      const got = await api(`/api/p/${PID}/pulse?${q}`);
+      pulseMiss = 0;
+      setLinkState(true);
+      if (got.stamp !== state.stamp) await load(!state.ir);
+      if (state.uiSeq < 0) state.uiSeq = got.ui_last;   // only what happens from now on
+      if (state.chatSeq >= 0 && (got.chat_ended || []).length) {
+        document.dispatchEvent(new CustomEvent("oxturnended", {detail: {ended: got.chat_ended}}));
+      }
+      state.chatSeq = got.chat_last ?? state.chatSeq;
+      // the plan's limits, as last heard by any conversation
+      if (got.assistant_rate) document.dispatchEvent(new CustomEvent("oxrate", {detail: got.assistant_rate}));
+      for (const a of got.actions || []) {
+        state.uiSeq = a.seq;
+        try { await performUi(a.kind, a.args || {}); } catch { /* a stale action is not an error */ }
+      }
+      if (state.follow && got.newest && (!state.run || state.run.run !== got.newest)) {
+        await showRunWorkflow(got.newest);
+      } else if (!state.follow && state.tab === "flow" && got.newest) {
+        flowLive.landed(got.newest, got.newest_info);
+      }
+    } catch {
+      // the studio or the tunnel is briefly away: back off, then say so
+      pulseMiss += 1;
+      if (pulseMiss > 2) setLinkState(false);
+      await new Promise(r => setTimeout(r, Math.min(8000, 800 * pulseMiss)));
     }
-  } catch { /* daemon briefly away; the next poll answers */ }
-  setTimeout(poll, 1500);
+  }
 }
 
+/* The header's Live dot: it says "Reconnecting" when the pulse keeps
+ * failing, instead of a page that silently stopped updating. */
+function setLinkState(up) {
+  const live = $("#live");
+  if (!live || live.classList.contains("stale")) return;
+  live.classList.toggle("down", !up);
+  $("#live-text").textContent = up ? "Live" : "Reconnecting…";
+}
+
+async function performUi(kind, args) {
+  if (kind === "open_run") {
+    if (state.tab !== "traces") switchTab("traces", {quiet: true});
+    if (args.lens) { state.lens = args.lens; store("lens", args.lens); }
+    await (args.mode === "workflow" ? showRunWorkflow(args.run) : showRunTree(args.run));
+    if (!args.quiet) toast(`Assistant opened run ${args.run}`);
+  } else if (kind === "open_monitor") {
+    store(`monitor:${PID}`, {target: args.target || "", range: args.days >= 30 ? "30d" : args.days <= 1 ? "24h" : "7d"});
+    switchTab("monitor");
+  } else if (kind === "compare") {
+    if (state.tab !== "traces") switchTab("traces", {quiet: true});
+    await RunView.compare(args.a, args.b);
+  } else if (kind === "select_op") {
+    if (state.tab !== "flow") switchTab("flow");
+    // an op is named by its node, or by the function behind it
+    const def = new RegExp(`\\bdef ${String(args.op).replace(/[^\w]/g, "")}\\(`);
+    const find = () => {
+      const all = [...state.rendered.values()];
+      return all.find(x => x.node.name === args.op) || all.find(x => def.test(x.node.code || ""));
+    };
+    let it = find();
+    if (!it) { expandAll(true); it = find(); }
+    if (it) { if (state.sel !== it.key) select(it.key); centerOn(it); }
+    else toast(`No op named ${args.op} in this graph`);
+  } else if (kind === "open_jobs") {
+    state.jobSel = args.job; switchTab("jobs");
+  } else if (kind === "open_tab") {
+    switchTab(args.tab);
+  } else if (kind === "open_eval") {
+    switchTab("evals", {name: args.name, run: args.run});
+  }
+}
+
+/* `studio:` links in the assistant's replies (chat.js turns them into
+ * buttons): studio:run/<id>, studio:op/<name>, studio:tab/<name>,
+ * studio:monitor/<origin>/<name>. */
+window.oxStudioLink = (href) => {
+  const path = String(href).replace(/^studio:/, "");
+  const [kind, ...rest] = path.split("/");
+  const arg = decodeURIComponent(rest.join("/"));
+  if (kind === "run") return performUi("open_run", {run: arg});
+  if (kind === "op") return performUi("select_op", {op: arg});
+  if (kind === "tab") return performUi("open_tab", {tab: arg === "runs" ? "traces" : arg});
+  if (kind === "eval") return performUi("open_eval", {name: rest[0], run: rest[1] || ""});
+  if (kind === "monitor") return performUi("open_monitor", {target: rest.length > 1 ? `${rest[0]}:${decodeURIComponent(rest.slice(1).join("/"))}` : ""});
+  return null;
+};
+
 state.follow = recall("follow", false);
-load(true).then(() => setTimeout(poll, 1500));
+load(true).catch((err) => {
+  // the first paint failed (a dropped tunnel, a dead studio): say so where
+  // the canvas would be; the pulse retries and draws when it can
+  const box = el("div", "errbox");
+  box.append(el("div", "errhead", "Could not load this project"), el("div", "note", err.message));
+  box.style.position = "absolute";
+  $("#stage").append(box);
+}).finally(pulse);
+
+/* ── the canvas in motion ─────────────────────────────────────────────
+ * The flow comes alive only when something runs: a playground session
+ * (its ops stream from the bridge as they finish — play.js dispatches
+ * "oxops"), or a recorded run replayed from its timings. The op at work
+ * carries the signal ring; when it finishes it settles green or red and
+ * a particle runs each wire out of it toward its consumers, which then
+ * wait, lit, for their own turn. Everything here toggles classes on
+ * cards and wires already drawn — never a render(): a repaint of callbot
+ * costs ~60 ms, far too much per event (docs/REFACTOR_PHASE2.md P4). */
+liveCanvas = (() => {
+  const MAX_PARTICLES = 24;
+  let particles = 0;
+  let run = null;       // {kind: "live"|"replay", label, timers, names, out, active}
+
+  // op name → the rendered keys that stand for it (the op itself, or the
+  // folded container it sits in)
+  function index() {
+    const names = new Map();
+    const put = (name, key) => { if (!names.has(name)) names.set(name, []); names.get(name).push(key); };
+    const walk = (g, key) => { for (const m of (g && g.nodes) || []) { put(m.name, key); if (m.graph) walk(m.graph, key); } };
+    for (const [key, it] of state.rendered) {
+      const n = it.node;
+      if (!n || !n.name) continue;
+      put(n.name, key);
+      if (n.graph && !state.expanded.has(key)) walk(n.graph, key);
+    }
+    const out = new Map();   // key → paths of the wires leaving it
+    for (const e of state.edgeEls) {
+      // a beam is a glow, a core and a filament: the particle rides the core
+      const els = (e.els || []).filter(x => x.getAttribute && x.getAttribute("d"));
+      const path = els.find(x => x.classList.contains("ecore")) || els[0];
+      if (!path) continue;
+      if (!out.has(e.a)) out.set(e.a, []);
+      out.get(e.a).push({path, glow: els.find(x => x.classList.contains("eglow")), to: e.b});
+    }
+    return {names, out};
+  }
+
+  function begin(kind, label) {
+    stop(true);
+    const ix = index();
+    run = {kind, label, timers: [], active: new Map(), names: ix.names, out: ix.out, seen: 0, t0: Date.now()};
+    $("#world").classList.add("live");
+    paintBar();
+    return run;
+  }
+
+  function stop(quiet) {
+    if (!run) return;
+    for (const t of run.timers) clearTimeout(t);
+    for (const t of run.active.values()) clearTimeout(t);
+    for (const n of document.querySelectorAll("#nodes .live-active, #nodes .live-done, #nodes .live-failed"))
+      n.classList.remove("live-active", "live-done", "live-failed");
+    for (const p of document.querySelectorAll("#edges path.flowing, #edgetop path.flowing")) p.classList.remove("flowing");
+    for (const p of document.querySelectorAll("#edges path.particle")) p.remove();
+    particles = 0;
+    $("#world").classList.remove("live");
+    run = null;
+    if (!quiet) paintBar();
+  }
+
+  function particle(path, failed, dur, glow) {
+    if (particles + 2 > MAX_PARTICLES || !path || !path.ownerSVGElement) return;
+    if (glow) glow.classList.add("flowing");
+    const d = path.getAttribute("d");
+    for (const trail of [false, true]) {
+      const p = document.createElementNS(SVGNS, "path");
+      p.setAttribute("d", d);
+      p.setAttribute("pathLength", "100");
+      p.setAttribute("class", "particle" + (trail ? " trail" : "") + (failed ? " failed" : ""));
+      p.style.setProperty("--dur", `${dur}ms`);
+      particles += 1;
+      const done = () => { p.remove(); particles = Math.max(0, particles - 1); };
+      p.addEventListener("animationend", done, {once: true});
+      setTimeout(done, dur + 600);          // reduced motion: no animationend
+      path.ownerSVGElement.append(p);
+    }
+    path.classList.add("flowing");
+  }
+
+  const cardsOf = (op) => (run && run.names.get(op) || []).map(k => [k, state.cardEls.get(k)]).filter(([, c]) => c);
+
+  function start(op) {
+    if (!run) return;
+    for (const [, card] of cardsOf(op)) {
+      card.classList.remove("live-done", "live-failed");
+      card.classList.add("live-active");
+    }
+  }
+
+  function finish(op, status, dur) {
+    if (!run) return;
+    run.seen += 1;
+    const bad = status === "error";
+    dur = Math.max(260, Math.min(900, dur || 500));
+    for (const [key, card] of cardsOf(op)) {
+      card.classList.remove("live-active");
+      card.classList.add(bad ? "live-failed" : "live-done");
+      for (const w of run.out.get(key) || []) {
+        particle(w.path, bad, dur, w.glow);
+        // the consumer lights as the data reaches it, until it finishes
+        const target = state.cardEls.get(w.to);
+        if (!target || target.classList.contains("bnode")) continue;
+        const prev = run.active.get(w.to);
+        if (prev) clearTimeout(prev);
+        run.active.set(w.to, setTimeout(() => {
+          if (!run) return;
+          target.classList.remove("live-done", "live-failed");
+          target.classList.add("live-active");
+          // nothing more heard from it: it settles on its own
+          run.active.set(w.to, setTimeout(() => target.classList.remove("live-active"), 2500));
+        }, dur * 0.8));
+      }
+    }
+    paintBar();
+  }
+
+  /* a live playground session: ops as they finish */
+  function onOps(detail) {
+    if (state.tab !== "flow" || !state.graph) return;
+    const ops = detail.ops || [];
+    const serving = serviceGraph(detail.service);
+    if (serving && serving !== state.graph.name) return;
+    if (!run || run.kind !== "live" || run.sid !== detail.sid) {
+      begin("live", detail.service ? `${detail.service} · live session` : "Live session");
+      run.sid = detail.sid;
+      run.trace = detail.trace_id;
+      animated.add(detail.trace_id);
+    }
+    // a burst arrives as one batch: spread it over ~a second so each op reads
+    const gap = Math.min(120, 900 / Math.max(1, ops.length));
+    ops.slice(0, 200).forEach((o, i) => {
+      const me = run;
+      me.timers.push(setTimeout(() => { if (run === me) finish(o.op, o.status, o.ms); }, i * gap));
+    });
+  }
+
+  // the graph a service serves ("module:graph" or "graph"), to match the canvas
+  function serviceGraph(service) {
+    if (!service) return null;
+    const sv = ((state.ir || {}).services || []).find(x => x.name === service);
+    return sv && sv.graph ? String(sv.graph).split(":").pop().replace(/\[.*$/, "") : null;
+  }
+
+  /* a recorded run, replayed from its timings: the whole run in 3–12 s,
+   * a two-millisecond job and a ten-minute call alike */
+  async function replay(runId, speed) {
+    let tl;
+    try { tl = await api(`/api/p/${PID}/trace/${encodeURIComponent(runId)}/timeline`); }
+    catch (e) { toast(e.message, true); return; }
+    const spans = tl.spans || [];
+    if (!spans.length) { toast("This run recorded no timings to replay"); return; }
+    const total = Math.max(...spans.map(x => x.start + (x.dur_ms || 0) / 1000));
+    const target = Math.max(3, Math.min(12, spans.length * 0.4)) / (speed || 1);
+    const k = total > 0 ? target / total : 0;
+    const me = begin("replay", `Replaying ${String(runId).slice(0, 12)}`);
+    me.run = runId;
+    me.speed = speed || 1;
+    animated.add(runId);
+    // an op firing again and again within a blink counts once
+    const last = new Map();
+    for (const x of spans) {
+      const at = Math.round(x.start * k * 1000);
+      if (last.has(x.op) && at - last.get(x.op) < 140) continue;
+      last.set(x.op, at);
+      const end = at + Math.max(200, Math.min(1200, (x.dur_ms || 0) * k));
+      me.timers.push(setTimeout(() => { if (run === me) start(x.op); }, at));
+      me.timers.push(setTimeout(() => { if (run === me) finish(x.op, x.status, 420 / me.speed + 200); }, end));
+    }
+    me.timers.push(setTimeout(() => { if (run === me) { me.over = true; paintBar(); } }, target * 1000 + 1400));
+    me.timers.push(setTimeout(() => { if (run === me) stop(); }, target * 1000 + 6000));
+  }
+
+  const animated = new Set();   // runs already shown moving: a landing run is not replayed twice
+
+  /* the pill over the canvas: what is moving, and a way to stop it */
+  function paintBar() {
+    let bar = $("#livebar");
+    if (!run) { if (bar) bar.hidden = true; return; }
+    if (!bar) {
+      bar = el("div", "livebar");
+      bar.id = "livebar";
+    }
+    if (bar.parentNode !== $("#stage")) $("#stage").prepend(bar);
+    bar.hidden = false;
+    bar.textContent = "";
+    bar.classList.toggle("over", !!run.over);
+    bar.append(el("span", "livedot"), el("span", "livelabel", run.over ? `${run.label} — done` : run.label));
+    if (run.seen) bar.append(el("span", "livecount", `${run.seen} op${run.seen === 1 ? "" : "s"}`));
+    if (run.kind === "replay") {
+      const again = Icons.button("resume", undefined, "livebtn", "Replay again");
+      const r0 = run.run, sp = run.speed;
+      again.onclick = () => replay(r0, sp);
+      bar.append(again);
+    }
+    const x = Icons.button("x", undefined, "livebtn", run.kind === "replay" ? "Stop the replay" : "Stop following");
+    x.onclick = () => stop();
+    bar.append(x);
+  }
+
+  document.addEventListener("oxops", (ev) => onOps(ev.detail || {}));
+  document.addEventListener("oxsession", (ev) => {
+    const d = ev.detail || {};
+    if (d.state === "ended" && run && run.kind === "live" && run.sid === d.sid) {
+      run.over = true;
+      run.label = `${d.service || "Session"} · ${d.status === "error" ? "ended with an error" : "finished"}`;
+      paintBar();
+      const me = run;
+      me.timers.push(setTimeout(() => { if (run === me) stop(); }, 5000));
+    }
+  });
+
+  // a repaint during a run rebuilt the cards and wires: point at the new ones
+  function reindex() {
+    if (!run) return;
+    const ix = index();
+    run.names = ix.names;
+    run.out = ix.out;
+    $("#world").classList.add("live");
+    const bar = $("#livebar");
+    if (bar && bar.parentNode !== $("#stage")) $("#stage").prepend(bar);
+  }
+
+  return {replay, stop, reindex, animated, get running() { return run; }};
+})();
+
+/* The Flow tab follows new runs of the graph on screen: each one replays
+ * as it lands (a live playground session already moved the canvas, so
+ * its run is not shown twice). Off in the canvas bar, remembered. */
+const flowLive = {
+  on: recall("flowLive", true),
+  newest: null,
+  landed(id, info) {
+    const first = this.newest === null;
+    if (id === this.newest) return;
+    this.newest = id;
+    if (first || !this.on || liveCanvas.animated.has(id) || liveCanvas.running) return;
+    if (info && state.graph && !graphServes(info)) return;
+    liveCanvas.replay(id, 2);
+  },
+};
+function graphServes(info) {
+  // the run belongs to the graph on screen: its service's or job's graph
+  const ir = state.ir || {};
+  const list = info.origin === "service" || info.origin === "playground" ? ir.services || [] : ir.jobs || [];
+  const decl = list.find(x => x.name === info.name);
+  const g = decl && decl.graph ? String(decl.graph).split(":").pop().replace(/\[.*$/, "") : null;
+  return !g || g === state.graph.name;
+}
+
+const liveBtn = $("#btn-live");
+function paintLiveBtn() {
+  liveBtn.classList.toggle("active", flowLive.on);
+  liveBtn.setAttribute("aria-pressed", String(flowLive.on));
+}
+liveBtn.onclick = () => {
+  flowLive.on = !flowLive.on;
+  store("flowLive", flowLive.on);
+  if (!flowLive.on) liveCanvas.stop();
+  paintLiveBtn();
+  toast(flowLive.on ? "Live: new runs replay on the canvas as they land" : "Live off");
+};
+paintLiveBtn();
+
+/* a run to replay, from the run view's header */
+function replayControl(runId) {
+  const box = el("span", "replayctl");
+  const go = Icons.button("play", "Replay", "small", "Replay this run on the canvas, from its recorded timings");
+  go.onclick = () => liveCanvas.replay(runId, 1);
+  const fast = el("button", "small ghost", "4×");
+  fast.type = "button";
+  fast.title = "Replay four times faster";
+  fast.onclick = () => liveCanvas.replay(runId, 4);
+  box.append(go, fast);
+  return box;
+}
 
 /* ── the project menu: Operons · Services · Jobs ───────────────────────
  * The three lists the application layer declares (operonx.app), from
@@ -3325,12 +4583,22 @@ function renderProjectMenu() {
 $("#btn-project").onclick = (ev) => {
   ev.stopPropagation();
   const box = $("#pmenu");
-  if (box.hidden) renderProjectMenu();
+  if (box.hidden) { renderProjectMenu(); $("#switcher").hidden = true; }
   box.hidden = !box.hidden;
+  $("#btn-project").setAttribute("aria-expanded", String(!box.hidden));
 };
 document.addEventListener("click", (ev) => {
   const box = $("#pmenu");
-  if (!box.hidden && !box.contains(ev.target)) box.hidden = true;
+  if (!box.hidden && !box.contains(ev.target)) {
+    box.hidden = true;
+    $("#btn-project").setAttribute("aria-expanded", "false");
+  }
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  for (const [menu, btn] of [["#pmenu", "#btn-project"], ["#switcher", "#pname"]]) {
+    if (!$(menu).hidden) { $(menu).hidden = true; $(btn).setAttribute("aria-expanded", "false"); $(btn).focus(); }
+  }
 });
 
 /* ── the Jobs tab: the records the jobs write, and Run / Resume ────────
@@ -3341,17 +4609,20 @@ document.addEventListener("click", (ev) => {
 
 let _jobsPoll = null;
 
+/* A status is a dot and a word — colour for the eye, the word for
+ * everyone else. */
 function statusChip(status) {
-  const cls = status === "ok" ? "cok" : status === "running" ? "crun"
-    : (status === "failed" || status === "stopped" || status === "timeout") ? "cbad" : "";
-  return el("span", "chip " + cls, status || "?");
+  const cls = status === "ok" ? "s-ok" : status === "running" ? "s-run"
+    : (status === "failed" || status === "stopped" || status === "timeout") ? "s-bad"
+    : status === "skipped" ? "s-skip" : "";
+  return el("span", "status " + cls, status || "unknown");
 }
 
 function countsChips(counts) {
   const wrap = el("span", "counts");
   for (const [k, v] of Object.entries(counts || {})) {
     if (!v && k !== "ok") continue;
-    wrap.append(el("span", "chip " + (k === "failed" || k === "timeout" ? "cbad" : k === "empty" ? "cwarn" : ""), `${k} ${v}`));
+    wrap.append(el("span", k === "failed" || k === "timeout" ? "bad" : k === "empty" ? "warn" : "", `${v} ${k}`));
   }
   return wrap;
 }
@@ -3359,19 +4630,27 @@ function countsChips(counts) {
 async function showJobs(sel, runId) {
   const box = $("#jobs");
   const mine = (state.jobsView = {});
+  if (!box.childNodes.length) box.append(el("div", "note", "Loading jobs…"));
   let data;
-  try { data = await api(`/api/p/${PID}/jobs`); }
-  catch (e) { box.textContent = ""; box.append(el("div", "errbox", e.message)); return; }
+  // one round trip: the list carries the opened job's runs and run
+  const q = new URLSearchParams({open: sel || "", run: runId || ""});
+  try { data = await api(`/api/p/${PID}/jobs?${q}`); }
+  catch (e) { box.textContent = ""; box.append(loadError(e, () => showJobs(sel, runId))); return; }
   if (state.jobsView !== mine) return;
   box.textContent = "";
   if (!data.jobs.length) {
-    box.append(el("div", "note",
-      'No [[job]] declared. Add one to operonx.toml:\n\n[[job]]\nname   = "score_calls"\ngraph  = "pipeline:score_call"\nsource = "data/calls.jsonl"\nsink   = "out/scores.jsonl"\nkey    = "call_id"'));
-    box.querySelector(".note").style.whiteSpace = "pre-wrap";
+    box.append(paneNote("No jobs declared",
+      "A job runs a graph over a batch of items — one run per item, a record per run.",
+      '[[job]]\nname   = "score_calls"\ngraph  = "pipeline:score_call"\nsource = "data/calls.jsonl"\nsink   = "out/scores.jsonl"\nkey    = "call_id"',
+      {ask: {label: "Add a job", prompt: "Add a job to this project that runs its main graph over a batch of items "
+        + "(a small JSONL of realistic examples if there is none) and records each result. Declare it, run it once, "
+        + "and tell me how it went."}}));
     return;
   }
   const cols = el("div", "jcols");
   const list = el("div", "jlist");
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", "Jobs");
   const detail = el("div", "jdetail");
   cols.append(list, detail);
   box.append(cols);
@@ -3380,79 +4659,116 @@ async function showJobs(sel, runId) {
   state.jobSel = picked.name;
   for (const j of data.jobs) {
     const r = el("div", "jrow" + (j.name === picked.name ? " sel" : ""));
+    r.tabIndex = 0;
+    r.setAttribute("role", "option");
+    r.setAttribute("aria-selected", String(j.name === picked.name));
     const head = el("div", "jhead");
-    head.append(el("span", "jn", j.name), el("span", "chip", j.kind === "runbook" ? "runbook" : j.session));
-    if (j.schedule) head.append(el("span", "chip", j.schedule));
+    head.append(el("span", "jn", j.name));
+    head.append(el("span", "jkind", (j.kind === "runbook" ? "runbook" : j.session) + (j.schedule ? ` · ${j.schedule}` : "")));
     r.append(head);
-    if (j.kind !== "runbook") r.append(el("div", "jio mono", `${j.source || "-"} → ${j.sink || "-"}`));
     if (j.description) r.append(el("div", "jdesc", j.description));
     const last = el("div", "jlast");
-    if (j.last) { last.append(statusChip(j.last.status), countsChips(j.last.counts), el("span", "jwhen", j.last.started || "")); }
-    else last.append(el("span", "jwhen", "never run"));
+    if (j.last) {
+      last.append(statusChip(j.last.status));
+      if (j.last.started) {
+        const w = el("span", "jwhen", fmtAgo(j.last.started));
+        w.title = fmtWhen(j.last.started);
+        last.append(w);
+      }
+    } else last.append(el("span", "jwhen", "Never run"));
     r.append(last);
     r.onclick = () => showJobs(j.name);
+    r.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); showJobs(j.name); } };
     list.append(r);
   }
-  await renderJobDetail(detail, picked, runId, mine);
+  await renderJobDetail(detail, picked, runId, mine, data.detail && data.detail.name === picked.name ? data.detail : null);
+  // keep the picked job in view on the phone's horizontal strip
+  const on = list.querySelector(".jrow.sel");
+  if (on && MOBILE.matches) on.scrollIntoView({block: "nearest", inline: "nearest"});
 }
 
-async function renderJobDetail(detail, job, runId, mine) {
+async function renderJobDetail(detail, job, runId, mine, pre) {
   detail.textContent = "";
   const bar = el("div", "jbar");
-  bar.append(el("span", "jtitle", job.name));
-  const run = el("button", "primary", "▶ run");
-  run.title = `operonx-run ${job.name} — under the project's interpreter`;
-  run.onclick = () => startJob(job.name, false);
-  bar.append(run);
+  bar.append(el("h2", "jtitle", job.name));
+  const refresh = Icons.button("refresh", undefined, "", "Refresh");
+  refresh.onclick = () => showJobs(job.name, state.jobRun);
+  bar.append(refresh);
   if (job.kind !== "runbook" && job.session !== "stream") {
-    const resume = el("button", null, "↻ resume");
-    resume.title = "only the keys the last run did not finish";
+    const resume = Icons.button("resume", "Resume");
+    resume.title = "Run only the keys the last run did not finish";
     resume.onclick = () => startJob(job.name, true);
     bar.append(resume);
   }
-  const refresh = el("button", null, "⟳");
-  refresh.onclick = () => showJobs(job.name, state.jobRun);
-  bar.append(refresh);
-  bar.append(el("span", "jpath mono", job.record_dir || ""));
+  const run = Icons.button("play", "Run", "primary");
+  run.title = `operonx-run ${job.name} — under the project's interpreter`;
+  run.onclick = () => startJob(job.name, false);
+  bar.append(run);
   detail.append(bar);
+  if (job.description) detail.append(el("p", "jmeta", job.description));
+  const facts = [job.kind === "runbook" ? "Runbook" : `${job.session} job`];
+  if (job.schedule) facts.push(`schedule ${job.schedule}`);
+  if (job.kind !== "runbook") facts.push(`${job.source || "—"} → ${job.sink || "—"}`);
+  detail.append(el("p", "jpath", facts.join("  ·  ") + (job.record_dir ? `\nrecords in ${job.record_dir}` : "")));
+  detail.querySelector(".jpath").style.whiteSpace = "pre-line";
 
-  let data;
-  try { data = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs`); }
-  catch (e) { detail.append(el("div", "errbox", e.message)); return; }
+  let data = pre ? {runs: pre.runs} : null;
+  if (!data) {
+    try { data = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs`); }
+    catch (e) { detail.append(el("div", "errbox", e.message)); return; }
+  }
   if (state.jobsView !== mine) return;
-  if (!data.runs.length) { detail.append(el("div", "note", "No runs recorded yet.")); return; }
+  if (!data.runs.length) {
+    detail.append(paneNote("Not run yet", `Press Run to start ${job.name}; its runs and their items appear here.`));
+    return;
+  }
 
-  const table = el("table", "jruns");
+  detail.append(el("h3", "jsection", "Runs"));
+  const wrap = el("div", "tablewrap");
+  const table = el("table", "datatable jruns");
   const hr = el("tr");
-  for (const h of ["run", "status", "counts", "started", "ended"]) hr.append(el("th", null, h));
+  for (const [h, cls] of [["Started"], ["Status"], ["Items"], ["Took", "num"]]) hr.append(el("th", cls || null, h));
   const thead = el("thead"); thead.append(hr); table.append(thead);
   const tbody = el("tbody");
   const open = data.runs.find(r => r.run_id === runId) || data.runs[0];
   state.jobRun = open.run_id;
   for (const r of data.runs) {
-    const tr = el("tr", r.run_id === open.run_id ? "sel" : "");
-    tr.append(el("td", "mono", r.run_id));
+    const tr = el("tr", "clickable" + (r.run_id === open.run_id ? " sel" : ""));
+    const when = el("td");
+    when.append(el("div", "cellmain", r.started ? fmtWhen(r.started) : "—"));
+    when.append(el("div", "cellsub mono", r.run_id));
+    tr.append(when);
     const st = el("td"); st.append(statusChip(r.status)); tr.append(st);
     const ct = el("td");
     if (r.tree) { const c = countsOfTree(r.tree); ct.append(countsChips(c)); }
     else ct.append(countsChips(r.counts));
     tr.append(ct);
-    tr.append(el("td", null, r.started || ""), el("td", null, r.ended || (r.status === "running" ? "…" : "")));
+    tr.append(el("td", "num dim", r.ended ? fmtSpan(r.started, r.ended) : (r.status === "running" ? "running…" : "")));
     tr.onclick = () => showJobs(job.name, r.run_id);
     tbody.append(tr);
   }
   table.append(tbody);
-  detail.append(table);
+  wrap.append(table);
+  detail.append(wrap);
 
-  let one;
-  try { one = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs/${open.run_id}`); }
-  catch (e) { detail.append(el("div", "errbox", e.message)); return; }
+  let one = pre && pre.one && pre.run_id === open.run_id ? pre.one : null;
+  if (!one) {
+    try { one = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs/${open.run_id}`); }
+    catch (e) { detail.append(el("div", "errbox", e.message)); return; }
+  }
   if (state.jobsView !== mine) return;
+  if (one.run.error) detail.append(el("div", "errbox", one.run.error));
   if (one.run.tree) {
+    detail.append(el("h3", "jsection", "Jobs in this run"));
     if ((one.run.wires || []).length) detail.append(renderWires(one.run.wires));
     detail.append(renderRunbookTree(one.run.tree));
-  } else detail.append(renderItems(one.items, one.run));
-  if (one.run.error) detail.append(el("div", "errbox", one.run.error));
+  } else {
+    const n = (one.items || []).length;
+    const h = el("h3", "jsection", "Items");
+    if (n) h.append(el("span", "count", `  ${n}`));
+    detail.append(h);
+    detail.append(renderItems(one.items, one.run));
+  }
 
   // a running run: poll until it settles
   clearTimeout(_jobsPoll);
@@ -3471,15 +4787,15 @@ function countsOfTree(tree) {
 function renderRunbookTree(tree) {
   const box = el("div", "rtree");
   const walk = (n, depth) => {
-    const row = el("div", "rrow" + (n.status === "failed" ? " err" : ""));
-    row.style.paddingLeft = `${8 + depth * 18}px`;
+    const row = el("div", "rrow jobrow" + (n.status === "failed" ? " err" : ""));
+    row.style.paddingLeft = `${12 + depth * 18}px`;
     row.append(el("span", "rico", n.kind === "job" ? "⚙" : n.kind === "parallel" ? "⇉" : "→"));
     // a job and a runbook (operonx >= 1.8) by name; an old tree's
     // sequential / parallel nodes by kind
     row.append(el("span", "rn", n.kind === "job" || n.kind === "runbook" ? n.name : n.kind));
     row.append(statusChip(n.status));
     if (n.ms) row.append(el("span", "rval", `${(n.ms / 1000).toFixed(2)}s`));
-    if (n.error) row.append(el("span", "rval", n.error));
+    if (n.error) row.append(el("span", "rval bad", n.error));
     if (n.run_id) row.append(el("span", "rval mono", n.run_id));
     box.append(row);
     for (const c of n.children || []) walk(c, depth + 1);
@@ -3518,26 +4834,32 @@ function renderWires(wires) {
 function renderItems(items, run) {
   if (!items.length) {
     const c = run.counts || {};
-    return el("div", "note", "fed" in c ? `one run: fed ${c.fed} · sent ${c.sent}${run.trace_id ? " · trace " + run.trace_id : ""}` : "no items recorded");
+    return el("div", "note", "fed" in c ? `One run: fed ${c.fed} · sent ${c.sent}${run.trace_id ? " · trace " + run.trace_id : ""}` : "No items recorded.");
   }
-  const table = el("table", "jitems");
+  const wrap = el("div", "tablewrap");
+  const table = el("table", "datatable jitems");
   const hr = el("tr");
-  for (const h of ["key", "status", "ms", "sent", "attempts", "error", "trace"]) hr.append(el("th", null, h));
+  for (const [h, cls] of [["Key"], ["Status"], ["Took", "num"], ["Sent", "num hide-sm"], ["Attempts", "num hide-sm"], ["Error"], [""]])
+    hr.append(el("th", cls || null, h));
   const thead = el("thead"); thead.append(hr); table.append(thead);
   const tbody = el("tbody");
   for (const it of items) {
     const tr = el("tr", it.status === "failed" || it.status === "timeout" ? "err" : "");
     tr.append(el("td", "mono", it.key));
     const st = el("td"); st.append(statusChip(it.status)); tr.append(st);
-    tr.append(el("td", "num", it.ms ? it.ms.toFixed(0) : ""), el("td", "num", String(it.sent ?? "")),
-              el("td", "num", String(it.attempts ?? "")), el("td", "jerr", it.error || ""));
-    const tc = el("td");
+    tr.append(el("td", "num", it.ms ? fmtMs(it.ms) : ""), el("td", "num hide-sm", String(it.sent ?? "")),
+              el("td", "num hide-sm", String(it.attempts ?? "")));
+    const err = el("td", "jerr", it.error || "");
+    if (it.error) err.title = it.error;
+    tr.append(err);
+    const tc = el("td", "num");
     if (it.trace_id) {
-      const b = el("button", null, "trace");
-      b.title = it.trace_id;
+      const b = el("button", "linkbtn", "Trace");
+      b.append(Icons.svg("right"));
+      b.title = `Open trace ${it.trace_id}`;
       b.onclick = async () => {
         switchTab("traces", {quiet: true});
-        try { await showRunTree(it.trace_id); } catch (e) { toast(`trace ${it.trace_id} not in the traces dir`, true); }
+        try { await showRunTree(it.trace_id); } catch (e) { toast(`Trace ${it.trace_id} is not in the traces directory`, true); }
       };
       tc.append(b);
     }
@@ -3545,13 +4867,14 @@ function renderItems(items, run) {
     tbody.append(tr);
   }
   table.append(tbody);
-  return table;
+  wrap.append(table);
+  return wrap;
 }
 
 async function startJob(name, resume) {
   try {
     const r = await api(`/api/p/${PID}/jobs/${encodeURIComponent(name)}/run`, {resume});
-    toast(`${resume ? "resuming" : "running"} ${name} (pid ${r.pid})`);
+    toast(`${resume ? "Resuming" : "Running"} ${name} (pid ${r.pid})`);
     setTimeout(() => showJobs(name), 1200);
   } catch (e) { toast(e.message, true); }
 }

@@ -2,41 +2,61 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1115" media="(prefers-color-scheme: dark)">
 <title>operonx studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%23c9940f'/%3E%3Ccircle cx='12' cy='12' r='5.2' fill='none' stroke='white' stroke-width='2.4'/%3E%3Ccircle cx='18.3' cy='5.7' r='1.7' fill='white'/%3E%3C/svg%3E">
+<script>/* the theme before the first paint (theme.js keeps it in step) */try{var t=localStorage.getItem("ox:theme")||"system";if(t==="system")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="stylesheet" href="/static/studio.css">
 </head>
-<body>
+<body data-tab="flow">
 <div class="shell">
   <header class="bar">
-    <a class="crumb" href="/">studio</a>
-    <span class="crumb">/</span>
-    <button class="pname" id="pname" title="switch project">…</button>
-    <div id="switcher" hidden></div>
-    <button id="btn-project" class="pmenubtn" title="this project: Operons · Services · Jobs">☰</button>
-    <div id="pmenu" hidden></div>
-    <select id="graph-pick" title="graph"></select>
-    <nav class="tabs">
-      <button data-tab="flow" class="active">Flow</button>
-      <button data-tab="traces">Traces</button>
-      <button data-tab="jobs">Jobs</button>
-      <button data-tab="resources">Resources</button>
+    <a class="brand" href="/" title="All projects" aria-label="operonx studio — all projects">
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6"/><circle cx="12" cy="12" r="5.2"/><circle class="dot" cx="18.3" cy="5.7" r="1.7"/></svg>
+      <span class="brand-name">operonx</span>
+    </a>
+    <nav class="crumbs" aria-label="Location">
+      <span class="sep" aria-hidden="true">/</span>
+      <button class="crumbbtn projname" id="pname" aria-haspopup="menu" title="Switch project">…</button>
+      <div id="switcher" class="popover" role="menu" hidden></div>
+      <span class="sep" aria-hidden="true">/</span>
+      <button id="btn-project" class="crumbbtn graphname" aria-haspopup="menu" title="Operons, services and jobs of this project"><span id="graph-name">…</span></button>
+      <div id="pmenu" class="popover" role="menu" hidden></div>
+      <select id="graph-pick" title="graph" hidden></select>
     </nav>
+    <button id="btn-screen" class="crumbbtn screenbtn" aria-haspopup="true" aria-controls="rail" title="Screens"><i data-icon="menu"></i><span id="screen-label">Flow</span></button>
     <div class="spacer"></div>
-    <div class="zoomctl" title="scroll to pan · ctrl+scroll or pinch = zoom · space+drag or middle-drag = pan">
-      <button id="btn-zoom-out">−</button>
-      <button id="btn-zoom-pct" title="reset to 100%">100%</button>
-      <button id="btn-zoom-in">+</button>
-      <button id="btn-fit" title="fit the flow's width (0) — read down by scrolling">Fit</button>
-      <button id="btn-expand" title="open / close every nested graph">⊞</button>
-      <button id="btn-find" title="find a node (/ or Ctrl+K)">🔍</button>
-      <button id="btn-legend" title="what am I looking at?">?</button>
-    </div>
-    <button id="btn-right" class="paneltoggle" title="side panel (inspect · assistant)">◨</button>
-    <span class="live" id="live"><span class="dot"></span><span id="live-text">live</span></span>
+    <span class="live" id="live" title="The studio re-extracts and redraws whenever the project's code changes"><span class="dot"></span><span id="live-text">live</span></span>
+    <span id="themeslot"></span>
+    <button id="btn-settings" class="iconbtn" data-tabbtn="settings" aria-label="Settings" title="Settings — retention, where runs are kept"><i data-icon="settings"></i></button>
+    <button id="btn-right" class="iconbtn paneltoggle" aria-label="Toggle the side panel" title="Side panel — inspect · assistant"><i data-icon="panel"></i></button>
   </header>
 
   <div class="main">
+    <!-- the screens, by what they are for: slim on a tablet, a drawer on a phone -->
+    <aside class="rail" id="rail" aria-label="Screens">
+      <nav class="tabs" role="tablist" aria-label="Views">
+        <div class="railgroup">Build</div>
+        <button data-tab="flow" class="active" role="tab" title="Flow"><i data-icon="graph"></i><span>Flow</span></button>
+        <button data-tab="playground" role="tab" title="Playground"><i data-icon="play"></i><span>Playground</span></button>
+        <button data-tab="resources" role="tab" title="Resources"><i data-icon="box"></i><span>Resources</span></button>
+        <div class="railgroup">Observe</div>
+        <button data-tab="traces" role="tab" title="Runs"><i data-icon="list"></i><span>Runs</span></button>
+        <button data-tab="monitor" role="tab" title="Monitor"><i data-icon="chart"></i><span>Monitor</span></button>
+        <button data-tab="review" role="tab" title="Review"><i data-icon="review"></i><span>Review</span></button>
+        <div class="railgroup">Improve</div>
+        <button data-tab="evals" role="tab" title="Evals"><i data-icon="evals"></i><span>Evals</span></button>
+        <button data-tab="prompts" role="tab" title="Prompts"><i data-icon="prompt"></i><span>Prompts</span></button>
+        <div class="railgroup">Operate</div>
+        <button data-tab="services" role="tab" title="Services"><i data-icon="server"></i><span>Services</span></button>
+        <button data-tab="jobs" role="tab" title="Jobs"><i data-icon="clock"></i><span>Jobs</span></button>
+        <button data-tab="alerts" role="tab" title="Alerts"><i data-icon="bell"></i><span>Alerts</span></button>
+      </nav>
+      <button id="rail-slim" class="railtoggle" type="button" title="Collapse the menu" aria-label="Collapse the menu"><i data-icon="collapse"></i><span>Collapse</span></button>
+    </aside>
+    <div id="railshade" hidden></div>
     <div id="stage">
       <div id="world">
         <div id="plane">
@@ -47,29 +67,70 @@
           <svg id="edgetop" class="wires"></svg>
         </div>
       </div>
-      <div id="find" hidden>
-        <input id="find-input" placeholder="find node… (Enter selects, Esc closes)" autocomplete="off">
-      </div>
-      <div id="legend" hidden></div>
     </div>
     <div id="traces" hidden></div>
     <div id="jobs" hidden></div>
     <div id="resources" hidden></div>
-    <div id="dragbar" title="drag to resize · double-click to reset"></div>
-    <aside id="sidebar">
-      <nav id="sidetabs">
-        <button data-side="inspect" class="active">Inspect</button>
-        <button data-side="assistant">Assistant</button>
+    <div id="playground" class="pane" hidden></div>
+    <div id="evals" class="pane" hidden></div>
+    <div id="services" class="pane" hidden></div>
+    <div id="review" class="pane" hidden></div>
+    <div id="prompts" class="pane" hidden></div>
+    <div id="alerts" class="pane" hidden></div>
+    <div id="monitor" class="pane" hidden></div>
+    <div id="settings" class="pane" hidden></div>
+
+    <!-- the canvas's own controls: they float over the canvas wherever it
+         is showing (the Flow tab, or a run's workflow view) -->
+    <div id="canvasbar" class="canvasbar" role="toolbar" aria-label="Canvas">
+      <button id="btn-find" class="iconbtn" aria-label="Find a node" title="Find a node  ( / or Ctrl+K )"><i data-icon="search"></i></button>
+      <button id="btn-expand" class="iconbtn" aria-label="Open every nested graph" title="Open / close every nested graph"><i data-icon="unfold"></i></button>
+      <span class="tsep" aria-hidden="true"></span>
+      <button id="btn-zoom-out" class="iconbtn" aria-label="Zoom out" title="Zoom out  ( − )"><i data-icon="minus"></i></button>
+      <button id="btn-zoom-pct" class="zoompct" title="Reset to 100%  ( 1 )">100%</button>
+      <button id="btn-zoom-in" class="iconbtn" aria-label="Zoom in" title="Zoom in  ( + )"><i data-icon="plus"></i></button>
+      <button id="btn-fit" class="iconbtn" aria-label="Fit the flow" title="Fit the flow to the screen  ( 0 )"><i data-icon="fit"></i></button>
+      <span class="tsep" aria-hidden="true"></span>
+      <button id="btn-live" class="iconbtn" aria-label="Follow runs live" title="Live: replay each new run as it lands, and follow playground sessions"><i data-icon="pulse"></i></button>
+      <button id="btn-legend" class="iconbtn" aria-label="How to read the canvas" title="How to read the canvas"><i data-icon="help"></i></button>
+    </div>
+    <div id="find" class="popover findbox" hidden>
+      <i data-icon="search"></i>
+      <input id="find-input" type="text" placeholder="Find a node…" autocomplete="off" aria-label="Find a node">
+      <kbd>Enter</kbd>
+    </div>
+    <div id="legend" class="popover" hidden></div>
+
+    <div id="dragbar" title="Drag to resize · double-click to reset"></div>
+    <aside id="sidebar" aria-label="Side panel">
+      <nav id="sidetabs" role="tablist">
+        <button data-side="assistant" class="active" role="tab"><i data-icon="spark"></i><span>Assistant</span><span class="tabdot" aria-hidden="true"></span></button>
+        <button data-side="inspect" role="tab">Inspect</button>
+        <span class="spacer"></span>
+        <button id="side-close" class="iconbtn" aria-label="Close the panel" title="Close"><i data-icon="x"></i></button>
       </nav>
       <div id="inspector" class="open"></div>
       <aside id="chatdock" hidden></aside>
     </aside>
   </div>
 </div>
+<script src="/static/icons.js"></script>
+<script src="/static/theme.js"></script>
 <script src="/static/values.js"></script>
 <script src="/static/providers.js"></script>
 <script src="/static/timeline.js"></script>
 <script src="/static/studio.js"></script>
-<script src="/static/chat.js"></script>
+<script src="/static/runview.js"></script>
+<script src="/static/runs.js"></script>
+<script src="/static/monitor.js"></script>
+<script src="/static/play.js"></script>
+<script src="/static/evals.js"></script>
+<script src="/static/services.js"></script>
+<script src="/static/review.js"></script>
+<script src="/static/prompts.js"></script>
+<script src="/static/alerts.js"></script>
+<script src="/static/settings.js"></script>
+<script src="/static/paste.js"></script>
+<script src="/static/assistant.js"></script>
 </body>
 </html>

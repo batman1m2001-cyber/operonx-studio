@@ -227,11 +227,25 @@ def extract_main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     root = Path(args.path)
+    # The IR is the only thing on stdout: while the project's graphs are
+    # built, fd 1 points at stderr, so a print or a LOGGER warning in the
+    # project cannot corrupt the JSON.
+    import os
+
+    sys.stdout.flush()
+    saved, real_stdout = os.dup(1), sys.stdout
+    os.dup2(2, 1)
+    sys.stdout = sys.stderr      # a Python-level stdout that is not fd 1, too
     try:
         ir = extract_project(Manifest.load(root))
     except (ManifestError, ExtractError) as exc:
         print(f"operonx-extract: {exc}", file=sys.stderr)
         return 1
+    finally:
+        sys.stderr.flush()
+        sys.stdout = real_stdout
+        os.dup2(saved, 1)
+        os.close(saved)
 
     text = json.dumps(ir, sort_keys=True, indent=None if args.compact else 2) + "\n"
     if args.output:

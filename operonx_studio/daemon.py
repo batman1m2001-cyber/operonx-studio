@@ -44,7 +44,11 @@ VENV_PYTHON = (".venv/bin/python", "venv/bin/python", ".venv/Scripts/python.exe"
 
 WATCH_SUFFIXES = {".py", ".toml", ".yaml", ".yml"}
 WATCH_NAMES = {".env", ".env.example"}
-SKIP_DIRS = {"__pycache__", ".venv", "venv", ".git", "node_modules", ".ruff_cache", ".pytest_cache"}
+# `.operonx` holds the project's own run records — thousands of files, none
+# of them code: walking it was 57 of the 65 ms a stamp took on a project
+# with 2.3k recorded runs.
+SKIP_DIRS = {"__pycache__", ".venv", "venv", ".git", "node_modules", ".ruff_cache", ".pytest_cache",
+             ".mypy_cache", ".tox", ".operonx"}
 
 _POLL_SECONDS = 0.7
 
@@ -226,11 +230,17 @@ class ProjectWatcher:
 
     def extract(self) -> ExtractResult:
         """Run extraction in a fresh interpreter and parse the result."""
+        # The IR goes out on a duplicate of stdout; the real fd 1 points at
+        # stderr before any project code is imported. Whatever the project
+        # prints or logs while its graphs are built (operonx's LOGGER writes
+        # warnings to stdout) would otherwise corrupt the JSON: a graph
+        # with an unwired op failed as "extractor returned invalid JSON".
         code = (
-            "import json,sys;"
+            "import json,os,sys;"
+            "out=os.fdopen(os.dup(1),'w',encoding='utf-8');os.dup2(2,1);sys.stdout=sys.stderr;"
             "from operonx_project.manifest import Manifest;"
             "from operonx_project.extract import extract_project;"
-            "sys.stdout.write(json.dumps(extract_project(Manifest.load(sys.argv[1]))))"
+            "out.write(json.dumps(extract_project(Manifest.load(sys.argv[1]))));out.flush()"
         )
         proc = subprocess.run(
             [self.interpreter(), "-c", code, str(self.root)],

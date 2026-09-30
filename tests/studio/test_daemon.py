@@ -107,6 +107,30 @@ class TestExtraction:
         after = watcher.extract()
         assert len(after.ir["graphs"][0]["nodes"]) == 2
 
+    def test_a_project_that_prints_or_warns_still_extracts(self, project):
+        """The IR has stdout to itself: a print at import and operonx's
+        LOGGER warning about an unwired op (it writes to stdout) used to
+        corrupt the JSON — "extractor returned invalid JSON"."""
+        root, mod = project
+        (root / f"{mod}.py").write_text(
+            'print("hello from import time")\n'
+            + WORKFLOW.replace("    START >> a >> END", "    lonely = first(x=x)\n    START >> a >> END"),
+            encoding="utf-8")
+        result = ProjectWatcher(root=root).extract()
+        assert result.ok, result.error
+        assert {n["name"] for n in result.ir["graphs"][0]["nodes"]} >= {"a", "lonely"}
+
+    def test_the_extract_cli_keeps_stdout_for_the_ir(self, project, capfd):
+        import json
+
+        from operonx_project.cli import extract_main
+
+        root, mod = project
+        (root / f"{mod}.py").write_text('print("noise")\n' + WORKFLOW, encoding="utf-8")
+        assert extract_main([str(root), "--compact"]) == 0
+        out, err = capfd.readouterr()
+        assert json.loads(out)["graphs"][0]["name"] == "flow" and "noise" in err
+
     def test_broken_project_reports_instead_of_raising(self, project):
         root, mod = project
         (root / f"{mod}.py").write_text("this is not python ((((\n", encoding="utf-8")
