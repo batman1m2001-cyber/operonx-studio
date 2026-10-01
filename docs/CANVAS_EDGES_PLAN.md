@@ -54,7 +54,7 @@ show you after 3 and again after 7.
 | 0c `scripts/perf/edge_audit.py` (+ fit before screenshots) | done | 5859206 + next |
 | 1 smooth curves (`sLane`, `_pathHits`, verticals as curves) | done — deepest view: straight runs 23 → 5, crossings 0 → 0, through-cards 0 → 0 | 808dc3d |
 | 2 loop edge violet (`--loop: #7c3aed`, pill label, arrowhead, violet loop badges) | done | 5d44fa8 |
-| 3 direction dots | **in progress, nothing applied yet**: the patch is drafted (`flowDot()` with SMIL `animateMotion` per wire, cap 150, paused when hidden, reduced-motion CSS, toolbar button `#btn-flowdots` in project.html). Fix before applying: studio.js has `recall()` but **no `remember()`** — write localStorage directly (try/catch). Then screenshot, commit, and **show the user screenshots after commit 3** | — |
+| 3 direction dots (SMIL dot per wire, cap 150, toggle `#btn-flowdots` + `flow` icon) | done — audit unchanged (drawing only) | see log |
 | 4–7 layout (ordering, long-edge lanes, fan-in ports, expanded container with siblings) | not started | — |
 
 Audit baseline (meeting-prep, `python scripts/perf/edge_audit.py --tag X`, Studio on :8766):
