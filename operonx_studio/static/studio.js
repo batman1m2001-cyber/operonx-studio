@@ -305,7 +305,16 @@ function placeGraph(g, prefix, depth) {
       loopRoom = Math.max(loopRoom, Math.ceil(need - (maxX + 48)));
     }
   }
-  return {items, edges: g.edges || [], w: maxX + 48, h: maxY + 48, loopRoom};
+  // a long edge's lane (the layout's dummies) shifts with every column
+  // whose card sits left of it — the gap it was given stays a gap
+  const laneShift = (vx) => {
+    let s = 0;
+    for (const x of xs) if (x + NODE_W / 2 < vx) s += extraX.get(x);
+    return s;
+  };
+  const edges = (g.edges || []).map(e => (e.via && e.via.length
+    ? {...e, viaX: e.via.map(v => v + laneShift(v))} : e));
+  return {items, edges, w: maxX + 48, h: maxY + 48, loopRoom};
 }
 
 function flattenModel(model, ox, oy, out) {
@@ -324,7 +333,7 @@ function flattenModel(model, ox, oy, out) {
   }
   for (const e of model.edges) {
     const a = abs.get(e.src), b = abs.get(e.dst);
-    if (a && b) out.edges.push({e, a, b});
+    if (a && b) out.edges.push({e, a, b, via: e.viaX ? e.viaX.map(v => v + ox) : null});
   }
   return out;
 }
@@ -461,10 +470,25 @@ function _clearLaneX(rects, top, bottom, prefer) {
   return null;
 }
 
-function routeAvoiding(a, b, obstacles) {
+function routeAvoiding(a, b, obstacles, via) {
   const x1 = portCX(a), y1 = a.y + a.h, x2 = portCX(b), y2 = b.y;
   const dy = Math.max(40, Math.abs(y2 - y1) / 2);
   const rects = _rects(obstacles, a, b);
+
+  // A long edge has its own lane: the gap the layout held open for it in
+  // every row it passes. Down that lane in one smooth S, when it is clear.
+  if (via && via.length && y2 - y1 > 60) {
+    const want = via.reduce((s, v) => s + v, 0) / via.length;
+    for (const off of [0, 11, -11, 22, -22]) {
+      const lane = want + off;
+      if (!_vFree(lane, y1 + 30, y2 - 30)) continue;
+      const d = Math.abs(lane - x1) < 3 && Math.abs(lane - x2) < 3 ? bezier(x1, y1, x2, y2)
+        : sLane(x1, y1, lane, x2, y2);
+      if (_pathHits(d, rects)) continue;
+      _lanes.v.push({x: lane, t: y1 + 30, b: y2 - 30});
+      return d;
+    }
+  }
   const long = y2 - y1 > 200;
   const vertical = Math.abs(x1 - x2) < 18;
 
@@ -1267,7 +1291,8 @@ function render() {
   const obstacles = flat.nodes;   // containers included — _rects decides per edge
 
   // graph edges (every open level draws its own)
-  for (const {e, a, b} of byPair.values()) {
+  for (const fe of byPair.values()) {
+    const {e, a, b} = fe;
     // a boundary tie inside an opened container: START → entries,
     // exits → END. Structural, quiet — not an energy beam.
     if (e.boundary) {
@@ -1323,7 +1348,7 @@ function render() {
         p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y));
         p.dataset.fromRow = "1";
       } else {
-        p.setAttribute("d", routeAvoiding(A, B, obstacles));
+        p.setAttribute("d", routeAvoiding(A, B, obstacles, fe.via));
       }
       if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }

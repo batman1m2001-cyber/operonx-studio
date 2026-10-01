@@ -188,3 +188,12 @@ class TestOrdering:
         out = layout_graph(ir(["a", "b", "c"], [("a", "b"), ("b", "c"), ("a", "c")], entries=["a"]))
         assert sorted(n.name for n in out.nodes) == ["a", "b", "c"]
         assert out.width > 2 * 48 + 260, "the row b sits in is wider by the long edge's slot"
+
+    def test_a_long_edge_carries_its_lane(self):
+        """The dummy's x in each row it passes rides on the edge, so the
+        canvas can draw the wire down the gap held open for it."""
+        out = layout_graph(ir(["a", "b", "c"], [("a", "b"), ("b", "c"), ("a", "c")], entries=["a"]))
+        long = next(e for e in out.edges if (e.src, e.dst) == ("g.a", "g.c"))
+        b = next(n for n in out.nodes if n.name == "b")
+        assert len(long.via) == 1
+        assert not (b.x <= long.via[0] <= b.x + 260), "the lane runs beside b, not through it"

@@ -73,6 +73,8 @@ class Edge:
     soft: bool = False
     origin: str = "authored"
     back: bool = False
+    # a long edge's lane: the x centre of its dummy in each row it passes
+    via: List[float] = field(default_factory=list)
 
 
 @dataclass
@@ -442,6 +444,11 @@ def layout_graph(graph: Dict) -> Layout:
                     meta=raw,
                 )
             )
+
+    for e in edges:
+        chain = dummy_of.get((e.src, e.dst))
+        if chain:
+            e.via = [round(cx[d], 1) for d in chain]
 
     # An edge that does not advance a layer is drawn as a return path rather
     # than a straight line, so it reads as a loop instead of a stray arrow.

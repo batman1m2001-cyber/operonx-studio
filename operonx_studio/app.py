@@ -196,7 +196,8 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
         ],
         "edges": [
             {"src": e.src, "dst": e.dst, "type": e.type, "soft": e.soft,
-             "origin": e.origin, "back": bool(getattr(e, "back", False))}
+             "origin": e.origin, "back": bool(getattr(e, "back", False)),
+             **({"via": e.via} if getattr(e, "via", None) else {})}
             for e in layout.edges
         ],
         "loops": graph.get("loops") or {},
