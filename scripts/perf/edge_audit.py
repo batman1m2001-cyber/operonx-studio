@@ -100,7 +100,8 @@ def main() -> None:
                 pg.locator(".node .badge.expand").nth(idx).click()
                 pg.wait_for_timeout(2500)
             m = pg.evaluate(MEASURE)
-            pg.screenshot(path=str(OUT / f"{args.tag}-{name}.png"))
+            pg.click("#btn-fit"); pg.wait_for_timeout(900)
+            pg.locator("#stage").screenshot(path=str(OUT / f"{args.tag}-{name}.png"))
             rows.append((name, m))
         # the deepest view: open the first container inside the opened one
         inner = pg.locator(".node:not(.container) .badge.expand")
@@ -108,7 +109,8 @@ def main() -> None:
             inner.nth(0).click()
             pg.wait_for_timeout(2500)
             m = pg.evaluate(MEASURE)
-            pg.locator(".node.container").last.screenshot(path=str(OUT / f"{args.tag}-open2.png"))
+            pg.click("#btn-fit"); pg.wait_for_timeout(900)
+            pg.locator("#stage").screenshot(path=str(OUT / f"{args.tag}-open2.png"))
             rows.append(("open2", m))
         b.close()
     for name, m in rows:
