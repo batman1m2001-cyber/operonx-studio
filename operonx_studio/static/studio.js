@@ -333,10 +333,33 @@ function flattenModel(model, ox, oy, out) {
 
 const portCX = (it) => it.x + it.w / 2;
 
+/* Smooth shapes for the routes that used to jog: curve, straight run,
+ * curve. All M and C, so pathSampler and the sparks follow them. */
+
+// two S-curves meeting at (lane, ym) with a vertical tangent there: C1, no straight run
+function sLane(x1, y1, lane, x2, y2, ym = (y1 + y2) / 2) {
+  const q1 = (ym - y1) / 2, q2 = (y2 - ym) / 2;
+  return `M ${x1} ${y1} C ${x1} ${y1 + q1}, ${lane} ${ym - q1}, ${lane} ${ym}`
+    + ` C ${lane} ${ym + q2}, ${x2} ${y2 - q2}, ${x2} ${y2}`;
+}
+
+// does a drawn path pass through any of these boxes?
+function _pathHits(d, rects) {
+  const s = pathSampler(d);
+  if (!s) return false;
+  const pts = [];
+  for (let v = 6; v < s.len - 6; v += 10) { const q = s.at(v); pts.push([q.x, q.y]); }
+  return _hits(pts, rects);
+}
+
 function bezier(x1, y1, x2, y2) {
   const gap = Math.abs(y2 - y1);
-  // dead vertical: a line, not a curve pretending to bend
-  if (Math.abs(x2 - x1) < 3) return `M ${x1} ${y1} L ${x2} ${y2}`;
+  // dead vertical: straight, drawn as a curve like every other wire
+  // (handles along its own direction, up or down)
+  if (Math.abs(x2 - x1) < 3) {
+    const k = (y2 - y1) / 3;
+    return `M ${x1} ${y1} C ${x1} ${y1 + k}, ${x2} ${y2 - k}, ${x2} ${y2}`;
+  }
   // handles must never outrun the gap — a 40px handle on a 30px hop
   // overshoots both ends and folds the wire into a kink
   const dy = gap < 80 ? gap * 0.45 : Math.max(40, gap / 2);
@@ -473,6 +496,8 @@ function routeAvoiding(a, b, obstacles) {
     if (!long) return null;
     const lane = _clearLaneX(rects, y1 + 50, y2 - 50, (x1 + x2) / 2);
     if (lane === null) return null;
+    const smooth = sLane(x1, y1, lane, x2, y2);
+    if (!_pathHits(smooth, rects)) return smooth;
     return `M ${x1} ${y1} C ${x1} ${y1 + 46}, ${lane} ${y1 + 46}, ${lane} ${y1 + 100}`
       + ` L ${lane} ${y2 - 100}`
       + ` C ${lane} ${y2 - 46}, ${x2} ${y2 - 46}, ${x2} ${y2}`;
@@ -497,6 +522,8 @@ function routeAvoiding(a, b, obstacles) {
       _lanes.v.pop();   // the turns are blocked: give the lane back
       return null;
     }
+    const smooth = sLane(x1, y1, lane, x2, y2, (bt + bb) / 2);
+    if (!_pathHits(smooth, rects)) return smooth;
     return `M ${x1} ${y1} C ${x1} ${y1 + q1}, ${lane} ${bt - q1}, ${lane} ${bt}`
       + ` L ${lane} ${bb}`
       + ` C ${lane} ${bb + q2}, ${x2} ${y2 - q2}, ${x2} ${y2}`;
@@ -606,6 +633,10 @@ function rowTiePath(A, port, b, obstacles) {
     const yh = y2 - r - 6;
     if (r < 4 || yh - r < y0 + 14) break;
     if (!clear(lx - 2, lx + 2, y0 + 14, yh) || !clear(Math.min(lx, x2), Math.max(lx, x2), yh - 2, yh + 2)) continue;
+    const ya = y0 + 18, q = (y2 - ya) / 2;
+    const smooth = `M ${x0} ${y0} C ${lx} ${y0}, ${lx} ${y0}, ${lx} ${ya}`
+      + ` C ${lx} ${ya + q}, ${x2} ${y2 - q}, ${x2} ${y2}`;
+    if (!_pathHits(smooth, rects)) return smooth;
     return `M ${x0} ${y0} C ${lx} ${y0}, ${lx} ${y0}, ${lx} ${y0 + 14} L ${lx} ${yh - r}`
       + ` C ${lx} ${yh - r * 0.45}, ${lx + dir * r * 0.45} ${yh}, ${lx + dir * r} ${yh} L ${x2 - dir * r} ${yh}`
       + ` C ${x2 - dir * r * 0.45} ${yh}, ${x2} ${yh + r * 0.45}, ${x2} ${yh + r} L ${x2} ${y2}`;
