@@ -4,3 +4,4 @@ __pycache__/
 uv.lock
 studio.html
 .pytest_cache/
+scripts/perf/edge_audit/
