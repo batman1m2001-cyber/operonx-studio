@@ -43,3 +43,30 @@ show you after 3 and again after 7.
 | animation cost on big graphs | capped to on-screen edges, one shared animation, paused off-screen; measured with `render_cost.py` |
 | layout changes move cards people know where to find | order changes only within a layer; the spine stays centred; a stable tie-break keeps today's order when there is no gain |
 | scope creep into a new layout engine | no new dependency; each layout commit is one function in `layout.py` |
+
+## Progress (2026-10-01, branch `feat/canvas-edges`, not pushed)
+
+| # | state | commit |
+|---|---|---|
+| plan | done | 98ae032 |
+| 0a pan inside an opened GraphOp | done | 33a51a7 |
+| 0b op count = what opening shows | done | 381c9f8 |
+| 0c `scripts/perf/edge_audit.py` (+ fit before screenshots) | done | 5859206 + next |
+| 1 smooth curves (`sLane`, `_pathHits`, verticals as curves) | done — deepest view: straight runs 23 → 5, crossings 0 → 0, through-cards 0 → 0 | 808dc3d |
+| 2 loop edge violet (`--loop: #7c3aed`, pill label, arrowhead, violet loop badges) | done | 5d44fa8 |
+| 3 direction dots | **in progress, nothing applied yet**: the patch is drafted (`flowDot()` with SMIL `animateMotion` per wire, cap 150, paused when hidden, reduced-motion CSS, toolbar button `#btn-flowdots` in project.html). Fix before applying: studio.js has `recall()` but **no `remember()`** — write localStorage directly (try/catch). Then screenshot, commit, and **show the user screenshots after commit 3** | — |
+| 4–7 layout (ordering, long-edge lanes, fan-in ports, expanded container with siblings) | not started | — |
+
+Audit baseline (meeting-prep, `python scripts/perf/edge_audit.py --tag X`, Studio on :8766):
+deepest view 51 edges · 0 crossings · 0 through-cards · 10 shared corridors · 5 straight runs
+(after commit 1). Shared corridors (wires on top of each other) are the main tangle left —
+commits 5–7 target them.
+
+Related, separate branch: **OperonX `feat/agent-zones`** (uncommitted in D:\Operonx): the
+ReAct loop gets `build_context` (6 steps) and `run_tools` subgraphs, the model step named
+`model` (`register_skip(call_model)`), `final` as the agent's show key, the context zone shows
+`messages`. Agent tests 397 pass; meeting-prep golden 19/19. Not yet run: OperonX full suite.
+Known, not fixed: a `.collect()` *inside* a subgraph hands its result up twice (workaround:
+gather in the parent). While testing, D:\meeting-prep-operonx's venv points at D:\Operonx via
+`operonx_local.pth` (released operonx uninstalled) — restore with `uv sync` after release;
+its :8200 server is stopped.
