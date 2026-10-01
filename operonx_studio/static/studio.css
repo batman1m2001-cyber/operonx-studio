@@ -748,6 +748,12 @@ body:not([data-stage]) .canvasbar { display: none; }
 .wires circle.espark { fill: #fff; stroke: var(--wire); stroke-width: 1.6; }
 .wires circle.espark.tailspark { fill: #bccfe3; opacity: .7; stroke: none; }
 .wires circle.espark.back { stroke: var(--loop); }
+/* direction dots: small, faint, slow — a hint of flow, not a light show */
+.wires circle.eflow { fill: #fff; stroke: var(--wire); stroke-width: 1.4; opacity: .9;
+  filter: drop-shadow(0 0 2px rgba(31, 111, 224, .55)); pointer-events: none; }
+.wires circle.eflow.cond { stroke: #b3661a; filter: drop-shadow(0 0 2px rgba(179, 102, 26, .5)); }
+.wires circle.eflow.back { fill: var(--loop); stroke: #fff; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--loop) 60%, transparent)); }
+@media (prefers-reduced-motion: reduce) { .wires circle.eflow { display: none; } }
 /* if/else routes: the beam in branch amber; the ELSE fallback dashed,
    laserless — a path that exists but is not flowing */
 .wires path.eglow.cond { stroke: rgba(179, 102, 26, .13); }

@@ -745,6 +745,44 @@ function pathSampler(d) {
   return {len, at};
 }
 
+/* Direction: one small light dot travelling each wire, source to target —
+ * a loop's return edge carries it backwards, in its own colour. One SMIL
+ * animateMotion per wire on the wire's own `d`, so it follows any route.
+ * Flow view only; off for prefers-reduced-motion (CSS), paused while the tab
+ * is hidden, at most FLOW_DOTS_MAX per canvas, and a toolbar switch. */
+const FLOW_DOTS_MAX = 150;
+let flowDotsOn = recall("ox:flowdots", true) !== false;
+
+function flowDot(svg, path, cls) {
+  if (!flowDotsOn || svg.querySelectorAll(".eflow").length >= FLOW_DOTS_MAX) return;
+  const d = path.getAttribute("d");
+  const s = d && pathSampler(d);
+  const len = s ? s.len : 0;
+  if (len < 40) return;
+  const dot = document.createElementNS(SVGNS, "circle");
+  dot.setAttribute("r", "3.2");
+  dot.setAttribute("class", ("eflow " + (cls || "")).trim());
+  const anim = document.createElementNS(SVGNS, "animateMotion");
+  anim.setAttribute("path", d);
+  anim.setAttribute("dur", `${Math.max(1.6, Math.min(7, len / 70)).toFixed(2)}s`);
+  anim.setAttribute("repeatCount", "indefinite");
+  // stagger, so neighbouring wires don't pulse in step
+  anim.setAttribute("begin", `${(-Math.random() * 4).toFixed(2)}s`);
+  if ((cls || "").includes("back")) {
+    // a loop's return runs bottom to top: its path is drawn from the last
+    // step to the first, so keep the path's own direction
+    anim.setAttribute("calcMode", "linear");
+  }
+  dot.append(anim);
+  svg.append(dot);
+}
+
+document.addEventListener("visibilitychange", () => {
+  for (const s of document.querySelectorAll("svg.wires")) {
+    if (document.hidden) s.pauseAnimations?.(); else s.unpauseAnimations?.();
+  }
+});
+
 function energySparks(svg, path, cls) {
   let s = pathSampler(path.getAttribute("d") || "");
   if (!s) {
@@ -1296,6 +1334,7 @@ function render() {
       drawn = energyEdge(svg, p.getAttribute("d"), sheath.trim(), made);
       // no sparks on an else-fallback, nor into an op that never ran
       if (!sheath.includes("relse") && !faded) energySparks(svg, drawn, sheath.trim());
+      if (!faded) flowDot(svg, drawn, sheath.trim());
     } else {
       p.setAttribute("class", cls.trim());
       svg.append(p);
@@ -3934,6 +3973,18 @@ $("#graph-pick").onchange = (ev) => {
 };
 
 $("#btn-fit").onclick = fit;
+{
+  const b = $("#btn-flowdots");
+  const show = () => { b.setAttribute("aria-pressed", String(flowDotsOn)); b.classList.toggle("on", flowDotsOn); };
+  show();
+  b.onclick = () => {
+    flowDotsOn = !flowDotsOn;
+    store("ox:flowdots", flowDotsOn);
+    show();
+    for (const dot of document.querySelectorAll(".eflow")) dot.style.display = flowDotsOn ? "" : "none";
+    if (flowDotsOn && !document.querySelector(".eflow")) render();
+  };
+}
 $("#btn-zoom-in").onclick = () => { const c = stageCenter(); zoomAt(c.x, c.y, 1.25); };
 $("#btn-zoom-out").onclick = () => { const c = stageCenter(); zoomAt(c.x, c.y, 0.8); };
 $("#btn-zoom-pct").onclick = () => {
