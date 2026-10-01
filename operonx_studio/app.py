@@ -185,10 +185,14 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                    ("bound", "start", "end", "outputs", "inputs", "source",
                     "loop", "is_gen", "transient", "serve_role", "code",
                     "resource", "routes", "description", "show_keys")},
-                "subgraph_ops": len((nodes_by_id.get(n.id, {}).get("graph") or {}).get("nodes") or []) or None,
-                "graph": _subgraph(n.id),
+                # what the card says it holds is what opening it shows: a loop's
+                # members are laid out in the container, so they are counted, not
+                # the one hidden loop graph that holds them
+                "subgraph_ops": len((sub or {}).get("nodes") or []) or None,
+                "graph": sub,
             }
             for n in layout.nodes
+            for sub in [_subgraph(n.id)]
         ],
         "edges": [
             {"src": e.src, "dst": e.dst, "type": e.type, "soft": e.soft,
