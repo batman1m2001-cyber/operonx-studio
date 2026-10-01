@@ -1309,7 +1309,16 @@ function render() {
     state.edgeEls.push({a: a.key, b: b.key, els: made});
     // the node's own port bead is the terminal; an extra circle on top of
     // it was clutter. Only a loop's flank, which has no port, gets one.
-    if (e.back) bouton(svg, B.x + B.w, B.y + B.h / 2, "b-back");
+    if (e.back) {
+      bouton(svg, B.x + B.w, B.y + B.h / 2, "b-back");
+      // the loop re-enters its first step: an arrowhead on the flank, pointing in
+      const hx = B.x + B.w + 3, hy = B.y + B.h / 2;
+      const head = document.createElementNS(SVGNS, "path");
+      head.setAttribute("d", `M ${hx + 11} ${hy - 6} L ${hx} ${hy} L ${hx + 11} ${hy + 6} Z`);
+      head.setAttribute("class", "loop-head");
+      svg.append(head);
+      made.push(head);
+    }
 
     if (!e.back) {
       // glyphs anchor to the drawn path itself, wherever it routed

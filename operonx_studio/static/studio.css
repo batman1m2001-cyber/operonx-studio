@@ -13,6 +13,7 @@
    no internet. */
 
 :root {
+  --loop: #7c3aed;           /* a loop's return edge: no other wire uses it */
   /* surfaces — cool graphite neutrals: an instrument, not a notebook */
   --bg: #f4f5f7;
   --surface: #ffffff;
@@ -550,13 +551,16 @@ body:not([data-stage]) .canvasbar { display: none; }
 .wires path.soft { stroke-dasharray: 6 5; }
 .wires path.hot { stroke: var(--wire-deep); stroke-width: 2.5; }
 .wires path.serve { stroke: var(--k-serve); stroke-dasharray: 2 4; }
-.wires path.back { stroke: var(--warn); stroke-dasharray: 7 4; }
+/* a loop's return edge has a colour no other wire uses: violet. Amber is a
+   condition's, blue is data — a loop drawn in amber read as one more branch */
+.wires path.back { stroke: var(--loop); stroke-dasharray: 10 6; }
 .wires path.stream { stroke-width: 2.5; }
 .wires text {
   fill: #64748b; font: 11px ui-monospace, monospace;
   paint-order: stroke; stroke: #ffffff; stroke-width: 4px;
 }
-.wires text.back-label { fill: var(--warn); }
+.wires text.back-label { fill: #fff; font-weight: 700; font-size: 11.5px;
+  stroke: var(--loop); stroke-width: 15px; stroke-linejoin: round; }   /* a pill */
 .wires text.routelabel { fill: var(--k-branch); font-size: 10.5px; }
 
 /* nodes — drawn as neurons: the card is the SOMA (radial cytoplasm,
@@ -700,8 +704,8 @@ body:not([data-stage]) .canvasbar { display: none; }
   background: rgba(207, 63, 54, .07); }
 .badge.gen { color: var(--k-io); border-color: rgba(207, 75, 143, .35);
   background: rgba(207, 75, 143, .06); }
-.badge.loop { color: var(--warn); border-color: rgba(179, 102, 26, .35);
-  background: rgba(179, 102, 26, .06); }
+.badge.loop { color: var(--loop); border-color: color-mix(in srgb, var(--loop) 35%, transparent);
+  background: color-mix(in srgb, var(--loop) 7%, #fff); }
 .badge.sub { color: var(--k-graph); border-color: rgba(23, 143, 102, .35);
   background: rgba(23, 143, 102, .06); }
 .badge.run { color: var(--text); background: var(--panel);
@@ -722,7 +726,8 @@ body:not([data-stage]) .canvasbar { display: none; }
    core, a WHITE laser filament with real contrast, and spark particles
    whose smaller trailing dots point the direction of flow */
 .wires circle.bouton { fill: var(--wire); stroke: #e8f1fd; stroke-width: 1.5; }
-.wires circle.bouton.b-back { fill: var(--warn); }
+.wires circle.bouton.b-back { fill: var(--loop); }
+.wires path.loop-head { fill: var(--loop); stroke: none; }
 .wires circle.bouton.b-serve { fill: var(--k-serve); }
 .wires path.eglow {
   stroke: var(--wire-glow); stroke-width: 12;
@@ -734,14 +739,15 @@ body:not([data-stage]) .canvasbar { display: none; }
   stroke: #ffffff; stroke-width: 1.6; stroke-linecap: round;
   pointer-events: none;
 }
-.wires path.eglow.back { stroke: rgba(179, 102, 26, .16); }
-.wires path.ecore.back { stroke: #b3661a; }
+.wires path.eglow.back { stroke: color-mix(in srgb, var(--loop) 18%, transparent); stroke-width: 14; }
+.wires path.ecore.back { stroke: var(--loop); stroke-width: 3.5; stroke-dasharray: 10 6; }
+.wires path.eray.back { display: none; }
 .wires path.eglow.hot { stroke: rgba(65, 114, 159, .3); }
 .wires path.ecore.hot { stroke: var(--wire-deep); stroke-width: 5; }
 .wires path.eray.hot { stroke-width: 2; }
 .wires circle.espark { fill: #fff; stroke: var(--wire); stroke-width: 1.6; }
 .wires circle.espark.tailspark { fill: #bccfe3; opacity: .7; stroke: none; }
-.wires circle.espark.back { stroke: #b3661a; }
+.wires circle.espark.back { stroke: var(--loop); }
 /* if/else routes: the beam in branch amber; the ELSE fallback dashed,
    laserless — a path that exists but is not flowing */
 .wires path.eglow.cond { stroke: rgba(179, 102, 26, .13); }
@@ -1054,7 +1060,8 @@ body.resizing { user-select: none; cursor: col-resize; }
   padding-left: 9px; }
 .chip.cgen { color: #a33a73; background: #fbeef5; }
 .chip.cres { color: #6d36a3; background: #f5effc; }
-.chip.cloop, .chip.clatest { color: #9a5510; background: var(--warn-soft); }
+.chip.clatest { color: #9a5510; background: var(--warn-soft); }
+.chip.cloop { color: var(--loop); background: color-mix(in srgb, var(--loop) 9%, #fff); }
 .chip.cfired, .chip.cok { color: var(--ok); background: var(--ok-soft); }
 .chip.cfired { margin-left: auto; }
 .chip.cbad { color: var(--err); background: var(--err-soft); }
