@@ -3919,7 +3919,10 @@ $("#btn-zoom-pct").onclick = () => {
   }, {passive: false});
 
   stage.addEventListener("mousedown", (ev) => {
-    const overNode = ev.target.closest(".node");
+    // an opened GraphOp's body is canvas — it pans like the background;
+    // only its title strip (select, collapse) is a control
+    const hit = ev.target.closest(".node");
+    const overNode = hit && hit.classList.contains("container") && !ev.target.closest(".chead") ? null : hit;
     const panButton = ev.button === 1 || (ev.button === 0 && spaceHeld);
     if (overNode && !panButton && ev.button === 0) return;  // node click
     if (ev.button !== 0 && ev.button !== 1) return;

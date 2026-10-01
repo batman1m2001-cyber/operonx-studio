@@ -778,6 +778,10 @@ body:not([data-stage]) .canvasbar { display: none; }
   padding: 0; cursor: default; box-shadow: none;
 }
 .node.container:hover { transform: none; box-shadow: none; }
+/* an opened GraphOp's body is canvas: the grab hand, and grabbing while panning */
+.node.container { cursor: grab; }
+.node.container .chead { cursor: pointer; }
+#stage.panning .node.container { cursor: grabbing; }
 .node.container::before { top: 0; bottom: auto; height: 34px; border-radius: 4px 0 0 4px; }
 .node.container .chead {
   display: flex; align-items: baseline; gap: 10px;
