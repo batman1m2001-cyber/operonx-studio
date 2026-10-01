@@ -171,3 +171,20 @@ class TestCanvas:
         from operonx_studio.layout import NODE_W
 
         assert all(b - a >= NODE_W for a, b in zip(xs, xs[1:]))
+
+
+class TestOrdering:
+    def test_rows_are_ordered_to_uncross_edges(self):
+        """r fans to a, b; a feeds y and b feeds x. Listed x before y, the
+        wires cross until the sweep swaps the bottom row."""
+        out = layout_graph(ir(["r", "a", "b", "x", "y"],
+                              [("r", "a"), ("r", "b"), ("a", "y"), ("b", "x")], entries=["r"]))
+        at = {n.name: n.x for n in out.nodes}
+        assert (at["a"] < at["b"]) == (at["y"] < at["x"])
+
+    def test_a_long_edge_holds_a_gap_but_draws_no_card(self):
+        """a -> c skips b's row: a dummy keeps room for it there, and only
+        the three real ops are placed."""
+        out = layout_graph(ir(["a", "b", "c"], [("a", "b"), ("b", "c"), ("a", "c")], entries=["a"]))
+        assert sorted(n.name for n in out.nodes) == ["a", "b", "c"]
+        assert out.width > 2 * 48 + 260, "the row b sits in is wider by the long edge's slot"
