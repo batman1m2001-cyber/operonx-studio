@@ -251,6 +251,60 @@ function withBoundaries(model, key, depth) {
   return {items: model.items, edges, w: model.w + (model.loopRoom || 0), h: end.y + KB / 2};
 }
 
+/* An opened container grows its column, and the shift keeps the grid a
+ * grid — but the rows beneath were placed for closed cards, so a card fed
+ * by the container and its siblings sat far off to one side of them and
+ * its wires swept across each other. Below the first opened card, each row
+ * hangs under its feeders again (real widths, order kept, a gap between
+ * cards), the way the server laid the closed graph. Nothing open: nothing
+ * moves. */
+function hangUnderOpened(items, edges) {
+  const opened = items.filter(it => it.inner);
+  if (!opened.length) return;
+  const top = Math.min(...opened.map(it => it.y));
+  const byId = new Map(items.map(it => [it.node.id, it]));
+  const feeders = new Map();
+  for (const e of edges) {
+    if (e.back) continue;
+    const a = byId.get(e.src), b = byId.get(e.dst);
+    if (!a || !b || a.y >= b.y) continue;
+    if (!feeders.has(b)) feeders.set(b, new Set());
+    feeders.get(b).add(a);
+  }
+  const rows = new Map();
+  for (const it of items) if (it.y > top) {
+    if (!rows.has(it.y)) rows.set(it.y, []);
+    rows.get(it.y).push(it);
+  }
+  const GAP = 56;
+  for (const y of [...rows.keys()].sort((p, q) => p - q)) {
+    const row = rows.get(y).sort((p, q) => p.x - q.x);
+    const want = row.map(it => {
+      const f = [...(feeders.get(it) || [])];
+      return f.length ? f.reduce((s, a) => s + a.x + a.w / 2, 0) / f.length : it.x + it.w / 2;
+    });
+    // order-preserving clusters, each centred on its members' wishes
+    const clusters = [];
+    row.forEach((it, k) => {
+      clusters.push({m: [k], off: [0], first: want[k]});
+      while (clusters.length > 1) {
+        const a = clusters[clusters.length - 2], b = clusters[clusters.length - 1];
+        const la = row[a.m[a.m.length - 1]], fb = row[b.m[0]];
+        const need = (la.w + fb.w) / 2 + GAP;
+        if (b.first - (a.first + a.off[a.off.length - 1]) >= need) break;
+        const base = a.off[a.off.length - 1] + need;
+        a.m.push(...b.m);
+        a.off.push(...b.off.map(o => base + o));
+        a.first = a.m.reduce((s, m, i) => s + want[m] - a.off[i], 0) / a.m.length;
+        clusters.pop();
+      }
+    });
+    for (const c of clusters) c.m.forEach((m, i) => { row[m].x = c.first + c.off[i] - row[m].w / 2; });
+  }
+  const minX = Math.min(...items.map(it => it.x));
+  if (minX < 48) for (const it of items) it.x += 48 - minX;
+}
+
 function placeGraph(g, prefix, depth) {
   const size = new Map();
   for (const n of g.nodes) {
@@ -279,13 +333,15 @@ function placeGraph(g, prefix, depth) {
   for (const y of ys) { shiftY.set(y, acc); acc += extraY.get(y); }
 
   const items = [];
-  let maxX = NODE_W, maxY = NODE_H;
   for (const n of g.nodes) {
     const s = size.get(n.id);
-    const it = {key: s.key, node: n, depth, inner: s.inner,
+    items.push({key: s.key, node: n, depth, inner: s.inner,
                 x: n.x + shiftX.get(n.x), y: n.y + shiftY.get(n.y),
-                w: s.w, h: s.h};
-    items.push(it);
+                w: s.w, h: s.h});
+  }
+  hangUnderOpened(items, g.edges || []);
+  let maxX = NODE_W, maxY = NODE_H;
+  for (const it of items) {
     maxX = Math.max(maxX, it.x + it.w);
     maxY = Math.max(maxY, it.y + it.h);
   }
@@ -479,14 +535,31 @@ function routeAvoiding(a, b, obstacles, via, ports) {
   // every row it passes. Down that lane in one smooth S, when it is clear.
   if (via && via.length && y2 - y1 > 60) {
     const want = via.reduce((s, v) => s + v, 0) / via.length;
-    for (const off of [0, 11, -11, 22, -22]) {
+    // a taken lane gives way on the side the wire comes from, so two
+    // neighbours sharing a gap never swap sides and cross
+    const s = x1 < want ? -1 : 1;
+    for (const off of [0, 11 * s, -11 * s, 22 * s, -22 * s]) {
       const lane = want + off;
       if (!_vFree(lane, y1 + 30, y2 - 30)) continue;
-      const d = Math.abs(lane - x1) < 3 && Math.abs(lane - x2) < 3 ? bezier(x1, y1, x2, y2)
-        : sLane(x1, y1, lane, x2, y2);
-      if (_pathHits(d, rects)) continue;
-      _lanes.v.push({x: lane, t: y1 + 30, b: y2 - 30});
-      return d;
+      if (Math.abs(lane - x1) < 3 && Math.abs(lane - x2) < 3) {
+        const d = bezier(x1, y1, x2, y2);
+        if (_pathHits(d, rects)) continue;
+        _lanes.v.push({x: lane, t: y1 + 30, b: y2 - 30});
+        return d;
+      }
+      // one S across the whole span, or — when that diagonal would cut a
+      // card — turn into the lane early, run down it, turn out late
+      const h = Math.min(160, (y2 - y1) / 3);
+      const down = (ya, yb) => { const k = (yb - ya) / 3; return ` C ${lane} ${ya + k}, ${lane} ${yb - k}, ${lane} ${yb}`; };
+      const turned = (hi, ho) => `M ${x1} ${y1} C ${x1} ${y1 + hi / 2}, ${lane} ${y1 + hi / 2}, ${lane} ${y1 + hi}`
+        + down(y1 + hi, y2 - ho) + ` C ${lane} ${y2 - ho / 2}, ${x2} ${y2 - ho / 2}, ${x2} ${y2}`;
+      // the turn out fits the gap above the target: try it tall, then tighter
+      for (const d of [sLane(x1, y1, lane, x2, y2), turned(h, h), turned(h, 90), turned(h, 56),
+                       turned(90, 56), turned(56, 56)]) {
+        if (_pathHits(d, rects)) continue;
+        _lanes.v.push({x: lane, t: y1 + 30, b: y2 - 30});
+        return d;
+      }
     }
   }
   const long = y2 - y1 > 200;
