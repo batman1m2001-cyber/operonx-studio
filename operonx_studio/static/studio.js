@@ -260,7 +260,7 @@ function withBoundaries(model, key, depth) {
  * moves. */
 function hangUnderOpened(items, edges) {
   const opened = items.filter(it => it.inner);
-  if (!opened.length) return;
+  if (!opened.length) return 0;
   const top = Math.min(...opened.map(it => it.y));
   const byId = new Map(items.map(it => [it.node.id, it]));
   const feeders = new Map();
@@ -301,8 +301,15 @@ function hangUnderOpened(items, edges) {
     });
     for (const c of clusters) c.m.forEach((m, i) => { row[m].x = c.first + c.off[i] - row[m].w / 2; });
   }
+  // back to the margin, from either side. Each opened card widens every
+  // column right of its own x, and the layout's x is continuous (no grid),
+  // so in a stack of opened cards (qc sentiment_agent, all open) the top
+  // one had been pushed right by the sum of the ones below — 2500 px of
+  // empty canvas on its left. Returns the shift, so the lanes follow it.
   const minX = Math.min(...items.map(it => it.x));
-  if (minX < 48) for (const it of items) it.x += 48 - minX;
+  const dx = 48 - minX;
+  if (Math.abs(dx) > 0.5) for (const it of items) it.x += dx;
+  return Math.abs(dx) > 0.5 ? dx : 0;
 }
 
 function placeGraph(g, prefix, depth) {
@@ -339,7 +346,7 @@ function placeGraph(g, prefix, depth) {
                 x: n.x + shiftX.get(n.x), y: n.y + shiftY.get(n.y),
                 w: s.w, h: s.h});
   }
-  hangUnderOpened(items, g.edges || []);
+  const hungDX = hangUnderOpened(items, g.edges || []);
   let maxX = NODE_W, maxY = NODE_H;
   for (const it of items) {
     maxX = Math.max(maxX, it.x + it.w);
@@ -366,7 +373,7 @@ function placeGraph(g, prefix, depth) {
   const laneShift = (vx) => {
     let s = 0;
     for (const x of xs) if (x + NODE_W / 2 < vx) s += extraX.get(x);
-    return s;
+    return s + hungDX;
   };
   const edges = (g.edges || []).map(e => (e.via && e.via.length
     ? {...e, viaX: e.via.map(v => v + laneShift(v))} : e));
