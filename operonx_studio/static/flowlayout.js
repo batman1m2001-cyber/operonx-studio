@@ -41,9 +41,74 @@
     GAP_DC: 22,         // lane to card
     ROW_OUT: 14,        // a condition row's first lane, past the card edge
     ROW_STEP: 8,        // between a card's row lanes
-    LABEL_W: 66,        // room right of a loop lane for "↺ loop"
+    LABEL_W: 66,        // room right of a loop lane for "next turn"
     SWEEPS: 8,
+    ZPAD: 14,           // a loop zone around its member cards
+    ZPAD_B: 16,         // … below its last row
+    ZOUT: 20,           // a non-member card to a loop zone's edge
+    ZHX: 10,            // the zone header's left inset
+    ZHY: 8,             // … its top/bottom inset in the header band
+    ZLH: 15,            // … one header line
+    ZWRAP: 380,         // a header line wraps past this
   };
+
+  // ── loops: what repeats, and where it stops ──────────────────────
+  /* A synthetic loop (the compiler's rewrite of an authored cycle) is
+   * inlined for display: its members carry n.loop = {group, mode, …}. The
+   * way OUT of the loop is a branch inside it whose route leads outside
+   * it (or to END) — that route's condition is the loop's stop rule. */
+  function loopsOf(g) {
+    const nodes = (g && g.nodes) || [];
+    const byGroup = new Map();
+    for (const n of nodes) {
+      const lp = n.loop;
+      if (!lp || !lp.group) continue;
+      if (!byGroup.has(lp.group)) {
+        byGroup.set(lp.group, {group: lp.group, mode: lp.mode || "synthetic",
+          synthetic: (lp.mode || "synthetic") === "synthetic",
+          max_iterations: lp.max_iterations ?? null, until: lp.until ?? null, members: []});
+      }
+      byGroup.get(lp.group).members.push(n.name);
+    }
+    for (const info of byGroup.values()) {
+      const set = new Set(info.members);
+      info.exits = [];
+      for (const n of nodes) {
+        if (!set.has(n.name) || !n.routes) continue;
+        n.routes.forEach((r, i) => {
+          if (!set.has(r.target)) {
+            info.exits.push({from: n.name, route: i, condition: r.condition,
+                             target: r.target === "__END__" ? "END" : r.target});
+          }
+        });
+      }
+    }
+    return [...byGroup.values()];
+  }
+
+  const exitText = (x) => `exits at ${x.from} ${x.condition === "else" ? "otherwise" : "when " + x.condition} → ${x.target}`;
+
+  /* The zone's header, as lines no wider than `room` where it can. */
+  function loopHeader(info, room, textWidth) {
+    const tw = textWidth || ((t) => t.length * 6.4);
+    let head = info.exits.length ? "↺ repeats each turn" : "↺ repeats until no step continues";
+    if (!info.synthetic && info.until != null) head += ` · until ${info.until}`;
+    if (!info.synthetic && info.max_iterations != null) head += ` · max ${info.max_iterations}`;
+    const tails = info.exits.map(exitText);
+    const one = [head, ...tails].join(" · ");
+    if (tw(one) <= room) return [one];
+    const wrap = Math.max(room, C.ZWRAP);
+    const out = [];
+    for (const line of [head, ...tails]) {
+      let cur = "";
+      for (const word of line.split(" ")) {
+        const next = cur ? cur + " " + word : word;
+        if (cur && tw(next) > wrap) { out.push(cur); cur = "  " + word; } else cur = next;
+      }
+      out.push(cur);
+    }
+    return out;
+  }
 
   const f = (v) => Math.round(v * 10) / 10;
 
@@ -115,6 +180,14 @@
     });
     const byName = new Map();
     for (const L of N) if (!byName.has(L.node.name)) byName.set(L.node.name, L);
+
+    // loop zones: each loop's members, kept together in one clear box
+    const zones = loopsOf(g).map(info => ({info,
+      set: new Set(info.members.map(nm => byName.get(nm)).filter(Boolean))}))
+      .filter(Z => Z.set.size);
+    const inZone = (Z, x) => x.dummy
+      ? !x.wire.tie && Z.set.has(x.wire.a) && Z.set.has(x.wire.b)
+      : Z.set.has(x);
 
     let S = null, E = null;
     const term = (which) => {
@@ -290,6 +363,24 @@
       }
     }
     for (const r of rows) r.sort((p, q) => p.hint - q.hint || p.idx - q.idx);
+    for (const Z of zones) {
+      const ls = [...Z.set].map(L => L.layer);
+      Z.lo = Math.min(...ls); Z.hi = Math.max(...ls);
+    }
+    // a loop's members (and its own lanes) sit side by side in every row
+    // they span; everything else in those rows goes left or right of them
+    const groupRow = (row, r) => {
+      for (const Z of zones) {
+        if (r < Z.lo || r > Z.hi) continue;
+        const mine = [], at = [];
+        row.forEach((x, i) => { if (inZone(Z, x)) { mine.push(x); at.push(i); } });
+        if (!mine.length || mine.length === row.length) continue;
+        const mean = at.reduce((s, i) => s + i, 0) / at.length;
+        const left = row.filter((x, i) => !inZone(Z, x) && i < mean);
+        const right = row.filter((x, i) => !inZone(Z, x) && i >= mean);
+        row.splice(0, row.length, ...left, ...mine, ...right);
+      }
+    };
 
     // a loop lane sits right next to its card, so the return's stub
     // between card and lane crosses nothing
@@ -305,6 +396,7 @@
       row.splice(0, row.length, ...rest);
     };
     rows.forEach(repin);
+    rows.forEach(groupRow);
 
     // ── ordering: barycentre sweeps, fewest crossings kept ──
     const crossings = () => {
@@ -336,6 +428,7 @@
           }));
           rows[r].sort((p, q) => key.get(p) - key.get(q) || cur.get(p) - cur.get(q));
           repin(rows[r]);
+          groupRow(rows[r], r);
         }
         const count = crossings();
         if (count < bestCount) { bestCount = count; stale = 0; best = rows.map(r => [...r]); }
@@ -403,6 +496,50 @@
     align([...idx].reverse(), down);
     align(idx, up);
 
+    // ── loop zones: the box, its header, and nothing else inside ──
+    for (const Z of zones) {
+      let zl = Infinity, zr = -Infinity, entry = Infinity;
+      for (let r = Z.lo; r <= Z.hi; r++) for (const x of rows[r]) {
+        if (!inZone(Z, x)) continue;
+        zl = Math.min(zl, cx.get(x) - x.wl); zr = Math.max(zr, cx.get(x) + x.wr);
+        if (r === Z.lo && !x.dummy) entry = Math.min(entry, cx.get(x));
+      }
+      zl -= C.ZPAD; zr += C.ZPAD;
+      // the header sits top-left, clear of the wires that enter the loop's
+      // first cards at their top centres: the zone widens to hold it
+      const room = entry - 12 - (zl + C.ZHX);
+      Z.lines = loopHeader(Z.info, room, opts.textWidth);
+      const hw = Math.max(...Z.lines.map(t => (opts.textWidth || ((u) => u.length * 6.4))(t)));
+      if (zl + C.ZHX + hw + 12 > entry) zl = entry - 12 - hw - C.ZHX;
+      Z.l = zl; Z.r = zr;
+      Z.band = Z.lines.length * C.ZLH + 2 * C.ZHY;
+      const mid = (zl + zr) / 2;
+      for (let r = Z.lo; r <= Z.hi; r++) {
+        const row = rows[r];
+        const m = row.map(x => inZone(Z, x));
+        const first = m.indexOf(true), last = m.lastIndexOf(true);
+        const lefts = [], rights = [];
+        row.forEach((x, i) => {
+          if (m[i]) return;
+          if (first < 0 ? cx.get(x) < mid : i < first) lefts.push(i);
+          else if (first < 0 || i > last) rights.push(i);
+        });
+        const gz = (x) => (x.dummy ? C.GAP_DD : C.ZOUT);
+        for (let k = lefts.length - 1; k >= 0; k--) {
+          const x = row[lefts[k]];
+          const bound = k === lefts.length - 1 ? zl - gz(x) - x.wr
+            : cx.get(row[lefts[k + 1]]) - sep(x, row[lefts[k + 1]]);
+          if (cx.get(x) > bound) cx.set(x, bound);
+        }
+        for (let k = 0; k < rights.length; k++) {
+          const x = row[rights[k]];
+          const bound = k === 0 ? zr + gz(x) + x.wl
+            : cx.get(row[rights[k - 1]]) + sep(row[rights[k - 1]], x);
+          if (cx.get(x) < bound) cx.set(x, bound);
+        }
+      }
+    }
+
     // knobs centre over what they hold
     const isContent = (x) => !x.term;
     {
@@ -415,11 +552,13 @@
     }
     {
       const everything = [].concat(...rows);
-      const lo = Math.min(...everything.map(x => cx.get(x) - x.wl));
+      const lo = Math.min(...everything.map(x => cx.get(x) - x.wl), ...zones.map(Z => Z.l));
       const shift = (inner ? 0 : C.MARGIN) - lo;
       for (const x of everything) cx.set(x, cx.get(x) + shift);
+      for (const Z of zones) { Z.l += shift; Z.r += shift; }
     }
-    const width = Math.max(...[].concat(...rows).map(x => cx.get(x) + x.wr)) + (inner ? 0 : C.MARGIN);
+    const width = Math.max(...[].concat(...rows).map(x => cx.get(x) + x.wr), ...zones.map(Z => Z.r))
+      + (inner ? 0 : C.MARGIN);
 
     // ── y: rows as tall as their tallest card, channels between ──
     const H = rows.map(row => Math.max(0, ...row.map(x => x.h || 0)));
@@ -430,8 +569,12 @@
       if (lo === hi && w.back && lo > 0) through[lo - 1]++;
     }
     const G = through.map(n => C.V_GAP + Math.min(120, Math.max(0, n - 8) * 4));
+    // a loop zone's header band sits at the foot of the channel above it
+    const band = new Array(nrows).fill(0);
+    for (const Z of zones) band[Z.lo] = Math.max(band[Z.lo], Z.band);
+    for (let r = 1; r < nrows; r++) G[r - 1] += band[r];
     const top = [];
-    let y = 0;
+    let y = band[0];
     for (let r = 0; r < nrows; r++) { top.push(y); y += H[r] + G[r]; }
     let oy = 0;
     if (!inner) oy = C.MARGIN - (S ? top[1] || 0 : 0);
@@ -441,7 +584,7 @@
     for (const L of all) { L.cx = cx.get(L); L.y = top[L.layer]; }
     for (const row of rows) for (const x of row) if (x.dummy) x.cx = cx.get(x);
 
-    return {N, S, E, W, rows, top, H, G, w: width, h: inner ? top[nrows - 1] + H[nrows - 1] : height, inner};
+    return {N, S, E, W, rows, top, H, G, band, zones, prefix, w: width, h: inner ? top[nrows - 1] + H[nrows - 1] : height, inner};
   }
 
   // ── absolute placement and wire paths ─────────────────────────────
@@ -498,7 +641,25 @@
       }
     }
 
+    // loop zones, absolute; every member item knows its zone
+    const zoneOf = new Map();
+    for (const Z of lv.zones) {
+      const y0 = oy + lv.top[Z.lo] - Z.band;
+      const z = {group: Z.info.group, info: Z.info, lines: Z.lines,
+                 key: lv.prefix + Z.info.group,
+                 x: ox + Z.l, y: y0, w: Z.r - Z.l,
+                 h: oy + lv.top[Z.hi] + lv.H[Z.hi] + C.ZPAD_B - y0,
+                 head: {x: ox + Z.l + C.ZHX, y: y0 + C.ZHY, lh: C.ZLH},
+                 members: [...Z.set].map(L => L.key)};
+      out.zones.push(z);
+      for (const L of Z.set) { zoneOf.set(L, z); item.get(L).zone = z; }
+    }
     const T = (r) => oy + lv.top[r];
+    // into a row under a zone's header: curve above the band, then straight down
+    const down = (p, x, r, y) => {
+      const b = lv.band[r] || 0;
+      if (b) { p.to(x, y - b); p.v(y); } else p.to(x, y);
+    };
     const B = (r) => oy + lv.top[r] + lv.H[r];
     const X = (D) => ox + D.cx;
     const portOut = (L) => { const it = item.get(L); return it.bOut || it; };
@@ -525,8 +686,8 @@
           p = new Path(A.x + A.w / 2, A.y + A.h);
         }
         p.v(B(la));
-        for (const D of w.lanes) { p.to(X(D), T(D.layer)); p.v(B(D.layer)); }
-        p.to(Bt.x + Bt.w / 2, Bt.y);
+        for (const D of w.lanes) { down(p, X(D), D.layer, T(D.layer)); p.v(B(D.layer)); }
+        down(p, Bt.x + Bt.w / 2, lb, Bt.y);
       } else {
         const la = w.a.layer, lb = w.b.layer;
         const x1 = dot ? dot.x : A.x + A.w, y1 = dot ? dot.y : A.y + A.h / 2;
@@ -567,9 +728,17 @@
         label = {x: X(LL) + 18, y: (T(LL.layer) + B(LL.layer)) / 2};
         if (LL.layer === la) label.y = Math.min(label.y, y1 - 14);
       }
+      // a route out of a loop: from a member, to what is not one
+      const za = zoneOf.get(w.a);
+      let exit = null;
+      if (za && zoneOf.get(w.b) !== za && !w.back && w.a.node.routes) {
+        const tname = w.b.term === "end" ? "__END__" : w.b.node.name;
+        const ri = w.e && w.e.route != null ? w.e.route : null;
+        if (w.a.node.routes.some((r, i) => r.target === tname && (ri == null || ri === i))) exit = za;
+      }
       out.wires.push({
         key: w.k, a: item.get(w.a), b: item.get(w.b), e: w.e, tie: w.tie, back: w.back,
-        fromRow: !!dot, row: w.row, d: p.d, pts: p.pts, label,
+        fromRow: !!dot, row: w.row, d: p.d, pts: p.pts, label, exit,
       });
     }
     return item;
@@ -581,14 +750,14 @@
    * pills, every wire with its path, and each decision card's row sides. */
   function layout(graph, opts) {
     const lv = buildLevel(graph, "", 0, opts, false);
-    const out = {items: [], pills: [], wires: [], rowSides: new Map(), w: lv.w, h: lv.h};
+    const out = {items: [], pills: [], wires: [], zones: [], rowSides: new Map(), w: lv.w, h: lv.h};
     emit(lv, 0, 0, out);
     out.start = out.pills.find(p => p.node.boundary === "start") || null;
     out.end = out.pills.find(p => p.node.boundary === "end") || null;
     return out;
   }
 
-  const api = {layout, C};
+  const api = {layout, loopsOf, loopHeader, exitText, C};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.FlowLayout = api;
 })(typeof window !== "undefined" ? window : globalThis);

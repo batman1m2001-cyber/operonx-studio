@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { problems, sample } from "./flowgeom.mjs";
+import { problems, sample, zoneProblems } from "./flowgeom.mjs";
 
 const require = createRequire(import.meta.url);
 const FL = require("../../operonx_studio/static/flowlayout.js");
@@ -61,6 +61,8 @@ function randomGraph(R, prefix, depthLeft, budget) {
   if (n >= 3 && R() < 0.5) {
     const b = Math.floor(R() * (n - 1)), a = b + 1 + Math.floor(R() * (n - 1 - b));
     add(a, b, {type: "back", origin: "back_edge", back: true});
+    // as the canvas sees an inlined synthetic loop: the cycle's steps are members
+    if (R() < 0.7) for (let i = b; i <= a; i++) nodes[i].loop = {group: "__loop_0__", mode: "synthetic", max_iterations: 1000};
   }
   const hasIn = new Set(edges.filter(e => e.origin !== "back_edge").map(e => e.dst));
   const hasOut = new Set(edges.filter(e => e.origin !== "back_edge").map(e => e.src));
@@ -97,7 +99,7 @@ function sizer(R) {
 const pos = (out) => Object.fromEntries([...out.items, ...out.pills].map(i => [i.key, [i.x, i.y, i.w, i.h]]));
 
 test("random workflows, random open sets: no wire through a card, no overlap, every edge drawn", () => {
-  let cases = 0, wires = 0;
+  let cases = 0, wires = 0, zones = 0;
   for (let seed = 1; seed <= 240; seed++) {
     const R = rng(seed * 7919);
     const g = randomGraph(R, "g.", 1 + (seed % 3), 9);
@@ -110,8 +112,9 @@ test("random workflows, random open sets: no wire through a card, no overlap, ev
       for (let i = 1; i < parts.length; i++) if (!open.has(parts.slice(0, i).join("/"))) open.delete(k);
     }
     const out = FL.layout(g, {expanded: open, sizeOf});
-    const bad = problems(out);
+    const bad = [...problems(out), ...zoneProblems(out)];
     assert.deepEqual(bad, [], `seed ${seed}: ${bad.slice(0, 3).join("; ")}`);
+    zones += out.zones.length;
     // every IR edge of every shown level is drawn
     const drawn = new Set(out.wires.filter(w => w.e).map(w => `${w.a.key}|${w.e.id}`));
     (function walk(gr, prefix) {
@@ -135,6 +138,7 @@ test("random workflows, random open sets: no wire through a card, no overlap, ev
     cases++; wires += out.wires.length;
   }
   assert.ok(cases >= 200 && wires > 2000, `${cases} cases, ${wires} wires`);
+  assert.ok(zones > 40, `only ${zones} loop zones exercised`);
 });
 
 const card = (n, extra = {}) => ({id: `t.${n}`, name: n, kind: "FuncOp", ...extra});
@@ -207,4 +211,80 @@ test("opening a container keeps unrelated cards' order and leaves no empty margi
   const x = (n) => out.items.find(i => i.node.name === n).x;
   assert.ok(x("a") < x("z") && x("z") < x("c"));
   assert.equal(Math.min(...out.items.map(i => i.x)), FL.C.MARGIN);
+});
+
+// ── loops: what repeats, where it stops ───────────────────────────
+// The ReAct agent as the canvas receives it: the compiler's hidden loop
+// inlined, every member tagged, `answer` outside the loop but in the same
+// row as `tools` (both follow the router).
+function react() {
+  const lp = {group: "__loop_0__", mode: "synthetic", max_iterations: 1000};
+  const chain = ["counter", "asked", "context", "model", "assistant", "router", "closed", "ended"];
+  const routes = [{condition: "finished == True", target: "answer"}, {condition: "else", target: "tools"}];
+  const nodes = [...chain.map(n => card(n, {loop: lp})),
+    card("route_1", {kind: "BranchOp", routes, loop: lp, end: true}),
+    card("answer", {end: true}), card("tools", {loop: lp}), card("gathered", {loop: lp, end: true})];
+  nodes[0].start = true;
+  const edges = [edge("route_1", "answer", {type: "condition"})];
+  for (let i = 0; i + 1 < chain.length; i++) edges.push(edge(chain[i], chain[i + 1]));
+  edges.push(edge("ended", "route_1"), edge("route_1", "tools", {id: "route_1->tools#1", type: "condition", route: 1}),
+             edge("tools", "gathered"), edge("gathered", "counter", {id: "gathered->counter#back", type: "back", origin: "back_edge", back: true}));
+  return {nodes, edges, entries: ["counter"], exits: ["answer", "gathered", "route_1"]};
+}
+const reactSize = (key, n) => n.routes
+  ? {w: 240, h: 90, rows: n.routes.map((r, i) => ({target: r.target, route: i, left: 12, top: 34 + 22 * i, w: 216, h: 18}))}
+  : {w: 200, h: 48};
+
+test("a loop's exit is the route inside it that leads out of it", () => {
+  const [info] = FL.loopsOf(react());
+  assert.equal(info.group, "__loop_0__");
+  assert.equal(info.members.length, 11);
+  assert.deepEqual(info.exits, [{from: "route_1", route: 0, condition: "finished == True", target: "answer"}]);
+  assert.deepEqual(FL.loopHeader(info, 1e9), ["↺ repeats each turn · exits at route_1 when finished == True → answer"]);
+  // narrow room: one line per fact, the compiler's cap never shown
+  const lines = FL.loopHeader(info, 100);
+  assert.deepEqual(lines, ["↺ repeats each turn", "exits at route_1 when finished == True → answer"]);
+  assert.ok(!lines.join(" ").includes("1000"));
+});
+
+test("loop exits: END, several, none, and an authored loop's limit", () => {
+  const lp = {group: "L", mode: "synthetic", max_iterations: 1000};
+  const g = {nodes: [card("t", {loop: lp}),
+    card("r", {loop: lp, routes: [{condition: "x >= 3", target: "__END__"}, {condition: "err", target: "bail"}, {condition: "else", target: "t"}]}),
+    card("bail")], edges: []};
+  const [info] = FL.loopsOf(g);
+  assert.deepEqual(info.exits.map(x => x.target), ["END", "bail"]);
+  assert.match(FL.loopHeader(info, 1e9)[0], /exits at r when x >= 3 → END · exits at r when err → bail/);
+  const closed = {nodes: [card("a", {loop: lp}), card("b", {loop: lp})], edges: []};
+  assert.deepEqual(FL.loopHeader(FL.loopsOf(closed)[0], 1e9), ["↺ repeats until no step continues"]);
+  const authored = {nodes: [card("a", {loop: {group: "L", mode: "classic", max_iterations: 5}})], edges: []};
+  assert.match(FL.loopHeader(FL.loopsOf(authored)[0], 1e9)[0], /max 5/);
+  assert.equal(FL.loopsOf({nodes: [card("a")], edges: []}).length, 0);
+});
+
+test("the loop zone holds every member and nothing else, its header clear", () => {
+  const g = react();
+  for (const open of [new Set()]) {
+    const out = FL.layout(g, {expanded: open, sizeOf: reactSize});
+    assert.deepEqual([...problems(out), ...zoneProblems(out)], []);
+    assert.equal(out.zones.length, 1);
+    const z = out.zones[0];
+    assert.equal(z.members.length, 11);
+    const answer = out.items.find(i => i.node.name === "answer");
+    assert.ok(answer.x + answer.w <= z.x || answer.x >= z.x + z.w, "answer stands outside the loop");
+    // the exit route is marked, the return is not
+    const exits = out.wires.filter(w => w.exit);
+    assert.deepEqual(exits.map(w => w.b.node.name), ["answer"]);
+    assert.ok(out.wires.find(w => w.back).label, "the return is labelled");
+    // members: each item knows its zone (the inspector reads it)
+    assert.ok(out.items.filter(i => i.zone === z).length === 11);
+  }
+  // nested inside an opened GraphOp, as the meeting-prep agents are
+  const outer = {nodes: [card("pre"), card("agent", {kind: "GraphOp", graph: {...g,
+    nodes: g.nodes.map(n => ({...n, id: "t.agent." + n.name})),
+    edges: g.edges.map(e => ({...e, src: e.src.replace("t.", "t.agent."), dst: e.dst.replace("t.", "t.agent.")}))}}), card("post")],
+    edges: [edge("pre", "agent"), edge("agent", "post"), edge("pre", "post")], entries: ["pre"], exits: ["post"]};
+  const out = FL.layout(outer, {expanded: new Set(["t.agent"]), sizeOf: reactSize});
+  assert.deepEqual([...problems(out), ...zoneProblems(out)], []);
+  assert.equal(out.zones[0].key, "t.agent/__loop_0__");
 });
