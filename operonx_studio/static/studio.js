@@ -243,8 +243,12 @@ function withBoundaries(model, key, depth) {
   const end = knob("end", midX, contentBottom + 22 - KB / 2);
   const edges = [...model.edges];
   for (const it of model.items) {
-    if (it.node.start) edges.push({src: "__start__", dst: it.node.id, boundary: true});
-    if (it.node.end) edges.push({src: it.node.id, dst: "__end__", boundary: true});
+    // a tie into END runs down its own lanes (layout's `ties`); a tie
+    // from START to an entry on the top row is a plain drop
+    if (it.node.start) edges.push({src: "__start__", dst: it.node.id, boundary: true,
+                                   via: it.node.layer === 0 ? [] : undefined});
+    if (it.node.end) edges.push({src: it.node.id, dst: "__end__", boundary: true,
+                                 via: (model.ties || {})[it.node.id] || undefined});
   }
   model.items.push(start, end);
   // the knobs stay centred over the content; a loop's room widens the box
@@ -264,18 +268,31 @@ function placeGraph(g, prefix, depth) {
     size.set(n.id, {key, w, h, inner});
   }
 
-  const xs = [...new Set(g.nodes.map(n => n.x))].sort((a, b) => a - b);
+  // An opened container is wider and taller than the card the layout
+  // placed. Rows below it move down by its extra height (every card of
+  // one row shares the row's y). Sideways, the stretch is CENTRED on the
+  // container: x is remapped by a monotone piecewise-linear map that
+  // widens just the container's own span, so a card above or below it
+  // stays centred over it, a lane beside it stays beside it, and no two
+  // things ever swap or collide — the layout's order holds exactly, and
+  // nothing unrelated moves more than it must.
+  const stretch = [];
+  for (const n of g.nodes) {
+    const s = size.get(n.id);
+    if (s.w > NODE_W) stretch.push({l: n.x, r: n.x + NODE_W, e: s.w - NODE_W});
+  }
+  const fx = (x) => {
+    let out = x;
+    for (const z of stretch) out += z.e * Math.max(0, Math.min(1, (x - z.l) / (z.r - z.l)));
+    return out;
+  };
   const ys = [...new Set(g.nodes.map(n => n.y))].sort((a, b) => a - b);
-  const extraX = new Map(xs.map(x => [x, 0]));
   const extraY = new Map(ys.map(y => [y, 0]));
   for (const n of g.nodes) {
     const s = size.get(n.id);
-    extraX.set(n.x, Math.max(extraX.get(n.x), s.w - NODE_W));
     extraY.set(n.y, Math.max(extraY.get(n.y), s.h - NODE_H));
   }
-  const shiftX = new Map(); let acc = 0;
-  for (const x of xs) { shiftX.set(x, acc); acc += extraX.get(x); }
-  const shiftY = new Map(); acc = 0;
+  const shiftY = new Map(); let acc = 0;
   for (const y of ys) { shiftY.set(y, acc); acc += extraY.get(y); }
 
   const items = [];
@@ -283,12 +300,17 @@ function placeGraph(g, prefix, depth) {
   for (const n of g.nodes) {
     const s = size.get(n.id);
     const it = {key: s.key, node: n, depth, inner: s.inner,
-                x: n.x + shiftX.get(n.x), y: n.y + shiftY.get(n.y),
+                x: fx(n.x + NODE_W / 2) - s.w / 2, y: n.y + shiftY.get(n.y),
                 w: s.w, h: s.h};
     items.push(it);
     maxX = Math.max(maxX, it.x + it.w);
     maxY = Math.max(maxY, it.y + it.h);
   }
+  // an edge's lanes ride the same map as the cards beside them
+  const lanes = (via) => (Array.isArray(via) ? via.map(v => ({x: fx(v.x), layer: v.layer})) : null);
+  const ties = {};
+  for (const [id, via] of Object.entries(g.ties || {})) ties[id] = lanes(via);
+  const edges = (g.edges || []).map(e => (Array.isArray(e.via) ? {...e, via: lanes(e.via)} : e));
   // An opened graph holds its own loops: a return bulges right of its
   // cards (returnPath: 56 px + 8% of its height, a card may grow 25 px
   // past its slot) with its "↺ loop" label beyond. Its box keeps room
@@ -305,7 +327,7 @@ function placeGraph(g, prefix, depth) {
       loopRoom = Math.max(loopRoom, Math.ceil(need - (maxX + 48)));
     }
   }
-  return {items, edges: g.edges || [], w: maxX + 48, h: maxY + 48, loopRoom};
+  return {items, edges, ties, w: maxX + 48, h: maxY + 48, loopRoom};
 }
 
 function flattenModel(model, ox, oy, out) {
@@ -324,7 +346,10 @@ function flattenModel(model, ox, oy, out) {
   }
   for (const e of model.edges) {
     const a = abs.get(e.src), b = abs.get(e.dst);
-    if (a && b) out.edges.push({e, a, b});
+    // lanes in canvas x; their y comes from the rows they pass, measured
+    // once the cards have their real heights (laidPath)
+    const via = Array.isArray(e.via) ? e.via.map(v => ({x: v.x + ox, layer: v.layer})) : null;
+    if (a && b) out.edges.push({e, a, b, via});
   }
   return out;
 }
@@ -341,6 +366,73 @@ function bezier(x1, y1, x2, y2) {
   // overshoots both ends and folds the wire into a kink
   const dy = gap < 80 ? gap * 0.45 : Math.max(40, gap / 2);
   return `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`;
+}
+
+/* ── laid-out wires ─────────────────────────────────────────────────
+ * The layout gives every edge that spans rows a LANE in each row it
+ * passes (Python's lane-holders, `via`), placed so the lane is clear of
+ * every card in that row. A wire is then one smooth stroke: out of its
+ * source's port, straight down each lane through its row, and an S-curve
+ * with vertical tangents across each gap between rows — gaps hold no
+ * cards, so the wire never meets one, and nothing needs dodging. */
+let _bands = new Map();   // "level|layer" -> {t, b}: a row's vertical extent, real heights
+const levelOf = (key) => (key.includes("/") ? key.slice(0, key.lastIndexOf("/")) : "");
+
+function lanePts(level, via, y1, dx = 0) {
+  const pts = [];
+  let py = y1;
+  for (const v of via || []) {
+    const band = _bands.get(`${level}|${v.layer}`);
+    if (!band) continue;
+    const t = Math.max(band.t, py + 12), b = Math.max(band.b, t);
+    pts.push({x: v.x + dx, t, b});
+    py = b;
+  }
+  return pts;
+}
+
+function _seg(x1, y1, x2, y2) {
+  if (Math.abs(x2 - x1) < 1) return ` L ${x2} ${y2}`;
+  const k = Math.max(4, (y2 - y1) / 2);
+  return ` C ${x1} ${y1 + k}, ${x2} ${y2 - k}, ${x2} ${y2}`;
+}
+
+// the rest of a laid wire, from the top of its first lane to (x2, y2)
+function laneTail(pts, x2, y2) {
+  let d = "";
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    if (i) d += _seg(pts[i - 1].x, pts[i - 1].b, p.x, p.t);
+    if (p.b > p.t) d += ` L ${p.x} ${p.b}`;
+  }
+  const last = pts[pts.length - 1];
+  return d + _seg(last.x, last.b, x2, Math.max(y2, last.b + 4));
+}
+
+// the bottom of the row band a card stands in, and the top of the one it
+// is fed in: a wire falls straight out of its own row and drops straight
+// into its target's, so it only ever turns in a gap between rows
+const bandOf = (it) => (it && it.node.layer != null ? _bands.get(`${levelOf(it.key)}|${it.node.layer}`) : null);
+
+function laidPath(x1, y1, pts, x2, y2, a, b) {
+  const ba = bandOf(a), bb = bandOf(b);
+  let d = `M ${x1} ${y1}`;
+  if (ba && ba.b > y1 + 1 && (!pts.length || ba.b < pts[0].t)) { d += ` L ${x1} ${ba.b}`; y1 = ba.b; }
+  let yIn = y2;
+  const lastY = pts.length ? pts[pts.length - 1].b : y1;
+  if (bb && bb.t < y2 - 1 && bb.t > lastY + 8) yIn = bb.t;
+  const tail = yIn < y2 ? ` L ${x2} ${y2}` : "";
+  if (!pts.length) {
+    return d + (Math.abs(x2 - x1) < 3 ? ` L ${x2} ${yIn}` : bezier(x1, y1, x2, yIn).replace(/^M\s*\S+\s+\S+/, "")) + tail;
+  }
+  return d + _seg(x1, y1, pts[0].x, pts[0].t) + laneTail(pts, x2, yIn) + tail;
+}
+
+// a decision row's wire down its lanes: out of the row's dot into the
+// first lane, then like any laid wire
+function rowLaidPath(A, port, pts, x2, y2, bend = 1) {
+  if (!pts.length) return rowWirePath(A, port, x2, y2, bend);
+  return rowWirePath(A, port, pts[0].x, pts[0].t, bend) + laneTail(pts, x2, y2);
 }
 
 /* ── obstacle avoidance ───────────────────────────────────────────────
@@ -1010,18 +1102,26 @@ function render() {
         }
       }
     };
+    // A laid-out row is a BAND: the next row starts below the lowest
+    // card of every row above it, not only below the cards it shares a
+    // column with — the gap between two bands is where wires turn, and a
+    // tall card hanging into it would stand in their way. Things with no
+    // layer row (a container's knobs) keep the per-column rule.
     const partRows = (items) => {
       const rows = new Map();
       for (const it of items) {
-        const k = Math.round(it.y);
+        const k = it.node.layer != null && it.node.kind !== "__boundary__"
+          ? `L${it.node.layer}` : `Y${Math.round(it.y)}`;
         if (!rows.has(k)) rows.set(k, []);
         rows.get(k).push(it);
       }
       const placedBoxes = [];
-      let maxBottom = -Infinity;
-      for (const y of [...rows.keys()].sort((a, b) => a - b)) {
-        const row = rows.get(y);
-        let minTop = y;
+      let maxBottom = -Infinity, bandFloor = -Infinity;
+      const topOf = (row) => Math.min(...row.map(it => it.y));
+      for (const row of [...rows.values()].sort((a, b) => topOf(a) - topOf(b))) {
+        const y = topOf(row);
+        const banded = row[0].node.layer != null && row[0].node.kind !== "__boundary__";
+        let minTop = banded ? Math.max(y, bandFloor) : y;
         for (const it of row) {
           for (const b of placedBoxes) {
             if (b.x < it.x + it.w && b.x + b.w > it.x) {
@@ -1034,6 +1134,7 @@ function render() {
         for (const it of row) {
           placedBoxes.push({x: it.x, w: it.w, bottom: it.y + it.h});
           maxBottom = Math.max(maxBottom, it.y + it.h);
+          if (banded) bandFloor = Math.max(bandFloor, it.y + it.h + 46);
         }
       }
       return maxBottom;
@@ -1070,6 +1171,17 @@ function render() {
       }
     }
     partRows(flat.nodes.filter(it => it.depth === 0));
+  }
+
+  // every laid-out row's band, at the cards' real heights: the lanes'
+  // vertical extent (laidPath)
+  _bands = new Map();
+  for (const it of flat.nodes) {
+    if (it.node.layer == null || it.node.kind === "__boundary__") continue;
+    const k = `${levelOf(it.key)}|${it.node.layer}`;
+    const band = _bands.get(k);
+    if (!band) _bands.set(k, {t: it.y, b: it.y + it.h});
+    else { band.t = Math.min(band.t, it.y); band.b = Math.max(band.b, it.y + it.h); }
   }
 
   const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
@@ -1184,11 +1296,18 @@ function render() {
     // the pills were placed above, where the extent needed them; a tie
     // routes around a card in its way like any wire (an exit's tie ran
     // straight through the ops beneath it)
-    const tie = (a, b) => {
+    const tie = (a, b, via) => {
       const p = document.createElementNS(SVGNS, "path");
       // a decision card's route into END leaves that route's row
       const row = exitRow(a);
-      p.setAttribute("d", row ? rowTiePath(a, row, b, flat.nodes) : routeAvoiding(a, b, flat.nodes));
+      if (Array.isArray(via)) {
+        // an exit's tie runs down the lanes the layout kept for it
+        const pts = lanePts("", via, a.y + a.h);
+        p.setAttribute("d", row ? rowLaidPath(a, row, pts, portCX(b), b.y)
+          : laidPath(portCX(a), a.y + a.h, pts, portCX(b), b.y, a.bOut ? null : a, null));
+      } else {
+        p.setAttribute("d", row ? rowTiePath(a, row, b, flat.nodes) : routeAvoiding(a, b, flat.nodes));
+      }
       p.setAttribute("class", "bedge");
       svg.append(p);
       if (row) overCard(a, [p]);
@@ -1199,7 +1318,7 @@ function render() {
     }
     if (endIt) {
       nodesBox.append(boundaryCard(endIt));
-      for (const t of exitTies) tie(t.bOut || t, endIt);
+      for (const t of exitTies) tie(t.bOut || t, endIt, (model.ties || {})[t.node.id]);
     }
   }
 
@@ -1252,8 +1371,14 @@ function render() {
       // member ties from its own END knob, like every other wire; a
       // decision card's route into END leaves that route's row
       const row = !a.bOut && exitRow(a);
-      const tb = b.bIn || b;
-      bp.setAttribute("d", row ? rowTiePath(a, row, tb, obstacles) : routeAvoiding(a.bOut || a, tb, obstacles));
+      const tb = b.bIn || b, ta = a.bOut || a;
+      if (fe.via) {
+        const pts = lanePts(levelOf(a.key), fe.via, ta.y + ta.h);
+        bp.setAttribute("d", row ? rowLaidPath(a, row, pts, portCX(tb), tb.y)
+          : laidPath(portCX(ta), ta.y + ta.h, pts, portCX(tb), tb.y, a.bOut ? null : a, null));
+      } else {
+        bp.setAttribute("d", row ? rowTiePath(a, row, tb, obstacles) : routeAvoiding(ta, tb, obstacles));
+      }
       bp.setAttribute("class", "bedge");
       svg.append(bp);
       const els = [bp];
@@ -1299,13 +1424,20 @@ function render() {
       // wire starts beside the condition that fires it
       const rowPort = condLabels.length && A.condPorts
         ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
+      // several routes of one branch into one target share its lanes:
+      // each runs a few px apart, in route order
+      const pk = `${a.key}→${b.key}`, n = routeCount.get(pk) || 1;
+      const rank = routeRank.get(fe) || 0;
+      const pts = fe.via ? lanePts(levelOf(a.key), fe.via, A.y + A.h, n > 1 ? (rank - (n - 1) / 2) * 7 : 0) : null;
       if (rowPort != null) {
-        const pk = `${a.key}→${b.key}`, n = routeCount.get(pk) || 1;
-        const bend = n > 1 ? 1 - 0.55 * (routeRank.get(fe) || 0) / (n - 1) : 1;
-        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y, bend));
+        const bend = n > 1 ? 1 - 0.55 * rank / (n - 1) : 1;
+        p.setAttribute("d", pts ? rowLaidPath(A, rowPort, pts, portCX(B), B.y, bend)
+          : rowWirePath(A, rowPort, portCX(B), B.y, bend));
         p.dataset.fromRow = "1";
       } else {
-        p.setAttribute("d", routeAvoiding(A, B, obstacles));
+        p.setAttribute("d", pts ? laidPath(portCX(A), A.y + A.h, pts, portCX(B), B.y,
+                                           a.bOut ? null : a, b.bIn ? null : b)
+          : routeAvoiding(A, B, obstacles));
       }
       if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
