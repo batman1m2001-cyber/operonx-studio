@@ -238,3 +238,61 @@ class TestParallelEdges:
     def test_edges_without_ids_get_unique_ones(self):
         out = layout_graph(ir(["a", "b"], [("a", "b"), ("a", "b")], entries=["a"]))
         assert len(out.edges) == 2 and len({e.id for e in out.edges}) == 2
+
+
+class TestLanesWithRoutes:
+    """The merge of long-edge lanes (feat/canvas-edges) with one edge per
+    branch route (PR #4): both must hold at once."""
+
+    def _graph(self):
+        # r routes three conditions to t, which sits two rows down (m is in
+        # between), so the three route edges are long and get a lane
+        graph = ir(["r", "m", "t"], [("m", "t")], entries=["r"])
+        graph["nodes"][0]["routes"] = [
+            {"condition": "a", "target": "t"},
+            {"condition": "b", "target": "t"},
+            {"condition": "c", "target": "t"},
+            {"condition": "else", "target": "m"},
+        ]
+        graph["edges"] = [
+            {"from": "r", "to": "t", "type": "condition", "id": f"r->t#{i}",
+             "kind": "branch", "route": i, "label": c}
+            for i, c in enumerate("abc")
+        ] + [{"from": "r", "to": "m", "type": "condition", "id": "r->m#3",
+              "kind": "branch", "route": 3, "label": "else"}] + graph["edges"]
+        return graph
+
+    def test_three_routes_to_one_target_stay_three_edges_after_lanes(self):
+        out = layout_graph(self._graph())
+        to_t = [e for e in out.edges if (e.src, e.dst) == ("g.r", "g.t")]
+        assert [e.id for e in to_t] == ["r->t#0", "r->t#1", "r->t#2"]
+        assert [e.label for e in to_t] == ["a", "b", "c"]
+        assert [e.kind for e in to_t] == ["branch"] * 3
+        # the long routes share the ONE lane the layout held open for the
+        # pair (the canvas keeps them apart by route rank)
+        assert all(len(e.via) == 1 for e in to_t)
+        assert len({tuple(e.via) for e in to_t}) == 1
+
+    def test_long_edge_gets_one_lane_per_row_beside_the_cards(self):
+        from operonx_studio.layout import DUMMY_W, NODE_W
+
+        # a -> e skips three rows, each holding a card of the chain b, c, d
+        out = layout_graph(ir(["a", "b", "c", "d", "e"],
+                              [("a", "b"), ("b", "c"), ("c", "d"), ("d", "e"), ("a", "e")],
+                              entries=["a"]))
+        long = next(e for e in out.edges if (e.src, e.dst) == ("g.a", "g.e"))
+        layer = {n.id: n.layer for n in out.nodes}
+        rows = range(layer["g.a"] + 1, layer["g.e"])
+        assert len(long.via) == len(rows) == 3
+        for depth, x in zip(rows, long.via):
+            for n in (n for n in out.nodes if n.layer == depth):
+                # the lane (its dummy's whole slot) is clear of every card in its row
+                assert x + DUMMY_W / 2 <= n.x or x - DUMMY_W / 2 >= n.x + NODE_W, (depth, x, n.name)
+
+    def test_same_ir_same_coordinates(self):
+        graph = self._graph()
+        runs = [layout_graph(graph)] + [layout_graph(self._graph()) for _ in range(2)]
+        sig = [([(n.id, n.x, n.y) for n in r.nodes], [(e.id, e.via) for e in r.edges], r.width, r.height)
+               for r in runs]
+        assert sig[0] == sig[1] == sig[2]
+        assert graph == self._graph(), "layout must not mutate its input"
