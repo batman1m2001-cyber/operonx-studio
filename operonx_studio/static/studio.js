@@ -688,7 +688,7 @@ function rowDot(A, port) {
  * it departs AT the row's dot, horizontal tangent out, vertical tangent
  * in; control distances scale with the actual gap, so a near neighbour
  * gets a tight elbow, not a balloon. */
-function rowWirePath(A, port, x2, y2, bend = 1) {
+function rowWirePath(A, port, x2, y2, bend = 1, lane = 0) {
   const side = port.side;
   const {x: x1, y: y1} = rowDot(A, port);
   // `bend` < 1 shortens the arrival handle: several routes into ONE
@@ -705,7 +705,9 @@ function rowWirePath(A, port, x2, y2, bend = 1) {
     // bent back through the card's own lower rows. Step out beside
     // the card and below its bottom first, then drop into the
     // target — every point of the second half is under the card.
-    const lx = side > 0 ? A.x + A.w + 14 : A.x - 14;
+    // several routes into one target step out in their own lane (route
+    // rank, 8 px apart), so they stay three wires down the side, not one
+    const lx = side > 0 ? A.x + A.w + 14 + 8 * lane : A.x - 14 - 8 * lane;
     const yb = bottom + Math.min(18, Math.max(6, (y2 - bottom) * 0.3));
     const k = (y2 - yb) / 2;
     return `M ${x1} ${y1} C ${lx} ${y1}, ${lx} ${y1}, ${lx} ${yb}`
@@ -1477,7 +1479,7 @@ function render() {
       if (rowPort != null) {
         const pk = `${a.key}→${b.key}`, n = routeCount.get(pk) || 1;
         const bend = n > 1 ? 1 - 0.55 * (routeRank.get(fe) || 0) / (n - 1) : 1;
-        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y, bend));
+        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y, bend, n > 1 ? routeRank.get(fe) || 0 : 0));
         p.dataset.fromRow = "1";
       } else {
         p.setAttribute("d", routeAvoiding(A, B, obstacles, fe.via));
