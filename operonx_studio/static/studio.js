@@ -364,7 +364,12 @@ function placeGraph(g, prefix, depth) {
       const a = e.back && byId.get(e.src), b = e.back && byId.get(e.dst);
       if (!a || !b) continue;
       const dy = Math.abs((a.y + a.h / 2) - (b.y + b.h / 2));
-      const need = Math.max(a.x + a.w, b.x + b.w) + 25 + 56 + dy * 0.08 + 34;
+      // a member between the two that reaches further right (an opened
+      // subgraph inside the loop) pushes the return out past it (returnRoute)
+      const top = Math.min(a.y, b.y), bot = Math.max(a.y + a.h, b.y + b.h);
+      const between = items.filter(it => it !== a && it !== b && it.y + it.h > top && it.y < bot);
+      const reach = Math.max(0, ...between.map(it => it.x + it.w + 6 + 48));
+      const need = Math.max(Math.max(a.x + a.w, b.x + b.w) + 25 + 56 + dy * 0.08, reach) + 34;
       loopRoom = Math.max(loopRoom, Math.ceil(need - (maxX + 48)));
     }
   }
@@ -665,7 +670,7 @@ function routeAvoiding(a, b, obstacles, via) {
     ?? bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
 }
 
-function returnPath(a, b, from) {
+function returnPath(a, b, from, rects) {
   // A loop's return edge: out of the source's right flank (or, from a
   // decision card, out of its own row's dot: `from`), bowing up the right
   // margin, back into the target's right flank. Drawn differently from a
@@ -674,8 +679,36 @@ function returnPath(a, b, from) {
   // compiler box.
   const x1 = from ? from.x : a.x + a.w, y1 = from ? from.y : a.y + a.h / 2;
   const x2 = b.x + b.w, y2 = b.y + b.h / 2;
-  const bulge = Math.max(x1, x2) + 56 + Math.abs(y1 - y2) * 0.08;
-  return `M ${x1} ${y1} C ${bulge} ${y1}, ${bulge} ${y2}, ${x2} ${y2}`;
+  return returnRoute(x1, y1, x2, y2, rects).d;
+}
+
+// The return's shape, and how far right it reaches (`x`, for its label).
+// Normally one bow past its own two cards. When a card or an opened
+// GraphOp between them sticks out further (a subgraph inside the loop —
+// agent zones), the bow would cut through it: then the return turns out
+// into its own lane right of everything in its span, runs up it, and turns
+// back in — still all C, so sparks and dots follow it. The box the loop
+// lives in (a wall) and a box holding either end (the opened GraphOp whose
+// START pill the return re-enters) are not in its way.
+function returnRoute(x1, y1, x2, y2, rects) {
+  const base = Math.max(x1, x2) + 56 + Math.abs(y1 - y2) * 0.08;
+  const bow = `M ${x1} ${y1} C ${base} ${y1}, ${base} ${y2}, ${x2} ${y2}`;
+  const holds = (r, x, y) => x >= r.l && x <= r.r && y >= r.t && y <= r.b;
+  const solid = (rects || []).filter(r => !r.wall && !holds(r, x1, y1) && !holds(r, x2, y2));
+  if (!solid.length || !_pathHits(bow, solid)) return {d: bow, x: base};
+  const lo = Math.min(y1, y2), hi = Math.max(y1, y2);
+  const span = solid.filter(r => r.b > lo && r.t < hi);
+  let lane = Math.max(x1, x2, ...span.map(r => r.r)) + 28;
+  const ry = Math.min(70, Math.abs(y1 - y2) / 4);
+  const up = y2 < y1 ? -1 : 1;
+  for (let k = 0; k < 6; k++, lane += 16) {
+    const ya = y1 + up * ry, yb = y2 - up * ry, q = (yb - ya) / 3;
+    const d = `M ${x1} ${y1} C ${lane} ${y1}, ${lane} ${y1}, ${lane} ${ya}`
+      + ` C ${lane} ${ya + q}, ${lane} ${yb - q}, ${lane} ${yb}`
+      + ` C ${lane} ${y2}, ${lane} ${y2}, ${x2} ${y2}`;
+    if (!_pathHits(d, solid)) return {d, x: lane + 14};
+  }
+  return {d: bow, x: base};
 }
 
 // where a decision card's condition row puts its wire: the row's dot,
@@ -1464,12 +1497,13 @@ function render() {
       const backRow = a.node.routes && A.condPorts
         ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
       const from = backRow ? rowDot(A, backRow) : null;
-      p.setAttribute("d", returnPath(A, B, from));
+      const backRects = _rects(obstacles, A, B);
+      p.setAttribute("d", returnPath(A, B, from, backRects));
       if (from) p.dataset.fromRow = "1";
       cls += " back";
       if (!e.soft) sheath = "back";
       const fx = from ? from.x : A.x + A.w, fy = from ? from.y : A.y + A.h / 2;
-      const bulge = Math.max(fx, B.x + B.w) + 56 + Math.abs(fy - (B.y + B.h / 2)) * 0.08;
+      const bulge = returnRoute(fx, fy, B.x + B.w, B.y + B.h / 2, backRects).x;
       addGlyph(bulge + 4, (fy + B.y + B.h / 2) / 2, "↺ loop", "back-label");
     } else {
       // a condition edge leaves ITS OWN ROW on the decision card — the
