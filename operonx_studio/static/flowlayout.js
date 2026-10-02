@@ -609,18 +609,25 @@
     for (const L of lv.N) place(L);
     if (lv.E) place(lv.E);
 
-    // condition rows: the side each one's wire leaves by, and its lane
+    // condition rows: the side each one's wire leaves by, and its lane.
+    // A wire leaves toward where it goes NEXT: its first lane when it spans
+    // several layers (that lane may sit on the other side from its target),
+    // else its target. Leaving toward the target and then crossing back over
+    // the card to reach the lane is the detour this avoids.
     const sideOf = new Map();
+    const rowWire = new Map();
+    for (const w of lv.W) if (w.row && !w.back) rowWire.set(w.row, w);
     for (const L of lv.N) {
       if (!L.rows || !L.rows.length) continue;
       const it = item.get(L);
       const mid = it.x + it.w / 2;
       const backTo = new Set(lv.W.filter(w => w.a === L && w.back).map(w => w.b.node.name));
       const sides = L.rows.map(r => {
-        const tgt = lv.N.find(o => o.node.name === r.target && o !== L);
-        const side = r.target === "__END__" ? -1
-          : !backTo.has(r.target) && tgt && ox + tgt.cx < mid ? -1 : 1;
-        return side;
+        if (backTo.has(r.target)) return 1;
+        const w = rowWire.get(r);
+        const next = w && w.lanes.length ? w.lanes[0] : w ? w.b : lv.N.find(o => o.node.name === r.target && o !== L);
+        if (next) return ox + next.cx < mid ? -1 : 1;
+        return r.target === "__END__" ? -1 : 1;
       });
       L.rows.forEach((r, i) => sideOf.set(r, sides[i]));
       out.rowSides.set(L.key, L.rows.map((r, i) => ({row: r, side: sides[i]})));
