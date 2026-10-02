@@ -501,8 +501,34 @@ function routeAvoiding(a, b, obstacles) {
       + ` L ${lane} ${bb}`
       + ` C ${lane} ${bb + q2}, ${x2} ${y2 - q2}, ${x2} ${y2}`;
   };
+  // Drop, then swing: fall straight down the source's own column to the
+  // clear channel just above the target's row, and sweep across that
+  // channel into the target's port. The fall meets the sweep with the
+  // same vertical tangent, so the wire is one smooth stroke. This is
+  // how a fan-in reads in a flowchart — the bow's S-curve swung each
+  // feeder out of its column and across its neighbours (prepare's six
+  // feeders into `facts`, which sits right under `website`).
+  const dropSwing = () => {
+    if (y2 - y1 < 60) return null;
+    const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
+    const above = rects.filter(o => !o.wall && o.b > y1 && o.b <= y2 + 1
+      && o.l < hi + 8 && o.r > lo - 8);
+    const yA = Math.max(y1 + 18, above.length ? Math.max(...above.map(o => o.b)) + 4 : y1 + 18);
+    if (y2 - yA < 30) return null;
+    const fall = [];
+    for (let y = y1 + 8; y < yA; y += 12) fall.push([x1, y]);
+    if (_hits(fall, rects)) return null;
+    const k = (y2 - yA) * 0.55;
+    if (_hits(_sampleCubic(x1, yA, x1, yA + k, x2, y2 - k, x2, y2), rects)) return null;
+    if (yA - y1 > 80) {
+      if (!_vFree(x1, y1 + 20, yA)) return null;
+      _lanes.v.push({x: x1, t: y1 + 20, b: yA});
+    }
+    return `M ${x1} ${y1} L ${x1} ${yA} C ${x1} ${yA + k}, ${x2} ${y2 - k}, ${x2} ${y2}`;
+  };
   const shortHop = y2 - y1 < 480;
-  return (shortHop ? (sideStep() ?? bow() ?? laneRoute()) : (laneRoute() ?? bow()))
+  return (shortHop ? (sideStep() ?? dropSwing() ?? bow() ?? laneRoute())
+    : (laneRoute() ?? dropSwing() ?? bow()))
     ?? bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
 }
 
