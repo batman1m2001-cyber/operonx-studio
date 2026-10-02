@@ -1041,70 +1041,35 @@ function render() {
   state.edgeEls = [];
   _lanes = {v: []};
 
-  const model = placeGraph(g, "", 0);
-  const flat = flattenModel(model, 0, 0, {nodes: [], edges: []});
-
-  // The serve boundary stands apart from the flow: ingress pulled left,
-  // egress pushed right, each in its own tinted band — the picture reads
-  // client → ingress → flow → egress → client.
-  const gatesIn = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "ingress");
-  const gatesOut = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "egress");
-  // A door steps OUT of the flow only when it truly stands on the
-  // boundary: an ingress nothing in the flow feeds, an egress that
-  // feeds nothing. A door with a flow neighbour on its boundary side
-  // (seed first, then the door) is one step of the sequence and keeps
-  // its row — lifting it regardless dragged it up beside its feeder
-  // and drew the feeding wire flat across the row gap.
-  const flowEdge = (x) => !x.e.back && x.a.depth === 0 && x.b.depth === 0;
-  const fedByFlow = (it) => flat.edges.some(x => flowEdge(x) && x.b === it);
-  const feedsFlow = (it) => flat.edges.some(x => flowEdge(x) && x.a === it);
-  for (const x of gatesIn) {
-    if (fedByFlow(x)) continue;
-    // only step up when the lane above is actually clear
-    const clash = flat.nodes.some(o => o !== x && !o.inner
-      && o.x < x.x + x.w && o.x + o.w > x.x
-      && o.y + o.h < x.y + 1 && o.y + o.h > x.y - 100);
-    if (!clash) x.y -= 70;
-  }
-  for (const x of gatesOut) {
-    if (feedsFlow(x)) continue;
-    // the egress is not always on the last row — only step down out of
-    // the flow when the lane below is actually clear
-    const clash = flat.nodes.some(o => o !== x && !o.inner
-      && o.x < x.x + x.w && o.x + o.w > x.x
-      && o.y > x.y && o.y < x.y + x.h + 100);
-    if (!clash) x.y += 70;
-  }
-
-  // Cards go into the DOM FIRST, so every edge, frame and stub below
-  // works from each card's REAL height — the layout's 64px is only a
-  // guess, and a door wearing a transport line runs ~90px tall. The
-  // old order anchored edges into the middle of tall cards.
-  for (const it of flat.nodes) {
-    const card = it.inner ? containerCard(it) : opCard(it);
-    state.cardEls.set(it.key, card);
+  // ── cards first, measured; then ONE layout places everything ──
+  // Every card goes into the DOM before anything is placed: the layout
+  // (flowlayout.js) works from each card's REAL size — its name line, a
+  // decision card's condition rows — and reserves a clear path for every
+  // wire around exactly those boxes. Nothing moves after it: an opened
+  // GraphOp is laid out with its siblings, not shifted into them.
+  const leaves = [];
+  (function walk(gr, prefix, depth) {
+    for (const n of gr.nodes || []) {
+      const key = prefix + n.id;
+      if (n.graph && state.expanded.has(key)) walk(n.graph, key + "/", depth + 1);
+      else leaves.push({key, node: n, depth, inner: null, x: 0, y: 0, w: NODE_W, h: NODE_H});
+    }
+  })(g, "", 0);
+  const cardOf = new Map();
+  for (const it of leaves) {
+    const card = opCard(it);
+    cardOf.set(it.key, card);
     nodesBox.append(card);
   }
-  // WIDTH pass first — the root fix for every truncation whack-a-mole:
-  // a card is exactly as wide as its name line (and, on a decision
-  // card, its longest condition) needs, no wider. scrollWidth minus
-  // clientWidth on the one-line elements says how much is missing
-  // (positive) or spare (negative); the card resizes by that amount,
-  // clamped, and KEEPS ITS SLOT CENTER so the layout's spacing holds —
-  // slack between 316px slots absorbs growth up to the cap.
-  //
-  // Reads and writes are BATCHED: measuring card by card (write a style,
-  // read a width, write it back, read again) forced a full layout of the
-  // canvas twice per card — 202 forced layouts, ~85 of the 108 ms a render
-  // of callbot took (measured, docs/REFACTOR_PHASE2.md P4). One class
-  // switches every measured line to max-content at once; all widths are
-  // read in one layout, all laid-out widths in a second, and only then is
-  // anything written.
+  // WIDTH pass first: a card is exactly as wide as its name line (and, on
+  // a decision card, its longest condition) needs, clamped 180–310.
+  // Reads and writes are BATCHED: one class switches every measured line
+  // to max-content at once, all widths are read in one layout, all
+  // laid-out widths in a second, and only then is anything written
+  // (docs/REFACTOR_PHASE2.md P4).
   const measured = [];
-  for (const it of flat.nodes) {
-    if (it.inner || it.node.kind === "__boundary__") continue;
-    const card = state.cardEls.get(it.key);
-    if (!card) continue;
+  for (const it of leaves) {
+    const card = cardOf.get(it.key);
     let els = [...card.querySelectorAll(".ntext, .brcond")];
     // gates: plain name line, plus the transport line below it
     if (!els.length) els = [".nname", ".nkind"].map(sel => card.querySelector(sel)).filter(Boolean);
@@ -1114,216 +1079,77 @@ function render() {
   const natural = measured.map(m => m.els.map(e => e.offsetWidth));
   nodesBox.classList.remove("measuring");
   const laidOut = measured.map(m => ({shown: !!m.card.offsetHeight, widths: m.els.map(e => e.clientWidth)}));
-  const resize = (m, w) => {
-    const it = m.it;
-    if (w === it.w) return;
-    it.x += (it.w - w) / 2;
-    it.w = w;
-    m.card.style.width = `${w}px`;
-    m.card.style.left = `${it.x}px`;
-  };
   measured.forEach((m, i) => {
     if (!laidOut[i].shown || !m.els.length) return;
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
     const want = Math.ceil(m.it.w + need + 8);
-    m.capped = want > 310;
-    resize(m, Math.max(180, Math.min(310, want)));
+    const w = Math.max(180, Math.min(310, want));
+    if (want > 310) {
+      // a name cut short says itself in full on hover
+      m.card.dataset.capped = "";
+      for (const e of m.els) if (e.classList.contains("ntext")) e.title = e.textContent;
+    }
+    if (w !== m.it.w) { m.it.w = w; m.card.style.width = `${w}px`; }
   });
-  // Two neighbours both grown to the cap stood 6 px apart (310 wide in
-  // 316 px slots). A row keeps 16 px between its cards: the wider ones
-  // give width back about their centres, never below the slot's own
-  // 260, which leaves the grid's 56.
-  const rowsOf = new Map();
-  for (const m of measured) {
-    const k = `${m.it.key.split("/").slice(0, -1).join("/")}|${Math.round(m.it.y)}`;
-    if (!rowsOf.has(k)) rowsOf.set(k, []);
-    rowsOf.get(k).push(m);
-  }
-  for (const row of rowsOf.values()) {
-    row.sort((p, q) => p.it.x - q.it.x);
-    for (let i = 1; i < row.length; i++) {
-      const a = row[i - 1], b = row[i];
-      const need = 16 - (b.it.x - (a.it.x + a.it.w));
-      if (need <= 0) continue;
-      for (const m of [a, b]) {
-        const w = Math.min(m.it.w, Math.max(NODE_W, m.it.w - need));
-        if (w < m.it.w) { resize(m, w); m.capped = true; }
-      }
+  // heights and the decision rows (card-relative), all read in one layout
+  for (const it of leaves) {
+    const card = cardOf.get(it.key);
+    // the card's real height: the layout's 64 px is only a guess
+    if (card.offsetHeight) it.h = card.offsetHeight;
+    if (it.node.routes && it.node.routes.length) {
+      it.rows = [...card.querySelectorAll(".brrow")].map(rrow => ({
+        el: rrow, target: rrow.dataset.target,
+        route: rrow.dataset.route != null ? Number(rrow.dataset.route) : null,
+        left: rrow.offsetLeft, top: rrow.offsetTop, w: rrow.offsetWidth, h: rrow.offsetHeight,
+      }));
     }
   }
-  // a name cut short says itself in full on hover
-  for (const m of measured) {
-    if (!m.capped) continue;
-    m.card.dataset.capped = "";
-    for (const e of m.els) if (e.classList.contains("ntext")) e.title = e.textContent;
+  const sized = new Map(leaves.map(it => [it.key, it]));
+  const L = FlowLayout.layout(g, {
+    expanded: state.expanded,
+    sizeOf: (key) => { const it = sized.get(key); return it ? {w: it.w, h: it.h, rows: it.rows || []} : null; },
+  });
+  // in paint order: a container before its members, so they sit on its box
+  nodesBox.textContent = "";
+  for (const it of L.items) {
+    state.rendered.set(it.key, it);
+    let card;
+    if (it.inner) card = containerCard(it);
+    else if (it.kind === "knob") card = boundaryCard(it);
+    else {
+      card = cardOf.get(it.key);
+      card.style.left = `${it.x}px`;
+      card.style.top = `${it.y}px`;
+    }
+    state.cardEls.set(it.key, card);
+    nodesBox.append(card);
   }
-  // heights and the decision rows' port dots: all read first (one
-  // layout), the rows' sides written after
-  const sides = [];
-  for (const it of flat.nodes) {
-    if (it.inner || it.node.kind === "__boundary__") continue;
-    const card = state.cardEls.get(it.key);
-    // the card's real height, both ways: the layout's 64 px is a guess,
-    // and a card slimmer than it (50 px at the landing zoom) kept the
-    // guess — every wire out of it then started 14 px below its port
-    if (card && card.offsetHeight) it.h = card.offsetHeight;
-    if (card && it.node.routes && it.node.routes.length) {
-      // each condition row is a wired exit: record where the wire
-      // leaves (first row per target decides), and put the row's port
-      // DOT on the side its target actually lies — the wire departs
-      // exactly at the dot, never from the blind side of the card
-      it.condPorts = {};
-      it.condDots = [];
-      // a route that is the loop's return leaves on the right, where
-      // returns bow up the margin
-      const backTo = new Set(flat.edges.filter(fe => fe.a === it && fe.e.back).map(fe => fe.b.node.name));
-      for (const rrow of card.querySelectorAll(".brrow")) {
-        const t = rrow.dataset.target;
-        const tgt = flat.nodes.find(o => o.depth === it.depth
-          && o.node.name === t && o !== it);
-        // a route into END leaves on the left: the right margin is where
-        // loop returns bow
-        const side = t === "__END__" ? -1 : !backTo.has(t) && tgt && portCX(tgt) < it.x + it.w / 2 ? -1 : 1;
-        sides.push([rrow, side < 0]);
-        const left = rrow.offsetLeft, top = rrow.offsetTop, w = rrow.offsetWidth, h = rrow.offsetHeight;
-        // a row that is not laid out has no port: its wire leaves the
-        // card's bottom rather than the card's top-left corner
-        if (!w) continue;
-        // every row's dot, card-relative — the wire repaint above the
-        // card is masked out under each one, so the dot stays the
-        // terminal the wire emerges FROM, never a bead the wire buries
-        const dot = {x: side < 0 ? left - 1 : left + w + 1, y: top + h / 2};
-        it.condDots.push(dot);
-        // x/y of the row's own DOT (card-relative): the wire must
-        // emerge from the condition box itself, not the card border
-        if (!(t in it.condPorts)) it.condPorts[t] = {...dot, side};
-        // ...and every row by its route index: three conditions into
-        // one target are three wires, each leaving its own row
-        if (rrow.dataset.route != null) it.condPorts["#" + rrow.dataset.route] = {...dot, side};
-      }
+  // each condition row's port DOT on the side its wire leaves by — the
+  // side the layout chose (where its target lies; END left, a loop's
+  // return right) — and where that dot is, card-relative
+  for (const [key, sides] of L.rowSides) {
+    const it = state.rendered.get(key);
+    if (!it) continue;
+    it.condPorts = {};
+    it.condDots = [];
+    for (const {row, side} of sides) {
+      row.el.classList.toggle("left", side < 0);
+      const dot = {x: side < 0 ? row.left - 1 : row.left + row.w + 1, y: row.top + row.h / 2};
+      it.condDots.push(dot);
+      if (!(row.target in it.condPorts)) it.condPorts[row.target] = {...dot, side};
+      if (row.route != null) it.condPorts["#" + row.route] = {...dot, side};
     }
   }
-  for (const [rrow, left] of sides) rrow.classList.toggle("left", left);
+  const flat = {nodes: L.items};
 
-  // Rows part for real heights: semantic zoom grows cards, and a
-  // fixed pitch would let them collide. Runs INSIDE every opened
-  // container first (deepest first — a grown inner box must be known
-  // before its parent's rows part), stretching the container around
-  // its members and END terminal, then across the top level.
-  {
-    const shiftTree = (it, delta) => {
-      for (const sub of flat.nodes) {
-        if (sub === it || sub.key.startsWith(it.key + "/")) {
-          sub.y += delta;
-          const c = state.cardEls.get(sub.key);
-          if (c) c.style.top = `${sub.y}px`;
-        }
-      }
-    };
-    const partRows = (items) => {
-      const rows = new Map();
-      for (const it of items) {
-        const k = Math.round(it.y);
-        if (!rows.has(k)) rows.set(k, []);
-        rows.get(k).push(it);
-      }
-      const placedBoxes = [];
-      let maxBottom = -Infinity;
-      for (const y of [...rows.keys()].sort((a, b) => a - b)) {
-        const row = rows.get(y);
-        let minTop = y;
-        for (const it of row) {
-          for (const b of placedBoxes) {
-            if (b.x < it.x + it.w && b.x + b.w > it.x) {
-              minTop = Math.max(minTop, b.bottom + 46);
-            }
-          }
-        }
-        const delta = minTop - y;
-        if (delta > 0) for (const it of row) shiftTree(it, delta);
-        for (const it of row) {
-          placedBoxes.push({x: it.x, w: it.w, bottom: it.y + it.h});
-          maxBottom = Math.max(maxBottom, it.y + it.h);
-        }
-      }
-      return maxBottom;
-    };
+  // The serve boundary stands apart from the flow: each door in its own
+  // tinted frame — the picture reads client → ingress → flow → egress.
+  const gatesIn = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "ingress");
+  const gatesOut = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "egress");
 
-    const containers = flat.nodes.filter(it => it.inner)
-      .sort((a, b) => b.depth - a.depth);
-    for (const c of containers) {
-      const kids = flat.nodes.filter(sub =>
-        sub.key.startsWith(c.key + "/")
-        && !sub.key.slice(c.key.length + 1).includes("/"));
-      if (!kids.length) continue;
-      const bottom = partRows(kids);
-      // the END knob rode any shift with its row — the container's
-      // bottom edge follows the knob's centre, never the other way
-      const endKnob = kids.find(k => k.node.boundary === "end");
-      // ... but a knob standing in the gap between two members shares no
-      // column with them, so a push that moved them down left it on their
-      // row, and the members hung out of the container's bottom (ex05's
-      // graded, under a tall decision card). END keeps withBoundaries'
-      // rule: under the lowest member.
-      if (endKnob) {
-        const lowest = Math.max(...kids.filter(k => k !== endKnob).map(k => k.y + k.h));
-        const floor = lowest + 22 - KB / 2;
-        if (endKnob.y < floor) shiftTree(endKnob, floor - endKnob.y);
-      }
-      const newH = Math.max(c.h, endKnob
-        ? (endKnob.y + endKnob.h / 2) - c.y
-        : bottom + 18 - c.y);
-      if (newH !== c.h) {
-        c.h = newH;
-        const cc = state.cardEls.get(c.key);
-        if (cc) cc.style.height = `${c.h}px`;
-      }
-    }
-    partRows(flat.nodes.filter(it => it.depth === 0));
-  }
-
-  const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
-  const maxY = Math.max(model.h, ...flat.nodes.map(n => n.y + n.h));
-  // The extent is the box everything drawn must fit in, so it has to know
-  // about the main flow's terminals before they are placed below: START
-  // stands 96 above the entries and END 96 below the exits. Headroom used
-  // to come from the door frame alone, which is only the topmost thing
-  // when the ingress door IS the entry — a graph whose first op precedes
-  // the door (seed, then recv) drew START above the canvas and lost it.
-  const at = (name) => flat.nodes.find(it => it.depth === 0 && it.node.name === name);
-  const entryTies = (g.entries || []).map(at).filter(Boolean);
-  const exitTies = (g.exits || []).map(at).filter(Boolean);
-  // The terminals are placed here, before the extent. Each is centred over
-  // its ops and 96 px away from them — and clear of every card in its
-  // column. An exit with ops beneath it (a loop's router, whose ops
-  // after it loop back) used to put END on top of one of them.
-  const pill = (which, x, y) => ({key: `__main/__${which}`, depth: 0, inner: null,
-                                  x, y, w: B_W, h: B_H,
-                                  node: {id: `__${which}__`, name: which.toUpperCase(),
-                                         kind: "__boundary__", boundary: which}});
-  const over = (items) => items.reduce((s, it) => s + portCX(it), 0) / items.length - B_W / 2;
-  const clearOf = (x, y, dir) => {
-    const tops = flat.nodes.filter(o => o.depth === 0);
-    for (let moved = true, n = 0; moved && n < tops.length; n++) {
-      moved = false;
-      for (const o of tops) {
-        if (o.x < x + B_W + 12 && o.x + o.w > x - 12 && o.y < y + B_H + 30 && o.y + o.h + 30 > y) {
-          y = dir > 0 ? o.y + o.h + 30 : o.y - 30 - B_H;
-          moved = true;
-        }
-      }
-    }
-    return y;
-  };
-  let startIt = null, endIt = null;
-  if (entryTies.length) {
-    const x = over(entryTies);
-    startIt = pill("start", x, clearOf(x, Math.min(...entryTies.map(it => it.y)) - 96, -1));
-  }
-  if (exitTies.length) {
-    const x = over(exitTies);
-    endIt = pill("end", x, clearOf(x, Math.max(...exitTies.map(it => it.y + it.h)) + 96, 1));
-  }
+  const maxX = Math.max(L.w, ...flat.nodes.map(n => n.x + n.w));
+  const maxY = Math.max(L.h, ...flat.nodes.map(n => n.y + n.h));
+  const startIt = L.start, endIt = L.end;
   // where the flow begins: a view that cannot show it all lands here
   state.startAt = startIt ? {x: startIt.x + startIt.w / 2, y: startIt.y} : null;
   let minY = gatesIn.length
@@ -1385,56 +1211,10 @@ function render() {
   }
 
   // The main graph has terminals too — the flow, like every opened
-  // GraphOp, begins at a START contact and ends at an END one. Quiet
-  // ties reach every entry (this is what dispatches beat/lag-style
-  // monitors: the session starting, not the client) and gather the
-  // exits. With the client stubs gone, ties land dead-centre on every
-  // card, doors included.
-  if (flat.nodes.length) {
-    // the pills were placed above, where the extent needed them; a tie
-    // routes around a card in its way like any wire (an exit's tie ran
-    // straight through the ops beneath it)
-    const tie = (a, b) => {
-      const p = document.createElementNS(SVGNS, "path");
-      // a decision card's route into END leaves that route's row
-      const row = exitRow(a);
-      p.setAttribute("d", row ? rowTiePath(a, row, b, flat.nodes) : routeAvoiding(a, b, flat.nodes));
-      p.setAttribute("class", "bedge");
-      svg.append(p);
-      if (row) overCard(a, [p]);
-    };
-    if (startIt) {
-      nodesBox.append(boundaryCard(startIt));
-      for (const t of entryTies) tie(startIt, t.bIn || t);
-    }
-    if (endIt) {
-      nodesBox.append(boundaryCard(endIt));
-      for (const t of exitTies) tie(t.bOut || t, endIt);
-    }
-  }
-
-  // One beam per edge id. A plain edge's id IS its pair, so a data edge
-  // and an order edge between the same two nodes still collapse to the
-  // most meaningful one; a branch carries one edge PER ROUTE (same pair,
-  // its own id), and each of those is its own wire.
-  const meaning = (fe) => (fe.e.soft ? 0 : 2) + (fe.e.type === "condition" ? 1 : 0)
-    + (fe.e.back ? 1 : 0);
-  const byPair = new Map();
-  for (const fe of flat.edges) {
-    const key = `${fe.a.key}→${fe.b.key}|${fe.e.id || ""}`;
-    const prev = byPair.get(key);
-    if (!prev || meaning(fe) > meaning(prev)) byPair.set(key, fe);
-  }
-
-  // Several routes of one branch into one target: each gets its rank, so
-  // their wires fan apart deterministically (route order) before the port.
-  const routeRank = new Map(), routeCount = new Map();
-  for (const fe of byPair.values()) {
-    if (fe.e.route == null) continue;
-    const k = `${fe.a.key}→${fe.b.key}`;
-    routeRank.set(fe, routeCount.get(k) || 0);
-    routeCount.set(k, (routeCount.get(k) || 0) + 1);
-  }
+  // GraphOp, begins at a START contact and ends at an END one; their quiet
+  // ties come from the layout with every other wire.
+  if (startIt) nodesBox.append(boundaryCard(startIt));
+  if (endIt) nodesBox.append(boundaryCard(endIt));
 
   // Glyphs and labels buffer here and draw AFTER every path, so no
   // later beam ever paints over a word.
@@ -1448,40 +1228,32 @@ function render() {
       return [pt.x + 12, pt.y + dy + 3];
     } catch { return null; }
   };
-  const obstacles = flat.nodes;   // containers included — _rects decides per edge
 
-  // graph edges (every open level draws its own)
-  for (const fe of byPair.values()) {
-    const {e, a, b} = fe;
-    // a boundary tie inside an opened container: START → entries,
-    // exits → END. Structural, quiet — not an energy beam.
-    if (e.boundary) {
+  // every wire (every open level draws its own), along the path the
+  // layout reserved for it. One beam per edge id: a branch carries one
+  // edge PER ROUTE, each its own wire out of its own condition row.
+  for (const W of L.wires) {
+    const {e, a, b} = W;
+    // a boundary tie: START → entries, exits → END. Structural, quiet —
+    // not an energy beam.
+    if (W.tie) {
       const bp = document.createElementNS(SVGNS, "path");
-      // around the members in its way, not through them (ex05: a loop's
-      // router ties to END straight through the op beneath it); an opened
-      // member ties from its own END knob, like every other wire; a
-      // decision card's route into END leaves that route's row
-      const row = !a.bOut && exitRow(a);
-      const tb = b.bIn || b;
-      bp.setAttribute("d", row ? rowTiePath(a, row, tb, obstacles) : routeAvoiding(a.bOut || a, tb, obstacles));
+      bp.setAttribute("d", W.d);
       bp.setAttribute("class", "bedge");
       svg.append(bp);
       const els = [bp];
-      if (row) overCard(a, els);
-      state.edgeEls.push({a: a.key, b: b.key, els});
+      if (W.fromRow) overCard(a, els);
+      if (a.kind !== "pill" && b.kind !== "pill") state.edgeEls.push({a: a.key, b: b.key, els});
       continue;
     }
-    // an expanded container's pills stand in for its rim: edges from
-    // outside land on START, leave from END
+    // an expanded container's knobs stand in for its rim
     const A = a.bOut || a, B = b.bIn || b;
     const p = document.createElementNS(SVGNS, "path");
     let cls = e.soft ? "soft" : "";
     let sheath = null;
     // an if/else route gets its own beam: branch amber, the ELSE
     // fallback dashed and laserless — the condition text stays OFF the
-    // wire (hover the edge, or open the router's route table). This
-    // holds whatever ROUTE the edge takes: a condition edge that wraps
-    // to the next band is still a condition edge.
+    // wire (hover the edge, or open the router's route table).
     let condLabels = [], isElse = false;
     const routeOf = a.node.routes && e.route != null ? a.node.routes[e.route] : null;
     if (routeOf) {
@@ -1492,33 +1264,14 @@ function render() {
         .filter(r => r.target === b.node.name).map(r => r.condition);
       isElse = condLabels.length > 0 && condLabels.every(c => c === "else");
     }
-    if (e.back) {
-      // a router's route that is the return leaves from its own row's dot
-      const backRow = a.node.routes && A.condPorts
-        ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
-      const from = backRow ? rowDot(A, backRow) : null;
-      const backRects = _rects(obstacles, A, B);
-      p.setAttribute("d", returnPath(A, B, from, backRects));
-      if (from) p.dataset.fromRow = "1";
+    p.setAttribute("d", W.d);
+    if (W.fromRow) p.dataset.fromRow = "1";
+    if (W.back) {
       cls += " back";
       if (!e.soft) sheath = "back";
-      const fx = from ? from.x : A.x + A.w, fy = from ? from.y : A.y + A.h / 2;
-      const bulge = returnRoute(fx, fy, B.x + B.w, B.y + B.h / 2, backRects).x;
-      addGlyph(bulge + 4, (fy + B.y + B.h / 2) / 2, "↺ loop", "back-label");
-    } else {
-      // a condition edge leaves ITS OWN ROW on the decision card — the
-      // wire starts beside the condition that fires it
-      const rowPort = condLabels.length && A.condPorts
-        ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
-      if (rowPort != null) {
-        const pk = `${a.key}→${b.key}`, n = routeCount.get(pk) || 1;
-        const bend = n > 1 ? 1 - 0.55 * (routeRank.get(fe) || 0) / (n - 1) : 1;
-        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y, bend, n > 1 ? routeRank.get(fe) || 0 : 0));
-        p.dataset.fromRow = "1";
-      } else {
-        p.setAttribute("d", routeAvoiding(A, B, obstacles, fe.via));
-      }
-      if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
+      addGlyph(W.label.x, W.label.y, "↺ loop", "back-label");
+    } else if (!e.soft) {
+      sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
     let drawn = p;
     const made = [];
@@ -1541,7 +1294,7 @@ function render() {
     state.edgeEls.push({a: a.key, b: b.key, id: e.id, els: made});
     // the node's own port bead is the terminal; an extra circle on top of
     // it was clutter. Only a loop's flank, which has no port, gets one.
-    if (e.back) {
+    if (W.back) {
       bouton(svg, B.x + B.w, B.y + B.h / 2, "b-back");
       // the loop re-enters its first step: an arrowhead on the flank, pointing in
       const hx = B.x + B.w + 3, hy = B.y + B.h / 2;
@@ -1552,7 +1305,7 @@ function render() {
       made.push(head);
     }
 
-    if (!e.back) {
+    if (!W.back) {
       // glyphs anchor to the drawn path itself, wherever it routed
       if (a.node.is_gen) {
         const at = along(drawn, 0.5, -7);
