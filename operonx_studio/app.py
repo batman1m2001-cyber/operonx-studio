@@ -178,6 +178,8 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
         "exports": graph.get("exports") or [],
         "width": layout.width,
         "height": layout.height,
+        # exit op id -> the lanes its tie into END runs down (see layout)
+        "ties": layout.ties,
         "nodes": [
             {
                 "id": n.id,
@@ -185,6 +187,7 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                 "kind": n.kind,
                 "x": n.x,
                 "y": n.y,
+                "layer": n.layer,
                 **{k: nodes_by_id.get(n.id, {}).get(k) for k in
                    ("bound", "start", "end", "outputs", "inputs", "source",
                     "loop", "is_gen", "transient", "serve_role", "code",
@@ -197,7 +200,7 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
         "edges": [
             {"id": e.id, "src": e.src, "dst": e.dst, "type": e.type, "soft": e.soft,
              "origin": e.origin, "back": bool(getattr(e, "back", False)),
-             "kind": e.kind, "route": e.route, "label": e.label}
+             "kind": e.kind, "route": e.route, "label": e.label, "via": e.via}
             for e in layout.edges
         ],
         "loops": graph.get("loops") or {},

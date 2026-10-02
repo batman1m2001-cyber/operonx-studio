@@ -130,16 +130,22 @@ class TestTopDown:
         row_mid = (min(n.x for n in row1) + max(n.x + 210 for n in row1)) / 2
         assert abs((a.x + 105) - row_mid) < 1, "the spine must run down the middle"
 
-    def test_row_gaps_grow_with_edge_pressure(self):
-        """A gap crossed by many long edges must deepen, so the
-        renderer's sideways lane search never runs out of room."""
-        names = [f"op{i:02d}" for i in range(30)]
+    def test_long_edges_get_a_lane_in_every_row_they_pass(self):
+        """An edge spanning k rows carries k-1 lanes, each clear of the
+        cards in its row — the canvas draws it through them, no dodging."""
+        from operonx_studio.layout import NODE_W
+
+        names = [f"op{i:02d}" for i in range(12)]
         chain = list(zip(names, names[1:]))
-        plain = layout_graph(ir(names, chain, entries=[names[0]]))
-        skips = [(names[i], names[25 + i % 4]) for i in range(8)]
-        busy = layout_graph(ir(names, chain + skips, entries=[names[0]]))
-        assert busy.height > plain.height, (
-            "row gaps must deepen when more edges pass over them")
+        skips = [(names[i], names[8 + i % 3]) for i in range(4)]
+        out = layout_graph(ir(names, chain + skips, entries=[names[0]]))
+        layer = {n.id: n.layer for n in out.nodes}
+        for e in out.edges:
+            assert len(e.via) == max(0, layer[e.dst] - layer[e.src] - 1)
+            for v in e.via:
+                for n in out.nodes:
+                    if n.layer == v["layer"]:
+                        assert not (n.x - 20 < v["x"] < n.x + NODE_W + 20), (e.id, v, n.id)
 
 
 class TestDeterminism:
