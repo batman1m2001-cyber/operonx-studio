@@ -555,11 +555,14 @@ function rowDot(A, port) {
  * it departs AT the row's dot, horizontal tangent out, vertical tangent
  * in; control distances scale with the actual gap, so a near neighbour
  * gets a tight elbow, not a balloon. */
-function rowWirePath(A, port, x2, y2) {
+function rowWirePath(A, port, x2, y2, bend = 1) {
   const side = port.side;
   const {x: x1, y: y1} = rowDot(A, port);
-  const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5));
-  const c2 = Math.max(26, Math.min(72, Math.max(1, y2 - y1) * 0.5));
+  // `bend` < 1 shortens the arrival handle: several routes into ONE
+  // target each get their own, so they fan apart before the shared port
+  // instead of lying on top of each other
+  const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5)) * (2 - bend);
+  const c2 = Math.max(26, Math.min(72, Math.max(1, y2 - y1) * 0.5)) * bend;
   // tangent tilts slightly toward the target, so the wire reads
   // "leaving this row, heading there" instead of bowing sideways
   const dip = Math.max(4, Math.min(22, (y2 - y1) * 0.15));
@@ -1213,6 +1216,16 @@ function render() {
     if (!prev || meaning(fe) > meaning(prev)) byPair.set(key, fe);
   }
 
+  // Several routes of one branch into one target: each gets its rank, so
+  // their wires fan apart deterministically (route order) before the port.
+  const routeRank = new Map(), routeCount = new Map();
+  for (const fe of byPair.values()) {
+    if (fe.e.route == null) continue;
+    const k = `${fe.a.key}→${fe.b.key}`;
+    routeRank.set(fe, routeCount.get(k) || 0);
+    routeCount.set(k, (routeCount.get(k) || 0) + 1);
+  }
+
   // Glyphs and labels buffer here and draw AFTER every path, so no
   // later beam ever paints over a word.
   const glyphJobs = [];
@@ -1228,7 +1241,8 @@ function render() {
   const obstacles = flat.nodes;   // containers included — _rects decides per edge
 
   // graph edges (every open level draws its own)
-  for (const {e, a, b} of byPair.values()) {
+  for (const fe of byPair.values()) {
+    const {e, a, b} = fe;
     // a boundary tie inside an opened container: START → entries,
     // exits → END. Structural, quiet — not an energy beam.
     if (e.boundary) {
@@ -1286,7 +1300,9 @@ function render() {
       const rowPort = condLabels.length && A.condPorts
         ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
       if (rowPort != null) {
-        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y));
+        const pk = `${a.key}→${b.key}`, n = routeCount.get(pk) || 1;
+        const bend = n > 1 ? 1 - 0.55 * (routeRank.get(fe) || 0) / (n - 1) : 1;
+        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y, bend));
         p.dataset.fromRow = "1";
       } else {
         p.setAttribute("d", routeAvoiding(A, B, obstacles));
