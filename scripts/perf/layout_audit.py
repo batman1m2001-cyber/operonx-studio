@@ -117,6 +117,8 @@ AUDIT_JS = r"""
       const t = rrow.dataset.target;
       const dot = rowDot(b, rrow);
       if (!firstRow.has(`${b.key}|${t}`)) firstRow.set(`${b.key}|${t}`, dot);
+      // one edge per route (edge ids `src->dst#route`): each leaves its own row
+      if (rrow.dataset.route != null) firstRow.set(`${b.key}|#${rrow.dataset.route}`, dot);
       const tgt = boxes.find(o => o !== b && o.it && o.it.depth === it.depth && o.name === t
                                   && parentKey(o.key) === parentKey(b.key));
       // a route that is the loop's return keeps its dot on the right,
@@ -214,7 +216,8 @@ AUDIT_JS = r"""
     const rowWire = !!firstRow.get(rowKey)
       && (a.node.routes || []).some(r => r.target === (toEnd ? '__END__' : bb.node.name));
     let want;
-    if (rowWire) want = firstRow.get(rowKey);
+    const routeIx = /#(\d+)$/.exec(E.id || '');
+    if (rowWire) want = (routeIx && firstRow.get(`${Akey}|#${routeIx[1]}`)) || firstRow.get(rowKey);
     else if (back) want = {x: A.x + A.w, y: A.y + A.h / 2};
     else want = {x: A.x + A.w / 2, y: A.y + A.h};
     if (!near(s, want, 6))

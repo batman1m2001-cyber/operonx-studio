@@ -55,7 +55,10 @@ show you after 3 and again after 7.
 | 1 smooth curves (`sLane`, `_pathHits`, verticals as curves) | done — deepest view: straight runs 23 → 5, crossings 0 → 0, through-cards 0 → 0 | 808dc3d |
 | 2 loop edge violet (`--loop: #7c3aed`, pill label, arrowhead, violet loop badges) | done | 5d44fa8 |
 | 3 direction dots (SMIL dot per wire, cap 150, toggle `#btn-flowdots` + `flow` icon) | done — audit unchanged (drawing only) | see log |
-| 4–7 layout (ordering, long-edge lanes, fan-in ports, expanded container with siblings) | not started | — |
+| 4–7 layout (ordering, long-edge lanes, fan-in ports, expanded container with siblings) | done | 7dda545, f6e5088, 770e6c3, 449d802 |
+| merge `main` (PR #4: one edge per branch route, stable edge ids) | done — ids, route labels and per-route bends kept; lanes first, b2fab22's drop-down only as fallback | branch `feat/canvas-edges-main` |
+| 6 reverted: **one anchor per card** (one input, one output point; a decision card keeps one dot per condition row). Wires fan apart along the way (lanes, per-route bends), not across the card's edge | done | after the merge |
+| fixes found while testing the merge: an opened stack starts at the margin (2500 px empty on qc sentiment_agent); a loop's return goes around a subgraph inside the loop (agent zones); routes of one branch under their card take one lane each | done | after the merge |
 
 Audit baseline (meeting-prep, `python scripts/perf/edge_audit.py --tag X`, Studio on :8766):
 deepest view 51 edges · 0 crossings · 0 through-cards · 10 shared corridors · 5 straight runs
