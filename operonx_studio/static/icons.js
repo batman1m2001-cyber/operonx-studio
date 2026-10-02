@@ -66,6 +66,7 @@ const Icons = (() => {
     compress: '<path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5"/>',
     sessions: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M13 9h4.5M13 13h4.5"/>',
     pulse: '<path d="M3 12h4l2.5-6 5 12 2.5-6H21"/>',
+    flow: '<path d="M4 19c7 0 5-14 16-14"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/>',
   };
 
   /** One icon as an SVG element; `cls` is added to the `icon` class. */

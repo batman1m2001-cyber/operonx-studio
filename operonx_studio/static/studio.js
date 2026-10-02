@@ -251,6 +251,67 @@ function withBoundaries(model, key, depth) {
   return {items: model.items, edges, w: model.w + (model.loopRoom || 0), h: end.y + KB / 2};
 }
 
+/* An opened container grows its column, and the shift keeps the grid a
+ * grid — but the rows beneath were placed for closed cards, so a card fed
+ * by the container and its siblings sat far off to one side of them and
+ * its wires swept across each other. Below the first opened card, each row
+ * hangs under its feeders again (real widths, order kept, a gap between
+ * cards), the way the server laid the closed graph. Nothing open: nothing
+ * moves. */
+function hangUnderOpened(items, edges) {
+  const opened = items.filter(it => it.inner);
+  if (!opened.length) return 0;
+  const top = Math.min(...opened.map(it => it.y));
+  const byId = new Map(items.map(it => [it.node.id, it]));
+  const feeders = new Map();
+  for (const e of edges) {
+    if (e.back) continue;
+    const a = byId.get(e.src), b = byId.get(e.dst);
+    if (!a || !b || a.y >= b.y) continue;
+    if (!feeders.has(b)) feeders.set(b, new Set());
+    feeders.get(b).add(a);
+  }
+  const rows = new Map();
+  for (const it of items) if (it.y > top) {
+    if (!rows.has(it.y)) rows.set(it.y, []);
+    rows.get(it.y).push(it);
+  }
+  const GAP = 56;
+  for (const y of [...rows.keys()].sort((p, q) => p - q)) {
+    const row = rows.get(y).sort((p, q) => p.x - q.x);
+    const want = row.map(it => {
+      const f = [...(feeders.get(it) || [])];
+      return f.length ? f.reduce((s, a) => s + a.x + a.w / 2, 0) / f.length : it.x + it.w / 2;
+    });
+    // order-preserving clusters, each centred on its members' wishes
+    const clusters = [];
+    row.forEach((it, k) => {
+      clusters.push({m: [k], off: [0], first: want[k]});
+      while (clusters.length > 1) {
+        const a = clusters[clusters.length - 2], b = clusters[clusters.length - 1];
+        const la = row[a.m[a.m.length - 1]], fb = row[b.m[0]];
+        const need = (la.w + fb.w) / 2 + GAP;
+        if (b.first - (a.first + a.off[a.off.length - 1]) >= need) break;
+        const base = a.off[a.off.length - 1] + need;
+        a.m.push(...b.m);
+        a.off.push(...b.off.map(o => base + o));
+        a.first = a.m.reduce((s, m, i) => s + want[m] - a.off[i], 0) / a.m.length;
+        clusters.pop();
+      }
+    });
+    for (const c of clusters) c.m.forEach((m, i) => { row[m].x = c.first + c.off[i] - row[m].w / 2; });
+  }
+  // back to the margin, from either side. Each opened card widens every
+  // column right of its own x, and the layout's x is continuous (no grid),
+  // so in a stack of opened cards (qc sentiment_agent, all open) the top
+  // one had been pushed right by the sum of the ones below — 2500 px of
+  // empty canvas on its left. Returns the shift, so the lanes follow it.
+  const minX = Math.min(...items.map(it => it.x));
+  const dx = 48 - minX;
+  if (Math.abs(dx) > 0.5) for (const it of items) it.x += dx;
+  return Math.abs(dx) > 0.5 ? dx : 0;
+}
+
 function placeGraph(g, prefix, depth) {
   const size = new Map();
   for (const n of g.nodes) {
@@ -279,13 +340,15 @@ function placeGraph(g, prefix, depth) {
   for (const y of ys) { shiftY.set(y, acc); acc += extraY.get(y); }
 
   const items = [];
-  let maxX = NODE_W, maxY = NODE_H;
   for (const n of g.nodes) {
     const s = size.get(n.id);
-    const it = {key: s.key, node: n, depth, inner: s.inner,
+    items.push({key: s.key, node: n, depth, inner: s.inner,
                 x: n.x + shiftX.get(n.x), y: n.y + shiftY.get(n.y),
-                w: s.w, h: s.h};
-    items.push(it);
+                w: s.w, h: s.h});
+  }
+  const hungDX = hangUnderOpened(items, g.edges || []);
+  let maxX = NODE_W, maxY = NODE_H;
+  for (const it of items) {
     maxX = Math.max(maxX, it.x + it.w);
     maxY = Math.max(maxY, it.y + it.h);
   }
@@ -301,11 +364,25 @@ function placeGraph(g, prefix, depth) {
       const a = e.back && byId.get(e.src), b = e.back && byId.get(e.dst);
       if (!a || !b) continue;
       const dy = Math.abs((a.y + a.h / 2) - (b.y + b.h / 2));
-      const need = Math.max(a.x + a.w, b.x + b.w) + 25 + 56 + dy * 0.08 + 34;
+      // a member between the two that reaches further right (an opened
+      // subgraph inside the loop) pushes the return out past it (returnRoute)
+      const top = Math.min(a.y, b.y), bot = Math.max(a.y + a.h, b.y + b.h);
+      const between = items.filter(it => it !== a && it !== b && it.y + it.h > top && it.y < bot);
+      const reach = Math.max(0, ...between.map(it => it.x + it.w + 6 + 48));
+      const need = Math.max(Math.max(a.x + a.w, b.x + b.w) + 25 + 56 + dy * 0.08, reach) + 34;
       loopRoom = Math.max(loopRoom, Math.ceil(need - (maxX + 48)));
     }
   }
-  return {items, edges: g.edges || [], w: maxX + 48, h: maxY + 48, loopRoom};
+  // a long edge's lane (the layout's dummies) shifts with every column
+  // whose card sits left of it — the gap it was given stays a gap
+  const laneShift = (vx) => {
+    let s = 0;
+    for (const x of xs) if (x + NODE_W / 2 < vx) s += extraX.get(x);
+    return s + hungDX;
+  };
+  const edges = (g.edges || []).map(e => (e.via && e.via.length
+    ? {...e, viaX: e.via.map(v => v + laneShift(v))} : e));
+  return {items, edges, w: maxX + 48, h: maxY + 48, loopRoom};
 }
 
 function flattenModel(model, ox, oy, out) {
@@ -324,7 +401,7 @@ function flattenModel(model, ox, oy, out) {
   }
   for (const e of model.edges) {
     const a = abs.get(e.src), b = abs.get(e.dst);
-    if (a && b) out.edges.push({e, a, b});
+    if (a && b) out.edges.push({e, a, b, via: e.viaX ? e.viaX.map(v => v + ox) : null});
   }
   return out;
 }
@@ -333,10 +410,33 @@ function flattenModel(model, ox, oy, out) {
 
 const portCX = (it) => it.x + it.w / 2;
 
+/* Smooth shapes for the routes that used to jog: curve, straight run,
+ * curve. All M and C, so pathSampler and the sparks follow them. */
+
+// two S-curves meeting at (lane, ym) with a vertical tangent there: C1, no straight run
+function sLane(x1, y1, lane, x2, y2, ym = (y1 + y2) / 2) {
+  const q1 = (ym - y1) / 2, q2 = (y2 - ym) / 2;
+  return `M ${x1} ${y1} C ${x1} ${y1 + q1}, ${lane} ${ym - q1}, ${lane} ${ym}`
+    + ` C ${lane} ${ym + q2}, ${x2} ${y2 - q2}, ${x2} ${y2}`;
+}
+
+// does a drawn path pass through any of these boxes?
+function _pathHits(d, rects) {
+  const s = pathSampler(d);
+  if (!s) return false;
+  const pts = [];
+  for (let v = 6; v < s.len - 6; v += 10) { const q = s.at(v); pts.push([q.x, q.y]); }
+  return _hits(pts, rects);
+}
+
 function bezier(x1, y1, x2, y2) {
   const gap = Math.abs(y2 - y1);
-  // dead vertical: a line, not a curve pretending to bend
-  if (Math.abs(x2 - x1) < 3) return `M ${x1} ${y1} L ${x2} ${y2}`;
+  // dead vertical: straight, drawn as a curve like every other wire
+  // (handles along its own direction, up or down)
+  if (Math.abs(x2 - x1) < 3) {
+    const k = (y2 - y1) / 3;
+    return `M ${x1} ${y1} C ${x1} ${y1 + k}, ${x2} ${y2 - k}, ${x2} ${y2}`;
+  }
   // handles must never outrun the gap — a 40px handle on a 30px hop
   // overshoots both ends and folds the wire into a kink
   const dy = gap < 80 ? gap * 0.45 : Math.max(40, gap / 2);
@@ -438,10 +538,44 @@ function _clearLaneX(rects, top, bottom, prefer) {
   return null;
 }
 
-function routeAvoiding(a, b, obstacles) {
+function routeAvoiding(a, b, obstacles, via) {
+  // one anchor per card: every wire leaves the bottom centre and lands on
+  // the top centre; wires fan apart along their way, not at the card
   const x1 = portCX(a), y1 = a.y + a.h, x2 = portCX(b), y2 = b.y;
   const dy = Math.max(40, Math.abs(y2 - y1) / 2);
   const rects = _rects(obstacles, a, b);
+
+  // A long edge has its own lane: the gap the layout held open for it in
+  // every row it passes. Down that lane in one smooth S, when it is clear.
+  if (via && via.length && y2 - y1 > 60) {
+    const want = via.reduce((s, v) => s + v, 0) / via.length;
+    // a taken lane gives way on the side the wire comes from, so two
+    // neighbours sharing a gap never swap sides and cross
+    const s = x1 < want ? -1 : 1;
+    for (const off of [0, 11 * s, -11 * s, 22 * s, -22 * s]) {
+      const lane = want + off;
+      if (!_vFree(lane, y1 + 30, y2 - 30)) continue;
+      if (Math.abs(lane - x1) < 3 && Math.abs(lane - x2) < 3) {
+        const d = bezier(x1, y1, x2, y2);
+        if (_pathHits(d, rects)) continue;
+        _lanes.v.push({x: lane, t: y1 + 30, b: y2 - 30});
+        return d;
+      }
+      // one S across the whole span, or — when that diagonal would cut a
+      // card — turn into the lane early, run down it, turn out late
+      const h = Math.min(160, (y2 - y1) / 3);
+      const down = (ya, yb) => { const k = (yb - ya) / 3; return ` C ${lane} ${ya + k}, ${lane} ${yb - k}, ${lane} ${yb}`; };
+      const turned = (hi, ho) => `M ${x1} ${y1} C ${x1} ${y1 + hi / 2}, ${lane} ${y1 + hi / 2}, ${lane} ${y1 + hi}`
+        + down(y1 + hi, y2 - ho) + ` C ${lane} ${y2 - ho / 2}, ${x2} ${y2 - ho / 2}, ${x2} ${y2}`;
+      // the turn out fits the gap above the target: try it tall, then tighter
+      for (const d of [sLane(x1, y1, lane, x2, y2), turned(h, h), turned(h, 90), turned(h, 56),
+                       turned(90, 56), turned(56, 56)]) {
+        if (_pathHits(d, rects)) continue;
+        _lanes.v.push({x: lane, t: y1 + 30, b: y2 - 30});
+        return d;
+      }
+    }
+  }
   const long = y2 - y1 > 200;
   const vertical = Math.abs(x1 - x2) < 18;
 
@@ -473,6 +607,8 @@ function routeAvoiding(a, b, obstacles) {
     if (!long) return null;
     const lane = _clearLaneX(rects, y1 + 50, y2 - 50, (x1 + x2) / 2);
     if (lane === null) return null;
+    const smooth = sLane(x1, y1, lane, x2, y2);
+    if (!_pathHits(smooth, rects)) return smooth;
     return `M ${x1} ${y1} C ${x1} ${y1 + 46}, ${lane} ${y1 + 46}, ${lane} ${y1 + 100}`
       + ` L ${lane} ${y2 - 100}`
       + ` C ${lane} ${y2 - 46}, ${x2} ${y2 - 46}, ${x2} ${y2}`;
@@ -497,6 +633,8 @@ function routeAvoiding(a, b, obstacles) {
       _lanes.v.pop();   // the turns are blocked: give the lane back
       return null;
     }
+    const smooth = sLane(x1, y1, lane, x2, y2, (bt + bb) / 2);
+    if (!_pathHits(smooth, rects)) return smooth;
     return `M ${x1} ${y1} C ${x1} ${y1 + q1}, ${lane} ${bt - q1}, ${lane} ${bt}`
       + ` L ${lane} ${bb}`
       + ` C ${lane} ${bb + q2}, ${x2} ${y2 - q2}, ${x2} ${y2}`;
@@ -532,7 +670,7 @@ function routeAvoiding(a, b, obstacles) {
     ?? bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
 }
 
-function returnPath(a, b, from) {
+function returnPath(a, b, from, rects) {
   // A loop's return edge: out of the source's right flank (or, from a
   // decision card, out of its own row's dot: `from`), bowing up the right
   // margin, back into the target's right flank. Drawn differently from a
@@ -541,8 +679,36 @@ function returnPath(a, b, from) {
   // compiler box.
   const x1 = from ? from.x : a.x + a.w, y1 = from ? from.y : a.y + a.h / 2;
   const x2 = b.x + b.w, y2 = b.y + b.h / 2;
-  const bulge = Math.max(x1, x2) + 56 + Math.abs(y1 - y2) * 0.08;
-  return `M ${x1} ${y1} C ${bulge} ${y1}, ${bulge} ${y2}, ${x2} ${y2}`;
+  return returnRoute(x1, y1, x2, y2, rects).d;
+}
+
+// The return's shape, and how far right it reaches (`x`, for its label).
+// Normally one bow past its own two cards. When a card or an opened
+// GraphOp between them sticks out further (a subgraph inside the loop —
+// agent zones), the bow would cut through it: then the return turns out
+// into its own lane right of everything in its span, runs up it, and turns
+// back in — still all C, so sparks and dots follow it. The box the loop
+// lives in (a wall) and a box holding either end (the opened GraphOp whose
+// START pill the return re-enters) are not in its way.
+function returnRoute(x1, y1, x2, y2, rects) {
+  const base = Math.max(x1, x2) + 56 + Math.abs(y1 - y2) * 0.08;
+  const bow = `M ${x1} ${y1} C ${base} ${y1}, ${base} ${y2}, ${x2} ${y2}`;
+  const holds = (r, x, y) => x >= r.l && x <= r.r && y >= r.t && y <= r.b;
+  const solid = (rects || []).filter(r => !r.wall && !holds(r, x1, y1) && !holds(r, x2, y2));
+  if (!solid.length || !_pathHits(bow, solid)) return {d: bow, x: base};
+  const lo = Math.min(y1, y2), hi = Math.max(y1, y2);
+  const span = solid.filter(r => r.b > lo && r.t < hi);
+  let lane = Math.max(x1, x2, ...span.map(r => r.r)) + 28;
+  const ry = Math.min(70, Math.abs(y1 - y2) / 4);
+  const up = y2 < y1 ? -1 : 1;
+  for (let k = 0; k < 6; k++, lane += 16) {
+    const ya = y1 + up * ry, yb = y2 - up * ry, q = (yb - ya) / 3;
+    const d = `M ${x1} ${y1} C ${lane} ${y1}, ${lane} ${y1}, ${lane} ${ya}`
+      + ` C ${lane} ${ya + q}, ${lane} ${yb - q}, ${lane} ${yb}`
+      + ` C ${lane} ${y2}, ${lane} ${y2}, ${x2} ${y2}`;
+    if (!_pathHits(d, solid)) return {d, x: lane + 14};
+  }
+  return {d: bow, x: base};
 }
 
 // where a decision card's condition row puts its wire: the row's dot,
@@ -555,7 +721,7 @@ function rowDot(A, port) {
  * it departs AT the row's dot, horizontal tangent out, vertical tangent
  * in; control distances scale with the actual gap, so a near neighbour
  * gets a tight elbow, not a balloon. */
-function rowWirePath(A, port, x2, y2, bend = 1) {
+function rowWirePath(A, port, x2, y2, bend = 1, lane = 0) {
   const side = port.side;
   const {x: x1, y: y1} = rowDot(A, port);
   // `bend` < 1 shortens the arrival handle: several routes into ONE
@@ -572,7 +738,9 @@ function rowWirePath(A, port, x2, y2, bend = 1) {
     // bent back through the card's own lower rows. Step out beside
     // the card and below its bottom first, then drop into the
     // target — every point of the second half is under the card.
-    const lx = side > 0 ? A.x + A.w + 14 : A.x - 14;
+    // several routes into one target step out in their own lane (route
+    // rank, 8 px apart), so they stay three wires down the side, not one
+    const lx = side > 0 ? A.x + A.w + 14 + 8 * lane : A.x - 14 - 8 * lane;
     const yb = bottom + Math.min(18, Math.max(6, (y2 - bottom) * 0.3));
     const k = (y2 - yb) / 2;
     return `M ${x1} ${y1} C ${lx} ${y1}, ${lx} ${y1}, ${lx} ${yb}`
@@ -635,6 +803,10 @@ function rowTiePath(A, port, b, obstacles) {
     const yh = y2 - r - 6;
     if (r < 4 || yh - r < y0 + 14) break;
     if (!clear(lx - 2, lx + 2, y0 + 14, yh) || !clear(Math.min(lx, x2), Math.max(lx, x2), yh - 2, yh + 2)) continue;
+    const ya = y0 + 18, q = (y2 - ya) / 2;
+    const smooth = `M ${x0} ${y0} C ${lx} ${y0}, ${lx} ${y0}, ${lx} ${ya}`
+      + ` C ${lx} ${ya + q}, ${x2} ${y2 - q}, ${x2} ${y2}`;
+    if (!_pathHits(smooth, rects)) return smooth;
     return `M ${x0} ${y0} C ${lx} ${y0}, ${lx} ${y0}, ${lx} ${y0 + 14} L ${lx} ${yh - r}`
       + ` C ${lx} ${yh - r * 0.45}, ${lx + dir * r * 0.45} ${yh}, ${lx + dir * r} ${yh} L ${x2 - dir * r} ${yh}`
       + ` C ${x2 - dir * r * 0.45} ${yh}, ${x2} ${yh + r * 0.45}, ${x2} ${yh + r} L ${x2} ${y2}`;
@@ -742,6 +914,44 @@ function pathSampler(d) {
   };
   return {len, at};
 }
+
+/* Direction: one small light dot travelling each wire, source to target —
+ * a loop's return edge carries it backwards, in its own colour. One SMIL
+ * animateMotion per wire on the wire's own `d`, so it follows any route.
+ * Flow view only; off for prefers-reduced-motion (CSS), paused while the tab
+ * is hidden, at most FLOW_DOTS_MAX per canvas, and a toolbar switch. */
+const FLOW_DOTS_MAX = 150;
+let flowDotsOn = recall("ox:flowdots", true) !== false;
+
+function flowDot(svg, path, cls) {
+  if (!flowDotsOn || svg.querySelectorAll(".eflow").length >= FLOW_DOTS_MAX) return;
+  const d = path.getAttribute("d");
+  const s = d && pathSampler(d);
+  const len = s ? s.len : 0;
+  if (len < 40) return;
+  const dot = document.createElementNS(SVGNS, "circle");
+  dot.setAttribute("r", "3.2");
+  dot.setAttribute("class", ("eflow " + (cls || "")).trim());
+  const anim = document.createElementNS(SVGNS, "animateMotion");
+  anim.setAttribute("path", d);
+  anim.setAttribute("dur", `${Math.max(1.6, Math.min(7, len / 70)).toFixed(2)}s`);
+  anim.setAttribute("repeatCount", "indefinite");
+  // stagger, so neighbouring wires don't pulse in step
+  anim.setAttribute("begin", `${(-Math.random() * 4).toFixed(2)}s`);
+  if ((cls || "").includes("back")) {
+    // a loop's return runs bottom to top: its path is drawn from the last
+    // step to the first, so keep the path's own direction
+    anim.setAttribute("calcMode", "linear");
+  }
+  dot.append(anim);
+  svg.append(dot);
+}
+
+document.addEventListener("visibilitychange", () => {
+  for (const s of document.querySelectorAll("svg.wires")) {
+    if (document.hidden) s.pauseAnimations?.(); else s.unpauseAnimations?.();
+  }
+});
 
 function energySparks(svg, path, cls) {
   let s = pathSampler(path.getAttribute("d") || "");
@@ -1287,12 +1497,13 @@ function render() {
       const backRow = a.node.routes && A.condPorts
         ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
       const from = backRow ? rowDot(A, backRow) : null;
-      p.setAttribute("d", returnPath(A, B, from));
+      const backRects = _rects(obstacles, A, B);
+      p.setAttribute("d", returnPath(A, B, from, backRects));
       if (from) p.dataset.fromRow = "1";
       cls += " back";
       if (!e.soft) sheath = "back";
       const fx = from ? from.x : A.x + A.w, fy = from ? from.y : A.y + A.h / 2;
-      const bulge = Math.max(fx, B.x + B.w) + 56 + Math.abs(fy - (B.y + B.h / 2)) * 0.08;
+      const bulge = returnRoute(fx, fy, B.x + B.w, B.y + B.h / 2, backRects).x;
       addGlyph(bulge + 4, (fy + B.y + B.h / 2) / 2, "↺ loop", "back-label");
     } else {
       // a condition edge leaves ITS OWN ROW on the decision card — the
@@ -1302,10 +1513,10 @@ function render() {
       if (rowPort != null) {
         const pk = `${a.key}→${b.key}`, n = routeCount.get(pk) || 1;
         const bend = n > 1 ? 1 - 0.55 * (routeRank.get(fe) || 0) / (n - 1) : 1;
-        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y, bend));
+        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y, bend, n > 1 ? routeRank.get(fe) || 0 : 0));
         p.dataset.fromRow = "1";
       } else {
-        p.setAttribute("d", routeAvoiding(A, B, obstacles));
+        p.setAttribute("d", routeAvoiding(A, B, obstacles, fe.via));
       }
       if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
@@ -1316,6 +1527,7 @@ function render() {
       drawn = energyEdge(svg, p.getAttribute("d"), sheath.trim(), made);
       // no sparks on an else-fallback, nor into an op that never ran
       if (!sheath.includes("relse") && !faded) energySparks(svg, drawn, sheath.trim());
+      if (!faded) flowDot(svg, drawn, sheath.trim());
     } else {
       p.setAttribute("class", cls.trim());
       svg.append(p);
@@ -1329,7 +1541,16 @@ function render() {
     state.edgeEls.push({a: a.key, b: b.key, id: e.id, els: made});
     // the node's own port bead is the terminal; an extra circle on top of
     // it was clutter. Only a loop's flank, which has no port, gets one.
-    if (e.back) bouton(svg, B.x + B.w, B.y + B.h / 2, "b-back");
+    if (e.back) {
+      bouton(svg, B.x + B.w, B.y + B.h / 2, "b-back");
+      // the loop re-enters its first step: an arrowhead on the flank, pointing in
+      const hx = B.x + B.w + 3, hy = B.y + B.h / 2;
+      const head = document.createElementNS(SVGNS, "path");
+      head.setAttribute("d", `M ${hx + 11} ${hy - 6} L ${hx} ${hy} L ${hx + 11} ${hy + 6} Z`);
+      head.setAttribute("class", "loop-head");
+      svg.append(head);
+      made.push(head);
+    }
 
     if (!e.back) {
       // glyphs anchor to the drawn path itself, wherever it routed
@@ -3946,6 +4167,18 @@ $("#graph-pick").onchange = (ev) => {
 };
 
 $("#btn-fit").onclick = fit;
+{
+  const b = $("#btn-flowdots");
+  const show = () => { b.setAttribute("aria-pressed", String(flowDotsOn)); b.classList.toggle("on", flowDotsOn); };
+  show();
+  b.onclick = () => {
+    flowDotsOn = !flowDotsOn;
+    store("ox:flowdots", flowDotsOn);
+    show();
+    for (const dot of document.querySelectorAll(".eflow")) dot.style.display = flowDotsOn ? "" : "none";
+    if (flowDotsOn && !document.querySelector(".eflow")) render();
+  };
+}
 $("#btn-zoom-in").onclick = () => { const c = stageCenter(); zoomAt(c.x, c.y, 1.25); };
 $("#btn-zoom-out").onclick = () => { const c = stageCenter(); zoomAt(c.x, c.y, 0.8); };
 $("#btn-zoom-pct").onclick = () => {
@@ -3971,7 +4204,10 @@ $("#btn-zoom-pct").onclick = () => {
   }, {passive: false});
 
   stage.addEventListener("mousedown", (ev) => {
-    const overNode = ev.target.closest(".node");
+    // an opened GraphOp's body is canvas — it pans like the background;
+    // only its title strip (select, collapse) is a control
+    const hit = ev.target.closest(".node");
+    const overNode = hit && hit.classList.contains("container") && !ev.target.closest(".chead") ? null : hit;
     const panButton = ev.button === 1 || (ev.button === 0 && spaceHeld);
     if (overNode && !panButton && ev.button === 0) return;  // node click
     if (ev.button !== 0 && ev.button !== 1) return;

@@ -11,7 +11,10 @@ at operonx's graph sizes:
 1. **Layer** by longest path from the entry set, so every edge points
    forward and an edge never spans backwards.
 2. **Order** within each layer by repeated barycentre sweeps, which is what
-   actually removes crossings.
+   actually removes crossings. An edge spanning several layers becomes a
+   chain of narrow *dummy* nodes, one per layer it passes, so it takes part
+   in the ordering like any edge and holds a gap open in every row it
+   crosses; the sweep keeps the order with the fewest crossings it saw.
 3. **Place** on a fixed grid: a layer is a ROW, and time flows down.
 
 Vertical is sequence, horizontal is simultaneity: branch targets and
@@ -41,7 +44,9 @@ H_GAP = 56      # between siblings in a row — things that happen together
 V_GAP = 78      # between rows — one step of sequence
 MARGIN = 48
 
-_SWEEPS = 6
+_SWEEPS = 8
+DUMMY_W = 24    # a long edge's slot in a row it passes through
+DUMMY_GAP = 18  # between a dummy and its neighbour
 
 
 @dataclass
@@ -75,6 +80,8 @@ class Edge:
     kind: str = ""
     route: Optional[int] = None
     label: Optional[str] = None
+    # a long edge's lane: the x centre of its dummy in each row it passes
+    via: List[float] = field(default_factory=list)
 
 
 @dataclass
@@ -157,34 +164,68 @@ def _layer_nodes(
     return layer
 
 
+def _crossings(layers: Dict[int, List[str]], down: Dict[str, List[str]]) -> int:
+    """Pairs of edges that cross between each pair of adjacent rows."""
+    total = 0
+    for depth in sorted(layers):
+        below = layers.get(depth + 1)
+        if not below:
+            continue
+        pos = {n: i for i, n in enumerate(below)}
+        es = [(i, pos[v]) for i, u in enumerate(layers[depth]) for v in down.get(u, []) if v in pos]
+        for a in range(len(es)):
+            for b in range(a + 1, len(es)):
+                if (es[a][0] - es[b][0]) * (es[a][1] - es[b][1]) < 0:
+                    total += 1
+    return total
+
+
 def _order_layers(
     layers: Dict[int, List[str]],
-    forward: Dict[str, List[str]],
-    backward: Dict[str, List[str]],
+    down: Dict[str, List[str]],
+    up: Dict[str, List[str]],
 ) -> None:
     """Barycentre sweeps — the step that actually removes edge crossings.
 
-    Each node is pulled toward the mean position of its neighbours in the
-    adjacent layer, alternating down and up so both ends settle. Ties keep
-    their previous position, which keeps the result stable run to run.
+    Every edge joins adjacent layers (long ones run through dummies), so
+    each node is pulled toward the mean position of its neighbours in the
+    row above (downward sweep) or below (upward). Ties keep their previous
+    position, which keeps the result stable run to run. A sweep can make
+    things worse; the order with the fewest crossings is the one kept.
     """
+    best = {d: list(r) for d, r in layers.items()}
+    best_count = _crossings(layers, down)
+    stale = 0
     for sweep in range(_SWEEPS):
+        if best_count == 0:
+            break
         downward = sweep % 2 == 0
-        indices = sorted(layers)
-        if not downward:
-            indices = list(reversed(indices))
-        for depth in indices:
-            neighbours = backward if downward else forward
-            positions = {n: idx for d in layers for idx, n in enumerate(layers[d]) if d != depth}
+        depths = sorted(layers) if downward else sorted(layers, reverse=True)
+        for depth in depths:
+            ref = layers.get(depth - 1 if downward else depth + 1)
+            if not ref:
+                continue
+            pos = {n: i for i, n in enumerate(ref)}
+            neighbours = up if downward else down
             current = {n: i for i, n in enumerate(layers[depth])}
 
             def barycentre(node: str) -> Tuple[float, int]:
-                linked = [positions[p] for p in neighbours.get(node, []) if p in positions]
+                linked = [pos[p] for p in neighbours.get(node, []) if p in pos]
                 if not linked:
                     return (float(current[node]), current[node])
                 return (sum(linked) / len(linked), current[node])
 
             layers[depth].sort(key=barycentre)
+        count = _crossings(layers, down)
+        if count < best_count:
+            best_count, stale = count, 0
+            best = {d: list(r) for d, r in layers.items()}
+        else:
+            stale += 1
+            if stale >= 2:
+                break
+    for d in layers:
+        layers[d] = best[d]
 
 
 def layout_graph(graph: Dict) -> Layout:
@@ -261,7 +302,34 @@ def layout_graph(graph: Dict) -> Layout:
     layers: Dict[int, List[str]] = {}
     for node_id in ids:
         layers.setdefault(depth_of[node_id], []).append(node_id)
-    _order_layers(layers, forward, backward)
+
+    # Long edges become chains of dummies, so every edge joins adjacent
+    # rows: `down`/`up` are that adjacent-only structure, used to order the
+    # rows and to hang each node under its neighbours.
+    down: Dict[str, List[str]] = {i: [] for i in ids}
+    up: Dict[str, List[str]] = {i: [] for i in ids}
+    dummy_of: Dict[Tuple[str, str], List[str]] = {}
+    for src, dsts in acyclic.items():
+        for dst in dict.fromkeys(dsts):
+            lo, hi = depth_of[src], depth_of[dst]
+            if hi <= lo:
+                continue
+            prev = src
+            chain: List[str] = []
+            for d in range(lo + 1, hi):
+                did = f"\0{src}\0{dst}\0{d}"
+                chain.append(did)
+                layers[d].append(did)
+                down[did], up[did] = [], []
+                down[prev].append(did)
+                up[did].append(prev)
+                prev = did
+            down[prev].append(dst)
+            up[dst].append(prev)
+            if chain:
+                dummy_of[(src, dst)] = chain
+    is_dummy = lambda n: n.startswith("\0")  # noqa: E731
+    _order_layers(layers, down, up)
 
     # A decision card's wires leave their condition rows top-to-bottom
     # and fan to both sides. They can only NEST (never cross) when each
@@ -325,30 +393,46 @@ def layout_graph(graph: Dict) -> Layout:
     # each cluster centred on its members' desires. A chain hangs plumb
     # under its feeder instead of snapping to the global centre; only
     # true siblings spread sideways.
-    slot = float(NODE_W + H_GAP)
-    row_span = widest * slot - H_GAP
-    xs: Dict[str, float] = {}
+    width_of = lambda n: DUMMY_W if is_dummy(n) else NODE_W  # noqa: E731
+
+    def sep(a: str, b: str) -> float:
+        gap = H_GAP if not (is_dummy(a) or is_dummy(b)) else DUMMY_GAP
+        return (width_of(a) + width_of(b)) / 2 + gap
+
+    def row_width(row: Sequence[str]) -> float:
+        return sum(sep(a, b) for a, b in zip(row, row[1:])) + (
+            (width_of(row[0]) + width_of(row[-1])) / 2 if row else 0)
+
+    row_span = max((row_width(layers[d]) for d in sorted_depths), default=NODE_W)
+    cx: Dict[str, float] = {}       # centres
     for depth in sorted_depths:
         row = layers[depth]
-        left = MARGIN + (row_span - (len(row) * slot - H_GAP)) / 2
-        for order, node_id in enumerate(row):
-            xs[node_id] = left + order * slot
+        c = MARGIN + (row_span - row_width(row)) / 2 + width_of(row[0]) / 2
+        for k, node_id in enumerate(row):
+            if k:
+                c += sep(row[k - 1], node_id)
+            cx[node_id] = c
 
-    def _spread(desired: List[float]) -> List[float]:
-        clusters: List[List[float]] = []   # [sum_of_desires, count]
-        for d in desired:
-            clusters.append([d, 1.0])
+    def _spread(row: Sequence[str], desired: List[float]) -> List[float]:
+        # order-preserving cluster merging: each cluster sits where its
+        # members' desires average out, packed at their minimum spacing
+        clusters: List[List] = []   # [members, offsets, first centre]
+        for k in range(len(row)):
+            clusters.append([[k], [0.0], desired[k]])
             while len(clusters) > 1:
                 a, b = clusters[-2], clusters[-1]
-                if b[0] / b[1] - a[0] / a[1] >= (a[1] + b[1]) * slot / 2:
+                need = sep(row[a[0][-1]], row[b[0][0]])
+                if b[2] - (a[2] + a[1][-1]) >= need:
                     break
+                base = a[1][-1] + need
                 a[0] += b[0]
-                a[1] += b[1]
+                a[1] += [base + o for o in b[1]]
+                a[2] = sum(desired[m] - o for m, o in zip(a[0], a[1])) / len(a[0])
                 clusters.pop()
-        out: List[float] = []
-        for s, n in clusters:
-            centre = s / n
-            out.extend(centre + (i - (n - 1) / 2) * slot for i in range(int(n)))
+        out = [0.0] * len(row)
+        for members, offsets, first in clusters:
+            for m, o in zip(members, offsets):
+                out[m] = first + o
         return out
 
     def _align(pass_depths: Sequence[int], neigh: Dict[str, List[str]]) -> None:
@@ -356,24 +440,26 @@ def layout_graph(graph: Dict) -> Layout:
             row = layers[depth]
             desired = []
             for node_id in row:
-                links = [xs[p] for p in neigh.get(node_id, []) if p in xs]
-                desired.append(sum(links) / len(links) if links else xs[node_id])
-            for node_id, x in zip(row, _spread(desired)):
-                xs[node_id] = x
+                links = [cx[p] for p in neigh.get(node_id, []) if p in cx]
+                desired.append(sum(links) / len(links) if links else cx[node_id])
+            for node_id, x in zip(row, _spread(row, desired)):
+                cx[node_id] = x
 
-    _align(sorted_depths, backward)
-    _align(list(reversed(sorted_depths)), forward)
-    _align(sorted_depths, backward)
+    _align(sorted_depths, up)
+    _align(list(reversed(sorted_depths)), down)
+    _align(sorted_depths, up)
 
-    if xs:
-        shift = MARGIN - min(xs.values())
-        for node_id in xs:
-            xs[node_id] += shift
+    if cx:
+        shift = MARGIN - min(c - width_of(n) / 2 for n, c in cx.items())
+        for node_id in cx:
+            cx[node_id] += shift
+    xs: Dict[str, float] = {n: cx[n] - NODE_W / 2 for n in ids}
+    right = max((c + width_of(n) / 2 for n, c in cx.items()), default=row_span + MARGIN)
 
     nodes: List[Node] = []
     ir_by_id = {n["id"]: n for n in ir_nodes}
     for depth in sorted_depths:
-        for order, node_id in enumerate(layers[depth]):
+        for order, node_id in enumerate(n for n in layers[depth] if not is_dummy(n)):
             raw = ir_by_id[node_id]
             nodes.append(
                 Node(
@@ -388,6 +474,11 @@ def layout_graph(graph: Dict) -> Layout:
                 )
             )
 
+    for e in edges:
+        chain = dummy_of.get((e.src, e.dst))
+        if chain:
+            e.via = [round(cx[d], 1) for d in chain]
+
     # An edge that does not advance a layer is drawn as a return path rather
     # than a straight line, so it reads as a loop instead of a stray arrow.
     depth_by_id = {n.id: n.layer for n in nodes}
@@ -395,6 +486,6 @@ def layout_graph(graph: Dict) -> Layout:
         e.back = (e.origin == "back_edge"
                   or depth_by_id.get(e.dst, 0) <= depth_by_id.get(e.src, 0))
 
-    width = (max(xs.values()) + NODE_W if xs else row_span + MARGIN) + MARGIN
+    width = right + MARGIN
     height = (y_cursor - V_GAP if nodes else 0) + MARGIN
     return Layout(nodes=nodes, edges=edges, width=width, height=height)
