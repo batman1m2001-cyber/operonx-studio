@@ -416,6 +416,43 @@ def _loop_of(op: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+def edge_id(src: str, dst: str, route: Optional[int] = None) -> str:
+    """A stable edge id: the pair, plus the route index for a branch route."""
+    return f"{src}->{dst}" if route is None else f"{src}->{dst}#{route}"
+
+
+def _expand_branch_edges(
+    edges: List[Dict[str, Any]], nodes: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Give every edge an ``id``; split a branch's edge into one per route.
+
+    operonx keeps one edge per (source, target) pair, so a branch whose
+    three conditions all route to the same op has ONE edge in ``_edges``
+    and the canvas could draw only one wire. Each route is its own
+    decision, so each becomes its own edge: same pair, its own ``id``,
+    ``route`` index, ``label`` (the condition) and ``kind: "branch"``.
+    Only pairs the engine actually wired are expanded — nothing is
+    invented — and every non-branch edge passes through as it was.
+    """
+    routes_of = {n["name"]: n.get("routes") or [] for n in nodes if n.get("routes")}
+    out: List[Dict[str, Any]] = []
+    for e in edges:
+        routes = routes_of.get(e["from"]) or []
+        hits = [i for i, r in enumerate(routes) if r.get("target") == e["to"]]
+        if not hits:
+            out.append({**e, "id": edge_id(e["from"], e["to"])})
+            continue
+        for i in hits:
+            out.append({
+                **e,
+                "id": edge_id(e["from"], e["to"], i),
+                "kind": "branch",
+                "route": i,
+                "label": routes[i].get("condition"),
+            })
+    return out
+
+
 def _subgraph(g: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str, Any]:
     nodes, loops = [], {}
     for name, op in (_slot(g, "_ops") or {}).items():
@@ -433,6 +470,7 @@ def _subgraph(g: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[
         }
         for edge in (_slot(g, "_edges") or {}).values()
     ]
+    edges = _expand_branch_edges(edges, nodes)
     for node in nodes:
         if not node["show_keys"] and not node.get("serve_role"):
             node["show_keys"] = _auto_show_keys(node, nodes)

@@ -197,3 +197,44 @@ class TestOrdering:
         b = next(n for n in out.nodes if n.name == "b")
         assert len(long.via) == 1
         assert not (b.x <= long.via[0] <= b.x + 260), "the lane runs beside b, not through it"
+
+
+class TestParallelEdges:
+    """A branch with several conditions into one target: one edge per route."""
+
+    def _graph(self):
+        graph = ir(["r", "t", "u"], [], entries=["r"])
+        graph["nodes"][0]["routes"] = [
+            {"condition": "a", "target": "t"},
+            {"condition": "b", "target": "t"},
+            {"condition": "c", "target": "t"},
+            {"condition": "else", "target": "u"},
+        ]
+        graph["edges"] = [
+            {"from": "r", "to": "t", "type": "condition", "id": f"r->t#{i}",
+             "kind": "branch", "route": i, "label": c}
+            for i, c in enumerate("abc")
+        ] + [{"from": "r", "to": "u", "type": "condition", "id": "r->u#3",
+              "kind": "branch", "route": 3, "label": "else"}]
+        return graph
+
+    def test_duplicates_survive_layout(self):
+        out = layout_graph(self._graph())
+        to_t = [e for e in out.edges if e.dst == "g.t"]
+        assert len(to_t) == 3
+        assert [e.id for e in to_t] == ["r->t#0", "r->t#1", "r->t#2"]
+        assert [e.label for e in to_t] == ["a", "b", "c"]
+        assert [e.route for e in to_t] == [0, 1, 2]
+
+    def test_parallel_edges_do_not_change_the_layout(self):
+        """Three routes into one op lay out exactly like one edge would."""
+        many = layout_graph(self._graph())
+        single = self._graph()
+        single["edges"] = [single["edges"][0], single["edges"][3]]
+        one = layout_graph(single)
+        assert [(n.id, n.x, n.y) for n in many.nodes] == [(n.id, n.x, n.y) for n in one.nodes]
+        assert many.height == one.height
+
+    def test_edges_without_ids_get_unique_ones(self):
+        out = layout_graph(ir(["a", "b"], [("a", "b"), ("a", "b")], entries=["a"]))
+        assert len(out.edges) == 2 and len({e.id for e in out.edges}) == 2

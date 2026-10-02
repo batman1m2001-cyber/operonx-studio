@@ -446,3 +446,56 @@ record_dir = "records"
     assert job["name"] == "echo_all" and job["session"] == "stream" and job["kind"] == "job"
     assert job["record_dir"] == str(manifest.root / "records")
     assert ir["serves"][0]["kind"] == "http"                 # the older key still there
+
+
+THREE_TO_ONE = """
+from operonx.core import END, PARENT, START, graph, op
+from operonx.core.ops.flow import if_
+
+@op
+def score(x: int = 0):
+    return {"s": x}
+
+@op
+def review(s: int = 0):
+    return {"r": s}
+
+@op
+def reject(s: int = 0):
+    return {"r": -s}
+
+@graph
+def flow(x):
+    sc = score(x=x)
+    rv = review(s=sc["s"])
+    rj = reject(s=sc["s"])
+    START >> sc >> (if_(sc["s"] >= 90, rv).if_(sc["s"] <= 10, rv)
+                    .if_(sc["s"] == 50, rv).else_(rj))
+    [rv, rj] >> END
+"""
+
+
+class TestBranchEdges:
+    """operonx keeps one edge per pair; the IR keeps one edge per ROUTE."""
+
+    def _graph(self, tmp_path):
+        return extract_project(project(tmp_path, THREE_TO_ONE, LINEAR_MANIFEST))["graphs"][0]
+
+    def test_three_conditions_to_one_target_are_three_edges(self, tmp_path):
+        g = self._graph(tmp_path)
+        router = next(n for n in g["nodes"] if n.get("routes"))
+        to_rv = [e for e in g["edges"] if e["from"] == router["name"] and e["to"] == "rv"]
+        assert len(to_rv) == 3
+        assert len({e["id"] for e in to_rv}) == 3
+        assert [e["route"] for e in to_rv] == [0, 1, 2]
+        assert len({e["label"] for e in to_rv}) == 3
+        assert all(e["kind"] == "branch" for e in to_rv)
+        else_edge = [e for e in g["edges"] if e["from"] == router["name"] and e["to"] == "rj"]
+        assert [e["label"] for e in else_edge] == ["else"]
+
+    def test_every_edge_has_a_unique_id_and_plain_edges_are_untouched(self, tmp_path):
+        g = self._graph(tmp_path)
+        ids = [e["id"] for e in g["edges"]]
+        assert len(ids) == len(set(ids))
+        plain = [e for e in g["edges"] if e["from"] == "sc"]
+        assert plain and all("kind" not in e and e["id"] == f"sc->{e['to']}" for e in plain)

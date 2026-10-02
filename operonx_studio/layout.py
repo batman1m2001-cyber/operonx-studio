@@ -34,7 +34,7 @@ layer that contradicts the loop boundary it belongs to.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = ["Node", "Edge", "Layout", "layout_graph", "NODE_W", "NODE_H"]
 
@@ -73,6 +73,13 @@ class Edge:
     soft: bool = False
     origin: str = "authored"
     back: bool = False
+    # Edges are keyed by ``id``, never by (src, dst): a branch whose
+    # conditions share a target carries one edge PER ROUTE between the
+    # same pair, each with its own id, route index and condition label.
+    id: str = ""
+    kind: str = ""
+    route: Optional[int] = None
+    label: Optional[str] = None
     # a long edge's lane: the x centre of its dummy in each row it passes
     via: List[float] = field(default_factory=list)
 
@@ -233,10 +240,21 @@ def layout_graph(graph: Dict) -> Layout:
         return by_name.get(ref, ref)
 
     edges: List[Edge] = []
+    seen_ids: Set[str] = set()
     for e in graph.get("edges") or []:
         src, dst = resolve(e["from"]), resolve(e["to"])
         if src not in short or dst not in short:
             continue
+        # An IR without ids (older extractions) keys by the pair; a clash
+        # (two records claiming one id) gets a suffix rather than merging,
+        # so an edge never silently disappears here.
+        eid = str(e.get("id") or f"{e['from']}->{e['to']}")
+        base, n = eid, 1
+        while eid in seen_ids:
+            n += 1
+            eid = f"{base}~{n}"
+        seen_ids.add(eid)
+        route = e.get("route")
         edges.append(
             Edge(
                 src=src,
@@ -244,6 +262,10 @@ def layout_graph(graph: Dict) -> Layout:
                 type=e.get("type", "normal"),
                 soft=bool(e.get("soft")),
                 origin=e.get("origin", "authored"),
+                id=eid,
+                kind=e.get("kind") or "",
+                route=route if isinstance(route, int) else None,
+                label=e.get("label"),
             )
         )
 
@@ -258,6 +280,11 @@ def layout_graph(graph: Dict) -> Layout:
         # backwards with the author's forward edge drawn as the return.
         # The author already said which edge goes back; believe them.
         if e.origin == "back_edge":
+            continue
+        # Parallel edges (one per branch route) are ONE adjacency for
+        # layering and ordering: three routes into the same op must not
+        # pull it three times as hard in the barycentre sweeps.
+        if e.dst in forward[e.src]:
             continue
         forward[e.src].append(e.dst)
         backward[e.dst].append(e.src)
@@ -338,9 +365,11 @@ def layout_graph(graph: Dict) -> Layout:
     # lane search always has room to jog sideways.
     depth_of_id = {i: depth_of[i] for i in ids}
     cuts: Dict[int, int] = {d: 0 for d in sorted_depths}
+    counted: Set[Tuple[str, str]] = set()
     for e in edges:
-        if e.origin == "back_edge":
+        if e.origin == "back_edge" or (e.src, e.dst) in counted:
             continue
+        counted.add((e.src, e.dst))
         lo_hi = (depth_of_id.get(e.src), depth_of_id.get(e.dst))
         if None in lo_hi:
             continue

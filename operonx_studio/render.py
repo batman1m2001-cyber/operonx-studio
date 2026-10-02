@@ -115,12 +115,15 @@ def _graph_payload(graph: Dict[str, Any]) -> Dict[str, Any]:
             colour = "var(--edge-back)"
         edges.append(
             {
+                "id": e.id,
                 "src": e.src,
                 "dst": e.dst,
                 "d": _edge_path(placed, e.src, e.dst, e.back),
                 "colour": colour,
                 "dash": dash,
-                "label": f"{e.type}·{e.origin}"
+                "label": e.label
+                if e.label
+                else f"{e.type}·{e.origin}"
                 if e.origin != "authored" or e.type != "normal"
                 else "",
                 "origin": e.origin,
