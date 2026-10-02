@@ -1,0 +1,575 @@
+/* Compound layered layout for the flow canvas — positions first, wires after.
+ *
+ * Given an IR graph, the set of opened containers and every card's REAL
+ * size (measured in the page), this places every card of every open level
+ * and plans every wire along a path the placement reserved for it:
+ *
+ * 1. Bottom-up: an opened GraphOp's inner graph is laid out first; its box
+ *    (START knob row on top, END knob row below) is then ONE node of that
+ *    size in its parent's graph. Nothing is shifted afterwards, so nothing
+ *    a lane was planned around moves.
+ * 2. Each level is layered (longest path; a level's START/END terminals are
+ *    rows of their own), long edges become chains of dummy lanes, a loop's
+ *    return gets a lane chain pinned just right of its two cards, rows are
+ *    ordered by barycentre sweeps (starting from the server's order, so a
+ *    graph keeps its look), and x is assigned by order-preserving
+ *    alignment. A decision card reserves room beside it for the lanes its
+ *    condition rows leave by.
+ * 3. A row is as tall as its tallest card and cards are top-aligned, so the
+ *    channel between two rows holds no card at all. A wire is vertical runs
+ *    through its own reserved slots plus y-monotone curves inside channels:
+ *    it cannot meet a card that is not its own end. No detours.
+ *
+ * Pure data → data: the same graph, open set and sizes give the same
+ * picture (and opening then closing a container gives back the same
+ * coordinates). Tested in node: tests/js/flowlayout.test.mjs. */
+(function (global) {
+  "use strict";
+
+  const C = {
+    NODE_W: 260, NODE_H: 64,
+    H_GAP: 56,          // between two cards in a row
+    V_GAP: 78,          // channel between two rows
+    MARGIN: 48,
+    KB: 26,             // a container's START/END knob
+    HEADER: 34,         // a container's title strip
+    B_W: 66, B_H: 28,   // the main flow's START/END pills
+    CPAD: 24,           // container side padding
+    CMIN_W: 300,        // container minimum width (its title strip)
+    DW: 4,              // half width of a dummy lane slot
+    GAP_DD: 14,         // lane to lane
+    GAP_DC: 22,         // lane to card
+    ROW_OUT: 14,        // a condition row's first lane, past the card edge
+    ROW_STEP: 8,        // between a card's row lanes
+    LABEL_W: 66,        // room right of a loop lane for "↺ loop"
+    SWEEPS: 8,
+  };
+
+  const f = (v) => Math.round(v * 10) / 10;
+
+  // ── path building: all M + C, vertical tangents between segments ──
+  class Path {
+    constructor(x, y) { this.d = `M ${f(x)} ${f(y)}`; this.x = x; this.y = y; this.pts = [[x, y]]; }
+    c(x1, y1, x2, y2, x, y) {
+      this.d += ` C ${f(x1)} ${f(y1)}, ${f(x2)} ${f(y2)}, ${f(x)} ${f(y)}`;
+      this.x = x; this.y = y; this.pts.push([x1, y1], [x2, y2], [x, y]);
+    }
+    // straight vertical run (as a curve)
+    v(y) {
+      if (Math.abs(y - this.y) < 0.5) return;
+      const k = (y - this.y) / 3;
+      this.c(this.x, this.y + k, this.x, y - k, this.x, y);
+    }
+    // inside a channel: vertical tangent out, vertical tangent in, y-monotone
+    to(x, y) {
+      if (Math.abs(x - this.x) < 0.5) return this.v(y);
+      const ym = (this.y + y) / 2;
+      this.c(this.x, ym, x, ym, x, y);
+    }
+    // horizontal departure at the current point, turning into the lane at lx
+    turnInto(lx, dir, q) { this.c(lx, this.y, lx, this.y, lx, this.y + dir * q); }
+    // from the lane, turning out horizontally into (px, py)
+    turnOut(px, py) { this.c(this.x, py, this.x, py, px, py); }
+  }
+
+  // ── one level ──────────────────────────────────────────────────────
+  function buildLevel(g, prefix, depth, opts, inner) {
+    const N = [];
+    const byId = new Map();
+    (g.nodes || []).forEach((n, i) => {
+      const key = prefix + n.id;
+      let L;
+      if (n.graph && opts.expanded.has(key)) {
+        const sub = buildLevel(n.graph, key + "/", depth + 1, opts, true);
+        L = {id: n.id, key, node: n, kind: "container", sub,
+             w: Math.max(C.CMIN_W, sub.w + 2 * C.CPAD), h: sub.h};
+      } else {
+        const s = opts.sizeOf(key, n) || {};
+        L = {id: n.id, key, node: n, kind: "card",
+             w: s.w || C.NODE_W, h: s.h || C.NODE_H,
+             rows: (s.rows || []).filter(r => r && r.w > 0)};
+      }
+      L.hint = typeof n.x === "number" ? n.x : i * 300;
+      L.idx = i;
+      L.depth = depth;
+      N.push(L); byId.set(n.id, L);
+    });
+    const byName = new Map();
+    for (const L of N) if (!byName.has(L.node.name)) byName.set(L.node.name, L);
+
+    let S = null, E = null;
+    const term = (which) => {
+      const knob = inner;
+      const L = {id: `__${which}__`, kind: knob ? "knob" : "pill",
+                 key: knob ? `${prefix}__${which}` : `__main/__${which}`,
+                 node: {id: `__${which}__`, name: which.toUpperCase(), kind: "__boundary__",
+                        boundary: which, ...(knob ? {knob: true} : {})},
+                 w: knob ? C.KB : C.B_W, h: knob ? C.KB : C.B_H, hint: 0, idx: -1,
+                 depth: knob ? depth : 0, term: which};
+      return L;
+    };
+    const entries = (g.entries || []).map(nm => byName.get(nm)).filter(Boolean);
+    const exits = (g.exits || []).map(nm => byName.get(nm)).filter(Boolean);
+    if (inner) { S = term("start"); E = term("end"); }
+    else {
+      if (entries.length) S = term("start");
+      if (exits.length) E = term("end");
+    }
+
+    // ── wires ──
+    const meaning = (e) => (e.soft ? 0 : 2) + (e.type === "condition" ? 1 : 0) + (e.origin === "back_edge" || e.back ? 1 : 0);
+    const W = [];
+    const seen = new Map();
+    const firstRow = (L, target) => (L.rows || []).find(r => r.target === target) || null;
+    for (const e of g.edges || []) {
+      const a = byId.get(e.src), b = byId.get(e.dst);
+      if (!a || !b) continue;
+      const k = `${a.key}→${b.key}|${e.id || ""}`;
+      const prev = seen.get(k);
+      if (prev) {
+        if (meaning(e) > meaning(prev.e)) prev.e = e;
+        continue;
+      }
+      const w = {k, a, b, e, tie: false};
+      seen.set(k, w);
+      W.push(w);
+    }
+    for (const w of W) {
+      const {a, b, e} = w;
+      // the row a decision card's wire leaves by (studio.js draws it there)
+      const routes = a.kind === "card" ? a.node.routes : null;
+      const routeOf = routes && e.route != null ? routes[e.route] : null;
+      const condish = !!routeOf || (routes && e.type === "condition"
+        && routes.some(r => r.target === b.node.name));
+      const byRoute = routeOf ? (a.rows || []).find(r => r.route === e.route) : null;
+      w.row = routes && (condish || e.origin === "back_edge" || e.back)
+        ? byRoute || firstRow(a, b.node.name) : null;
+      w.condish = !!condish;
+    }
+    const tie = (a, b) => {
+      const w = {k: `${a.key}⇢${b.key}`, a, b, e: null, tie: true, row: null};
+      if (b.term === "end" && a.kind === "card" && a.node.routes) w.row = firstRow(a, "__END__");
+      W.push(w);
+    };
+    if (inner) {
+      for (const L of N) if (L.node.start) tie(S, L);
+      for (const L of N) if (L.node.end) tie(L, E);
+    } else {
+      if (S) for (const L of entries) tie(S, L);
+      if (E) for (const L of exits) tie(L, E);
+    }
+
+    // ── layering ──
+    const all = [...(S ? [S] : []), ...N, ...(E ? [E] : [])];
+    const fwd = new Map(all.map(L => [L, []]));
+    for (const w of W) {
+      if (w.e && w.e.origin === "back_edge") continue;
+      if (w.a === w.b) continue;
+      if (!fwd.get(w.a).includes(w.b)) fwd.get(w.a).push(w.b);
+    }
+    // DFS back-edge detection (lookback edges the rewrite left alone)
+    const cyc = new Set();
+    {
+      const colour = new Map(all.map(L => [L, 0]));
+      for (const root of all) {
+        if (colour.get(root)) continue;
+        const stack = [[root, 0]];
+        while (stack.length) {
+          const top = stack[stack.length - 1];
+          const [node, i] = top;
+          if (i === 0) colour.set(node, 1);
+          const nb = fwd.get(node);
+          if (i < nb.length) {
+            top[1]++;
+            const nx = nb[i];
+            if (colour.get(nx) === 1) cyc.add(node.key + "→" + nx.key);
+            else if (colour.get(nx) === 0) stack.push([nx, 0]);
+          } else { colour.set(node, 2); stack.pop(); }
+        }
+      }
+    }
+    const layer = new Map();
+    {
+      const indeg = new Map(all.map(L => [L, 0]));
+      const acyc = new Map(all.map(L => [L, fwd.get(L).filter(b => !cyc.has(L.key + "→" + b.key))]));
+      for (const [, bs] of acyc) for (const b of bs) indeg.set(b, indeg.get(b) + 1);
+      for (const L of all) layer.set(L, L === S ? 0 : S ? 1 : 0);
+      const queue = all.filter(L => indeg.get(L) === 0);
+      for (let qi = 0; qi < queue.length; qi++) {
+        const u = queue[qi];
+        for (const b of acyc.get(u)) {
+          if (layer.get(b) < layer.get(u) + 1) layer.set(b, layer.get(u) + 1);
+          indeg.set(b, indeg.get(b) - 1);
+          if (indeg.get(b) === 0) queue.push(b);
+        }
+      }
+      if (E) {
+        let mx = 0;
+        for (const L of all) if (L !== E) mx = Math.max(mx, layer.get(L));
+        layer.set(E, mx + 1);
+      }
+    }
+    for (const w of W) {
+      w.back = !w.tie && (w.e.origin === "back_edge" || cyc.has(w.a.key + "→" + w.b.key)
+        || layer.get(w.b) <= layer.get(w.a));
+    }
+
+    // ── rows, dummies ──
+    const nrows = Math.max(...all.map(L => layer.get(L))) + 1;
+    const rows = Array.from({length: nrows}, () => []);
+    for (const L of all) { L.layer = layer.get(L); rows[L.layer].push(L); }
+    for (const r of rows) r.sort((p, q) => p.hint - q.hint || p.idx - q.idx);
+    const up = new Map(), down = new Map();
+    const link = (p, q) => {   // p in row r, q in row r+1
+      if (!down.has(p)) down.set(p, []);
+      if (!up.has(q)) up.set(q, []);
+      if (!down.get(p).includes(q)) down.get(p).push(q);
+      if (!up.get(q).includes(p)) up.get(q).push(p);
+    };
+    const pinned = [];   // [dummy, anchor]
+    let did = 0;
+    const dummy = (r, wire, hint) => {
+      const D = {id: `\0${did++}`, dummy: true, layer: r, wire, wl: C.DW, wr: C.DW, h: 0, w: 0, hint, idx: 1e6 + did};
+      rows[r].push(D);
+      return D;
+    };
+    for (const w of W) {
+      const la = w.a.layer, lb = w.b.layer;
+      w.lanes = [];
+      if (!w.back) {
+        let prev = w.a;
+        for (let r = la + 1; r < lb; r++) {
+          const t = (r - la) / (lb - la);
+          const D = dummy(r, w, w.a.hint + (w.b.hint - w.a.hint) * t);
+          w.lanes.push(D);
+          link(prev, D); prev = D;
+        }
+        link(prev, w.b);
+      } else if (la === lb) {
+        const ds = dummy(la, w, w.a.hint), dd = dummy(la, w, w.b.hint);
+        ds.pin = w.a; dd.pin = w.b;
+        pinned.push(ds, dd);
+        w.lanes.push(ds, dd);
+      } else {
+        const step = la < lb ? 1 : -1;
+        let prev = null;
+        for (let r = la; ; r += step) {
+          const D = dummy(r, w, w.a.hint + 200);
+          if (r === la) { D.pin = w.a; pinned.push(D); }
+          if (r === lb) { D.pin = w.b; pinned.push(D); }
+          if (prev) (step > 0 ? link(prev, D) : link(D, prev));
+          w.lanes.push(D);
+          prev = D;
+          if (r === lb) break;
+        }
+      }
+      if (w.back) {
+        // the "↺ loop" label rides the lane in the middle row of its span
+        const mid = w.lanes[Math.floor((w.lanes.length - 1) / 2)];
+        mid.wr += C.LABEL_W;
+        w.labelLane = mid;
+      }
+    }
+    for (const r of rows) r.sort((p, q) => p.hint - q.hint || p.idx - q.idx);
+
+    // a loop lane sits right next to its card, so the return's stub
+    // between card and lane crosses nothing
+    const repin = (row) => {
+      const mine = row.filter(x => x.pin);
+      if (!mine.length) return;
+      const rest = row.filter(x => !x.pin);
+      for (const D of mine) {
+        let at = rest.indexOf(D.pin) + 1;
+        while (at < rest.length && rest[at].pin === D.pin) at++;
+        rest.splice(at, 0, D);
+      }
+      row.splice(0, row.length, ...rest);
+    };
+    rows.forEach(repin);
+
+    // ── ordering: barycentre sweeps, fewest crossings kept ──
+    const crossings = () => {
+      let total = 0;
+      for (let r = 0; r + 1 < nrows; r++) {
+        const pos = new Map(rows[r + 1].map((x, i) => [x, i]));
+        const es = [];
+        rows[r].forEach((u, i) => { for (const v of down.get(u) || []) if (pos.has(v)) es.push([i, pos.get(v)]); });
+        for (let a = 0; a < es.length; a++) for (let b = a + 1; b < es.length; b++)
+          if ((es[a][0] - es[b][0]) * (es[a][1] - es[b][1]) < 0) total++;
+      }
+      return total;
+    };
+    {
+      let best = rows.map(r => [...r]), bestCount = crossings(), stale = 0;
+      for (let sweep = 0; sweep < C.SWEEPS && bestCount > 0; sweep++) {
+        const downward = sweep % 2 === 0;
+        const order = [...rows.keys()];
+        if (!downward) order.reverse();
+        for (const r of order) {
+          const ref = rows[downward ? r - 1 : r + 1];
+          if (!ref) continue;
+          const pos = new Map(ref.map((x, i) => [x, i]));
+          const nb = downward ? up : down;
+          const cur = new Map(rows[r].map((x, i) => [x, i]));
+          const key = new Map(rows[r].map(x => {
+            const ps = (nb.get(x) || []).filter(p => pos.has(p)).map(p => pos.get(p));
+            return [x, ps.length ? ps.reduce((s, v) => s + v, 0) / ps.length : cur.get(x)];
+          }));
+          rows[r].sort((p, q) => key.get(p) - key.get(q) || cur.get(p) - cur.get(q));
+          repin(rows[r]);
+        }
+        const count = crossings();
+        if (count < bestCount) { bestCount = count; stale = 0; best = rows.map(r => [...r]); }
+        else if (++stale >= 2) break;
+      }
+      best.forEach((r, i) => { rows[i] = r; });
+    }
+
+    // ── extents ──
+    const used = new Map();   // card → rows its wires leave by
+    for (const w of W) if (w.row) {
+      if (!used.has(w.a)) used.set(w.a, new Set());
+      used.get(w.a).add(w.row);
+    }
+    for (const L of all) {
+      const u = used.has(L) ? used.get(L).size : 0;
+      L.margin = u ? C.ROW_OUT + C.ROW_STEP * (u - 1) + 10 : 0;
+      L.wl = L.w / 2 + L.margin; L.wr = L.w / 2 + L.margin;
+    }
+    const gap = (a, b) => (a.dummy && b.dummy ? C.GAP_DD : a.dummy || b.dummy ? C.GAP_DC : C.H_GAP);
+    const sep = (a, b) => a.wr + gap(a, b) + b.wl;
+
+    // ── x: centred seed, then children hang under parents ──
+    const cx = new Map();
+    {
+      const rowW = (row) => row.reduce((s, x, i) => s + (i ? sep(row[i - 1], x) : 0), 0)
+        + (row.length ? row[0].wl + row[row.length - 1].wr : 0);
+      const span = Math.max(...rows.map(rowW));
+      for (const row of rows) {
+        let c = (span - rowW(row)) / 2 + (row.length ? row[0].wl : 0);
+        row.forEach((x, i) => { if (i) c += sep(row[i - 1], x); cx.set(x, c); });
+      }
+    }
+    const spread = (row, want) => {
+      const cl = [];
+      row.forEach((_, k) => {
+        cl.push({m: [k], off: [0], first: want[k]});
+        while (cl.length > 1) {
+          const a = cl[cl.length - 2], b = cl[cl.length - 1];
+          const need = sep(row[a.m[a.m.length - 1]], row[b.m[0]]);
+          if (b.first - (a.first + a.off[a.off.length - 1]) >= need) break;
+          const base = a.off[a.off.length - 1] + need;
+          a.m.push(...b.m);
+          a.off.push(...b.off.map(o => base + o));
+          a.first = a.m.reduce((s, m, i) => s + want[m] - a.off[i], 0) / a.m.length;
+          cl.pop();
+        }
+      });
+      const out = new Array(row.length);
+      for (const c of cl) c.m.forEach((m, i) => { out[m] = c.first + c.off[i]; });
+      return out;
+    };
+    const align = (order, nb) => {
+      for (const r of order) {
+        const row = rows[r];
+        const want = row.map(x => {
+          const ps = (nb.get(x) || []).filter(p => cx.has(p));
+          return ps.length ? ps.reduce((s, p) => s + cx.get(p), 0) / ps.length : cx.get(x);
+        });
+        spread(row, want).forEach((v, i) => cx.set(row[i], v));
+      }
+    };
+    const idx = [...rows.keys()];
+    align(idx, up);
+    align([...idx].reverse(), down);
+    align(idx, up);
+
+    // knobs centre over what they hold
+    const isContent = (x) => !x.term;
+    {
+      const content = [].concat(...rows).filter(isContent);
+      if (inner && content.length) {
+        const lo = Math.min(...content.map(x => cx.get(x) - x.wl));
+        const hi = Math.max(...content.map(x => cx.get(x) + x.wr));
+        cx.set(S, (lo + hi) / 2); cx.set(E, (lo + hi) / 2);
+      }
+    }
+    {
+      const everything = [].concat(...rows);
+      const lo = Math.min(...everything.map(x => cx.get(x) - x.wl));
+      const shift = (inner ? 0 : C.MARGIN) - lo;
+      for (const x of everything) cx.set(x, cx.get(x) + shift);
+    }
+    const width = Math.max(...[].concat(...rows).map(x => cx.get(x) + x.wr)) + (inner ? 0 : C.MARGIN);
+
+    // ── y: rows as tall as their tallest card, channels between ──
+    const H = rows.map(row => Math.max(0, ...row.map(x => x.h || 0)));
+    const through = new Array(nrows).fill(0);   // wires in the channel below row r
+    for (const w of W) {
+      const lo = Math.min(w.a.layer, w.b.layer), hi = Math.max(w.a.layer, w.b.layer);
+      for (let r = lo; r < hi; r++) through[r]++;
+      if (lo === hi && w.back && lo > 0) through[lo - 1]++;
+    }
+    const G = through.map(n => C.V_GAP + Math.min(120, Math.max(0, n - 8) * 4));
+    const top = [];
+    let y = 0;
+    for (let r = 0; r < nrows; r++) { top.push(y); y += H[r] + G[r]; }
+    let oy = 0;
+    if (!inner) oy = C.MARGIN - (S ? top[1] || 0 : 0);
+    for (let r = 0; r < nrows; r++) top[r] += oy;
+    const height = top[nrows - 1] + H[nrows - 1] + (inner ? 0 : C.MARGIN);
+
+    for (const L of all) { L.cx = cx.get(L); L.y = top[L.layer]; }
+    for (const row of rows) for (const x of row) if (x.dummy) x.cx = cx.get(x);
+
+    return {N, S, E, W, rows, top, H, G, w: width, h: inner ? top[nrows - 1] + H[nrows - 1] : height, inner};
+  }
+
+  // ── absolute placement and wire paths ─────────────────────────────
+  function emit(lv, ox, oy, out) {
+    const item = new Map();
+    const place = (L) => {
+      const x = ox + L.cx - L.w / 2, y = oy + L.y;
+      let it;
+      if (L.kind === "container") {
+        it = {key: L.key, node: L.node, depth: L.depth, kind: "container", inner: true,
+              x, y: y + C.KB / 2, w: L.w, h: L.h - C.KB, box: {x, y, w: L.w, h: L.h}};
+        out.items.push(it);
+        const sub = emit(L.sub, x + (L.w - L.sub.w) / 2, y, out);
+        it.bIn = sub.get(L.sub.S); it.bOut = sub.get(L.sub.E);
+      } else {
+        it = {key: L.key, node: L.node, depth: L.depth, kind: L.kind, inner: null, x, y, w: L.w, h: L.h};
+        if (L.kind === "pill") out.pills.push(it); else out.items.push(it);
+      }
+      item.set(L, it);
+    };
+    if (lv.S) place(lv.S);
+    for (const L of lv.N) place(L);
+    if (lv.E) place(lv.E);
+
+    // condition rows: the side each one's wire leaves by, and its lane
+    const sideOf = new Map();
+    for (const L of lv.N) {
+      if (!L.rows || !L.rows.length) continue;
+      const it = item.get(L);
+      const mid = it.x + it.w / 2;
+      const backTo = new Set(lv.W.filter(w => w.a === L && w.back).map(w => w.b.node.name));
+      const sides = L.rows.map(r => {
+        const tgt = lv.N.find(o => o.node.name === r.target && o !== L);
+        const side = r.target === "__END__" ? -1
+          : !backTo.has(r.target) && tgt && ox + tgt.cx < mid ? -1 : 1;
+        return side;
+      });
+      L.rows.forEach((r, i) => sideOf.set(r, sides[i]));
+      out.rowSides.set(L.key, L.rows.map((r, i) => ({row: r, side: sides[i]})));
+    }
+    const laneOf = new Map();
+    {
+      const rowsUsed = new Map();
+      for (const w of lv.W) if (w.row && !w.back) {
+        if (!rowsUsed.has(w.a)) rowsUsed.set(w.a, []);
+        if (!rowsUsed.get(w.a).includes(w.row)) rowsUsed.get(w.a).push(w.row);
+      }
+      for (const [, used] of rowsUsed) {
+        for (const side of [-1, 1]) {
+          const mine = used.filter(r => sideOf.get(r) === side).sort((p, q) => p.top - q.top);
+          // upper rows take the outer lanes: no row's run crosses another's
+          mine.forEach((r, i) => laneOf.set(r, mine.length - 1 - i));
+        }
+      }
+    }
+
+    const T = (r) => oy + lv.top[r];
+    const B = (r) => oy + lv.top[r] + lv.H[r];
+    const X = (D) => ox + D.cx;
+    const portOut = (L) => { const it = item.get(L); return it.bOut || it; };
+    const portIn = (L) => { const it = item.get(L); return it.bIn || it; };
+
+    for (const w of lv.W) {
+      const A = portOut(w.a), Bt = w.back ? portIn(w.b) : portIn(w.b);
+      let p;
+      const fromRow = w.row && !(item.get(w.a).bOut);
+      const dot = fromRow ? {
+        x: A.x + (sideOf.get(w.row) < 0 ? w.row.left - 1 : w.row.left + w.row.w + 1),
+        y: A.y + w.row.top + w.row.h / 2,
+      } : null;
+      let label = null;
+      if (!w.back) {
+        const la = w.a.layer, lb = w.b.layer;
+        if (dot) {
+          const side = sideOf.get(w.row);
+          const lx = side < 0 ? A.x - C.ROW_OUT - C.ROW_STEP * laneOf.get(w.row)
+            : A.x + A.w + C.ROW_OUT + C.ROW_STEP * laneOf.get(w.row);
+          p = new Path(dot.x, dot.y);
+          p.turnInto(lx, 1, Math.max(1, Math.min(12, B(la) - dot.y)));
+        } else {
+          p = new Path(A.x + A.w / 2, A.y + A.h);
+        }
+        p.v(B(la));
+        for (const D of w.lanes) { p.to(X(D), T(D.layer)); p.v(B(D.layer)); }
+        p.to(Bt.x + Bt.w / 2, Bt.y);
+      } else {
+        const la = w.a.layer, lb = w.b.layer;
+        const x1 = dot ? dot.x : A.x + A.w, y1 = dot ? dot.y : A.y + A.h / 2;
+        const x2 = Bt.x + Bt.w, y2 = Bt.y + Bt.h / 2;
+        p = new Path(x1, y1);
+        const lanes = w.lanes;
+        if (la === lb) {
+          const [ds, dd] = lanes;
+          const q1 = Math.max(1, Math.min(12, y1 - T(la)));
+          p.turnInto(X(ds), -1, q1);
+          p.v(T(la));
+          const hop = Math.min(lv.G[la - 1] || C.V_GAP, C.V_GAP) * 0.6;
+          p.c(X(ds), T(la) - hop, X(dd), T(la) - hop, X(dd), T(la));
+          p.v(y2 - Math.max(1, Math.min(12, y2 - T(la))));
+          p.turnOut(x2, y2);
+        } else if (la > lb) {
+          p.turnInto(X(lanes[0]), -1, Math.max(1, Math.min(12, y1 - T(la))));
+          p.v(T(la));
+          for (let i = 1; i < lanes.length; i++) {
+            const D = lanes[i];
+            p.to(X(D), B(D.layer));
+            if (i < lanes.length - 1) p.v(T(D.layer));
+          }
+          p.v(y2 + Math.max(1, Math.min(12, B(lb) - y2)));
+          p.turnOut(x2, y2);
+        } else {
+          p.turnInto(X(lanes[0]), 1, Math.max(1, Math.min(12, B(la) - y1)));
+          p.v(B(la));
+          for (let i = 1; i < lanes.length; i++) {
+            const D = lanes[i];
+            p.to(X(D), T(D.layer));
+            if (i < lanes.length - 1) p.v(B(D.layer));
+          }
+          p.v(y2 - Math.max(1, Math.min(12, y2 - T(lb))));
+          p.turnOut(x2, y2);
+        }
+        const LL = w.labelLane;
+        label = {x: X(LL) + 18, y: (T(LL.layer) + B(LL.layer)) / 2};
+        if (LL.layer === la) label.y = Math.min(label.y, y1 - 14);
+      }
+      out.wires.push({
+        key: w.k, a: item.get(w.a), b: item.get(w.b), e: w.e, tie: w.tie, back: w.back,
+        fromRow: !!dot, row: w.row, d: p.d, pts: p.pts, label,
+      });
+    }
+    return item;
+  }
+
+  /* graph: an IR graph; opts.expanded: Set of opened container keys;
+   * opts.sizeOf(key, node) → {w, h, rows: [{target, route, left, top, w, h}]}.
+   * Returns absolute items (cards, containers, knobs), the main flow's
+   * pills, every wire with its path, and each decision card's row sides. */
+  function layout(graph, opts) {
+    const lv = buildLevel(graph, "", 0, opts, false);
+    const out = {items: [], pills: [], wires: [], rowSides: new Map(), w: lv.w, h: lv.h};
+    emit(lv, 0, 0, out);
+    out.start = out.pills.find(p => p.node.boundary === "start") || null;
+    out.end = out.pills.find(p => p.node.boundary === "end") || null;
+    return out;
+  }
+
+  const api = {layout, C};
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else global.FlowLayout = api;
+})(typeof window !== "undefined" ? window : globalThis);
