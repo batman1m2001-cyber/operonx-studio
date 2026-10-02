@@ -209,230 +209,22 @@ function ranInRun(n) {
   return !!state.run.ops[n.name];
 }
 
-/* ── placement: expansion opens a GraphOp in place ────────────────── */
+/* ── placement: flowlayout.js ─────────────────────────────────────── */
 
-/* The server lays every graph on a grid, nested graphs included. A
- * GraphOp the user opens becomes a container sized to its inner layout;
- * every column to its right and row below shifts by the growth, so the
- * grid stays a grid and nothing overlaps. Recursion makes a container
- * inside a container work for free. */
-/* An opened GraphOp shows its own ports as nodes: a START pill where
- * the outside's edges arrive, an END pill they leave from. The pills
- * ARE the GraphOp's boundary — inner entries hang off START, inner
- * exits feed END, and external edges plug into the pills instead of
- * the container's rim. */
-const B_W = 66, B_H = 28;   // the main flow's standalone terminal pills
-const KB = 26;              // a container's boundary KNOB
-const K_TOP = 18;           // room between the title strip and the first row
-
-function withBoundaries(model, key, depth) {
-  // An opened GraphOp's ports are KNOBS on its own border: START
-  // straddles the top edge (above the title strip), END the bottom.
-  // Outside wires plug into the knobs; the container's height is
-  // defined by END's centre, so the knob always sits on the edge.
-  for (const it of model.items) it.y += K_TOP;
-  const contentBottom = (model.h - 48) + K_TOP;
-  const midX = Math.max(6, (model.w - 48) / 2 - KB / 2);
-  const knob = (which, x, y) => ({
-    key: `${key}/__${which}`,
-    node: {id: `__${which}__`, name: which.toUpperCase(),
-           kind: "__boundary__", boundary: which, knob: true},
-    depth, inner: null, x, y, w: KB, h: KB,
-  });
-  const start = knob("start", midX, -HEADER - KB / 2);
-  const end = knob("end", midX, contentBottom + 22 - KB / 2);
-  const edges = [...model.edges];
-  for (const it of model.items) {
-    if (it.node.start) edges.push({src: "__start__", dst: it.node.id, boundary: true});
-    if (it.node.end) edges.push({src: it.node.id, dst: "__end__", boundary: true});
-  }
-  model.items.push(start, end);
-  // the knobs stay centred over the content; a loop's room widens the box
-  return {items: model.items, edges, w: model.w + (model.loopRoom || 0), h: end.y + KB / 2};
-}
-
-/* An opened container grows its column, and the shift keeps the grid a
- * grid — but the rows beneath were placed for closed cards, so a card fed
- * by the container and its siblings sat far off to one side of them and
- * its wires swept across each other. Below the first opened card, each row
- * hangs under its feeders again (real widths, order kept, a gap between
- * cards), the way the server laid the closed graph. Nothing open: nothing
- * moves. */
-function hangUnderOpened(items, edges) {
-  const opened = items.filter(it => it.inner);
-  if (!opened.length) return 0;
-  const top = Math.min(...opened.map(it => it.y));
-  const byId = new Map(items.map(it => [it.node.id, it]));
-  const feeders = new Map();
-  for (const e of edges) {
-    if (e.back) continue;
-    const a = byId.get(e.src), b = byId.get(e.dst);
-    if (!a || !b || a.y >= b.y) continue;
-    if (!feeders.has(b)) feeders.set(b, new Set());
-    feeders.get(b).add(a);
-  }
-  const rows = new Map();
-  for (const it of items) if (it.y > top) {
-    if (!rows.has(it.y)) rows.set(it.y, []);
-    rows.get(it.y).push(it);
-  }
-  const GAP = 56;
-  for (const y of [...rows.keys()].sort((p, q) => p - q)) {
-    const row = rows.get(y).sort((p, q) => p.x - q.x);
-    const want = row.map(it => {
-      const f = [...(feeders.get(it) || [])];
-      return f.length ? f.reduce((s, a) => s + a.x + a.w / 2, 0) / f.length : it.x + it.w / 2;
-    });
-    // order-preserving clusters, each centred on its members' wishes
-    const clusters = [];
-    row.forEach((it, k) => {
-      clusters.push({m: [k], off: [0], first: want[k]});
-      while (clusters.length > 1) {
-        const a = clusters[clusters.length - 2], b = clusters[clusters.length - 1];
-        const la = row[a.m[a.m.length - 1]], fb = row[b.m[0]];
-        const need = (la.w + fb.w) / 2 + GAP;
-        if (b.first - (a.first + a.off[a.off.length - 1]) >= need) break;
-        const base = a.off[a.off.length - 1] + need;
-        a.m.push(...b.m);
-        a.off.push(...b.off.map(o => base + o));
-        a.first = a.m.reduce((s, m, i) => s + want[m] - a.off[i], 0) / a.m.length;
-        clusters.pop();
-      }
-    });
-    for (const c of clusters) c.m.forEach((m, i) => { row[m].x = c.first + c.off[i] - row[m].w / 2; });
-  }
-  // back to the margin, from either side. Each opened card widens every
-  // column right of its own x, and the layout's x is continuous (no grid),
-  // so in a stack of opened cards (qc sentiment_agent, all open) the top
-  // one had been pushed right by the sum of the ones below — 2500 px of
-  // empty canvas on its left. Returns the shift, so the lanes follow it.
-  const minX = Math.min(...items.map(it => it.x));
-  const dx = 48 - minX;
-  if (Math.abs(dx) > 0.5) for (const it of items) it.x += dx;
-  return Math.abs(dx) > 0.5 ? dx : 0;
-}
-
-function placeGraph(g, prefix, depth) {
-  const size = new Map();
-  for (const n of g.nodes) {
-    const key = prefix + n.id;
-    let inner = null, w = NODE_W, h = NODE_H;
-    if (n.graph && state.expanded.has(key)) {
-      inner = withBoundaries(placeGraph(n.graph, key + "/", depth + 1), key, depth + 1);
-      w = Math.max(NODE_W + 40, inner.w);
-      h = inner.h + HEADER;
-    }
-    size.set(n.id, {key, w, h, inner});
-  }
-
-  const xs = [...new Set(g.nodes.map(n => n.x))].sort((a, b) => a - b);
-  const ys = [...new Set(g.nodes.map(n => n.y))].sort((a, b) => a - b);
-  const extraX = new Map(xs.map(x => [x, 0]));
-  const extraY = new Map(ys.map(y => [y, 0]));
-  for (const n of g.nodes) {
-    const s = size.get(n.id);
-    extraX.set(n.x, Math.max(extraX.get(n.x), s.w - NODE_W));
-    extraY.set(n.y, Math.max(extraY.get(n.y), s.h - NODE_H));
-  }
-  const shiftX = new Map(); let acc = 0;
-  for (const x of xs) { shiftX.set(x, acc); acc += extraX.get(x); }
-  const shiftY = new Map(); acc = 0;
-  for (const y of ys) { shiftY.set(y, acc); acc += extraY.get(y); }
-
-  const items = [];
-  for (const n of g.nodes) {
-    const s = size.get(n.id);
-    items.push({key: s.key, node: n, depth, inner: s.inner,
-                x: n.x + shiftX.get(n.x), y: n.y + shiftY.get(n.y),
-                w: s.w, h: s.h});
-  }
-  const hungDX = hangUnderOpened(items, g.edges || []);
-  let maxX = NODE_W, maxY = NODE_H;
-  for (const it of items) {
-    maxX = Math.max(maxX, it.x + it.w);
-    maxY = Math.max(maxY, it.y + it.h);
-  }
-  // An opened graph holds its own loops: a return bulges right of its
-  // cards (returnPath: 56 px + 8% of its height, a card may grow 25 px
-  // past its slot) with its "↺ loop" label beyond. Its box keeps room
-  // for both, or the wire left the container (ex09's loop). The top
-  // level has the extent's margin instead.
-  let loopRoom = 0;
-  if (depth > 0) {
-    const byId = new Map(items.map(it => [it.node.id, it]));
-    for (const e of g.edges || []) {
-      const a = e.back && byId.get(e.src), b = e.back && byId.get(e.dst);
-      if (!a || !b) continue;
-      const dy = Math.abs((a.y + a.h / 2) - (b.y + b.h / 2));
-      // a member between the two that reaches further right (an opened
-      // subgraph inside the loop) pushes the return out past it (returnRoute)
-      const top = Math.min(a.y, b.y), bot = Math.max(a.y + a.h, b.y + b.h);
-      const between = items.filter(it => it !== a && it !== b && it.y + it.h > top && it.y < bot);
-      const reach = Math.max(0, ...between.map(it => it.x + it.w + 6 + 48));
-      const need = Math.max(Math.max(a.x + a.w, b.x + b.w) + 25 + 56 + dy * 0.08, reach) + 34;
-      loopRoom = Math.max(loopRoom, Math.ceil(need - (maxX + 48)));
-    }
-  }
-  // a long edge's lane (the layout's dummies) shifts with every column
-  // whose card sits left of it — the gap it was given stays a gap
-  const laneShift = (vx) => {
-    let s = 0;
-    for (const x of xs) if (x + NODE_W / 2 < vx) s += extraX.get(x);
-    return s + hungDX;
-  };
-  const edges = (g.edges || []).map(e => (e.via && e.via.length
-    ? {...e, viaX: e.via.map(v => v + laneShift(v))} : e));
-  return {items, edges, w: maxX + 48, h: maxY + 48, loopRoom};
-}
-
-function flattenModel(model, ox, oy, out) {
-  const abs = new Map();
-  for (const it of model.items) {
-    const a = {...it, x: it.x + ox, y: it.y + oy};
-    abs.set(it.node.id, a);
-    out.nodes.push(a);
-    state.rendered.set(a.key, a);
-    if (it.inner) {
-      flattenModel(it.inner, a.x, a.y + HEADER, out);
-      // the pills stand for the container: outside edges plug into them
-      a.bIn = state.rendered.get(it.key + "/__start") || null;
-      a.bOut = state.rendered.get(it.key + "/__end") || null;
-    }
-  }
-  for (const e of model.edges) {
-    const a = abs.get(e.src), b = abs.get(e.dst);
-    if (a && b) out.edges.push({e, a, b, via: e.viaX ? e.viaX.map(v => v + ox) : null});
-  }
-  return out;
-}
-
-/* ── edge geometry (top-down: out of the bottom, into the top) ───── */
+/* Every card of every open level is placed by ONE compound layout
+ * (FlowLayout.layout, static/flowlayout.js), from the cards' real sizes:
+ * an opened GraphOp is laid out with its siblings as one node of its real
+ * size, its START/END knobs on its border, and each wire follows the lane
+ * the placement reserved for it — no wire is routed around a card after
+ * the fact. */
+const B_H = 28;   // the main flow's standalone terminal pills
 
 const portCX = (it) => it.x + it.w / 2;
 
-/* Smooth shapes for the routes that used to jog: curve, straight run,
- * curve. All M and C, so pathSampler and the sparks follow them. */
-
-// two S-curves meeting at (lane, ym) with a vertical tangent there: C1, no straight run
-function sLane(x1, y1, lane, x2, y2, ym = (y1 + y2) / 2) {
-  const q1 = (ym - y1) / 2, q2 = (y2 - ym) / 2;
-  return `M ${x1} ${y1} C ${x1} ${y1 + q1}, ${lane} ${ym - q1}, ${lane} ${ym}`
-    + ` C ${lane} ${ym + q2}, ${x2} ${y2 - q2}, ${x2} ${y2}`;
-}
-
-// does a drawn path pass through any of these boxes?
-function _pathHits(d, rects) {
-  const s = pathSampler(d);
-  if (!s) return false;
-  const pts = [];
-  for (let v = 6; v < s.len - 6; v += 10) { const q = s.at(v); pts.push([q.x, q.y]); }
-  return _hits(pts, rects);
-}
-
+// a plain curve: the serve transport's fan to the entries
 function bezier(x1, y1, x2, y2) {
   const gap = Math.abs(y2 - y1);
   // dead vertical: straight, drawn as a curve like every other wire
-  // (handles along its own direction, up or down)
   if (Math.abs(x2 - x1) < 3) {
     const k = (y2 - y1) / 3;
     return `M ${x1} ${y1} C ${x1} ${y1 + k}, ${x2} ${y2 - k}, ${x2} ${y2}`;
@@ -441,312 +233,6 @@ function bezier(x1, y1, x2, y2) {
   // overshoots both ends and folds the wire into a kink
   const dy = gap < 80 ? gap * 0.45 : Math.max(40, gap / 2);
   return `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`;
-}
-
-/* ── obstacle avoidance ───────────────────────────────────────────────
- * An edge through the middle of an unrelated node is a lie about the
- * graph. Every forward edge is collision-tested against the node boxes;
- * a dirty one reroutes through the clear horizontal channel between
- * rows, or failing that, bows around the obstacle. */
-
-function _cubic(p0, p1, p2, p3, t) {
-  const u = 1 - t;
-  return [
-    u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0],
-    u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1],
-  ];
-}
-
-function _hits(points, rects) {
-  for (const [x, y] of points) {
-    for (const r of rects) {
-      if (x > r.l && x < r.r && y > r.t && y < r.b) return true;
-    }
-  }
-  return false;
-}
-
-function _sampleCubic(x1, y1, cx1, cy1, cx2, cy2, x2, y2) {
-  // sample by LENGTH, not by a fixed count — fifteen points on a
-  // 900px edge leaves 60px blind spots, wide enough to miss a node
-  const span = Math.abs(x2 - x1) + Math.abs(y2 - y1);
-  const steps = Math.min(140, Math.max(14, Math.round(span / 20)));
-  const pts = [];
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps;
-    pts.push(_cubic([x1, y1], [cx1, cy1], [cx2, cy2], [x2, y2], t));
-  }
-  return pts;
-}
-
-function _rects(obstacles, a, b) {
-  // An opened container is solid ground to every edge that has no
-  // business inside it — through-traffic must route around the box.
-  // Only an edge whose endpoint lives INSIDE (a member, or the START/
-  // END pill an external edge was rerouted to) may cross the membrane.
-  const inside = (o, it) => it && it.x >= o.x - 1 && it.y >= o.y - 1
-    && it.x + it.w <= o.x + o.w + 1 && it.y + it.h <= o.y + o.h + 1;
-  const out = [];
-  let holder = null;
-  for (const o of obstacles) {
-    if (o === a || o === b) continue;
-    if (o.inner && (inside(o, a) || inside(o, b))) {
-      if (!holder || o.w * o.h < holder.w * holder.h) holder = o;
-      continue;
-    }
-    out.push({l: o.x - 6, r: o.x + o.w + 6, t: o.y - 6, b: o.y + o.h + 6});
-  }
-  // ...and a wire between members stays in their box: its side walls are
-  // obstacles too, so no detour swings out through them (ex05's agent)
-  if (holder) {
-    out.push({l: -1e6, r: holder.x + 4, t: -1e6, b: 1e6, wall: true});
-    out.push({l: holder.x + holder.w - 4, r: 1e6, t: -1e6, b: 1e6, wall: true});
-  }
-  return out;
-}
-
-/* Lane bookkeeping, reset per render: crossing edges are legible,
- * COINCIDENT edges are mud. Every claimed vertical lane is recorded,
- * and the next edge that wants the same corridor gets the nearest free
- * offset instead of stacking on top. */
-let _lanes = {v: []};
-
-function _vFree(x, t, b) {
-  return !_lanes.v.some(o => Math.abs(o.x - x) < 11 && o.b > t && o.t < b);
-}
-
-/* A clear vertical lane through the y-band, nearest the preferred x.
- * Candidates come from the actual obstacle silhouette (their left and
- * right flanks), because centred rows have no global column grid. */
-function _clearLaneX(rects, top, bottom, prefer) {
-  const band = rects.filter(o => o.b > top && o.t < bottom);
-  const cands = [prefer];
-  for (const o of band) cands.push(o.l - 16, o.r + 16);
-  cands.sort((m, n) => Math.abs(m - prefer) - Math.abs(n - prefer));
-  for (const cand of cands) {
-    for (let step = 0; step <= 6; step++) {
-      for (const off of step ? [step * 13, -step * 13] : [0]) {
-        const x = cand + off;
-        const blocked = band.some(o => o.l < x + 8 && o.r > x - 8);
-        if (!blocked && _vFree(x, top, bottom)) {
-          _lanes.v.push({x, t: top, b: bottom});
-          return x;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function routeAvoiding(a, b, obstacles, via) {
-  // one anchor per card: every wire leaves the bottom centre and lands on
-  // the top centre; wires fan apart along their way, not at the card
-  const x1 = portCX(a), y1 = a.y + a.h, x2 = portCX(b), y2 = b.y;
-  const dy = Math.max(40, Math.abs(y2 - y1) / 2);
-  const rects = _rects(obstacles, a, b);
-
-  // A long edge has its own lane: the gap the layout held open for it in
-  // every row it passes. Down that lane in one smooth S, when it is clear.
-  if (via && via.length && y2 - y1 > 60) {
-    const want = via.reduce((s, v) => s + v, 0) / via.length;
-    // a taken lane gives way on the side the wire comes from, so two
-    // neighbours sharing a gap never swap sides and cross
-    const s = x1 < want ? -1 : 1;
-    for (const off of [0, 11 * s, -11 * s, 22 * s, -22 * s]) {
-      const lane = want + off;
-      if (!_vFree(lane, y1 + 30, y2 - 30)) continue;
-      if (Math.abs(lane - x1) < 3 && Math.abs(lane - x2) < 3) {
-        const d = bezier(x1, y1, x2, y2);
-        if (_pathHits(d, rects)) continue;
-        _lanes.v.push({x: lane, t: y1 + 30, b: y2 - 30});
-        return d;
-      }
-      // one S across the whole span, or — when that diagonal would cut a
-      // card — turn into the lane early, run down it, turn out late
-      const h = Math.min(160, (y2 - y1) / 3);
-      const down = (ya, yb) => { const k = (yb - ya) / 3; return ` C ${lane} ${ya + k}, ${lane} ${yb - k}, ${lane} ${yb}`; };
-      const turned = (hi, ho) => `M ${x1} ${y1} C ${x1} ${y1 + hi / 2}, ${lane} ${y1 + hi / 2}, ${lane} ${y1 + hi}`
-        + down(y1 + hi, y2 - ho) + ` C ${lane} ${y2 - ho / 2}, ${x2} ${y2 - ho / 2}, ${x2} ${y2}`;
-      // the turn out fits the gap above the target: try it tall, then tighter
-      for (const d of [sLane(x1, y1, lane, x2, y2), turned(h, h), turned(h, 90), turned(h, 56),
-                       turned(90, 56), turned(56, 56)]) {
-        if (_pathHits(d, rects)) continue;
-        _lanes.v.push({x: lane, t: y1 + 30, b: y2 - 30});
-        return d;
-      }
-    }
-  }
-  const long = y2 - y1 > 200;
-  const vertical = Math.abs(x1 - x2) < 18;
-
-  // A straight shot is only kept when it hits nothing AND, for a long
-  // near-vertical run, when no other edge already owns that corridor —
-  // two skips accepted "straight" used to lie exactly on each other.
-  const straight = _sampleCubic(x1, y1, x1, y1 + dy, x2, y2 - dy, x2, y2);
-  if (!_hits(straight, rects)) {
-    if (!(long && vertical) || _vFree(x1, y1 + 20, y2 - 20)) {
-      if (long && vertical) _lanes.v.push({x: x1, t: y1 + 20, b: y2 - 20});
-      return bezier(x1, y1, x2, y2);
-    }
-  }
-
-  // Two escapes: a smooth bow, or a jogged vertical side-lane. A short
-  // hop looks best bowed; a long haul looks best in a straight lane —
-  // try in that order, fall back to the other.
-  const bow = () => {
-    const stepX = NODE_W / 2 + 64;
-    for (const off of [-stepX, stepX, -2 * stepX, 2 * stepX]) {
-      const pts = _sampleCubic(x1, y1, x1 + off, y1 + dy, x2 + off, y2 - dy, x2, y2);
-      if (!_hits(pts, rects)) {
-        return `M ${x1} ${y1} C ${x1 + off} ${y1 + dy}, ${x2 + off} ${y2 - dy}, ${x2} ${y2}`;
-      }
-    }
-    return null;
-  };
-  const laneRoute = () => {
-    if (!long) return null;
-    const lane = _clearLaneX(rects, y1 + 50, y2 - 50, (x1 + x2) / 2);
-    if (lane === null) return null;
-    const smooth = sLane(x1, y1, lane, x2, y2);
-    if (!_pathHits(smooth, rects)) return smooth;
-    return `M ${x1} ${y1} C ${x1} ${y1 + 46}, ${lane} ${y1 + 46}, ${lane} ${y1 + 100}`
-      + ` L ${lane} ${y2 - 100}`
-      + ` C ${lane} ${y2 - 46}, ${x2} ${y2 - 46}, ${x2} ${y2}`;
-  };
-  // A short near-vertical hop blocked by a card in its own column steps
-  // aside just past that card and back. The bow is one symmetric curve:
-  // to clear an op sitting low in a short gap (a loop's router tying to
-  // END over the op beneath it) it swung ~270 px out, and out of its
-  // container.
-  const sideStep = () => {
-    if (Math.abs(x2 - x1) >= 40) return null;
-    const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
-    const block = rects.filter(o => !o.wall && o.l < hi + 8 && o.r > lo - 8 && o.b > y1 && o.t < y2);
-    if (!block.length) return null;
-    const bt = Math.min(...block.map(o => o.t)), bb = Math.max(...block.map(o => o.b));
-    if (bt - y1 < 16 || y2 - bb < 16) return null;   // no room to turn
-    const lane = _clearLaneX(rects, bt, bb, (x1 + x2) / 2);
-    if (lane === null) return null;
-    const q1 = (bt - y1) / 2, q2 = (y2 - bb) / 2;
-    if (_hits(_sampleCubic(x1, y1, x1, y1 + q1, lane, bt - q1, lane, bt), rects)
-        || _hits(_sampleCubic(lane, bb, lane, bb + q2, x2, y2 - q2, x2, y2), rects)) {
-      _lanes.v.pop();   // the turns are blocked: give the lane back
-      return null;
-    }
-    const smooth = sLane(x1, y1, lane, x2, y2, (bt + bb) / 2);
-    if (!_pathHits(smooth, rects)) return smooth;
-    return `M ${x1} ${y1} C ${x1} ${y1 + q1}, ${lane} ${bt - q1}, ${lane} ${bt}`
-      + ` L ${lane} ${bb}`
-      + ` C ${lane} ${bb + q2}, ${x2} ${y2 - q2}, ${x2} ${y2}`;
-  };
-  // Drop, then swing: fall straight down the source's own column to the
-  // clear channel just above the target's row, and sweep across that
-  // channel into the target's port. The fall meets the sweep with the
-  // same vertical tangent, so the wire is one smooth stroke. This is
-  // how a fan-in reads in a flowchart — the bow's S-curve swung each
-  // feeder out of its column and across its neighbours (prepare's six
-  // feeders into `facts`, which sits right under `website`).
-  const dropSwing = () => {
-    if (y2 - y1 < 60) return null;
-    const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
-    const above = rects.filter(o => !o.wall && o.b > y1 && o.b <= y2 + 1
-      && o.l < hi + 8 && o.r > lo - 8);
-    const yA = Math.max(y1 + 18, above.length ? Math.max(...above.map(o => o.b)) + 4 : y1 + 18);
-    if (y2 - yA < 30) return null;
-    const fall = [];
-    for (let y = y1 + 8; y < yA; y += 12) fall.push([x1, y]);
-    if (_hits(fall, rects)) return null;
-    const k = (y2 - yA) * 0.55;
-    if (_hits(_sampleCubic(x1, yA, x1, yA + k, x2, y2 - k, x2, y2), rects)) return null;
-    if (yA - y1 > 80) {
-      if (!_vFree(x1, y1 + 20, yA)) return null;
-      _lanes.v.push({x: x1, t: y1 + 20, b: yA});
-    }
-    return `M ${x1} ${y1} L ${x1} ${yA} C ${x1} ${yA + k}, ${x2} ${y2 - k}, ${x2} ${y2}`;
-  };
-  const shortHop = y2 - y1 < 480;
-  return (shortHop ? (sideStep() ?? dropSwing() ?? bow() ?? laneRoute())
-    : (laneRoute() ?? dropSwing() ?? bow()))
-    ?? bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
-}
-
-function returnPath(a, b, from, rects) {
-  // A loop's return edge: out of the source's right flank (or, from a
-  // decision card, out of its own row's dot: `from`), bowing up the right
-  // margin, back into the target's right flank. Drawn differently from a
-  // forward edge on purpose — this is the arrow that makes an agent
-  // while-loop look like what the author wrote instead of one opaque
-  // compiler box.
-  const x1 = from ? from.x : a.x + a.w, y1 = from ? from.y : a.y + a.h / 2;
-  const x2 = b.x + b.w, y2 = b.y + b.h / 2;
-  return returnRoute(x1, y1, x2, y2, rects).d;
-}
-
-// The return's shape, and how far right it reaches (`x`, for its label).
-// Normally one bow past its own two cards. When a card or an opened
-// GraphOp between them sticks out further (a subgraph inside the loop —
-// agent zones), the bow would cut through it: then the return turns out
-// into its own lane right of everything in its span, runs up it, and turns
-// back in — still all C, so sparks and dots follow it. The box the loop
-// lives in (a wall) and a box holding either end (the opened GraphOp whose
-// START pill the return re-enters) are not in its way.
-function returnRoute(x1, y1, x2, y2, rects) {
-  const base = Math.max(x1, x2) + 56 + Math.abs(y1 - y2) * 0.08;
-  const bow = `M ${x1} ${y1} C ${base} ${y1}, ${base} ${y2}, ${x2} ${y2}`;
-  const holds = (r, x, y) => x >= r.l && x <= r.r && y >= r.t && y <= r.b;
-  const solid = (rects || []).filter(r => !r.wall && !holds(r, x1, y1) && !holds(r, x2, y2));
-  if (!solid.length || !_pathHits(bow, solid)) return {d: bow, x: base};
-  const lo = Math.min(y1, y2), hi = Math.max(y1, y2);
-  const span = solid.filter(r => r.b > lo && r.t < hi);
-  let lane = Math.max(x1, x2, ...span.map(r => r.r)) + 28;
-  const ry = Math.min(70, Math.abs(y1 - y2) / 4);
-  const up = y2 < y1 ? -1 : 1;
-  for (let k = 0; k < 6; k++, lane += 16) {
-    const ya = y1 + up * ry, yb = y2 - up * ry, q = (yb - ya) / 3;
-    const d = `M ${x1} ${y1} C ${lane} ${y1}, ${lane} ${y1}, ${lane} ${ya}`
-      + ` C ${lane} ${ya + q}, ${lane} ${yb - q}, ${lane} ${yb}`
-      + ` C ${lane} ${y2}, ${lane} ${y2}, ${x2} ${y2}`;
-    if (!_pathHits(d, solid)) return {d, x: lane + 14};
-  }
-  return {d: bow, x: base};
-}
-
-// where a decision card's condition row puts its wire: the row's dot,
-// in canvas coordinates
-function rowDot(A, port) {
-  return {x: A.x + (port.x != null ? port.x : (port.side > 0 ? A.w : 0)), y: A.y + port.y};
-}
-
-/* A wire out of a decision card's condition row to a port at (x2, y2):
- * it departs AT the row's dot, horizontal tangent out, vertical tangent
- * in; control distances scale with the actual gap, so a near neighbour
- * gets a tight elbow, not a balloon. */
-function rowWirePath(A, port, x2, y2, bend = 1, lane = 0) {
-  const side = port.side;
-  const {x: x1, y: y1} = rowDot(A, port);
-  // `bend` < 1 shortens the arrival handle: several routes into ONE
-  // target each get their own, so they fan apart before the shared port
-  // instead of lying on top of each other
-  const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5)) * (2 - bend);
-  const c2 = Math.max(26, Math.min(72, Math.max(1, y2 - y1) * 0.5)) * bend;
-  // tangent tilts slightly toward the target, so the wire reads
-  // "leaving this row, heading there" instead of bowing sideways
-  const dip = Math.max(4, Math.min(22, (y2 - y1) * 0.15));
-  const bottom = A.y + A.h;
-  if (y2 > bottom && x2 > A.x - 12 && x2 < A.x + A.w + 12) {
-    // the target lies under the card: one curve from the dot to it
-    // bent back through the card's own lower rows. Step out beside
-    // the card and below its bottom first, then drop into the
-    // target — every point of the second half is under the card.
-    // several routes into one target step out in their own lane (route
-    // rank, 8 px apart), so they stay three wires down the side, not one
-    const lx = side > 0 ? A.x + A.w + 14 + 8 * lane : A.x - 14 - 8 * lane;
-    const yb = bottom + Math.min(18, Math.max(6, (y2 - bottom) * 0.3));
-    const k = (y2 - yb) / 2;
-    return `M ${x1} ${y1} C ${lx} ${y1}, ${lx} ${y1}, ${lx} ${yb}`
-      + ` C ${lx} ${yb + k}, ${x2} ${y2 - k}, ${x2} ${y2}`;
-  }
-  return `M ${x1} ${y1} C ${x1 + side * c1} ${y1 + dip}, ${x2} ${y2 - c2}, ${x2} ${y2}`;
 }
 
 /* A wire that starts at a row's dot starts INSIDE its card — but edges
@@ -786,38 +272,7 @@ function overCard(A, made) {
   made.push(...over);
 }
 
-/* A tie out of a decision card's row into END: out of the row's dot,
- * down a clear lane beside the card, along above END and down into its
- * port, like every wire. It stays off the cards between: a straight fall
- * ran under the op beneath the router, and the router's bow swung 250 px
- * wide. The lane steps outward past anything in its way; if none is
- * clear, the tie routes like any other. */
-function rowTiePath(A, port, b, obstacles) {
-  const {x: x0, y: y0} = rowDot(A, port);
-  const rects = _rects(obstacles, A, b);
-  const x2 = portCX(b), y2 = b.y;
-  const clear = (l, r, t, bt) => !rects.some(q => q.l < r && q.r > l && q.t < bt && q.b > t);
-  for (let step = 0; step < 6; step++) {
-    const lx = port.side > 0 ? A.x + A.w + 14 + 24 * step : A.x - 14 - 24 * step;
-    const dir = x2 >= lx ? 1 : -1, r = Math.min(14, Math.abs(x2 - lx) / 2);
-    const yh = y2 - r - 6;
-    if (r < 4 || yh - r < y0 + 14) break;
-    if (!clear(lx - 2, lx + 2, y0 + 14, yh) || !clear(Math.min(lx, x2), Math.max(lx, x2), yh - 2, yh + 2)) continue;
-    const ya = y0 + 18, q = (y2 - ya) / 2;
-    const smooth = `M ${x0} ${y0} C ${lx} ${y0}, ${lx} ${y0}, ${lx} ${ya}`
-      + ` C ${lx} ${ya + q}, ${x2} ${y2 - q}, ${x2} ${y2}`;
-    if (!_pathHits(smooth, rects)) return smooth;
-    return `M ${x0} ${y0} C ${lx} ${y0}, ${lx} ${y0}, ${lx} ${y0 + 14} L ${lx} ${yh - r}`
-      + ` C ${lx} ${yh - r * 0.45}, ${lx + dir * r * 0.45} ${yh}, ${lx + dir * r} ${yh} L ${x2 - dir * r} ${yh}`
-      + ` C ${x2 - dir * r * 0.45} ${yh}, ${x2} ${yh + r * 0.45}, ${x2} ${yh + r} L ${x2} ${y2}`;
-  }
-  const v = {x: (port.side > 0 ? A.x + A.w + 14 : A.x - 14) - 1, y: y0 + 14, w: 2, h: 0, node: {}};
-  const rest = routeAvoiding(v, b, obstacles).replace(/^M\s*-?[\d.]+[\s,]+-?[\d.]+/, "");
-  return `M ${x0} ${y0} C ${v.x + 1} ${y0}, ${v.x + 1} ${y0}, ${v.x + 1} ${y0 + 14}${rest}`;
-}
 
-// a decision card's row for a route into END: its tie leaves that row
-const exitRow = (it) => (it && it.node.routes && it.condPorts ? it.condPorts.__END__ || null : null);
 
 function consumeOf(edge, a, b) {
   // `.parallel()` / `.collect()` live on the CONSUMER's binding: find the
@@ -1039,72 +494,36 @@ function render() {
   state.rendered.clear();
   state.cardEls.clear();
   state.edgeEls = [];
-  _lanes = {v: []};
 
-  const model = placeGraph(g, "", 0);
-  const flat = flattenModel(model, 0, 0, {nodes: [], edges: []});
-
-  // The serve boundary stands apart from the flow: ingress pulled left,
-  // egress pushed right, each in its own tinted band — the picture reads
-  // client → ingress → flow → egress → client.
-  const gatesIn = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "ingress");
-  const gatesOut = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "egress");
-  // A door steps OUT of the flow only when it truly stands on the
-  // boundary: an ingress nothing in the flow feeds, an egress that
-  // feeds nothing. A door with a flow neighbour on its boundary side
-  // (seed first, then the door) is one step of the sequence and keeps
-  // its row — lifting it regardless dragged it up beside its feeder
-  // and drew the feeding wire flat across the row gap.
-  const flowEdge = (x) => !x.e.back && x.a.depth === 0 && x.b.depth === 0;
-  const fedByFlow = (it) => flat.edges.some(x => flowEdge(x) && x.b === it);
-  const feedsFlow = (it) => flat.edges.some(x => flowEdge(x) && x.a === it);
-  for (const x of gatesIn) {
-    if (fedByFlow(x)) continue;
-    // only step up when the lane above is actually clear
-    const clash = flat.nodes.some(o => o !== x && !o.inner
-      && o.x < x.x + x.w && o.x + o.w > x.x
-      && o.y + o.h < x.y + 1 && o.y + o.h > x.y - 100);
-    if (!clash) x.y -= 70;
-  }
-  for (const x of gatesOut) {
-    if (feedsFlow(x)) continue;
-    // the egress is not always on the last row — only step down out of
-    // the flow when the lane below is actually clear
-    const clash = flat.nodes.some(o => o !== x && !o.inner
-      && o.x < x.x + x.w && o.x + o.w > x.x
-      && o.y > x.y && o.y < x.y + x.h + 100);
-    if (!clash) x.y += 70;
-  }
-
-  // Cards go into the DOM FIRST, so every edge, frame and stub below
-  // works from each card's REAL height — the layout's 64px is only a
-  // guess, and a door wearing a transport line runs ~90px tall. The
-  // old order anchored edges into the middle of tall cards.
-  for (const it of flat.nodes) {
-    const card = it.inner ? containerCard(it) : opCard(it);
-    state.cardEls.set(it.key, card);
+  // ── cards first, measured; then ONE layout places everything ──
+  // Every card goes into the DOM before anything is placed: the layout
+  // (flowlayout.js) works from each card's REAL size — its name line, a
+  // decision card's condition rows — and reserves a clear path for every
+  // wire around exactly those boxes. Nothing moves after it: an opened
+  // GraphOp is laid out with its siblings, not shifted into them.
+  const leaves = [];
+  (function walk(gr, prefix, depth) {
+    for (const n of gr.nodes || []) {
+      const key = prefix + n.id;
+      if (n.graph && state.expanded.has(key)) walk(n.graph, key + "/", depth + 1);
+      else leaves.push({key, node: n, depth, inner: null, x: 0, y: 0, w: NODE_W, h: NODE_H});
+    }
+  })(g, "", 0);
+  const cardOf = new Map();
+  for (const it of leaves) {
+    const card = opCard(it);
+    cardOf.set(it.key, card);
     nodesBox.append(card);
   }
-  // WIDTH pass first — the root fix for every truncation whack-a-mole:
-  // a card is exactly as wide as its name line (and, on a decision
-  // card, its longest condition) needs, no wider. scrollWidth minus
-  // clientWidth on the one-line elements says how much is missing
-  // (positive) or spare (negative); the card resizes by that amount,
-  // clamped, and KEEPS ITS SLOT CENTER so the layout's spacing holds —
-  // slack between 316px slots absorbs growth up to the cap.
-  //
-  // Reads and writes are BATCHED: measuring card by card (write a style,
-  // read a width, write it back, read again) forced a full layout of the
-  // canvas twice per card — 202 forced layouts, ~85 of the 108 ms a render
-  // of callbot took (measured, docs/REFACTOR_PHASE2.md P4). One class
-  // switches every measured line to max-content at once; all widths are
-  // read in one layout, all laid-out widths in a second, and only then is
-  // anything written.
+  // WIDTH pass first: a card is exactly as wide as its name line (and, on
+  // a decision card, its longest condition) needs, clamped 180–310.
+  // Reads and writes are BATCHED: one class switches every measured line
+  // to max-content at once, all widths are read in one layout, all
+  // laid-out widths in a second, and only then is anything written
+  // (docs/REFACTOR_PHASE2.md P4).
   const measured = [];
-  for (const it of flat.nodes) {
-    if (it.inner || it.node.kind === "__boundary__") continue;
-    const card = state.cardEls.get(it.key);
-    if (!card) continue;
+  for (const it of leaves) {
+    const card = cardOf.get(it.key);
     let els = [...card.querySelectorAll(".ntext, .brcond")];
     // gates: plain name line, plus the transport line below it
     if (!els.length) els = [".nname", ".nkind"].map(sel => card.querySelector(sel)).filter(Boolean);
@@ -1114,216 +533,77 @@ function render() {
   const natural = measured.map(m => m.els.map(e => e.offsetWidth));
   nodesBox.classList.remove("measuring");
   const laidOut = measured.map(m => ({shown: !!m.card.offsetHeight, widths: m.els.map(e => e.clientWidth)}));
-  const resize = (m, w) => {
-    const it = m.it;
-    if (w === it.w) return;
-    it.x += (it.w - w) / 2;
-    it.w = w;
-    m.card.style.width = `${w}px`;
-    m.card.style.left = `${it.x}px`;
-  };
   measured.forEach((m, i) => {
     if (!laidOut[i].shown || !m.els.length) return;
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
     const want = Math.ceil(m.it.w + need + 8);
-    m.capped = want > 310;
-    resize(m, Math.max(180, Math.min(310, want)));
+    const w = Math.max(180, Math.min(310, want));
+    if (want > 310) {
+      // a name cut short says itself in full on hover
+      m.card.dataset.capped = "";
+      for (const e of m.els) if (e.classList.contains("ntext")) e.title = e.textContent;
+    }
+    if (w !== m.it.w) { m.it.w = w; m.card.style.width = `${w}px`; }
   });
-  // Two neighbours both grown to the cap stood 6 px apart (310 wide in
-  // 316 px slots). A row keeps 16 px between its cards: the wider ones
-  // give width back about their centres, never below the slot's own
-  // 260, which leaves the grid's 56.
-  const rowsOf = new Map();
-  for (const m of measured) {
-    const k = `${m.it.key.split("/").slice(0, -1).join("/")}|${Math.round(m.it.y)}`;
-    if (!rowsOf.has(k)) rowsOf.set(k, []);
-    rowsOf.get(k).push(m);
-  }
-  for (const row of rowsOf.values()) {
-    row.sort((p, q) => p.it.x - q.it.x);
-    for (let i = 1; i < row.length; i++) {
-      const a = row[i - 1], b = row[i];
-      const need = 16 - (b.it.x - (a.it.x + a.it.w));
-      if (need <= 0) continue;
-      for (const m of [a, b]) {
-        const w = Math.min(m.it.w, Math.max(NODE_W, m.it.w - need));
-        if (w < m.it.w) { resize(m, w); m.capped = true; }
-      }
+  // heights and the decision rows (card-relative), all read in one layout
+  for (const it of leaves) {
+    const card = cardOf.get(it.key);
+    // the card's real height: the layout's 64 px is only a guess
+    if (card.offsetHeight) it.h = card.offsetHeight;
+    if (it.node.routes && it.node.routes.length) {
+      it.rows = [...card.querySelectorAll(".brrow")].map(rrow => ({
+        el: rrow, target: rrow.dataset.target,
+        route: rrow.dataset.route != null ? Number(rrow.dataset.route) : null,
+        left: rrow.offsetLeft, top: rrow.offsetTop, w: rrow.offsetWidth, h: rrow.offsetHeight,
+      }));
     }
   }
-  // a name cut short says itself in full on hover
-  for (const m of measured) {
-    if (!m.capped) continue;
-    m.card.dataset.capped = "";
-    for (const e of m.els) if (e.classList.contains("ntext")) e.title = e.textContent;
+  const sized = new Map(leaves.map(it => [it.key, it]));
+  const L = FlowLayout.layout(g, {
+    expanded: state.expanded,
+    sizeOf: (key) => { const it = sized.get(key); return it ? {w: it.w, h: it.h, rows: it.rows || []} : null; },
+  });
+  // in paint order: a container before its members, so they sit on its box
+  nodesBox.textContent = "";
+  for (const it of L.items) {
+    state.rendered.set(it.key, it);
+    let card;
+    if (it.inner) card = containerCard(it);
+    else if (it.kind === "knob") card = boundaryCard(it);
+    else {
+      card = cardOf.get(it.key);
+      card.style.left = `${it.x}px`;
+      card.style.top = `${it.y}px`;
+    }
+    state.cardEls.set(it.key, card);
+    nodesBox.append(card);
   }
-  // heights and the decision rows' port dots: all read first (one
-  // layout), the rows' sides written after
-  const sides = [];
-  for (const it of flat.nodes) {
-    if (it.inner || it.node.kind === "__boundary__") continue;
-    const card = state.cardEls.get(it.key);
-    // the card's real height, both ways: the layout's 64 px is a guess,
-    // and a card slimmer than it (50 px at the landing zoom) kept the
-    // guess — every wire out of it then started 14 px below its port
-    if (card && card.offsetHeight) it.h = card.offsetHeight;
-    if (card && it.node.routes && it.node.routes.length) {
-      // each condition row is a wired exit: record where the wire
-      // leaves (first row per target decides), and put the row's port
-      // DOT on the side its target actually lies — the wire departs
-      // exactly at the dot, never from the blind side of the card
-      it.condPorts = {};
-      it.condDots = [];
-      // a route that is the loop's return leaves on the right, where
-      // returns bow up the margin
-      const backTo = new Set(flat.edges.filter(fe => fe.a === it && fe.e.back).map(fe => fe.b.node.name));
-      for (const rrow of card.querySelectorAll(".brrow")) {
-        const t = rrow.dataset.target;
-        const tgt = flat.nodes.find(o => o.depth === it.depth
-          && o.node.name === t && o !== it);
-        // a route into END leaves on the left: the right margin is where
-        // loop returns bow
-        const side = t === "__END__" ? -1 : !backTo.has(t) && tgt && portCX(tgt) < it.x + it.w / 2 ? -1 : 1;
-        sides.push([rrow, side < 0]);
-        const left = rrow.offsetLeft, top = rrow.offsetTop, w = rrow.offsetWidth, h = rrow.offsetHeight;
-        // a row that is not laid out has no port: its wire leaves the
-        // card's bottom rather than the card's top-left corner
-        if (!w) continue;
-        // every row's dot, card-relative — the wire repaint above the
-        // card is masked out under each one, so the dot stays the
-        // terminal the wire emerges FROM, never a bead the wire buries
-        const dot = {x: side < 0 ? left - 1 : left + w + 1, y: top + h / 2};
-        it.condDots.push(dot);
-        // x/y of the row's own DOT (card-relative): the wire must
-        // emerge from the condition box itself, not the card border
-        if (!(t in it.condPorts)) it.condPorts[t] = {...dot, side};
-        // ...and every row by its route index: three conditions into
-        // one target are three wires, each leaving its own row
-        if (rrow.dataset.route != null) it.condPorts["#" + rrow.dataset.route] = {...dot, side};
-      }
+  // each condition row's port DOT on the side its wire leaves by — the
+  // side the layout chose (where its target lies; END left, a loop's
+  // return right) — and where that dot is, card-relative
+  for (const [key, sides] of L.rowSides) {
+    const it = state.rendered.get(key);
+    if (!it) continue;
+    it.condPorts = {};
+    it.condDots = [];
+    for (const {row, side} of sides) {
+      row.el.classList.toggle("left", side < 0);
+      const dot = {x: side < 0 ? row.left - 1 : row.left + row.w + 1, y: row.top + row.h / 2};
+      it.condDots.push(dot);
+      if (!(row.target in it.condPorts)) it.condPorts[row.target] = {...dot, side};
+      if (row.route != null) it.condPorts["#" + row.route] = {...dot, side};
     }
   }
-  for (const [rrow, left] of sides) rrow.classList.toggle("left", left);
+  const flat = {nodes: L.items};
 
-  // Rows part for real heights: semantic zoom grows cards, and a
-  // fixed pitch would let them collide. Runs INSIDE every opened
-  // container first (deepest first — a grown inner box must be known
-  // before its parent's rows part), stretching the container around
-  // its members and END terminal, then across the top level.
-  {
-    const shiftTree = (it, delta) => {
-      for (const sub of flat.nodes) {
-        if (sub === it || sub.key.startsWith(it.key + "/")) {
-          sub.y += delta;
-          const c = state.cardEls.get(sub.key);
-          if (c) c.style.top = `${sub.y}px`;
-        }
-      }
-    };
-    const partRows = (items) => {
-      const rows = new Map();
-      for (const it of items) {
-        const k = Math.round(it.y);
-        if (!rows.has(k)) rows.set(k, []);
-        rows.get(k).push(it);
-      }
-      const placedBoxes = [];
-      let maxBottom = -Infinity;
-      for (const y of [...rows.keys()].sort((a, b) => a - b)) {
-        const row = rows.get(y);
-        let minTop = y;
-        for (const it of row) {
-          for (const b of placedBoxes) {
-            if (b.x < it.x + it.w && b.x + b.w > it.x) {
-              minTop = Math.max(minTop, b.bottom + 46);
-            }
-          }
-        }
-        const delta = minTop - y;
-        if (delta > 0) for (const it of row) shiftTree(it, delta);
-        for (const it of row) {
-          placedBoxes.push({x: it.x, w: it.w, bottom: it.y + it.h});
-          maxBottom = Math.max(maxBottom, it.y + it.h);
-        }
-      }
-      return maxBottom;
-    };
+  // The serve boundary stands apart from the flow: each door in its own
+  // tinted frame — the picture reads client → ingress → flow → egress.
+  const gatesIn = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "ingress");
+  const gatesOut = flat.nodes.filter(x => x.depth === 0 && x.node.serve_role === "egress");
 
-    const containers = flat.nodes.filter(it => it.inner)
-      .sort((a, b) => b.depth - a.depth);
-    for (const c of containers) {
-      const kids = flat.nodes.filter(sub =>
-        sub.key.startsWith(c.key + "/")
-        && !sub.key.slice(c.key.length + 1).includes("/"));
-      if (!kids.length) continue;
-      const bottom = partRows(kids);
-      // the END knob rode any shift with its row — the container's
-      // bottom edge follows the knob's centre, never the other way
-      const endKnob = kids.find(k => k.node.boundary === "end");
-      // ... but a knob standing in the gap between two members shares no
-      // column with them, so a push that moved them down left it on their
-      // row, and the members hung out of the container's bottom (ex05's
-      // graded, under a tall decision card). END keeps withBoundaries'
-      // rule: under the lowest member.
-      if (endKnob) {
-        const lowest = Math.max(...kids.filter(k => k !== endKnob).map(k => k.y + k.h));
-        const floor = lowest + 22 - KB / 2;
-        if (endKnob.y < floor) shiftTree(endKnob, floor - endKnob.y);
-      }
-      const newH = Math.max(c.h, endKnob
-        ? (endKnob.y + endKnob.h / 2) - c.y
-        : bottom + 18 - c.y);
-      if (newH !== c.h) {
-        c.h = newH;
-        const cc = state.cardEls.get(c.key);
-        if (cc) cc.style.height = `${c.h}px`;
-      }
-    }
-    partRows(flat.nodes.filter(it => it.depth === 0));
-  }
-
-  const maxX = Math.max(model.w, ...flat.nodes.map(n => n.x + n.w));
-  const maxY = Math.max(model.h, ...flat.nodes.map(n => n.y + n.h));
-  // The extent is the box everything drawn must fit in, so it has to know
-  // about the main flow's terminals before they are placed below: START
-  // stands 96 above the entries and END 96 below the exits. Headroom used
-  // to come from the door frame alone, which is only the topmost thing
-  // when the ingress door IS the entry — a graph whose first op precedes
-  // the door (seed, then recv) drew START above the canvas and lost it.
-  const at = (name) => flat.nodes.find(it => it.depth === 0 && it.node.name === name);
-  const entryTies = (g.entries || []).map(at).filter(Boolean);
-  const exitTies = (g.exits || []).map(at).filter(Boolean);
-  // The terminals are placed here, before the extent. Each is centred over
-  // its ops and 96 px away from them — and clear of every card in its
-  // column. An exit with ops beneath it (a loop's router, whose ops
-  // after it loop back) used to put END on top of one of them.
-  const pill = (which, x, y) => ({key: `__main/__${which}`, depth: 0, inner: null,
-                                  x, y, w: B_W, h: B_H,
-                                  node: {id: `__${which}__`, name: which.toUpperCase(),
-                                         kind: "__boundary__", boundary: which}});
-  const over = (items) => items.reduce((s, it) => s + portCX(it), 0) / items.length - B_W / 2;
-  const clearOf = (x, y, dir) => {
-    const tops = flat.nodes.filter(o => o.depth === 0);
-    for (let moved = true, n = 0; moved && n < tops.length; n++) {
-      moved = false;
-      for (const o of tops) {
-        if (o.x < x + B_W + 12 && o.x + o.w > x - 12 && o.y < y + B_H + 30 && o.y + o.h + 30 > y) {
-          y = dir > 0 ? o.y + o.h + 30 : o.y - 30 - B_H;
-          moved = true;
-        }
-      }
-    }
-    return y;
-  };
-  let startIt = null, endIt = null;
-  if (entryTies.length) {
-    const x = over(entryTies);
-    startIt = pill("start", x, clearOf(x, Math.min(...entryTies.map(it => it.y)) - 96, -1));
-  }
-  if (exitTies.length) {
-    const x = over(exitTies);
-    endIt = pill("end", x, clearOf(x, Math.max(...exitTies.map(it => it.y + it.h)) + 96, 1));
-  }
+  const maxX = Math.max(L.w, ...flat.nodes.map(n => n.x + n.w));
+  const maxY = Math.max(L.h, ...flat.nodes.map(n => n.y + n.h));
+  const startIt = L.start, endIt = L.end;
   // where the flow begins: a view that cannot show it all lands here
   state.startAt = startIt ? {x: startIt.x + startIt.w / 2, y: startIt.y} : null;
   let minY = gatesIn.length
@@ -1385,56 +665,10 @@ function render() {
   }
 
   // The main graph has terminals too — the flow, like every opened
-  // GraphOp, begins at a START contact and ends at an END one. Quiet
-  // ties reach every entry (this is what dispatches beat/lag-style
-  // monitors: the session starting, not the client) and gather the
-  // exits. With the client stubs gone, ties land dead-centre on every
-  // card, doors included.
-  if (flat.nodes.length) {
-    // the pills were placed above, where the extent needed them; a tie
-    // routes around a card in its way like any wire (an exit's tie ran
-    // straight through the ops beneath it)
-    const tie = (a, b) => {
-      const p = document.createElementNS(SVGNS, "path");
-      // a decision card's route into END leaves that route's row
-      const row = exitRow(a);
-      p.setAttribute("d", row ? rowTiePath(a, row, b, flat.nodes) : routeAvoiding(a, b, flat.nodes));
-      p.setAttribute("class", "bedge");
-      svg.append(p);
-      if (row) overCard(a, [p]);
-    };
-    if (startIt) {
-      nodesBox.append(boundaryCard(startIt));
-      for (const t of entryTies) tie(startIt, t.bIn || t);
-    }
-    if (endIt) {
-      nodesBox.append(boundaryCard(endIt));
-      for (const t of exitTies) tie(t.bOut || t, endIt);
-    }
-  }
-
-  // One beam per edge id. A plain edge's id IS its pair, so a data edge
-  // and an order edge between the same two nodes still collapse to the
-  // most meaningful one; a branch carries one edge PER ROUTE (same pair,
-  // its own id), and each of those is its own wire.
-  const meaning = (fe) => (fe.e.soft ? 0 : 2) + (fe.e.type === "condition" ? 1 : 0)
-    + (fe.e.back ? 1 : 0);
-  const byPair = new Map();
-  for (const fe of flat.edges) {
-    const key = `${fe.a.key}→${fe.b.key}|${fe.e.id || ""}`;
-    const prev = byPair.get(key);
-    if (!prev || meaning(fe) > meaning(prev)) byPair.set(key, fe);
-  }
-
-  // Several routes of one branch into one target: each gets its rank, so
-  // their wires fan apart deterministically (route order) before the port.
-  const routeRank = new Map(), routeCount = new Map();
-  for (const fe of byPair.values()) {
-    if (fe.e.route == null) continue;
-    const k = `${fe.a.key}→${fe.b.key}`;
-    routeRank.set(fe, routeCount.get(k) || 0);
-    routeCount.set(k, (routeCount.get(k) || 0) + 1);
-  }
+  // GraphOp, begins at a START contact and ends at an END one; their quiet
+  // ties come from the layout with every other wire.
+  if (startIt) nodesBox.append(boundaryCard(startIt));
+  if (endIt) nodesBox.append(boundaryCard(endIt));
 
   // Glyphs and labels buffer here and draw AFTER every path, so no
   // later beam ever paints over a word.
@@ -1442,46 +676,39 @@ function render() {
   const addGlyph = (x, y, text, cls, tip) => glyphJobs.push([x, y, text, cls, tip]);
   const along = (path, fraction, dy) => {
     // labels sit BESIDE a mostly-vertical wire, not on it
-    try {
-      const len = path.getTotalLength();
-      const pt = path.getPointAtLength(len * fraction);
-      return [pt.x + 12, pt.y + dy + 3];
-    } catch { return null; }
+    // sampled in JS from the path's own `d`: getTotalLength on a wire of
+    // many segments cost ~110 ms a render on qc_flow with everything open
+    const s = pathSampler(path.getAttribute("d") || "");
+    if (!s) return null;
+    const pt = s.at(s.len * fraction);
+    return [pt.x + 12, pt.y + dy + 3];
   };
-  const obstacles = flat.nodes;   // containers included — _rects decides per edge
 
-  // graph edges (every open level draws its own)
-  for (const fe of byPair.values()) {
-    const {e, a, b} = fe;
-    // a boundary tie inside an opened container: START → entries,
-    // exits → END. Structural, quiet — not an energy beam.
-    if (e.boundary) {
+  // every wire (every open level draws its own), along the path the
+  // layout reserved for it. One beam per edge id: a branch carries one
+  // edge PER ROUTE, each its own wire out of its own condition row.
+  for (const W of L.wires) {
+    const {e, a, b} = W;
+    // a boundary tie: START → entries, exits → END. Structural, quiet —
+    // not an energy beam.
+    if (W.tie) {
       const bp = document.createElementNS(SVGNS, "path");
-      // around the members in its way, not through them (ex05: a loop's
-      // router ties to END straight through the op beneath it); an opened
-      // member ties from its own END knob, like every other wire; a
-      // decision card's route into END leaves that route's row
-      const row = !a.bOut && exitRow(a);
-      const tb = b.bIn || b;
-      bp.setAttribute("d", row ? rowTiePath(a, row, tb, obstacles) : routeAvoiding(a.bOut || a, tb, obstacles));
+      bp.setAttribute("d", W.d);
       bp.setAttribute("class", "bedge");
       svg.append(bp);
       const els = [bp];
-      if (row) overCard(a, els);
-      state.edgeEls.push({a: a.key, b: b.key, els});
+      if (W.fromRow) overCard(a, els);
+      if (a.kind !== "pill" && b.kind !== "pill") state.edgeEls.push({a: a.key, b: b.key, els});
       continue;
     }
-    // an expanded container's pills stand in for its rim: edges from
-    // outside land on START, leave from END
+    // an expanded container's knobs stand in for its rim
     const A = a.bOut || a, B = b.bIn || b;
     const p = document.createElementNS(SVGNS, "path");
     let cls = e.soft ? "soft" : "";
     let sheath = null;
     // an if/else route gets its own beam: branch amber, the ELSE
     // fallback dashed and laserless — the condition text stays OFF the
-    // wire (hover the edge, or open the router's route table). This
-    // holds whatever ROUTE the edge takes: a condition edge that wraps
-    // to the next band is still a condition edge.
+    // wire (hover the edge, or open the router's route table).
     let condLabels = [], isElse = false;
     const routeOf = a.node.routes && e.route != null ? a.node.routes[e.route] : null;
     if (routeOf) {
@@ -1492,33 +719,14 @@ function render() {
         .filter(r => r.target === b.node.name).map(r => r.condition);
       isElse = condLabels.length > 0 && condLabels.every(c => c === "else");
     }
-    if (e.back) {
-      // a router's route that is the return leaves from its own row's dot
-      const backRow = a.node.routes && A.condPorts
-        ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
-      const from = backRow ? rowDot(A, backRow) : null;
-      const backRects = _rects(obstacles, A, B);
-      p.setAttribute("d", returnPath(A, B, from, backRects));
-      if (from) p.dataset.fromRow = "1";
+    p.setAttribute("d", W.d);
+    if (W.fromRow) p.dataset.fromRow = "1";
+    if (W.back) {
       cls += " back";
       if (!e.soft) sheath = "back";
-      const fx = from ? from.x : A.x + A.w, fy = from ? from.y : A.y + A.h / 2;
-      const bulge = returnRoute(fx, fy, B.x + B.w, B.y + B.h / 2, backRects).x;
-      addGlyph(bulge + 4, (fy + B.y + B.h / 2) / 2, "↺ loop", "back-label");
-    } else {
-      // a condition edge leaves ITS OWN ROW on the decision card — the
-      // wire starts beside the condition that fires it
-      const rowPort = condLabels.length && A.condPorts
-        ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
-      if (rowPort != null) {
-        const pk = `${a.key}→${b.key}`, n = routeCount.get(pk) || 1;
-        const bend = n > 1 ? 1 - 0.55 * (routeRank.get(fe) || 0) / (n - 1) : 1;
-        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y, bend, n > 1 ? routeRank.get(fe) || 0 : 0));
-        p.dataset.fromRow = "1";
-      } else {
-        p.setAttribute("d", routeAvoiding(A, B, obstacles, fe.via));
-      }
-      if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
+      addGlyph(W.label.x, W.label.y, "↺ loop", "back-label");
+    } else if (!e.soft) {
+      sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
     let drawn = p;
     const made = [];
@@ -1541,7 +749,7 @@ function render() {
     state.edgeEls.push({a: a.key, b: b.key, id: e.id, els: made});
     // the node's own port bead is the terminal; an extra circle on top of
     // it was clutter. Only a loop's flank, which has no port, gets one.
-    if (e.back) {
+    if (W.back) {
       bouton(svg, B.x + B.w, B.y + B.h / 2, "b-back");
       // the loop re-enters its first step: an arrowhead on the flank, pointing in
       const hx = B.x + B.w + 3, hy = B.y + B.h / 2;
@@ -1552,7 +760,7 @@ function render() {
       made.push(head);
     }
 
-    if (!e.back) {
+    if (!W.back) {
       // glyphs anchor to the drawn path itself, wherever it routed
       if (a.node.is_gen) {
         const at = along(drawn, 0.5, -7);
@@ -1603,19 +811,20 @@ function render() {
   // flatten order still draws a container before its members, so
   // members paint on top of their box without z-index bookkeeping)
 
-  // A wire can bow past every card (a tie routed around an op at the
-  // flow's left edge): the world grows to hold what was actually drawn,
-  // so no stretch of wire sits where the canvas cannot scroll.
-  try {
-    const bb = svg.getBBox();
-    if (bb.width || bb.height) {
-      const ex = state.extent;
-      ex.minX = Math.min(ex.minX, Math.floor(bb.x) - 16);
-      ex.minY = Math.min(ex.minY, Math.floor(bb.y) - 16);
-      ex.maxX = Math.max(ex.maxX, Math.ceil(bb.x + bb.width) + 16);
-      ex.maxY = Math.max(ex.maxY, Math.ceil(bb.y + bb.height) + 16);
+  // The world grows to hold every wire (a loop's lane and its label run
+  // right of the cards): from the layout's own points — a curve stays
+  // inside its control points' hull — not svg.getBBox(), which forced the
+  // whole wire layer's geometry mid-render (~110 ms on qc_flow, all open).
+  {
+    const ex = state.extent;
+    for (const W of L.wires) for (const [x, y] of W.pts) {
+      if (x - 16 < ex.minX) ex.minX = Math.floor(x) - 16;
+      if (y - 16 < ex.minY) ex.minY = Math.floor(y) - 16;
+      if (x + 16 > ex.maxX) ex.maxX = Math.ceil(x) + 16;
+      if (y + 16 > ex.maxY) ex.maxY = Math.ceil(y) + 16;
     }
-  } catch { /* nothing drawn */ }
+    for (const W of L.wires) if (W.label) ex.maxX = Math.max(ex.maxX, Math.ceil(W.label.x) + 70);
+  }
 
   // a very big graph keeps its membranes but not their soft blurred
   // shadows: a zoom re-rasters every visible cell each frame, and on the

@@ -73,3 +73,15 @@ Known, not fixed: a `.collect()` *inside* a subgraph hands its result up twice (
 gather in the parent). While testing, D:\meeting-prep-operonx's venv points at D:\Operonx via
 `operonx_local.pth` (released operonx uninstalled) — restore with `uv sync` after release;
 its :8200 server is stopped.
+
+## Compound layout (2026-10-02, branch `feat/compound-layout`)
+
+Wires still ran through cards once containers opened (1 / 9 / 19 on the hard views): Python laid
+out each level with closed cards, and opening a container shifted its siblings without
+re-planning the lanes passing by. Now `static/flowlayout.js` lays out the whole open view at once,
+in the browser, from the cards' measured sizes: inner graphs bottom-up, an opened container is
+one node of its real size, rows as tall as their tallest card (so channels hold no card), dummy
+lanes for long edges, loop lanes pinned right of their cards, room beside decision cards for
+their row lanes. Wires are vertical runs through reserved slots plus y-monotone curves in
+channels — clear by construction, no detours. Python's layout still supplies the starting order.
+Checked by `tests/js/flowlayout.test.mjs` (240 seeded random nested workflows × random open sets).
