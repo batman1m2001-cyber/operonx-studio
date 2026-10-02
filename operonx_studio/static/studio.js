@@ -526,8 +526,10 @@ function _clearLaneX(rects, top, bottom, prefer) {
   return null;
 }
 
-function routeAvoiding(a, b, obstacles, via, ports) {
-  const x1 = ports?.x1 ?? portCX(a), y1 = a.y + a.h, x2 = ports?.x2 ?? portCX(b), y2 = b.y;
+function routeAvoiding(a, b, obstacles, via) {
+  // one anchor per card: every wire leaves the bottom centre and lands on
+  // the top centre; wires fan apart along their way, not at the card
+  const x1 = portCX(a), y1 = a.y + a.h, x2 = portCX(b), y2 = b.y;
   const dy = Math.max(40, Math.abs(y2 - y1) / 2);
   const rects = _rects(obstacles, a, b);
 
@@ -1406,41 +1408,6 @@ function render() {
   };
   const obstacles = flat.nodes;   // containers included — _rects decides per edge
 
-  // Fan-in and fan-out spread over the card's edge: wires into one card
-  // arrive side by side across its top, ordered by where they come from;
-  // wires out of one leave spread across its bottom, ordered by where they
-  // go. All meeting at one dot is where most crossings started.
-  const ports = new Map();      // fe -> {x1?, x2?}
-  {
-    const fromX = (fe) => (fe.via ? fe.via[0] : portCX(fe.a.bOut || fe.a));
-    const toX = (fe) => (fe.via ? fe.via[fe.via.length - 1] : portCX(fe.b.bIn || fe.b));
-    const groups = (keyOf, skip) => {
-      const m = new Map();
-      for (const fe of byPair.values()) {
-        if (fe.e.back || fe.e.boundary || skip(fe)) continue;
-        const k = keyOf(fe);
-        if (!m.has(k)) m.set(k, []);
-        m.get(k).push(fe);
-      }
-      return m.values();
-    };
-    const spread = (list, card, order, side) => {
-      if (list.length < 2 || card.w < 120 || card.node.kind === "__boundary__") return;
-      list.sort((p, q) => order(p) - order(q));
-      const step = Math.min(18, (card.w - 60) / (list.length - 1));
-      list.forEach((fe, i) => {
-        const at = ports.get(fe) || {};
-        at[side] = portCX(card) + (i - (list.length - 1) / 2) * step;
-        ports.set(fe, at);
-      });
-    };
-    for (const list of groups(fe => (fe.b.bIn || fe.b).key, () => false))
-      spread(list, list[0].b.bIn || list[0].b, fromX, "x2");
-    // a decision card's wires leave their own rows, not its bottom
-    for (const list of groups(fe => (fe.a.bOut || fe.a).key, fe => !!(fe.a.node.routes && fe.e.type === "condition")))
-      spread(list, list[0].a.bOut || list[0].a, toX, "x1");
-  }
-
   // graph edges (every open level draws its own)
   for (const fe of byPair.values()) {
     const {e, a, b} = fe;
@@ -1503,10 +1470,10 @@ function render() {
       if (rowPort != null) {
         const pk = `${a.key}→${b.key}`, n = routeCount.get(pk) || 1;
         const bend = n > 1 ? 1 - 0.55 * (routeRank.get(fe) || 0) / (n - 1) : 1;
-        p.setAttribute("d", rowWirePath(A, rowPort, ports.get(fe)?.x2 ?? portCX(B), B.y, bend));
+        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y, bend));
         p.dataset.fromRow = "1";
       } else {
-        p.setAttribute("d", routeAvoiding(A, B, obstacles, fe.via, ports.get(fe)));
+        p.setAttribute("d", routeAvoiding(A, B, obstacles, fe.via));
       }
       if (!e.soft) sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
@@ -1531,10 +1498,6 @@ function render() {
     state.edgeEls.push({a: a.key, b: b.key, id: e.id, els: made});
     // the node's own port bead is the terminal; an extra circle on top of
     // it was clutter. Only a loop's flank, which has no port, gets one.
-    // a spread wire lands beside the card's own port bead: give it its own
-    const spreadAt = !e.back && ports.get(fe);
-    if (spreadAt && spreadAt.x2 != null && Math.abs(spreadAt.x2 - portCX(B)) > 4) bouton(svg, spreadAt.x2, B.y);
-    if (spreadAt && spreadAt.x1 != null && Math.abs(spreadAt.x1 - portCX(A)) > 4) bouton(svg, spreadAt.x1, A.y + A.h);
     if (e.back) {
       bouton(svg, B.x + B.w, B.y + B.h / 2, "b-back");
       // the loop re-enters its first step: an arrowhead on the flank, pointing in
