@@ -501,8 +501,34 @@ function routeAvoiding(a, b, obstacles) {
       + ` L ${lane} ${bb}`
       + ` C ${lane} ${bb + q2}, ${x2} ${y2 - q2}, ${x2} ${y2}`;
   };
+  // Drop, then swing: fall straight down the source's own column to the
+  // clear channel just above the target's row, and sweep across that
+  // channel into the target's port. The fall meets the sweep with the
+  // same vertical tangent, so the wire is one smooth stroke. This is
+  // how a fan-in reads in a flowchart — the bow's S-curve swung each
+  // feeder out of its column and across its neighbours (prepare's six
+  // feeders into `facts`, which sits right under `website`).
+  const dropSwing = () => {
+    if (y2 - y1 < 60) return null;
+    const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
+    const above = rects.filter(o => !o.wall && o.b > y1 && o.b <= y2 + 1
+      && o.l < hi + 8 && o.r > lo - 8);
+    const yA = Math.max(y1 + 18, above.length ? Math.max(...above.map(o => o.b)) + 4 : y1 + 18);
+    if (y2 - yA < 30) return null;
+    const fall = [];
+    for (let y = y1 + 8; y < yA; y += 12) fall.push([x1, y]);
+    if (_hits(fall, rects)) return null;
+    const k = (y2 - yA) * 0.55;
+    if (_hits(_sampleCubic(x1, yA, x1, yA + k, x2, y2 - k, x2, y2), rects)) return null;
+    if (yA - y1 > 80) {
+      if (!_vFree(x1, y1 + 20, yA)) return null;
+      _lanes.v.push({x: x1, t: y1 + 20, b: yA});
+    }
+    return `M ${x1} ${y1} L ${x1} ${yA} C ${x1} ${yA + k}, ${x2} ${y2 - k}, ${x2} ${y2}`;
+  };
   const shortHop = y2 - y1 < 480;
-  return (shortHop ? (sideStep() ?? bow() ?? laneRoute()) : (laneRoute() ?? bow()))
+  return (shortHop ? (sideStep() ?? dropSwing() ?? bow() ?? laneRoute())
+    : (laneRoute() ?? dropSwing() ?? bow()))
     ?? bezier(x1, y1, x2, y2);   // accept the overlap rather than spiral
 }
 
@@ -529,11 +555,14 @@ function rowDot(A, port) {
  * it departs AT the row's dot, horizontal tangent out, vertical tangent
  * in; control distances scale with the actual gap, so a near neighbour
  * gets a tight elbow, not a balloon. */
-function rowWirePath(A, port, x2, y2) {
+function rowWirePath(A, port, x2, y2, bend = 1) {
   const side = port.side;
   const {x: x1, y: y1} = rowDot(A, port);
-  const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5));
-  const c2 = Math.max(26, Math.min(72, Math.max(1, y2 - y1) * 0.5));
+  // `bend` < 1 shortens the arrival handle: several routes into ONE
+  // target each get their own, so they fan apart before the shared port
+  // instead of lying on top of each other
+  const c1 = Math.max(22, Math.min(64, Math.abs(x2 - x1) * 0.5)) * (2 - bend);
+  const c2 = Math.max(26, Math.min(72, Math.max(1, y2 - y1) * 0.5)) * bend;
   // tangent tilts slightly toward the target, so the wire reads
   // "leaving this row, heading there" instead of bowing sideways
   const dip = Math.max(4, Math.min(22, (y2 - y1) * 0.15));
@@ -958,6 +987,9 @@ function render() {
         // x/y of the row's own DOT (card-relative): the wire must
         // emerge from the condition box itself, not the card border
         if (!(t in it.condPorts)) it.condPorts[t] = {...dot, side};
+        // ...and every row by its route index: three conditions into
+        // one target are three wires, each leaving its own row
+        if (rrow.dataset.route != null) it.condPorts["#" + rrow.dataset.route] = {...dot, side};
       }
     }
   }
@@ -1171,16 +1203,27 @@ function render() {
     }
   }
 
-  // One beam per pair: the IR often carries a data edge AND an order
-  // edge between the same two nodes, and drawing both stacked parallel
-  // strands was half the visual noise. Keep the most meaningful one.
+  // One beam per edge id. A plain edge's id IS its pair, so a data edge
+  // and an order edge between the same two nodes still collapse to the
+  // most meaningful one; a branch carries one edge PER ROUTE (same pair,
+  // its own id), and each of those is its own wire.
   const meaning = (fe) => (fe.e.soft ? 0 : 2) + (fe.e.type === "condition" ? 1 : 0)
     + (fe.e.back ? 1 : 0);
   const byPair = new Map();
   for (const fe of flat.edges) {
-    const key = `${fe.a.key}→${fe.b.key}`;
+    const key = `${fe.a.key}→${fe.b.key}|${fe.e.id || ""}`;
     const prev = byPair.get(key);
     if (!prev || meaning(fe) > meaning(prev)) byPair.set(key, fe);
+  }
+
+  // Several routes of one branch into one target: each gets its rank, so
+  // their wires fan apart deterministically (route order) before the port.
+  const routeRank = new Map(), routeCount = new Map();
+  for (const fe of byPair.values()) {
+    if (fe.e.route == null) continue;
+    const k = `${fe.a.key}→${fe.b.key}`;
+    routeRank.set(fe, routeCount.get(k) || 0);
+    routeCount.set(k, (routeCount.get(k) || 0) + 1);
   }
 
   // Glyphs and labels buffer here and draw AFTER every path, so no
@@ -1198,7 +1241,8 @@ function render() {
   const obstacles = flat.nodes;   // containers included — _rects decides per edge
 
   // graph edges (every open level draws its own)
-  for (const {e, a, b} of byPair.values()) {
+  for (const fe of byPair.values()) {
+    const {e, a, b} = fe;
     // a boundary tie inside an opened container: START → entries,
     // exits → END. Structural, quiet — not an energy beam.
     if (e.boundary) {
@@ -1229,14 +1273,19 @@ function render() {
     // holds whatever ROUTE the edge takes: a condition edge that wraps
     // to the next band is still a condition edge.
     let condLabels = [], isElse = false;
-    if (a.node.routes && e.type === "condition") {
+    const routeOf = a.node.routes && e.route != null ? a.node.routes[e.route] : null;
+    if (routeOf) {
+      condLabels = [routeOf.condition];
+      isElse = routeOf.condition === "else";
+    } else if (a.node.routes && e.type === "condition") {
       condLabels = a.node.routes
         .filter(r => r.target === b.node.name).map(r => r.condition);
       isElse = condLabels.length > 0 && condLabels.every(c => c === "else");
     }
     if (e.back) {
       // a router's route that is the return leaves from its own row's dot
-      const backRow = a.node.routes && A.condPorts ? A.condPorts[b.node.name] : null;
+      const backRow = a.node.routes && A.condPorts
+        ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
       const from = backRow ? rowDot(A, backRow) : null;
       p.setAttribute("d", returnPath(A, B, from));
       if (from) p.dataset.fromRow = "1";
@@ -1249,9 +1298,11 @@ function render() {
       // a condition edge leaves ITS OWN ROW on the decision card — the
       // wire starts beside the condition that fires it
       const rowPort = condLabels.length && A.condPorts
-        ? A.condPorts[b.node.name] : null;
+        ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
       if (rowPort != null) {
-        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y));
+        const pk = `${a.key}→${b.key}`, n = routeCount.get(pk) || 1;
+        const bend = n > 1 ? 1 - 0.55 * (routeRank.get(fe) || 0) / (n - 1) : 1;
+        p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y, bend));
         p.dataset.fromRow = "1";
       } else {
         p.setAttribute("d", routeAvoiding(A, B, obstacles));
@@ -1275,7 +1326,7 @@ function render() {
     if (faded) for (const el2 of made) el2.classList.add("dorm");
     // selection highlights and ←/→ walking work off this ledger, so a
     // click never needs to redraw the whole canvas
-    state.edgeEls.push({a: a.key, b: b.key, els: made});
+    state.edgeEls.push({a: a.key, b: b.key, id: e.id, els: made});
     // the node's own port bead is the terminal; an extra circle on top of
     // it was clutter. Only a loop's flank, which has no port, gets one.
     if (e.back) bouton(svg, B.x + B.w, B.y + B.h / 2, "b-back");
@@ -1683,14 +1734,15 @@ function opCard(it) {
     card.append(line);
     card.title = n.kind + (n.bound ? ` · ${n.bound}` : "");
     const list = el("div", "brlist");
-    for (const r of n.routes) {
+    n.routes.forEach((r, ri) => {
       const rrow = el("div", "brrow" + (r.condition === "else" ? " relse" : ""));
       rrow.dataset.target = r.target;
+      rrow.dataset.route = String(ri);
       rrow.append(el("span", "brcond mono", r.condition));
       rrow.append(el("span", "brport"));
       rrow.title = `${r.condition} → ${r.target}`;
       list.append(rrow);
-    }
+    });
     card.append(list);
   } else {
     // a brain cell, with two membrane variants so a row of cells reads
