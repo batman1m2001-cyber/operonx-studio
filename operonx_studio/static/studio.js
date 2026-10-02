@@ -288,7 +288,7 @@ function consumeOf(edge, a, b) {
 function edgeGlyph(svg, x, y, text, cls, tip) {
   const t = document.createElementNS(SVGNS, "text");
   t.setAttribute("x", x); t.setAttribute("y", y);
-  t.setAttribute("text-anchor", "middle");
+  t.setAttribute("text-anchor", cls && /\b(start|end)$/.test(cls) ? cls.split(" ").pop() : "middle");
   if (cls) t.setAttribute("class", cls);
   t.textContent = text;
   if (tip) {
@@ -561,12 +561,19 @@ function render() {
   const sized = new Map(leaves.map(it => [it.key, it]));
   const L = FlowLayout.layout(g, {
     expanded: state.expanded,
+    textWidth: zoneTextWidth,
     sizeOf: (key) => { const it = sized.get(key); return it ? {w: it.w, h: it.h, rows: it.rows || []} : null; },
   });
   // in paint order: a container before its members, so they sit on its box
+  // — and a loop's zone between the two: over the box, under its cards
   nodesBox.textContent = "";
+  const zoneDrawn = new Set();
   for (const it of L.items) {
     state.rendered.set(it.key, it);
+    if (it.zone && !zoneDrawn.has(it.zone)) {
+      zoneDrawn.add(it.zone);
+      nodesBox.append(loopZone(it.zone));
+    }
     let card;
     if (it.inner) card = containerCard(it);
     else if (it.kind === "knob") card = boundaryCard(it);
@@ -694,8 +701,14 @@ function render() {
     if (W.tie) {
       const bp = document.createElementNS(SVGNS, "path");
       bp.setAttribute("d", W.d);
-      bp.setAttribute("class", "bedge");
+      bp.setAttribute("class", "bedge" + (W.exit ? " bexit" : ""));
       svg.append(bp);
+      if (W.exit) {
+        const at = exitPoint(bp, W.exit);
+        const x = W.exit.info.exits.find(q => q.from === a.node.name && q.target === "END");
+        if (at) addGlyph(at[0], at[1], "exit loop", "exit-label " + at[2],
+                         x ? "leaves the loop: " + FlowLayout.exitText(x) : "leaves the loop");
+      }
       const els = [bp];
       if (W.fromRow) overCard(a, els);
       if (a.kind !== "pill" && b.kind !== "pill") state.edgeEls.push({a: a.key, b: b.key, els});
@@ -724,7 +737,8 @@ function render() {
     if (W.back) {
       cls += " back";
       if (!e.soft) sheath = "back";
-      addGlyph(W.label.x, W.label.y, "↺ loop", "back-label");
+      addGlyph(W.label.x, W.label.y, "next turn", "back-label",
+               "back to the start of the loop for another turn");
     } else if (!e.soft) {
       sheath = condLabels.length ? (isElse ? "cond relse" : "cond") : "";
     }
@@ -773,6 +787,12 @@ function render() {
         if (at) addGlyph(at[0], at[1],
           consume.mode === "collect" ? "⧉ collect"
           : `∥ parallel${consume.max ? "≤" + consume.max : ""}`, "");
+      }
+      if (W.exit) {
+        // where the route leaves the loop's zone: say so, just outside it
+        const at = exitPoint(drawn, W.exit);
+        if (at) addGlyph(at[0], at[1], "exit loop", "exit-label " + at[2],
+                         `leaves the loop: ${FlowLayout.exitText(W.exit.info.exits.find(x => x.from === a.node.name) || {from: a.node.name, condition: condLabels.join(" | "), target: b.node.name})}`);
       }
       if (condLabels.length) {
         const tip = document.createElementNS(SVGNS, "title");
@@ -944,6 +964,89 @@ function toggleExpand(key) {
   render();
 }
 
+/* ── loops, in plain words ──
+ * A loop's members sit in ONE light-violet zone (laid out by flowlayout.js,
+ * which also keeps every other card out of it); the zone's header says what
+ * repeats and where it stops — the exit is a branch inside the loop whose
+ * route leads out of it. No per-card badges: the zone says it once. */
+let zoneCtx = null;
+function zoneTextWidth(text) {
+  if (!zoneCtx) {
+    zoneCtx = document.createElement("canvas").getContext("2d");
+    const fam = getComputedStyle(document.body).fontFamily || "sans-serif";
+    zoneCtx.font = `600 11px ${fam}`;
+  }
+  return Math.ceil(zoneCtx.measureText(text).width * 1.04) + 4;
+}
+
+function loopZone(z) {
+  const box = el("div", "loopzone");
+  box.dataset.members = z.members.join("|");
+  box.style.left = `${z.x}px`;
+  box.style.top = `${z.y}px`;
+  box.style.width = `${z.w}px`;
+  box.style.height = `${z.h}px`;
+  const head = el("div", "lzhead");
+  head.style.left = `${z.head.x - z.x}px`;
+  head.style.top = `${z.head.y - z.y}px`;
+  for (const line of z.lines) head.append(el("div", "lzline", line));
+  head.title = loopSentence(z.info) + "\n" + loopDetail(z.info);
+  box.append(head);
+  return box;
+}
+
+function loopSentence(info) {
+  const ex = (info && info.exits) || [];
+  let s = "Part of a loop: runs again every turn.";
+  if (!ex.length) s += " It repeats until no step continues.";
+  else s += " The loop " + ex.map((x, i) => (i ? "or " : "") + FlowLayout.exitText(x)).join(", ") + ".";
+  if (info && !info.synthetic && info.max_iterations != null) s += ` At most ${info.max_iterations} turns.`;
+  return s;
+}
+
+function loopDetail(info) {
+  if (!info) return "";
+  return info.synthetic
+    ? `Compiler view: the authored cycle is rewritten into a synthetic loop '${info.group}' so the scheduler sees no cycle; its safety cap is ${info.max_iterations ?? "none"} iterations — not the flow's own turn limit.`
+    : `Authored loop '${info.group}' (${info.mode})${info.until != null ? `, until ${info.until}` : ""}${info.max_iterations != null ? `, max ${info.max_iterations} iterations` : ""}.`;
+}
+
+function loopNote(n, zone) {
+  const info = zone ? zone.info : {group: n.loop.group, mode: n.loop.mode,
+    synthetic: n.loop.mode === "synthetic", max_iterations: n.loop.max_iterations, exits: []};
+  const box = el("div", "rolenote loopnote");
+  box.append(el("div", null, loopSentence(info)));
+  const fold = el("details", "loopdetail");
+  fold.append(el("summary", null, "details"));
+  fold.append(el("div", "mono", loopDetail(info)));
+  box.append(fold);
+  return box;
+}
+
+function authoredLoop(it) {
+  const parent = it.key.split("/").slice(0, -1).join("/");
+  const g = parent ? state.rendered.get(parent)?.node.graph : state.graph;
+  const lp = g && g.loops ? g.loops[it.node.id] : null;
+  return lp && !lp.synthetic ? lp : null;
+}
+
+/* Where a wire leaves its loop's zone: a label spot just outside that
+ * edge, beside the wire — [x, y, anchor]. */
+function exitPoint(path, z) {
+  const s = pathSampler(path.getAttribute("d") || "");
+  if (!s) return null;
+  const inside = (q) => q.x > z.x && q.x < z.x + z.w && q.y > z.y && q.y < z.y + z.h;
+  const n = Math.max(20, Math.round(s.len / 6));
+  for (let i = 1; i <= n; i++) {
+    const q = s.at(s.len * i / n);
+    if (inside(q)) continue;
+    if (q.x <= z.x + 1) return [q.x - 6, q.y - 7, "end"];
+    if (q.x >= z.x + z.w - 1) return [q.x + 6, q.y - 7, "start"];
+    return [q.x + 8, q.y + 13, "start"];
+  }
+  return null;
+}
+
 function containerCard(it) {
   const n = it.node;
   const card = el("div", "node container");
@@ -963,6 +1066,16 @@ function containerCard(it) {
   head.append(promoter);
   head.append(el("span", "nname", n.name));
   head.append(el("span", "nkind", `${n.kind} · ${n.subgraph_ops} ops`));
+  // an AUTHORED loop (classic / until — not the compiler's rewrite of a
+  // cycle, which is drawn as a zone) is this container: say it repeats
+  const lp = authoredLoop(it);
+  if (lp) {
+    const info = {group: n.name, mode: lp.mode, synthetic: false, until: lp.until,
+                  max_iterations: lp.max_iterations, exits: []};
+    const t = el("span", "lzline cloopnote", FlowLayout.loopHeader(info, 1e9)[0]);
+    t.title = loopSentence(info) + "\n" + loopDetail(info);
+    head.append(t);
+  }
   const close = el("button", "collapse", "▾ collapse");
   close.title = "Collapse this graph back into a single node";
   close.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
@@ -1225,11 +1338,8 @@ function opCard(it) {
     b.title = "A nested @graph — click to open it in place.";
     b.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
     badges.append(b);
-  } else if (n.loop) {
-    const b = el("span", "badge loop", "↺ loop");
-    b.title = "Member of a rewritten cycle; the return edge below is what the author wrote.";
-    badges.append(b);
   }
+  // a loop's member wears no badge: the violet zone it sits in says it
 
   if (state.run && !ranInRun(n)) card.classList.add("dormant");
   if (state.run) lensBadge(card, badges, n);
@@ -1424,13 +1534,10 @@ function select(key) {
     chips.append(el("span", "chip cres",
       "⛁ " + (Array.isArray(n.resource) ? n.resource.join(" · ") : n.resource)));
   }
-  if (n.loop) {
-    const c = el("span", "chip cloop", `↺ while ≤${n.loop.max_iterations ?? "∞"}`);
-    c.title = `Member of the authored cycle '${n.loop.group}', rewritten by the compiler into a synthetic loop.`;
-    chips.append(c);
-  }
+  if (n.loop) chips.append(el("span", "chip cloop", "↺ in a loop"));
   head.append(chips);
   panel.append(head);
+  if (n.loop) panel.append(loopNote(n, it.zone));
 
   if (state.run && !ranInRun(n)) {
     panel.append(el("div", "rolenote dormnote",
@@ -3281,7 +3388,8 @@ function buildLegend() {
   row(legendSample("cond"), "if/else route — the condition sits in its own row on the router card, and the wire leaves that row");
   row(legendSample("ecore cond relse", true), "else — fires only when no condition matched");
   row(legendSample("soft", true), "soft merge — may not fire at all");
-  row(el("span", "lglyph", "↺"), "a loop returns up the right margin, back to where the author's cycle begins — from its router's row when the route itself is the return");
+  row(el("span", "lglyph lzone", "↺"), "a violet zone is a loop: the steps inside run again every turn; its header says where the loop exits and on what condition");
+  row(el("span", "lglyph", "next turn"), "the violet return wire goes back to the start of the loop for another turn; \"exit loop\" marks the route that leaves it");
   row(el("span", "lglyph", "⚡"), "generator: one call, many yields — consumers run per yield");
   row(el("span", "lglyph", "≋ ∥ ⧉"), "streaming edge · parallel fan-out · collect-into-list");
   row(el("span", "lglyph", "▣"), "a nested graph — click its badge (or double-click) to open it in place");

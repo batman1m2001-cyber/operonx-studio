@@ -2994,3 +2994,26 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   .jrow { flex: 0 0 260px; border-color: var(--border); scroll-snap-align: start; }
 }
 .rerunpair pre.bad { color: var(--err); }
+
+/* a loop: ONE light-violet zone around the steps that repeat, under the
+   cards and over a container's box — the return wire's colour family */
+#nodes .loopzone {
+  position: absolute; pointer-events: none; box-sizing: border-box;
+  background: color-mix(in srgb, var(--loop) 6%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--loop) 30%, transparent);
+  border-radius: 14px;
+}
+#nodes .loopzone .lzhead {
+  position: absolute; pointer-events: auto; cursor: help; white-space: nowrap;
+  color: color-mix(in srgb, var(--loop) 85%, var(--text, #333));
+  font-size: 11px; font-weight: 600; line-height: 15px;
+}
+#nodes .loopzone .lzline:first-child { font-weight: 700; }
+.wires text.exit-label { fill: var(--loop); font-size: 10.5px; font-weight: 700; }
+.lglyph.lzone { color: var(--loop); background: color-mix(in srgb, var(--loop) 8%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--loop) 40%, transparent); border-radius: 5px; padding: 0 4px; }
+.rolenote.loopnote { border-left-color: var(--loop); }
+.loopnote .loopdetail { margin-top: 6px; font-size: 11px; color: var(--muted); }
+.loopnote .loopdetail summary { cursor: pointer; }
+.loopnote .loopdetail .mono { margin-top: 4px; white-space: normal; }
+.node.container .chead .cloopnote { color: var(--loop); font-size: 11px; font-weight: 600; }

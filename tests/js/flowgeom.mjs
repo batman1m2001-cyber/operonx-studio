@@ -75,3 +75,31 @@ export function crossingCount(out) {
   }
   return n;
 }
+
+// loop zones: every member card inside its zone, every other card (and any
+// card of another level) clear of it, and its header clear of cards and wires
+export function zoneProblems(out, textWidth = (t) => t.length * 6.4) {
+  const bad = [];
+  const cards = [...out.items, ...out.pills];
+  const hit = (z, c) => Math.min(z.x + z.w, c.x + c.w) - Math.max(z.x, c.x) > 0.5
+    && Math.min(z.y + z.h, c.y + c.h) - Math.max(z.y, c.y) > 0.5;
+  for (const z of out.zones || []) {
+    const members = new Set(z.members);
+    const mine = (k) => members.has(k) || z.members.some(m => k.startsWith(m + "/"));
+    for (const c of cards) {
+      if (mine(c.key)) {
+        if (c.x < z.x || c.y < z.y || c.x + c.w > z.x + z.w || c.y + c.h > z.y + z.h)
+          bad.push(`zone ${z.key}: member ${c.key} sticks out`);
+      } else if (c.inner && z.key.startsWith(c.key + "/")) {
+        continue;   // the container the loop lives in
+      } else if (hit(z, c)) bad.push(`zone ${z.key}: ${c.key} inside`);
+    }
+    const head = {x: z.head.x, y: z.head.y, w: Math.max(...z.lines.map(textWidth)), h: z.lines.length * z.head.lh};
+    for (const c of cards) if (!c.inner && hit(head, c)) bad.push(`zone ${z.key}: header over ${c.key}`);
+    for (const w of out.wires) {
+      if (sample(w.d).some(([x, y]) => x > head.x && x < head.x + head.w && y > head.y && y < head.y + head.h))
+        bad.push(`zone ${z.key}: header over wire ${w.key}`);
+    }
+  }
+  return bad;
+}
