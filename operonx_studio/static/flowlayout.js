@@ -49,10 +49,29 @@
 
   // ── path building: all M + C, vertical tangents between segments ──
   class Path {
-    constructor(x, y) { this.d = `M ${f(x)} ${f(y)}`; this.x = x; this.y = y; this.pts = [[x, y]]; }
+    constructor(x, y) { this.x0 = x; this.y0 = y; this.x = x; this.y = y; this.segs = []; }
     c(x1, y1, x2, y2, x, y) {
-      this.d += ` C ${f(x1)} ${f(y1)}, ${f(x2)} ${f(y2)}, ${f(x)} ${f(y)}`;
-      this.x = x; this.y = y; this.pts.push([x1, y1], [x2, y2], [x, y]);
+      // a vertical run straight after a vertical run is one run: fewer
+      // segments, a lighter path for the browser to lay out and animate
+      const last = this.segs[this.segs.length - 1];
+      const vert = x1 === this.x && x2 === this.x && x === this.x;
+      if (vert && last && last.vert && (y - this.y) * (last.y - last.y0) > 0) {
+        last.y = y;
+        const k = (y - last.y0) / 3;
+        last.p = [x, last.y0 + k, x, y - k, x, y];
+      } else {
+        this.segs.push({p: [x1, y1, x2, y2, x, y], vert, y0: this.y, y});
+      }
+      this.x = x; this.y = y;
+    }
+    get d() {
+      return `M ${f(this.x0)} ${f(this.y0)}` + this.segs.map(s =>
+        ` C ${f(s.p[0])} ${f(s.p[1])}, ${f(s.p[2])} ${f(s.p[3])}, ${f(s.p[4])} ${f(s.p[5])}`).join("");
+    }
+    get pts() {
+      const out = [[this.x0, this.y0]];
+      for (const s of this.segs) out.push([s.p[0], s.p[1]], [s.p[2], s.p[3]], [s.p[4], s.p[5]]);
+      return out;
     }
     // straight vertical run (as a curve)
     v(y) {

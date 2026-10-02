@@ -676,11 +676,12 @@ function render() {
   const addGlyph = (x, y, text, cls, tip) => glyphJobs.push([x, y, text, cls, tip]);
   const along = (path, fraction, dy) => {
     // labels sit BESIDE a mostly-vertical wire, not on it
-    try {
-      const len = path.getTotalLength();
-      const pt = path.getPointAtLength(len * fraction);
-      return [pt.x + 12, pt.y + dy + 3];
-    } catch { return null; }
+    // sampled in JS from the path's own `d`: getTotalLength on a wire of
+    // many segments cost ~110 ms a render on qc_flow with everything open
+    const s = pathSampler(path.getAttribute("d") || "");
+    if (!s) return null;
+    const pt = s.at(s.len * fraction);
+    return [pt.x + 12, pt.y + dy + 3];
   };
 
   // every wire (every open level draws its own), along the path the
@@ -810,19 +811,20 @@ function render() {
   // flatten order still draws a container before its members, so
   // members paint on top of their box without z-index bookkeeping)
 
-  // A wire can bow past every card (a tie routed around an op at the
-  // flow's left edge): the world grows to hold what was actually drawn,
-  // so no stretch of wire sits where the canvas cannot scroll.
-  try {
-    const bb = svg.getBBox();
-    if (bb.width || bb.height) {
-      const ex = state.extent;
-      ex.minX = Math.min(ex.minX, Math.floor(bb.x) - 16);
-      ex.minY = Math.min(ex.minY, Math.floor(bb.y) - 16);
-      ex.maxX = Math.max(ex.maxX, Math.ceil(bb.x + bb.width) + 16);
-      ex.maxY = Math.max(ex.maxY, Math.ceil(bb.y + bb.height) + 16);
+  // The world grows to hold every wire (a loop's lane and its label run
+  // right of the cards): from the layout's own points — a curve stays
+  // inside its control points' hull — not svg.getBBox(), which forced the
+  // whole wire layer's geometry mid-render (~110 ms on qc_flow, all open).
+  {
+    const ex = state.extent;
+    for (const W of L.wires) for (const [x, y] of W.pts) {
+      if (x - 16 < ex.minX) ex.minX = Math.floor(x) - 16;
+      if (y - 16 < ex.minY) ex.minY = Math.floor(y) - 16;
+      if (x + 16 > ex.maxX) ex.maxX = Math.ceil(x) + 16;
+      if (y + 16 > ex.maxY) ex.maxY = Math.ceil(y) + 16;
     }
-  } catch { /* nothing drawn */ }
+    for (const W of L.wires) if (W.label) ex.maxX = Math.max(ex.maxX, Math.ceil(W.label.x) + 70);
+  }
 
   // a very big graph keeps its membranes but not their soft blurred
   // shadows: a zoom re-rasters every visible cell each frame, and on the
