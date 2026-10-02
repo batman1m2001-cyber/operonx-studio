@@ -112,7 +112,8 @@ def _inline_synthetic_loops(graph: Dict[str, Any]) -> Dict[str, Any]:
         edges.extend(inner.get("edges") or [])
         for src, dst in meta.get("back_edges") or []:
             edges.append({"from": src, "to": dst, "type": "back",
-                          "soft": False, "origin": "back_edge"})
+                          "soft": False, "origin": "back_edge",
+                          "id": f"{src}->{dst}#back"})
 
     # Reconnect the seam: edges that touched the hidden box now touch the
     # members the rewrite recorded as its entry and exits.
@@ -126,6 +127,9 @@ def _inline_synthetic_loops(graph: Dict[str, Any]) -> Dict[str, Any]:
             if e["from"] == box:
                 exits = seam.get("exits") or []
                 e["from"] = exits[0][0] if exits else e["from"]
+        if e.get("kind") != "branch" and e.get("origin") != "back_edge":
+            # a seam-rewritten edge is a new pair: its id follows the pair
+            e["id"] = f"{e['from']}->{e['to']}"
         if e["from"] not in hidden and e["to"] not in hidden:
             fixed.append(e)
 
@@ -191,8 +195,9 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
             for n in layout.nodes
         ],
         "edges": [
-            {"src": e.src, "dst": e.dst, "type": e.type, "soft": e.soft,
-             "origin": e.origin, "back": bool(getattr(e, "back", False))}
+            {"id": e.id, "src": e.src, "dst": e.dst, "type": e.type, "soft": e.soft,
+             "origin": e.origin, "back": bool(getattr(e, "back", False)),
+             "kind": e.kind, "route": e.route, "label": e.label}
             for e in layout.edges
         ],
         "loops": graph.get("loops") or {},

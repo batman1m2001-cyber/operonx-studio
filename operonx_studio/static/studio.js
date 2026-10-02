@@ -958,6 +958,9 @@ function render() {
         // x/y of the row's own DOT (card-relative): the wire must
         // emerge from the condition box itself, not the card border
         if (!(t in it.condPorts)) it.condPorts[t] = {...dot, side};
+        // ...and every row by its route index: three conditions into
+        // one target are three wires, each leaving its own row
+        if (rrow.dataset.route != null) it.condPorts["#" + rrow.dataset.route] = {...dot, side};
       }
     }
   }
@@ -1171,14 +1174,15 @@ function render() {
     }
   }
 
-  // One beam per pair: the IR often carries a data edge AND an order
-  // edge between the same two nodes, and drawing both stacked parallel
-  // strands was half the visual noise. Keep the most meaningful one.
+  // One beam per edge id. A plain edge's id IS its pair, so a data edge
+  // and an order edge between the same two nodes still collapse to the
+  // most meaningful one; a branch carries one edge PER ROUTE (same pair,
+  // its own id), and each of those is its own wire.
   const meaning = (fe) => (fe.e.soft ? 0 : 2) + (fe.e.type === "condition" ? 1 : 0)
     + (fe.e.back ? 1 : 0);
   const byPair = new Map();
   for (const fe of flat.edges) {
-    const key = `${fe.a.key}→${fe.b.key}`;
+    const key = `${fe.a.key}→${fe.b.key}|${fe.e.id || ""}`;
     const prev = byPair.get(key);
     if (!prev || meaning(fe) > meaning(prev)) byPair.set(key, fe);
   }
@@ -1229,14 +1233,19 @@ function render() {
     // holds whatever ROUTE the edge takes: a condition edge that wraps
     // to the next band is still a condition edge.
     let condLabels = [], isElse = false;
-    if (a.node.routes && e.type === "condition") {
+    const routeOf = a.node.routes && e.route != null ? a.node.routes[e.route] : null;
+    if (routeOf) {
+      condLabels = [routeOf.condition];
+      isElse = routeOf.condition === "else";
+    } else if (a.node.routes && e.type === "condition") {
       condLabels = a.node.routes
         .filter(r => r.target === b.node.name).map(r => r.condition);
       isElse = condLabels.length > 0 && condLabels.every(c => c === "else");
     }
     if (e.back) {
       // a router's route that is the return leaves from its own row's dot
-      const backRow = a.node.routes && A.condPorts ? A.condPorts[b.node.name] : null;
+      const backRow = a.node.routes && A.condPorts
+        ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
       const from = backRow ? rowDot(A, backRow) : null;
       p.setAttribute("d", returnPath(A, B, from));
       if (from) p.dataset.fromRow = "1";
@@ -1249,7 +1258,7 @@ function render() {
       // a condition edge leaves ITS OWN ROW on the decision card — the
       // wire starts beside the condition that fires it
       const rowPort = condLabels.length && A.condPorts
-        ? A.condPorts[b.node.name] : null;
+        ? (routeOf && A.condPorts["#" + e.route]) || A.condPorts[b.node.name] : null;
       if (rowPort != null) {
         p.setAttribute("d", rowWirePath(A, rowPort, portCX(B), B.y));
         p.dataset.fromRow = "1";
@@ -1275,7 +1284,7 @@ function render() {
     if (faded) for (const el2 of made) el2.classList.add("dorm");
     // selection highlights and ←/→ walking work off this ledger, so a
     // click never needs to redraw the whole canvas
-    state.edgeEls.push({a: a.key, b: b.key, els: made});
+    state.edgeEls.push({a: a.key, b: b.key, id: e.id, els: made});
     // the node's own port bead is the terminal; an extra circle on top of
     // it was clutter. Only a loop's flank, which has no port, gets one.
     if (e.back) bouton(svg, B.x + B.w, B.y + B.h / 2, "b-back");
@@ -1683,14 +1692,15 @@ function opCard(it) {
     card.append(line);
     card.title = n.kind + (n.bound ? ` · ${n.bound}` : "");
     const list = el("div", "brlist");
-    for (const r of n.routes) {
+    n.routes.forEach((r, ri) => {
       const rrow = el("div", "brrow" + (r.condition === "else" ? " relse" : ""));
       rrow.dataset.target = r.target;
+      rrow.dataset.route = String(ri);
       rrow.append(el("span", "brcond mono", r.condition));
       rrow.append(el("span", "brport"));
       rrow.title = `${r.condition} → ${r.target}`;
       list.append(rrow);
-    }
+    });
     card.append(list);
   } else {
     // a brain cell, with two membrane variants so a row of cells reads
