@@ -35,6 +35,15 @@
     return s.length >= PAYLOAD_MIN && B64ISH.test(s.slice(0, 512));
   }
 
+  const PCM = /^audio\/(l8|l16|l24|pcm|raw|x-raw)$/i;
+  function declaredMime(mime, rate, channels) {
+    if (!mime) return null;
+    const base = mime.split(";")[0].trim();
+    if (!PCM.test(base) || /;\s*rate=/i.test(mime) || !(Number.isInteger(rate) && rate > 0)) return mime;
+    const ch = Number.isInteger(channels) && channels > 0 ? channels : 1;
+    return `${mime};rate=${rate};channels=${ch}`;
+  }
+
   function marker(v) {
     // the trace consumer's own tokens for things it chose not to inline
     if (v && typeof v === "object" && !Array.isArray(v)) {
@@ -48,6 +57,9 @@
           const mime = typeof v.mime === "string" ? v.mime : "";
           out.sha = v.$media;
           out.mime = mime || null;
+          // what the server is told the blob is: raw PCM has no header, so
+          // its rate rides along (operonx keeps it beside the mime)
+          out.declared = declaredMime(mime, v.sample_rate, v.channels);
           out.kind = mime.startsWith("audio/") ? "audio"
             : mime.startsWith("image/") && mime !== "image/svg+xml" ? "image" : null;
           if (typeof v.duration_s === "number")
@@ -118,7 +130,7 @@
         const tok = elx("span", "vt vt-marker",
           `▮ ${s.mime || "media"}${s.duration ? ` · ${s.duration}` : ""}${s.size ? ` · ${s.size}` : ""}`);
         tok.title = `sha256 ${s.sha}`;
-        const url = api.mediaUrl ? api.mediaUrl(s.sha) : null;
+        const url = api.mediaUrl ? api.mediaUrl(s.sha, s.declared) : null;
         if (!url || !s.kind) return tok;
         const box = elx("div", "vmedia");
         if (s.kind === "audio") {
@@ -258,7 +270,7 @@
     return s.t === "media" ? assemble(s) : null;
   }
 
-  // mediaUrl(sha) → where the page fetches a blob; set by the page
+  // mediaUrl(sha, mime) → where the page fetches a blob; set by the page
   // (studio.js), null under node where nothing is fetched
   const api = { spec, render, media, fmtBytes, looksPayload, brief, mediaUrl: null };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

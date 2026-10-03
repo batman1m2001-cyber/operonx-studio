@@ -274,6 +274,192 @@ def test_a_store_with_no_media_dir_says_so(client, tmp_path):
     assert "keeps no media" in r.json()["error"]
 
 
+# ── media from a store with no files: ClickHouse's ``media: clickhouse`` ──
+
+
+class _BlobStore:
+    """What ``ClickHouseMediaStore`` offers a reader: ``get``/``exists``,
+    no ``root``, no ``path``."""
+
+    name = "clickhouse"
+
+    def __init__(self, *blobs: bytes):
+        self.blobs = {hashlib.sha256(b).hexdigest(): b for b in blobs}
+        self.asked: list = []
+
+    def get(self, sha):
+        self.asked.append(sha)
+        return self.blobs.get(sha)
+
+    def exists(self, sha):
+        return sha in self.blobs
+
+
+def _with_store(client, tmp_path, media) -> str:
+    """A project whose store's media is *media*."""
+    from types import SimpleNamespace
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    root = _project(tmp_path)
+    pid = _open(client, root)
+    pr = project_runs(root, sweep=False)
+    pr.store = SimpleNamespace(media=media)
+    return pid
+
+
+def _pcm(seconds: float, rate: int) -> bytes:
+    import math
+
+    n = int(seconds * rate)
+    return b"".join(struct.pack("<h", int(8000 * math.sin(i / 7))) for i in range(n))
+
+
+def test_a_blob_with_no_file_is_read_from_the_stores_get(client, tmp_path):
+    wav = _wav(0.2)
+    store = _BlobStore(wav)
+    pid = _with_store(client, tmp_path, store)
+    sha = hashlib.sha256(wav).hexdigest()
+    r = client.get(f"/api/p/{pid}/media/{sha}")
+    assert r.status_code == 200 and r.content == wav
+    assert r.headers["content-type"] == "audio/wav"
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["content-security-policy"] == "default-src 'none'; sandbox"
+    assert "immutable" in r.headers["cache-control"]
+    assert "content-disposition" not in r.headers
+    assert store.asked == [sha]
+    # a player seeks with a range
+    part = client.get(f"/api/p/{pid}/media/{sha}", headers={"Range": "bytes=4-11"})
+    assert part.status_code == 206 and part.content == wav[4:12]
+    assert part.headers["content-range"] == f"bytes 4-11/{len(wav)}"
+    assert client.get(f"/api/p/{pid}/media/{sha}", headers={"Range": "bytes=-4"}).content == wav[-4:]
+    assert client.get(f"/api/p/{pid}/media/{sha}",
+                      headers={"Range": f"bytes={len(wav)}-"}).status_code == 416
+
+
+def test_raw_l16_is_served_as_wav_with_its_declared_rate(client, tmp_path):
+    from urllib.parse import quote
+
+    pcm = _pcm(1.25, 8000)
+    pid = _with_store(client, tmp_path, _BlobStore(pcm))
+    sha = hashlib.sha256(pcm).hexdigest()
+    r = client.get(f"/api/p/{pid}/media/{sha}?mime={quote('audio/L16;rate=8000;channels=1')}")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "audio/wav"
+    assert "content-disposition" not in r.headers
+    body = r.content
+    assert body[:4] == b"RIFF" and body[8:16] == b"WAVEfmt "
+    assert struct.unpack("<I", body[4:8])[0] == len(body) - 8
+    fmt, ch, rate, byte_rate, align, bits = struct.unpack("<HHIIHH", body[20:36])
+    assert (fmt, ch, rate, byte_rate, align, bits) == (1, 1, 8000, 16000, 2, 16)
+    assert body[36:40] == b"data" and struct.unpack("<I", body[40:44])[0] == len(pcm)
+    assert body[44:] == pcm                     # the samples as kept, not swapped
+    info = detect_media(body)
+    assert info.mime == "audio/wav" and info.duration_s == pytest.approx(1.25)
+    # the standard library reads it back
+    import io
+    import wave
+
+    with wave.open(io.BytesIO(body)) as w:
+        assert (w.getframerate(), w.getnchannels(), w.getsampwidth()) == (8000, 1, 2)
+        assert w.getnframes() / w.getframerate() == pytest.approx(1.25)
+    # stereo at 16 kHz; a torn last frame is dropped
+    stereo = _pcm(0.5, 16000) + b"\x01"
+    pid2 = _with_store(client, tmp_path / "two", _BlobStore(stereo))
+    s2 = hashlib.sha256(stereo).hexdigest()
+    body = client.get(f"/api/p/{pid2}/media/{s2}?mime={quote('audio/L16;rate=16000;channels=2')}").content
+    assert detect_media(body).duration_s == pytest.approx(0.25)
+    assert detect_media(body).channels == 2
+
+
+def test_raw_pcm_with_no_declared_rate_downloads(client, tmp_path):
+    from urllib.parse import quote
+
+    pcm = _pcm(0.1, 8000)
+    pid = _with_store(client, tmp_path, _BlobStore(pcm))
+    sha = hashlib.sha256(pcm).hexdigest()
+    for q in ("", "?mime=audio%2FL16", f"?mime={quote('audio/L16;rate=abc')}"):
+        r = client.get(f"/api/p/{pid}/media/{sha}{q}")
+        assert r.status_code == 200 and r.content == pcm
+        assert r.headers["content-type"] == "application/octet-stream"
+        assert r.headers["content-disposition"] == f'attachment; filename="{sha}.bin"'
+
+
+def test_a_declared_type_never_makes_a_blob_render_inline(client, tmp_path):
+    from urllib.parse import quote
+
+    html = b"<html><script>alert(1)</script></html>" * 40
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' * 20
+    pid = _with_store(client, tmp_path, _BlobStore(html, svg))
+    for blob in (html, svg):
+        sha = hashlib.sha256(blob).hexdigest()
+        for mime in ("", "text/html", "image/svg+xml", "audio/wav", "image/png", "video/mp4"):
+            r = client.get(f"/api/p/{pid}/media/{sha}?mime={quote(mime)}")
+            assert r.status_code == 200, mime
+            assert r.headers["content-type"] == "application/octet-stream", mime
+            assert r.headers["content-disposition"].startswith("attachment;"), mime
+            assert r.headers["x-content-type-options"] == "nosniff"
+            assert r.content == blob
+    # bytes that *are* a WAV play whatever is declared: the bytes win
+    wav = _wav()
+    pid2 = _with_store(client, tmp_path / "two", _BlobStore(wav))
+    sha = hashlib.sha256(wav).hexdigest()
+    r = client.get(f"/api/p/{pid2}/media/{sha}?mime={quote('audio/L16;rate=16000')}")
+    assert r.headers["content-type"] == "audio/wav" and r.content == wav
+
+
+def test_a_store_get_keeps_the_sha_rules(client, tmp_path):
+    store = _BlobStore(b"x" * 2000)
+    pid = _with_store(client, tmp_path, store)
+    assert client.get(f"/api/p/{pid}/media/not-a-sha").status_code == 400
+    assert client.get(f"/api/p/{pid}/media/{'A' * 64}").status_code == 400
+    assert client.get(f"/api/p/{pid}/media/..%2F..%2Fsecret.txt").status_code in (400, 404)
+    assert store.asked == []                    # nothing malformed reaches the store
+    r = client.get(f"/api/p/{pid}/media/{'0' * 64}")
+    assert r.status_code == 404 and r.json()["error"] == "no such media"
+    # a store handing back other bytes than the id names is not believed
+    store.blobs["1" * 64] = b"not what that id hashes"
+    assert client.get(f"/api/p/{pid}/media/{'1' * 64}").status_code == 502
+
+
+def test_a_store_that_is_away_is_a_503(client, tmp_path):
+    class Away(_BlobStore):
+        def get(self, sha):
+            raise ConnectionError("refused")
+
+    pid = _with_store(client, tmp_path, Away())
+    r = client.get(f"/api/p/{pid}/media/{'0' * 64}")
+    assert r.status_code == 503
+    assert r.json()["store_unreachable"] is True and "refused" in r.json()["error"]
+
+
+@needs_api
+def test_a_local_raw_pcm_file_plays_as_wav_too(client, tmp_path):
+    from urllib.parse import quote
+
+    root = _dead_clickhouse(tmp_path)
+    pcm = _pcm(0.5, 16000)
+    sha = LocalMediaStore(root / "media").put(pcm, detect_media(pcm, "audio/L16;rate=16000"))
+    pid = _open(client, root)
+    plain = client.get(f"/api/p/{pid}/media/{sha}")
+    assert plain.headers["content-type"] == "application/octet-stream"
+    assert plain.headers["content-disposition"] == f'attachment; filename="{sha}.pcm"'
+    r = client.get(f"/api/p/{pid}/media/{sha}?mime={quote('audio/L16;rate=16000;channels=1')}")
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/wav"
+    assert r.content[44:] == pcm and detect_media(r.content).duration_s == pytest.approx(0.5)
+
+
+@needs_api
+def test_a_local_svg_never_renders_inline(client, tmp_path):
+    root = _dead_clickhouse(tmp_path)
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' * 20
+    sha = LocalMediaStore(root / "media").put(svg, detect_media(svg, "image/svg+xml"))
+    pid = _open(client, root)
+    r = client.get(f"/api/p/{pid}/media/{sha}?mime=image%2Fsvg%2Bxml")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/octet-stream"
+    assert r.headers["content-disposition"].startswith("attachment;")
+
+
 # ── live: a run an engine-side store wrote, read back by the studio ──────
 
 

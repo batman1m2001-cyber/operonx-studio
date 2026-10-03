@@ -22,10 +22,12 @@ means the tabs say so instead of guessing.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
+import struct
 import subprocess
 import sys
 import time
@@ -512,6 +514,69 @@ def _dir_size(path: Path) -> int:
     return total
 
 
+# ── trace media ─────────────────────────────────────────────────────────
+
+#: how much of a media file the type is read from
+_MEDIA_HEAD = 4096
+_PCM_BITS = {"audio/l8": 8, "audio/l16": 16, "audio/l24": 24}
+_PCM_ANY = ("audio/pcm", "audio/raw", "audio/x-raw")
+_RANGE = re.compile(r"bytes=(\d*)-(\d*)")
+
+
+def _pcm_wav(data: bytes, declared: str) -> Optional[bytes]:
+    """*data* — raw PCM, as *declared* (``audio/L16;rate=16000;channels=1``)
+    names it — behind a WAV header, or ``None`` when *declared* is not a
+    raw-PCM type with a rate.
+
+    The samples are taken as they are, little-endian: RFC 3551 has L16 in
+    network byte order, but operonx keeps the samples it was handed — the
+    callbot's TTS ``audio/L16`` blob is byte for byte the ``data`` chunk of
+    the WAV it sends, and its customer turns decode as speech only
+    little-endian. L8 is unsigned with an offset of 128 in both."""
+    from operonx.telemetry.media import detect_media
+
+    parts = [p.strip() for p in str(declared or "").split(";")]
+    base = parts[0].lower()
+    params = dict(p.split("=", 1) for p in parts[1:] if "=" in p)
+    params = {k.strip().lower(): v.strip().strip('"') for k, v in params.items()}
+    if base in _PCM_BITS:
+        bits = _PCM_BITS[base]
+    elif base in _PCM_ANY:
+        given = params.get("bits", "16")
+        bits = int(given) if given.isdigit() else 0
+    else:
+        return None
+    info = detect_media(data, declared)
+    rate, channels = info.sample_rate or 0, info.channels or 1
+    if bits not in (8, 16, 24) or not 0 < rate <= 768000 or not 0 < channels <= 16:
+        return None
+    frame = channels * bits // 8
+    data = data[: len(data) - len(data) % frame]
+    return (b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt "
+            + struct.pack("<IHHIIHH", 16, 1, channels, rate, rate * frame, frame, bits)
+            + b"data" + struct.pack("<I", len(data)) + data)
+
+
+def _bytes_response(request: Any, data: bytes, mime: str, headers: Dict[str, str]) -> Any:
+    """*data* as *mime*, honouring one ``Range: bytes=a-b`` so a player
+    can seek; any other range header gets the whole body."""
+    from fastapi.responses import Response
+
+    headers = {**headers, "Accept-Ranges": "bytes"}
+    m = _RANGE.fullmatch((request.headers.get("range") or "").strip())
+    n = len(data)
+    if m is None or not (m[1] or m[2]):
+        return Response(data, media_type=mime, headers=headers)
+    if m[1]:
+        start, end = int(m[1]), min(int(m[2]) if m[2] else n - 1, n - 1)
+    else:
+        start, end = max(0, n - int(m[2])), n - 1
+    if start >= n or start > end:
+        return Response(b"", status_code=416, headers={**headers, "Content-Range": f"bytes */{n}"})
+    return Response(data[start : end + 1], status_code=206, media_type=mime,
+                    headers={**headers, "Content-Range": f"bytes {start}-{end}/{n}"})
+
+
 # ── the app ─────────────────────────────────────────────────────────────
 
 
@@ -528,8 +593,6 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     recents = recents if recents is not None else Recents()
     watchers: Dict[str, ProjectWatcher] = {}
-
-    import hashlib
 
     from fastapi import Depends
     from fastapi.middleware.gzip import GZipMiddleware
@@ -1918,13 +1981,25 @@ def build_studio_app(recents: Optional[Recents] = None):
     _INLINE = ("audio/", "image/", "video/")
 
     @app.get("/api/p/{pid}/media/{sha}")
-    def media_blob(pid: str, sha: str) -> Any:
-        """One blob a ``$media`` reference names, from the store's
-        ``media_dir`` (a :class:`~operonx.telemetry.media.LocalMediaStore`).
-        Read only; *sha* must be 64 lowercase hex, and the file found must
-        resolve inside the media directory — a symlink out of it is not
-        followed."""
+    def media_blob(pid: str, sha: str, request: Request, mime: str = "") -> Any:
+        """One blob a ``$media`` reference names, read only.
+
+        A store that keeps blobs as files (a
+        :class:`~operonx.telemetry.media.LocalMediaStore`: ``root`` and
+        ``path``) serves the file, which must resolve inside the media
+        directory — a symlink out of it is not followed. Any other store
+        (ClickHouse's ``media: clickhouse``) is asked for the bytes with
+        ``get(sha)``. *sha* must be 64 lowercase hex.
+
+        What the browser is told the blob is comes from its bytes
+        (:func:`~operonx.telemetry.media.detect_media`). *mime* — the
+        reference's declared type — only names raw PCM, which has no
+        header: ``audio/L16;rate=8000;channels=1`` (also L8, L24, and
+        ``audio/pcm``/``raw`` with ``bits=``) is served as WAV, a header
+        put in front of the samples so ``<audio>`` plays it. Never
+        anything else: a declared type cannot make a blob render inline."""
         from fastapi.responses import FileResponse
+        from operonx.telemetry.media import OCTET, detect_media
 
         if not _SHA.match(sha):
             return JSONResponse({"error": "a media id is 64 lowercase hex characters"}, status_code=400)
@@ -1932,33 +2007,54 @@ def build_studio_app(recents: Optional[Recents] = None):
         if pr is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
         media = getattr(pr.store, "media", None)
-        base = getattr(media, "root", None)
-        if base is None or not hasattr(media, "path"):
-            return JSONResponse({"error": f"this project's store ({pr.info.get('label') or pr.source}) "
-                                          "keeps no media"}, status_code=404)
-        base = Path(base).resolve()
-        found = media.path(sha)
-        if found is None:
-            return JSONResponse({"error": "no such media"}, status_code=404)
-        real = Path(found).resolve()
-        if not real.is_file() or not real.is_relative_to(base) or real.name.split(".", 1)[0] != sha:
-            return JSONResponse({"error": "no such media"}, status_code=404)
-        import mimetypes
-
-        mime = mimetypes.guess_type(real.name)[0] or "application/octet-stream"
-        if mime == "audio/x-wav":
-            mime = "audio/wav"
-        inline = mime.startswith(_INLINE) and mime != "image/svg+xml"
         headers = {
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'; sandbox",
             # named by its content: it never changes under the same address
             "Cache-Control": "private, max-age=31536000, immutable",
         }
-        if not inline:
-            mime = "application/octet-stream"
-            headers["Content-Disposition"] = f'attachment; filename="{real.name}"'
-        return FileResponse(str(real), media_type=mime, headers=headers)
+        base = getattr(media, "root", None)
+        if base is not None and hasattr(media, "path"):
+            base = Path(base).resolve()
+            found = media.path(sha)
+            if found is None:
+                return JSONResponse({"error": "no such media"}, status_code=404)
+            real = Path(found).resolve()
+            if not real.is_file() or not real.is_relative_to(base) or real.name.split(".", 1)[0] != sha:
+                return JSONResponse({"error": "no such media"}, status_code=404)
+            with open(real, "rb") as fh:
+                head = fh.read(_MEDIA_HEAD)
+            kind = detect_media(head).mime
+            wav = _pcm_wav(real.read_bytes(), mime) if kind == OCTET and mime else None
+            if wav is None:
+                kind = kind if kind.startswith(_INLINE) and kind != "image/svg+xml" else OCTET
+                if kind == OCTET:
+                    headers["Content-Disposition"] = f'attachment; filename="{real.name}"'
+                return FileResponse(str(real), media_type=kind, headers=headers)
+            return _bytes_response(request, wav, "audio/wav", headers)
+        if media is None or not callable(getattr(media, "get", None)):
+            return JSONResponse({"error": f"this project's store ({pr.info.get('label') or pr.source}) "
+                                          "keeps no media"}, status_code=404)
+        try:
+            data = media.get(sha)
+        except Exception as exc:  # noqa: BLE001 — a remote store may be away
+            label = pr.info.get("label") or pr.source
+            return JSONResponse({"error": f"can't reach the trace store ({label}): {type(exc).__name__}: {exc}",
+                                 "store_unreachable": True}, status_code=503)
+        if data is None:
+            return JSONResponse({"error": "no such media"}, status_code=404)
+        data = bytes(data)
+        if hashlib.sha256(data).hexdigest() != sha:   # a store is addressed by content; hold it to it
+            return JSONResponse({"error": "the store's bytes do not match this media id"}, status_code=502)
+        info = detect_media(data)
+        wav = _pcm_wav(data, mime) if info.mime == OCTET and mime else None
+        if wav is not None:
+            return _bytes_response(request, wav, "audio/wav", headers)
+        kind = info.mime
+        if not kind.startswith(_INLINE) or kind == "image/svg+xml":
+            kind = OCTET
+            headers["Content-Disposition"] = f'attachment; filename="{sha}.{info.ext}"'
+        return _bytes_response(request, data, kind, headers)
 
     def _policy_from(body: Dict[str, Any]) -> Dict[str, Optional[float]]:
         raw = body.get("retention") or {}

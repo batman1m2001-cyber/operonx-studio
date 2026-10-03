@@ -11,7 +11,10 @@
 
 const PID = location.pathname.split("/").pop();
 // a $media blob in a recorded value plays or shows from the project's store
-if (window.Values) Values.mediaUrl = (sha) => `/api/p/${PID}/media/${sha}`;
+// the ref's declared type rides along: the server reads the bytes' own
+// type first and takes this only for raw PCM (served as WAV so it plays)
+if (window.Values) Values.mediaUrl = (sha, mime) =>
+  `/api/p/${PID}/media/${sha}${mime ? `?mime=${encodeURIComponent(mime)}` : ""}`;
 const NODE_W = 260, NODE_H = 64;
 const HEADER = 34;              // a container's title strip
 const SVGNS = "http://www.w3.org/2000/svg";
