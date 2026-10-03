@@ -2125,102 +2125,21 @@ function literalEditor(node, inp) {
  * record is pre-selected. */
 function fmtCtx(c) { return Array.isArray(c) ? c.join(".") : (c || ""); }
 
-/* ── trace values: EXPOSED, not a debugger tree ─────────────────────
- * A person reading a trace wants the values in front of their eyes:
- * strings as readable text blocks, dicts as flat key/value rows all
- * open, scalars plain. Nothing to expand unless it is truly huge. */
-function traceValue(v, depth = 0) {
-  if (v === null || v === undefined) return el("span", "tvnull", "null");
-  if (typeof v === "boolean" || typeof v === "number")
-    return el("span", "tvnum", String(v));
-  if (typeof v === "string") {
-    if (v === "") return el("span", "tvempty", "empty");
-    if (v === "[]") return el("span", "tvempty", "empty list");
-    const s = el("div", "tvstr");
-    if (v.length > 480) {
-      const head = document.createTextNode(v.slice(0, 480) + "… ");
-      const btn = el("button", "tvmore", `show all (${v.length} chars)`);
-      btn.onclick = () => { s.textContent = v; };
-      s.append(head, btn);
-    } else s.textContent = v;
-    return s;
-  }
-  if (Array.isArray(v)) {
-    if (!v.length) return el("span", "tvempty", "empty list");
-    const flat = JSON.stringify(v);
-    if (flat.length < 110 && v.every(x =>
-        x === null || ["string", "number", "boolean"].includes(typeof x)))
-      return el("span", "tvnum", flat);
-    const box = el("div", "tvdict");
-    v.slice(0, 10).forEach((x, i) => {
-      const row = el("div", "tvrow");
-      row.append(el("span", "tvkey", String(i)));
-      row.append(traceValue(x, depth + 1));
-      box.append(row);
-    });
-    if (v.length > 10) box.append(el("div", "tvempty", `+ ${v.length - 10} more`));
-    return box;
-  }
-  if (typeof v === "object") {
-    if (v.$unserializable) return el("span", "tvtoken", `⊘ ${v.$unserializable}`);
-    if (v.$media) {
-      // one renderer for media (values.js): a player or the image when
-      // the store serves the blob, else a token naming it
-      const m = window.Values && Values.media(v);
-      if (m) return m;
-      const t = el("span", "tvtoken",
-        `▶ media${v.bytes ? ` · ${(v.bytes / 1024).toFixed(1)} KB` : ""}`);
-      t.title = v.$media;
-      return t;
-    }
-    if (depth >= 2) {
-      const s = el("div", "tvstr");
-      const flat = JSON.stringify(v);
-      s.textContent = flat.length > 300 ? flat.slice(0, 300) + "…" : flat;
-      return s;
-    }
-    const box = el("div", "tvdict");
-    for (const [k, x] of Object.entries(v)) {
-      const row = el("div", "tvrow");
-      row.append(el("span", "tvkey", k));
-      row.append(traceValue(x, depth + 1));
-      box.append(row);
-    }
-    return box;
-  }
-  return el("span", "tvnum", String(v));
-}
+/* ── trace values ───────────────────────────────────────────────────
+ * One renderer for an execution's values (io.js): an LLM call as its
+ * conversation and reply, everything else as readable fields, and a
+ * Formatted / JSON switch the panel remembers. */
+function traceValue(v) { return IO.valueView(v); }
 
-/* the run's inputs and outputs as the two familiar port zones — blue
- * in, warm out — every variable a labelled block, every value open */
+/* an execution's input and output cards; inputs that read a SCRATCH
+ * cell wear the cell's name */
 function valueZones(box, inputs, outputs, scratchKeyOf = {}, opts = {}) {
-  const zone = (label, values, cls) => {
-    const z = el("div", `pzone ${cls}`);
-    z.append(el("div", "tvhead", label));
-    const entries = values && typeof values === "object"
-      ? Object.entries(values).filter(([k]) => !(opts.hide || []).includes(k)) : [];
-    if (!entries.length) z.append(el("div", "tvempty", "none recorded"));
-    for (const [k, v] of entries) {
-      const varbox = el("div", "tvvar");
-      const nm = el("div", "pname", k);
-      if (cls === "pzin" && k in scratchKeyOf) {
-        const pill = el("span", "pchip pscratch", `⌂ ${scratchKeyOf[k]}`);
-        pill.title = "read from a SCRATCH cell — the cell's observed value at this step";
-        nm.append(" ", pill);
-      }
-      varbox.append(nm);
-      varbox.append(traceValue(v));
-      z.append(varbox);
-    }
-    box.append(z);
-  };
-  if (opts.outputsFirst) {
-    zone("output", outputs, "pzout");
-    zone("input", inputs, "pzin");
-  } else {
-    zone("inputs", inputs, "pzin");
-    zone("outputs", outputs, "pzout");
-  }
+  const badges = {};
+  for (const [k, cell] of Object.entries(scratchKeyOf))
+    badges[k] = [`⌂ ${cell}`, "read from a SCRATCH cell — the cell's observed value at this step"];
+  box.append(IO.panel(inputs, outputs, {
+    ...opts, badges, mode: recall("ioMode", "pretty"), onMode: (m) => store("ioMode", m),
+  }));
 }
 
 function executionsSection(n, execP) {
@@ -2875,7 +2794,18 @@ async function renderExecPanel(run, e, execs) {
 
   // ── verdict ──
   const head = el("div", "phead");
-  head.append(el("h3", null, e.op));
+  const title = el("div", "pheadrow");
+  title.append(el("h3", null, e.op));
+  // reading a long prompt wants width: the panel widens in place
+  const wide = Icons.button($("#sidebar").classList.contains("wide") ? "collapse" : "expand", undefined,
+    "small ghost widebtn", "Widen the panel to read values");
+  wide.onclick = () => {
+    const on = $("#sidebar").classList.toggle("wide");
+    store("panelWide", on);
+    renderExecPanel(run, e, execs);
+  };
+  title.append(wide);
+  head.append(title);
   const verdict = el("div", "execverdict");
   verdict.append(el("span", "status " + (e.status === "error" ? "s-bad" : "s-ok"), e.status === "error" ? "failed" : "ok"));
   verdict.append(el("span", "vsep", "·"), el("span", "strong", fmtMs(e.dur_ms)));
@@ -2986,7 +2916,9 @@ async function renderExecPanel(run, e, execs) {
     if (typeof PlayView !== "undefined" && sm && (sm.service || sm.job) && state._tlrun === run) {
       panel.insertBefore(PlayView.rerunSection(run, e, match), costSec.nextSibling);
     }
-    if (priced) {
+    // an LLM reply carries its own facts line (io.js); only a priced op
+    // that is not a chat reply keeps the separate block
+    if (priced && !IO.replyOf(outs)) {
       costSec.append(el("div", "stitle", "Cost and usage"));
       const u = outs.usage || {};
       const facts = el("div", "facts compact");
@@ -3658,6 +3590,7 @@ function centerOn(item) {
   const bar = $("#dragbar"), panel = $("#sidebar");
   const saved = recall("panelW", null);
   if (saved) panel.style.width = `${saved}px`;
+  if (recall("panelWide", false)) panel.classList.add("wide");
   let dragging = false;
   bar.addEventListener("pointerdown", (ev) => {
     dragging = true;
