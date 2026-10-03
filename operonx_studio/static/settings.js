@@ -152,11 +152,17 @@
     const runs = el("section", "setsection");
     runs.append(el("h3", "setsectitle", "Runs"));
     const facts = el("div", "facts");
-    facts.append(factRow("Stored in", current.store, true));
+    const info = current.store_info || {};
+    facts.append(factRow("Stored in", info.label || current.store, true));
+    if (info.why) facts.append(factRow("Chosen by", info.why));
     facts.append(factRow("Backend", `${current.backend}${current.writable ? "" : " (read-only)"}`));
-    facts.append(factRow("Runs kept", String(current.runs)));
-    facts.append(factRow("Langfuse", current.langfuse || "Not connected", !!current.langfuse));
+    facts.append(factRow("Runs kept", current.runs == null ? "—" : String(current.runs)));
+    facts.append(factRow("Langfuse", info.remote || current.langfuse || "Not connected",
+      !!(info.remote || current.langfuse)));
+    for (const sk of info.skipped || [])
+      facts.append(factRow("Not read", `${sk.sink} — ${sk.reason}`));
     runs.append(facts);
+    if (current.store_error) runs.append(el("div", "errbox setstoreerr", current.store_error));
     box.append(runs);
 
     const ret = el("section", "setsection");

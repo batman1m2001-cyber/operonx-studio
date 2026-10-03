@@ -88,6 +88,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/runs"): "read",
     ("GET", f"{P}/runs/groups"): "read",
     ("GET", f"{P}/runs/origins"): "read",
+    ("GET", f"{P}/media/{{sha}}"): "read",
     ("GET", f"{P}/monitor"): "read",
     ("GET", f"{P}/trace/{{run}}"): "read",
     ("GET", f"{P}/trace/{{run}}/flow"): "read",

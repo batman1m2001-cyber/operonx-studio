@@ -19,7 +19,9 @@ version = "0.1.0"
 description = "Visual studio and project tooling for operonx — open a project, see the flow."
 requires-python = ">=3.10"
 dependencies = [
-    "operonx>=1.11.0",
+    # the ClickHouse driver: a project whose [tracing] records to ClickHouse
+    # is read from there
+    "operonx[clickhouse]>=1.14.0",
     "tomli>=2.0; python_version < '3.11'",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",

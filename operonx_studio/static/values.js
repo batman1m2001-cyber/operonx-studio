@@ -23,6 +23,7 @@
   const MAX_DEPTH = 8;
 
   const B64ISH = /^[A-Za-z0-9+/=\s]+$/;
+  const SHA = /^[0-9a-f]{64}$/;    // a content-addressed blob ($media)
 
   function fmtBytes(n) {
     if (n < 1024) return `${n} B`;
@@ -34,6 +35,15 @@
     return s.length >= PAYLOAD_MIN && B64ISH.test(s.slice(0, 512));
   }
 
+  const PCM = /^audio\/(l8|l16|l24|pcm|raw|x-raw)$/i;
+  function declaredMime(mime, rate, channels) {
+    if (!mime) return null;
+    const base = mime.split(";")[0].trim();
+    if (!PCM.test(base) || /;\s*rate=/i.test(mime) || !(Number.isInteger(rate) && rate > 0)) return mime;
+    const ch = Number.isInteger(channels) && channels > 0 ? channels : 1;
+    return `${mime};rate=${rate};channels=${ch}`;
+  }
+
   function marker(v) {
     // the trace consumer's own tokens for things it chose not to inline
     if (v && typeof v === "object" && !Array.isArray(v)) {
@@ -41,7 +51,21 @@
       if ("$media" in v || "$media_ref" in v) {
         const ref = v.$media ?? v.$media_ref;
         const size = v.bytes ?? v.size;
-        return { t: "media", text: String(ref), size: size ? fmtBytes(size) : null };
+        const out = { t: "media", text: String(ref), size: size ? fmtBytes(size) : null };
+        if ("$media" in v && SHA.test(String(v.$media))) {
+          // a blob in the store's media directory: /media/<sha> serves it
+          const mime = typeof v.mime === "string" ? v.mime : "";
+          out.sha = v.$media;
+          out.mime = mime || null;
+          // what the server is told the blob is: raw PCM has no header, so
+          // its rate rides along (operonx keeps it beside the mime)
+          out.declared = declaredMime(mime, v.sample_rate, v.channels);
+          out.kind = mime.startsWith("audio/") ? "audio"
+            : mime.startsWith("image/") && mime !== "image/svg+xml" ? "image" : null;
+          if (typeof v.duration_s === "number")
+            out.duration = `${Number(v.duration_s.toFixed(v.duration_s < 10 ? 2 : 1))} s`;
+        }
+        return out;
       }
     }
     return null;
@@ -100,8 +124,37 @@
       case "token": return elx("span", `vt vt-${s.cls}`, s.text);
       case "str": return elx("span", "vt vt-str", `"${s.text}"`);
       case "unser": return elx("span", "vt vt-marker", `⊘ ${s.text}`);
-      case "media": return elx("span", "vt vt-marker",
-        `▮ media${s.size ? ` · ${s.size}` : ""} · ${s.text.split("/").pop()}`);
+      case "media": {
+        if (!s.sha) return elx("span", "vt vt-marker",
+          `▮ media${s.size ? ` · ${s.size}` : ""} · ${s.text.split("/").pop()}`);
+        const tok = elx("span", "vt vt-marker",
+          `▮ ${s.mime || "media"}${s.duration ? ` · ${s.duration}` : ""}${s.size ? ` · ${s.size}` : ""}`);
+        tok.title = `sha256 ${s.sha}`;
+        const url = api.mediaUrl ? api.mediaUrl(s.sha, s.declared) : null;
+        if (!url || !s.kind) return tok;
+        const box = elx("div", "vmedia");
+        if (s.kind === "audio") {
+          const a = elx("audio");
+          a.controls = true;
+          a.preload = "metadata";
+          a.src = url;
+          a.setAttribute("aria-label", `Recorded audio, ${s.mime}${s.duration ? `, ${s.duration}` : ""}`);
+          box.append(a);
+        } else {
+          const link = elx("a");
+          link.href = url;
+          link.target = "_blank";
+          link.rel = "noopener";
+          const img = elx("img");
+          img.loading = "lazy";
+          img.src = url;
+          img.alt = `Recorded image, ${s.mime}`;
+          link.append(img);
+          box.append(link);
+        }
+        box.append(tok);
+        return box;
+      }
       case "payload": {
         const d = elx("details", "vfold");
         d.append(elx("summary", "vt vt-marker", `▮ ${s.size} payload`));
@@ -210,7 +263,16 @@
     }
   }
 
-  const api = { spec, render, fmtBytes, looksPayload, brief };
+  /* A media marker on its own — the token, and a player or the image
+   * when the blob can be fetched — for renderers other than render(). */
+  function media(v) {
+    const s = spec(v);
+    return s.t === "media" ? assemble(s) : null;
+  }
+
+  // mediaUrl(sha, mime) → where the page fetches a blob; set by the page
+  // (studio.js), null under node where nothing is fetched
+  const api = { spec, render, media, fmtBytes, looksPayload, brief, mediaUrl: null };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.Values = api;
 })(typeof window !== "undefined" ? window : globalThis);

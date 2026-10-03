@@ -10,6 +10,11 @@
 "use strict";
 
 const PID = location.pathname.split("/").pop();
+// a $media blob in a recorded value plays or shows from the project's store
+// the ref's declared type rides along: the server reads the bytes' own
+// type first and takes this only for raw PCM (served as WAV so it plays)
+if (window.Values) Values.mediaUrl = (sha, mime) =>
+  `/api/p/${PID}/media/${sha}${mime ? `?mime=${encodeURIComponent(mime)}` : ""}`;
 const NODE_W = 260, NODE_H = 64;
 const HEADER = 34;              // a container's title strip
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -120,7 +125,12 @@ async function api(path, body) {
   }
   if (!res.ok) {
     if (window.Account) Account.refused(res.status, data.error);
-    throw new Error(data.error || res.statusText);
+    // the body rides along: a screen can tell "the store is away"
+    // (data.store_unreachable) from any other failure
+    const err = new Error(data.error || res.statusText);
+    err.status = res.status;
+    err.data = data;
+    throw err;
   }
   return data;
 }
@@ -2154,6 +2164,10 @@ function traceValue(v, depth = 0) {
   if (typeof v === "object") {
     if (v.$unserializable) return el("span", "tvtoken", `⊘ ${v.$unserializable}`);
     if (v.$media) {
+      // one renderer for media (values.js): a player or the image when
+      // the store serves the blob, else a token naming it
+      const m = window.Values && Values.media(v);
+      if (m) return m;
       const t = el("span", "tvtoken",
         `▶ media${v.bytes ? ` · ${(v.bytes / 1024).toFixed(1)} KB` : ""}`);
       t.title = v.$media;
