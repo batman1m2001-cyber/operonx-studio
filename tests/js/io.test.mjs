@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { pyRepr, pyFormat, chatOf, replyOf, jsonish, segments, contentParts } =
+const { pyRepr, pyFormat, chatOf, replyOf, jsonish, segments, contentParts, toolCallOf } =
   require("../../operonx_studio/static/io.js");
 
 test("repr matches Python for JSON values", () => {
@@ -92,4 +92,44 @@ test("content blocks: text, image, media", () => {
     { type: "image_url", image_url: { url: { $media: "a".repeat(64), mime: "image/png" } } },
   ]);
   assert.deepEqual(p.map((x) => x.t), ["text", "image", "media"]);
+});
+
+test("chatOf shows the messages the trace recorded, with the template and its variables (C15)", () => {
+  // operonx >= C15 records the rendered request beside the template. It
+  // wins over a re-rendering here: `{pi:.2f}` is a spec this renderer
+  // cannot apply, and the recorded text is what the model saw.
+  const sent = [{ role: "system", content: "S" }, { role: "user", content: "Q: 3.14" }];
+  const c = chatOf({
+    prompt: { system: "{sys}", user: "Q: {pi:.2f}" }, temperature: 0,
+    sys: "S", pi: 3.14159, other: 1, messages: sent,
+  });
+  assert.equal(c.source, "recorded");
+  assert.deepEqual(c.messages, sent);
+  assert.deepEqual(c.approx, []);
+  assert.deepEqual(c.template, { system: "{sys}", user: "Q: {pi:.2f}" });
+  assert.deepEqual(Object.keys(c.used).sort(), ["pi", "sys"]);
+  assert.deepEqual(Object.keys(c.extra), ["other"]);
+  assert.deepEqual(c.knobs, { temperature: 0 });
+});
+
+test("chatOf falls back to rendering when an old trace recorded only the template", () => {
+  const c = chatOf({ prompt: "Q: {q}", q: "2+2" });
+  assert.equal(c.source, "rendered");
+  assert.deepEqual(c.messages.map((m) => m.content), ["Q: 2+2"]);
+});
+
+test("toolCallOf reads OpenAI, flat and Anthropic tool calls", () => {
+  const openai = toolCallOf({ id: "c1", type: "function",
+    function: { name: "lookup", arguments: '{"sku": "A1"}' } });
+  assert.deepEqual(openai, { id: "c1", name: "lookup", args: { sku: "A1" } });
+  // operonx.agents' shape: {id, name, args} with args a dict
+  assert.deepEqual(toolCallOf({ id: "c2", name: "lookup", args: { sku: "B2" } }),
+    { id: "c2", name: "lookup", args: { sku: "B2" } });
+  // Anthropic tool_use: {id, name, input}
+  assert.deepEqual(toolCallOf({ id: "c3", type: "tool_use", name: "lookup", input: { sku: "C3" } }),
+    { id: "c3", name: "lookup", args: { sku: "C3" } });
+  // arguments that are not JSON stay text; nothing at all stays null
+  assert.deepEqual(toolCallOf({ function: { name: "say", arguments: "hi there" } }),
+    { id: null, name: "say", args: "hi there" });
+  assert.deepEqual(toolCallOf({ name: "ping" }), { id: null, name: "ping", args: null });
 });
