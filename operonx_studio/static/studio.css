@@ -1183,6 +1183,10 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .vt-null { color: var(--text-3); font-style: italic; }
 .vt-str { color: #8d5c0c; }
 .vt-marker { color: #a33a73; background: #fbeef5; border-radius: 5px; padding: 1px 7px; }
+.vmedia { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; max-width: 100%; }
+.vmedia audio { width: 320px; max-width: 100%; height: 36px; }
+.vmedia img { display: block; max-width: min(100%, 360px); max-height: 240px; border-radius: 6px;
+  border: 1px solid var(--border-soft); background: var(--surface-2); }
 .vt-count { color: var(--text-3); }
 .vpreview { color: var(--text-3); font-size: 11.5px; }
 .vfold summary { cursor: pointer; list-style: none; }
@@ -1512,6 +1516,13 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .runstools { display: flex; align-items: center; gap: 8px; }
 .runstitle h2 { margin: 0; font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.015em; }
 .runssub { color: var(--text-3); font-size: var(--fs-md); }
+.runsstore { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: -6px 0 12px;
+  color: var(--text-3); font-size: var(--fs-sm); min-width: 0; }
+.runsstore .icon { width: 14px; height: 14px; flex: none; }
+.runsstorename { color: var(--text-2); font-family: var(--mono); overflow-wrap: anywhere; min-width: 0; }
+.runsstorewhy { overflow-wrap: anywhere; min-width: 0; }
+.setstoreerr { margin-top: 10px; font-family: var(--mono); font-size: var(--fs-sm); white-space: normal;
+  overflow-wrap: anywhere; }
 .runspicker { display: none; }
 .runsbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .runssearch { flex: 1 1 220px; margin: 0; min-height: 30px; }
@@ -1766,6 +1777,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .panenote .notehand summary { cursor: pointer; color: var(--text-3); font-size: var(--fs-sm); }
 .panenote .notehand summary:hover { color: var(--text); }
 .panenote .notehand pre { margin-top: 8px; }
+.panenote pre.noteerr { white-space: pre-wrap; overflow-wrap: anywhere; }
 .loadnote { display: flex; align-items: center; gap: 10px; color: var(--text-2); font-size: var(--fs-md); padding: 8px 0; }
 .spin { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--border);
   border-top-color: var(--signal); animation: axspin .8s linear infinite; }

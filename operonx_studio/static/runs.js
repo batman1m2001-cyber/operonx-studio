@@ -86,6 +86,32 @@ const RunsView = (() => {
     return b;
   }
 
+  /* which store this screen reads, and the configuration that chose it */
+  function storeLine(info) {
+    const line = el("div", "runsstore");
+    if (!info || !info.label) return line;
+    line.append(Icons.svg("database"), el("span", "runsstorename", info.label));
+    if (info.why) line.append(el("span", "runsstorewhy", info.why));
+    const tip = [`Reading ${info.label}`, info.why];
+    if (info.remote) tip.push(`Also: ${info.remote}`);
+    for (const s of info.skipped || []) tip.push(`Not read: ${s.sink} — ${s.reason}`);
+    line.title = tip.filter(Boolean).join("\n");
+    return line;
+  }
+
+  /* the project's store did not answer: say which and why it is read */
+  function unreachable(err) {
+    const info = (err.data && err.data.store) || {};
+    const why = info.why ? ` The studio reads it ${info.why.replace(/^from /, "because of ")}.` : "";
+    const note = paneNote("Can't reach the trace store",
+      `${info.label || "The project's store"} did not answer, so no runs can be listed.${why}`,
+      null, {actions: [{label: "Try again", icon: "refresh", run: () => render()}]});
+    const more = el("details", "notehand");
+    more.append(el("summary", null, "What the store said"), el("pre", "noteerr", err.message));
+    note.append(more);
+    return note;
+  }
+
   function same(a, b) { return a.kind === b.kind && (a.name || "") === (b.name || ""); }
 
   function renderRail(rail) {
@@ -305,8 +331,17 @@ const RunsView = (() => {
     const early = {url: firstPage()};
     early.got = api(`${early.url}&with_origins=1`);
     early.got.catch(() => {});      // awaited below, or dropped
-    try { origins = (await early.got).origins || null; }
-    catch (e) { origins = null; main.append(loadError(e, () => render())); }
+    let first = null;
+    try { first = await early.got; origins = first.origins || null; }
+    catch (e) {
+      origins = null;
+      if (mine !== token) return;
+      if (e.data && e.data.store_unreachable) {
+        main.append(unreachable(e));
+        return;
+      }
+      main.append(loadError(e, () => render()));
+    }
     if (mine !== token) return;
     // a folder that no longer exists falls back to all runs
     if (origins && v.folder.kind !== "all") {
@@ -325,6 +360,7 @@ const RunsView = (() => {
     const tools = el("div", "runstools");
     head.append(picker, htext, tools);
     main.append(head);
+    if (first && first.store) main.append(storeLine(first.store));
 
     const bar = el("div", "runsbar");
     const range = el("select");

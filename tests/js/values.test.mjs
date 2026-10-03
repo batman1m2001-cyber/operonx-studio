@@ -41,6 +41,28 @@ test("consumer markers render as tokens", () => {
   assert.equal(m.size, "22.5 KB");
 });
 
+test("a $media blob by sha says what it is, and whether it plays or shows", () => {
+  const sha = "9f".repeat(32);
+  const a = spec({ $media: sha, mime: "audio/wav", size: 48044, duration_s: 1.5,
+                   sample_rate: 16000, channels: 1, store: "local" });
+  assert.equal(a.t, "media");
+  assert.equal(a.sha, sha);
+  assert.equal(a.kind, "audio");
+  assert.equal(a.mime, "audio/wav");
+  assert.equal(a.duration, "1.5 s");
+  assert.equal(a.size, "46.9 KB");
+  assert.equal(spec({ $media: sha, mime: "image/png", size: 10 }).kind, "image");
+  // an svg can carry script: never shown inline
+  assert.equal(spec({ $media: sha, mime: "image/svg+xml" }).kind, null);
+  assert.equal(spec({ $media: sha, mime: "application/pdf" }).kind, null);
+  // a path-style reference (the files store's) is not a blob id
+  const old = spec({ $media: "media/a1.wav", mime: "audio/wav" });
+  assert.equal(old.sha, undefined);
+  assert.equal(old.kind, undefined);
+  // nor is anything that is not 64 lowercase hex
+  assert.equal(spec({ $media: "../" + sha.slice(3), mime: "audio/wav" }).sha, undefined);
+});
+
 test("arrays carry a count and a scalar preview", () => {
   const s = spec([1, 2, 3, 4, 5]);
   assert.equal(s.count, 5);

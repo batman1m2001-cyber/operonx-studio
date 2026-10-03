@@ -837,6 +837,15 @@ def build_studio_app(recents: Optional[Recents] = None):
             _cookie(response, request, token)
         return response
 
+    from operonx_studio.runs import StoreUnreachable
+
+    @app.exception_handler(StoreUnreachable)
+    async def _unreachable(request, exc: StoreUnreachable):
+        # the project's own store did not answer: say which, and why
+        # the studio reads it, instead of a 500 and a spinner
+        return JSONResponse({"error": str(exc), "store_unreachable": True, "store": exc.info},
+                            status_code=503)
+
     @app.exception_handler(AccessDenied)
     async def _denied(request, exc: AccessDenied):
         if not request.url.path.startswith("/api/"):
@@ -1598,7 +1607,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         out: Dict[str, Any] = {"runs": [_row(s) for s in page.items], "next": page.next_cursor,
-                               "total": page.total, "source": pr.source}
+                               "total": page.total, "source": pr.source, "store": pr.info}
         if with_origins:
             got = _origins(pid, since, until)
             out["origins"] = None if isinstance(got, JSONResponse) else got
@@ -1683,6 +1692,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             "playground": list(folders["playground"].values()),
             "adhoc": list(folders["adhoc"].values()),
             "source": pr.source,
+            "store": pr.info,
         }
 
     @app.get("/api/p/{pid}/monitor")
@@ -1877,19 +1887,78 @@ def build_studio_app(recents: Optional[Recents] = None):
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
         pr = project_runs(watcher.root)  # the first open sweeps, as every route's does
+        # a store that does not answer still has a Settings screen: it
+        # says which store, why, and that it could not be reached
+        try:
+            count: Optional[int] = pr.store.count()
+            preview = _retention_preview(watcher, _policy_from({"retention": read_retention(watcher.root)}))
+            error = None
+        except StoreUnreachable as exc:
+            count, preview, error = None, {}, str(exc)
         return JSONResponse({
             "store": pr.source,
+            "store_info": pr.info,
+            "store_error": error,
             "backend": pr.spec.get("backend"),
             "writable": pr.store.writable,
             "langfuse": pr.remote.config.get("host") if pr.remote is not None else None,
             "retention": read_retention(watcher.root),
             "last_sweep": pr.last_sweep,
             "swept_at": pr.swept_at or None,
-            "runs": pr.store.count(),
+            "runs": count,
             # what the current policy would delete, so the screen needs no
             # second round trip to say so
-            "preview": _retention_preview(watcher, _policy_from({"retention": read_retention(watcher.root)})),
+            "preview": preview,
         })
+
+    # ── media: a trace's blobs, by content address ──────────────────────
+
+    _SHA = re.compile(r"^[0-9a-f]{64}$")
+    # what a browser may render inline; anything else downloads
+    _INLINE = ("audio/", "image/", "video/")
+
+    @app.get("/api/p/{pid}/media/{sha}")
+    def media_blob(pid: str, sha: str) -> Any:
+        """One blob a ``$media`` reference names, from the store's
+        ``media_dir`` (a :class:`~operonx.telemetry.media.LocalMediaStore`).
+        Read only; *sha* must be 64 lowercase hex, and the file found must
+        resolve inside the media directory — a symlink out of it is not
+        followed."""
+        from fastapi.responses import FileResponse
+
+        if not _SHA.match(sha):
+            return JSONResponse({"error": "a media id is 64 lowercase hex characters"}, status_code=400)
+        pr = _runs(pid)
+        if pr is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        media = getattr(pr.store, "media", None)
+        base = getattr(media, "root", None)
+        if base is None or not hasattr(media, "path"):
+            return JSONResponse({"error": f"this project's store ({pr.info.get('label') or pr.source}) "
+                                          "keeps no media"}, status_code=404)
+        base = Path(base).resolve()
+        found = media.path(sha)
+        if found is None:
+            return JSONResponse({"error": "no such media"}, status_code=404)
+        real = Path(found).resolve()
+        if not real.is_file() or not real.is_relative_to(base) or real.name.split(".", 1)[0] != sha:
+            return JSONResponse({"error": "no such media"}, status_code=404)
+        import mimetypes
+
+        mime = mimetypes.guess_type(real.name)[0] or "application/octet-stream"
+        if mime == "audio/x-wav":
+            mime = "audio/wav"
+        inline = mime.startswith(_INLINE) and mime != "image/svg+xml"
+        headers = {
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            # named by its content: it never changes under the same address
+            "Cache-Control": "private, max-age=31536000, immutable",
+        }
+        if not inline:
+            mime = "application/octet-stream"
+            headers["Content-Disposition"] = f'attachment; filename="{real.name}"'
+        return FileResponse(str(real), media_type=mime, headers=headers)
 
     def _policy_from(body: Dict[str, Any]) -> Dict[str, Optional[float]]:
         raw = body.get("retention") or {}
