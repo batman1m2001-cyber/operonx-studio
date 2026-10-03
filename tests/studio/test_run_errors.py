@@ -1,6 +1,6 @@
 """Script runs, their names and their structured errors, in the Runs screen (W1).
 
-operonx records a script run inside a project into ``.operonx/runs`` (C14),
+A script run with ``trace="project"`` inside a project lands in its store (C14),
 names it after its graph (C13), and writes the run's ``$errors`` records
 — ``{type, message, count, first_ctx}`` — into ``meta.json`` (C12). The
 run view reads them from ``/tree`` as ``errors``, each with the trace
@@ -72,7 +72,9 @@ def _open(client, root) -> str:
 
 def test_a_script_run_is_listed_under_its_graph_with_its_errors(client, project):
     orders = [{"id": 1, "amount": 5}, {"id": 100, "amount": -1}, {"id": 200, "amount": -2}]
-    out = asyncio.run(Operon(analytics, params={"orders": None}).run(inputs={"orders": orders}))
+    # not held in a variable: the run is named after its graph (C13)
+    run = Operon(analytics, params={"orders": None}, trace="project").run(inputs={"orders": orders})
+    out = asyncio.run(run)
     assert out["$errors"]["analytics.en"]["count"] == 2
 
     pid = _open(client, project)

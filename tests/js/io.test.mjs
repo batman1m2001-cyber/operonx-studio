@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { pyRepr, pyFormat, chatOf, replyOf, jsonish, segments, contentParts, toolCallOf } =
+const { pyRepr, pyFormat, chatOf, replyOf, jsonish, segments, contentParts, toolCallOf, messageParts } =
   require("../../operonx_studio/static/io.js");
 
 test("repr matches Python for JSON values", () => {
@@ -132,4 +132,14 @@ test("toolCallOf reads OpenAI, flat and Anthropic tool calls", () => {
   assert.deepEqual(toolCallOf({ function: { name: "say", arguments: "hi there" } }),
     { id: null, name: "say", args: "hi there" });
   assert.deepEqual(toolCallOf({ name: "ping" }), { id: null, name: "ping", args: null });
+});
+
+test("messageParts: empty content beside tool calls shows nothing, alone it is a signal", () => {
+  const call = [{ id: "c1", name: "lookup", args: { sku: "A1" } }];
+  assert.deepEqual(messageParts({ role: "assistant", content: "", tool_calls: call }), []);
+  assert.deepEqual(messageParts({ role: "assistant", content: null, tool_calls: call }), []);
+  // a reply with neither content nor tool calls is a real signal: kept
+  assert.deepEqual(messageParts({ role: "assistant", content: "" }), [{ t: "text", text: "" }]);
+  assert.deepEqual(messageParts({ role: "assistant", content: "ok", tool_calls: call }),
+    [{ t: "text", text: "ok" }]);
 });

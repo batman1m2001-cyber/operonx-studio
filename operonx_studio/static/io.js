@@ -289,6 +289,16 @@
     });
   }
 
+  /* What a message's body shows. An assistant turn that only calls
+   * tools has empty content ("" or null) — nothing to show above the
+   * calls. Without calls, empty content is shown: a reply that said
+   * nothing is worth seeing. */
+  function messageParts(m) {
+    const calls = Array.isArray(m && m.tool_calls) && m.tool_calls.length > 0;
+    if (calls && (m.content === "" || m.content === null || m.content === undefined)) return [];
+    return contentParts(m ? m.content : null);
+  }
+
   function lineCount(s) {
     let n = 1;
     for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) === 10) n++;
@@ -515,7 +525,7 @@
     const lines = role === "system" ? 8 : 18;
     if (m.parts && text !== null && m.parts.some((p) => p.t !== "text")) body.append(partsView(m.parts, text, lines));
     else {
-      const parts = contentParts(m.content);
+      const parts = messageParts(m);
       if (!parts.length && !(m.tool_calls || []).length) body.append(h("span", "ioempty", "no content"));
       for (const p of parts) {
         if (p.t === "text") body.append(textView(p.text, { lines }));
@@ -700,7 +710,7 @@
     return wrap;
   }
 
-  const api = { KNOBS, pyRepr, pyStr, pyFormat, chatOf, replyOf, toolCallOf, jsonish, segments, contentParts,
+  const api = { KNOBS, pyRepr, pyStr, pyFormat, chatOf, replyOf, toolCallOf, messageParts, jsonish, segments, contentParts,
                 lineCount, panel, valueView, jsonView, textView };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.IO = api;
