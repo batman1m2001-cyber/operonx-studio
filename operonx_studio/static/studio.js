@@ -2764,6 +2764,7 @@ async function showRunTree(run) {
       r.el = row;
       row.classList.add("record");
       row.dataset.op = r.op || "";
+      row.dataset.id = r.id || "";
       row.onclick = () => {
         for (const o of els) o.classList.remove("sel");
         row.classList.add("sel");
@@ -3809,7 +3810,12 @@ window.oxStudioLink = (href) => {
 };
 
 state.follow = recall("follow", false);
-load(true).catch((err) => {
+// `/p/<pid>?run=<trace id>` opens that run: a served reply's
+// `x-operonx-trace-id` header is all a client needs to link to its run
+const linkedRun = new URLSearchParams(location.search).get("run");
+load(true).then(() => {
+  if (linkedRun) performUi("open_run", {run: linkedRun, quiet: true});
+}).catch((err) => {
   // the first paint failed (a dropped tunnel, a dead studio): say so where
   // the canvas would be; the pulse retries and draws when it can
   const box = el("div", "errbox");

@@ -58,8 +58,12 @@ const RunView = (() => {
 
     const recs = execsOf(data.rows || []);
     const errs = s.errors != null ? s.errors : recs.filter(r => r.status === "error").length;
+    const records = data.errors || [];
+    // a run can fail with no failed execution: a structured LLM step that
+    // returned `error`, a subgraph failing around its children
+    const failed = !!errs || records.length > 0 || s.status === "error";
     const line = el("div", "verdict");
-    const status = el("span", "status " + (errs ? "s-bad" : "s-ok"), errs ? "failed" : "ok");
+    const status = el("span", "status " + (failed ? "s-bad" : "s-ok"), failed ? "failed" : "ok");
     line.append(status);
     const bits = [fmtMs(s.duration_ms || data.total_ms || 0)];
     const cost = money(s.cost_usd, s.unpriced);
@@ -76,6 +80,7 @@ const RunView = (() => {
       line.append(next);
     }
     head.append(line);
+    if (records.length) head.append(errorList(records, mode));
 
     const rolls = data.rollups || [];
     const total = Math.max(1, s.duration_ms || data.total_ms || 1);
@@ -101,6 +106,54 @@ const RunView = (() => {
     const origin = originLine(s);
     if (origin) head.append(origin);
     return head;
+  }
+
+  /* What failed, one line per op: its type, the op (a link to the
+   * execution that failed first), how many times, the last line of the
+   * error; the traceback — the user's frames only — folds under it. */
+  function errorList(records, mode) {
+    const box = el("div", "errlist");
+    box.setAttribute("aria-label", "Errors");
+    for (const e of records) {
+      const item = el("details", "erritem");
+      const sum = el("summary");
+      sum.append(el("span", "errtype mono", e.type || "Error"));
+      const go = el("button", "linkbtn mono", e.name || e.op);
+      go.type = "button";
+      go.title = e.op_id ? `Open the execution that failed first (${e.first_ctx})` : `Select ${e.op}`;
+      go.onclick = (ev) => { ev.preventDefault(); focusExec(e, mode); };
+      sum.append(go);
+      if (e.count > 1) {
+        const n = el("span", "errcount", `×${e.count}`);
+        n.title = `${e.op} failed ${e.count} times in this run`;
+        sum.append(n);
+      }
+      sum.append(el("span", "errlast mono", errorLine(e.message, e.type)));
+      item.append(sum);
+      const pre = el("pre", "errtrace mono", String(e.message || "").trim());
+      item.append(pre);
+      box.append(item);
+    }
+    return box;
+  }
+
+  /* The exception's own line, without its type (shown beside it): the
+   * last line that is not indented — an exception whose message spans
+   * lines (operonx's PromptError) indents the rest under it. */
+  function errorLine(message, type) {
+    const lines = String(message || "").trim().split("\n").filter(l => l.trim() && !/^\s/.test(l));
+    const last = lines.length ? lines[lines.length - 1] : "";
+    const prefix = new RegExp(`^(?:[\\w.]*\\.)?${String(type || "").replace(/\W/g, "")}: `);
+    return type ? last.replace(prefix, "") : last;
+  }
+
+  /* an error's execution: its tree row by trace id, else its op */
+  function focusExec(e, mode) {
+    if (mode !== "workflow" && e.op_id) {
+      const row = [...document.querySelectorAll("#traces .rrow.record")].find(r => r.dataset.id === e.op_id);
+      if (row) { row.scrollIntoView({block: "center", behavior: "smooth"}); row.click(); return; }
+    }
+    focusOp(e.name || e.op);
   }
 
   function opLink(op) {
