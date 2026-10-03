@@ -306,6 +306,27 @@ def _flow_records(records, run_name: str, cap: int = 3000) -> Dict[str, Any]:
     return {"run": run_name, "total": len(out), "executions": out[:cap], "turns": turns}
 
 
+def _run_errors(meta: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The run's own failure records (operonx's ``$errors``, written to
+    ``meta.json`` as ``errors``), as rows: ``op`` (full name), ``name``
+    (the op's own), ``type``, ``message``, ``count``, ``first_ctx`` and
+    ``op_id`` — the trace id of the execution that failed first, which
+    the page links to. A run recorded before operonx kept them has none;
+    its failed nodes still say what failed."""
+    out: List[Dict[str, Any]] = []
+    for op, rec in ((meta or {}).get("errors") or {}).items():
+        if not isinstance(rec, dict):
+            continue
+        ctx = rec.get("first_ctx")
+        out.append({
+            "op": op, "name": op.rsplit(".", 1)[-1],
+            "type": rec.get("type"), "message": rec.get("message") or "",
+            "count": int(rec.get("count") or 1), "first_ctx": ctx,
+            "op_id": f"{op}#{ctx}" if ctx else None,
+        })
+    return out
+
+
 def _tree_records(records, run_name: str) -> Dict[str, Any]:
     """The run as the tree Langfuse gets: operonx's own `build_tree` over
     the recorded rows, so the studio and Langfuse never disagree on a
@@ -1792,6 +1813,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         rows, rec = got
         out = _summarise_run(rows, run)
         out["summary"] = rec.summary.to_dict()
+        out["errors"] = _run_errors(rec.meta)
         return JSONResponse(out)
 
     @app.post("/api/p/{pid}/trace/{run}/delete")
@@ -1836,6 +1858,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         out = _tree_records(got[0], run)
         out["summary"] = got[1].summary.to_dict()
         out["rollups"] = _rollups_of(got[0], got[1])
+        out["errors"] = _run_errors(got[1].meta)
         return JSONResponse(out)
 
     @app.get("/api/p/{pid}/compare")
