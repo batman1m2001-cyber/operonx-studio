@@ -246,6 +246,61 @@ def test_a_real_runs_child_executions_come_back_nested(client, project):
     assert model["attrs"] == {"gen_ai.operation.name": "chat"}
 
 
+def _record_agent_run(project, trace_id: str) -> None:
+    """A run whose op ``a`` records turn -> model, lookup with ``child()``."""
+    import asyncio
+
+    from operonx import END, START, Operon, child, graph, op
+
+    @op
+    async def agent(question: str) -> dict:
+        for n in range(2):
+            async with child("turn", inputs={"n": n}, op_type="turn") as turn:
+                async with child("model", inputs={"q": question}, op_type="llm") as call:
+                    call.outputs = {"content": "use lookup"}
+                async with child("lookup", inputs={"q": question}, op_type="tool") as tool:
+                    tool.outputs = {"hit": n}
+                turn.outputs = {"calls": 1}
+        return {"answer": "done"}
+
+    @graph
+    def flow(question):
+        a = agent(question=question)
+        START >> a >> END
+
+    store = FilesRunStore(root=project / ".operonx" / "runs", refresh_every=0)
+
+    async def go():
+        handle = Operon(flow, params={"question": None}, trace=store).start(
+            {"question": "where?"}, trace_id=trace_id
+        )
+        await handle.collect()
+
+    asyncio.run(go())
+
+
+def test_a_run_names_the_ops_it_ran_at_its_root(client, project):
+    """AGENTS_V2_PLAN §2b: the Workflow view matches a run to its graph by
+    the ops that ran. The steps an op recorded with ``child()`` are not
+    graph ops, so they are not counted: the run says which ops ran at its
+    root, and each tree row whether it is such a step."""
+    _record_agent_run(project, "agent-roots")
+    pid = _open(client, project)
+    data = client.get(f"/api/p/{pid}/trace/agent-roots").json()
+    assert data["root_ops"] == ["a"]
+    assert set(data["ops"]) == {"a", "turn", "model", "lookup"}
+    rows = client.get(f"/api/p/{pid}/trace/agent-roots/tree").json()["rows"]
+    assert [(r["name"], r["child"]) for r in rows] == [
+        ("a", False),
+        ("turn", True),
+        ("model", True),
+        ("lookup", True),
+        ("turn", True),
+        ("model", True),
+        ("lookup", True),
+    ]
+
+
 def test_a_running_run_is_listed_and_filtered_as_running(client, project, tmp_path):
     (project / "resources.yaml").write_text("run_store:\n  default:\n    backend: sqlite\n    path: runs.sqlite\n")
     store = SqliteRunStore(path=project / "runs.sqlite")

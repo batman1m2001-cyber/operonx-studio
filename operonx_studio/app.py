@@ -190,7 +190,7 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                 **{k: nodes_by_id.get(n.id, {}).get(k) for k in
                    ("bound", "start", "end", "outputs", "inputs", "source",
                     "loop", "is_gen", "transient", "serve_role", "code",
-                    "resource", "routes", "description", "show_keys")},
+                    "resource", "routes", "description", "show_keys", "op_type")},
                 # what the card says it holds is what opening it shows: a loop's
                 # members are laid out in the container, so they are counted, not
                 # the one hidden loop graph that holds them
@@ -333,7 +333,7 @@ def _tree_records(records, run_name: str) -> Dict[str, Any]:
     parent. Rows come out depth-first, siblings by start time, each with
     what a tree row prints (name, kind, timing, status) and what the
     inspector needs (ctx, upstreams, outputs bounded to card size)."""
-    from operonx.core.workflow_trace import OpExecution, UpstreamRef, WorkflowTrace
+    from operonx.core.workflow_trace import OpExecution, UpstreamRef, WorkflowTrace, child_parent_id
     from operonx.telemetry.consumers.langfuse import build_tree
 
     execs: List[OpExecution] = []
@@ -387,6 +387,8 @@ def _tree_records(records, run_name: str) -> Dict[str, Any]:
         if rec is not None:
             raw = raw_by_id.get(nid, {})
             row.update({
+                # a step its op recorded with `child()`, not one of the graph's ops
+                "child": child_parent_id(rec.op_full_name, rec.ctx) is not None,
                 "status": rec.status, "error": rec.error, "is_yield": rec.is_yield, "op_type": rec.op_type,
                 "attempt": rec.attempt, "attrs": raw.get("attrs") or {},
                 "wall_start": raw.get("wall_start"),
@@ -468,6 +470,13 @@ def _printable_outputs(outputs: Any) -> Optional[Dict[str, Any]]:
     return out
 
 
+def _ctx_tuple(ctx: Any) -> tuple:
+    """A record's ctx as operonx keeps it: a list, or a dotted string."""
+    if isinstance(ctx, (list, tuple)):
+        return tuple(str(c) for c in ctx)
+    return tuple((ctx or "main").split("."))
+
+
 def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]:
     """Per-op aggregates for one recorded run.
 
@@ -475,7 +484,13 @@ def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]
     of thousands of per-item entries — the callbot writes one per audio
     packet — and the canvas needs per-op numbers, not the firehose.
     """
+    from operonx.core.workflow_trace import child_parent_id
+
     per_op: Dict[str, Dict[str, Any]] = {}
+    # the ops that ran at the run's root: what matches a run to its graph.
+    # A step an op recorded with `child()` (an agent's turn, model, tool)
+    # is not one of the graph's ops, however it is named.
+    roots: Dict[str, None] = {}
     count = 0
     t_first: Optional[float] = None
     t_last: Optional[float] = None
@@ -484,6 +499,8 @@ def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]
             break
         count += 1
         name = rec.get("op_name") or rec.get("op_full_name") or "?"
+        if child_parent_id(rec.get("op_full_name") or "", _ctx_tuple(rec.get("ctx"))) is None:
+            roots.setdefault(name)
         agg = per_op.setdefault(name, {
             "runs": 0, "errors": 0, "total_ms": 0.0, "max_ms": 0.0, "last_error": None,
             "last": None,
@@ -505,7 +522,7 @@ def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]
             agg["errors"] += 1
             agg["last_error"] = rec.get("error") or rec.get("status")
     wall_s = (t_last - t_first) if (t_first is not None and t_last is not None) else None
-    return {"run": run_name, "records": count, "ops": per_op,
+    return {"run": run_name, "records": count, "ops": per_op, "root_ops": list(roots),
             "wall_s": round(wall_s, 2) if wall_s is not None else None,
             "errors": sum(a["errors"] for a in per_op.values()),
             "truncated": count >= limit}

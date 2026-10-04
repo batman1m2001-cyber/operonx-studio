@@ -502,7 +502,7 @@
     const card = h("div", "iotool");
     const head = h("div", "iotoolhead");
     head.append(h("span", "iotoolname mono", `${call.name || "tool"}()`));
-    if (call.id) head.append(h("span", "iotoolid mono", call.id));
+    if (call.id) { const id = h("span", "iotoolid mono", call.id); id.title = call.id; head.append(id); }
     card.append(head);
     const args = call.args;
     if (args === null) card.append(h("span", "ioempty", "no arguments"));
@@ -516,7 +516,11 @@
     const head = h("div", "iomsghead");
     head.append(h("span", "iorole", ROLE_LABEL[role] || role));
     if (m.name) head.append(h("span", "iomsgname mono", m.name));
-    if (m.tool_call_id) head.append(h("span", "iomsgname mono", `↩ ${m.tool_call_id}`));
+    if (m.tool_call_id) {
+      const id = h("span", "iomsgname iomsgid mono", `↩ ${m.tool_call_id}`);
+      id.title = m.tool_call_id;
+      head.append(id);
+    }
     const text = typeof m.content === "string" ? m.content : null;
     if (text) head.append(h("span", "iomsgsize", fmtSize(text.length)));
     head.append(copyBtn(() => m.content));

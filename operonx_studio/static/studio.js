@@ -178,7 +178,14 @@ function visualOf(kind) {
   return OP_DEFAULT;
 }
 
-function kindColor(node) { return visualOf(node.kind).color; }
+/* An agent op, and the steps a run recorded under one (turn, model call,
+ * tool call), look like their TYPE (agentsteps.js) — never like an IR
+ * node that happens to share the step's name. */
+function stepVisual(node) {
+  return (node.step || node.op_type === "agent") ? AgentSteps.visual(node.op_type) : null;
+}
+
+function kindColor(node) { return (stepVisual(node) || visualOf(node.kind)).color; }
 
 /* An LLM op's icon is its BACKEND, not just "some LLM" — detection
  * lives in providers.js (pure, node-tested); this file only wires it
@@ -197,6 +204,8 @@ function llmProvider(node) {
 }
 
 function kindIcon(node) {
+  const sv = stepVisual(node);
+  if (sv) return sv.icon;
   const v = visualOf(node.kind);
   if (v.color === "var(--k-llm)") {
     const p = llmProvider(node);
@@ -211,6 +220,7 @@ function kindIcon(node) {
 function ranInRun(n) {
   if (!state.run) return true;
   if (n.kind === "__boundary__") return true;
+  if (n.step) return true;            // a step the run recorded: it ran
   if (n.graph) return (n.graph.nodes || []).some(ranInRun);
   if (state.runTurn && state.runByOpTurn) {
     const byTurn = state.runByOpTurn.get(n.name);
@@ -947,10 +957,17 @@ function renderFlowInfo() {
   const sec = el("section");
   if (state.run) {
     sec.append(el("div", "stitle", `Painted run · ${state.run.run}`));
-    const bits = [`${Object.keys(state.run.ops || {}).length} ops ran`,
-                  `${state.run.records ?? "?"} records`];
+    // the graph's ops that ran, and apart from them the steps an agent op
+    // recorded under itself (its turns, model and tool calls)
+    const steps = (state.runRows || []).filter(r => r.kind === "record" && r.child).length;
+    const bits = [`${AgentSteps.rootOps(state.run).length} ops ran`];
+    if (steps) bits.push(`${steps} agent steps`);
+    bits.push(`${state.run.records ?? "?"} records`);
     if (state.run.wall_s != null) bits.push(`${state.run.wall_s.toFixed(1)}s`);
-    if (state.run.errors) bits.push(`${state.run.errors} errors`);
+    // the run's failure records (a list, one per failing op), or a count
+    const failed = Array.isArray(state.run.errors)
+      ? state.run.errors.reduce((sum, e) => sum + (e.count || 1), 0) : state.run.errors;
+    if (failed) bits.push(`${failed} errors`);
     sec.append(el("div", "srcline", bits.join(" · ")));
     sec.append(el("div", "note",
       "Click any lit op for its recorded inputs and outputs; faded ops did not run."));
@@ -1057,6 +1074,15 @@ function exitPoint(path, z) {
   return null;
 }
 
+/* What an opened container holds, in its own words: a nested graph's ops,
+ * an agent's turns, a turn's steps. */
+function containerKind(n) {
+  const k = n.subgraph_ops;
+  if (n.agentSteps) return `agent · ${k} turn${k === 1 ? "" : "s"}`;
+  if (n.step) return `${n.kind} · ${k} step${k === 1 ? "" : "s"}`;
+  return `${n.kind} · ${k} ops`;
+}
+
 function containerCard(it) {
   const n = it.node;
   const card = el("div", "node container");
@@ -1075,7 +1101,7 @@ function containerCard(it) {
   promoter.title = "An operon: one promoter, the genes inside transcribed together.";
   head.append(promoter);
   head.append(el("span", "nname", n.name));
-  head.append(el("span", "nkind", `${n.kind} · ${n.subgraph_ops} ops`));
+  head.append(el("span", "nkind", containerKind(n)));
   // an AUTHORED loop (classic / until — not the compiler's rewrite of a
   // cycle, which is drawn as a zone) is this container: say it repeats
   const lp = authoredLoop(it);
@@ -1169,8 +1195,23 @@ function nameChips(n) {
  * values: executions and average, and the show-key values. */
 /* An op's numbers in the painted run — a nested graph's are its members'
  * summed (a container never executes under its own name). */
+/* A step's own numbers: the one execution the run recorded. */
+function stepNumbers(n) {
+  const s = n.step;
+  const bad = s.status && s.status !== "ok";
+  return {runs: 1, total_ms: s.dur_ms || 0, max_ms: s.dur_ms || 0, errors: bad ? 1 : 0,
+          last_error: bad ? (s.error || s.status) : null};
+}
+
 function runNumbers(n) {
   const rolls = state.runRollups || new Map();
+  if (n.step) return {info: stepNumbers(n), roll: null};
+  if (n.agentSteps) {
+    // an agent op opened onto its steps: its own record's numbers, not its
+    // members' summed (they are inside its time)
+    const info = state.run && state.run.ops[n.name];
+    return info ? {info, roll: rolls.get(n.name) || null} : null;
+  }
   if (!n.graph) {
     const info = state.run && state.run.ops[n.name];
     return info ? {info, roll: rolls.get(n.name) || null} : null;
@@ -1180,6 +1221,13 @@ function runNumbers(n) {
   let any = false;
   (function walk(g) {
     for (const m of (g && g.nodes) || []) {
+      if (m.step && !m.graph) {
+        const i = stepNumbers(m);
+        any = true;
+        acc.runs += 1; acc.total_ms += i.total_ms; acc.max_ms = Math.max(acc.max_ms, i.max_ms);
+        acc.errors += i.errors; acc.last_error = i.last_error || acc.last_error;
+        continue;
+      }
       if (m.graph) { walk(m.graph); continue; }
       const i = state.run.ops[m.name];
       if (!i) continue;
@@ -1323,9 +1371,10 @@ function opCard(it) {
     const keys = (state.run && (state.lens || "path") !== "values") ? [] : (n.show_keys || []).slice(0, 2);
     const turnExec = state.run && state.runTurn && state.runByOpTurn
       && state.runByOpTurn.get(n.name) && state.runByOpTurn.get(n.name).get(state.runTurn);
-    const vals = turnExec ? turnExec.outputs
+    const vals = n.step ? n.step.outputs : turnExec ? turnExec.outputs
       : (state.run && !state.runTurn && state.run.ops[n.name] && state.run.ops[n.name].last);
-    const where = turnExec ? `in ${state.runTurn}` : `last value of ${state.run ? state.run.run : ""}`;
+    const where = n.step ? `at ${n.step.ctx}` : turnExec ? `in ${state.runTurn}`
+      : `last value of ${state.run ? state.run.run : ""}`;
     for (const k of keys) {
       const row = el("div", "dshow mono");
       row.append(el("span", "dkey", "→ " + k));
@@ -1345,7 +1394,9 @@ function opCard(it) {
   const badges = el("div", "badges");
   if (n.graph) {
     const b = el("button", "badge sub expand", `▣ ${n.subgraph_ops} ▸`);
-    b.title = "A nested @graph — click to open it in place.";
+    b.title = n.agentSteps ? "This run's turns — click to open them in place."
+      : n.step ? "The steps under it — click to open them in place."
+      : "A nested @graph — click to open it in place.";
     b.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
     badges.append(b);
   }
@@ -1497,6 +1548,9 @@ function select(key) {
   const it = state.rendered.get(state.sel);
   if (!it) { state.sel = null; renderFlowInfo(); return; }
   const n = it.node;
+  // a step the run recorded (an agent's turn, model or tool call) reads as
+  // the Tree view reads it: that one execution, its inputs and outputs
+  if (n.step && state.run) { renderExecPanel(state.run.run, n.step, execsOf(state.runRows || [])); return; }
   // an op was picked on the canvas: its detail is the point, bring the tab forward
   // (on a phone the panel is a sheet that only a selection opens)
   if (MOBILE.matches || (panelWanted() && recall("sideTab", "assistant") !== "inspect")) showSide("inspect");
@@ -2719,9 +2773,13 @@ async function showRunTree(run) {
     const guides = el("span", "rind");
     for (let d = 0; d < r.depth; d++) guides.append(el("i"));
     const tog = el("span", "rtog", r.kids ? "▾" : "");
-    const node = r.op ? irNodeByName(r.op) : null;
-    const ico = el("span", "rico", node ? kindIcon(node) : (r.kind === "container" ? "▣" : "≋"));
-    if (node) ico.style.setProperty("--kind", kindColor(node));
+    // a step an op recorded (turn, model, tool) is drawn by its type: an IR
+    // node of the same name is some other op
+    const node = r.op && !r.child ? irNodeByName(r.op) : null;
+    const sv = r.child ? AgentSteps.visual(r.op_type) : null;
+    const ico = el("span", "rico", node ? kindIcon(node) : sv ? sv.icon : (r.kind === "container" ? "▣" : "≋"));
+    if (node || sv) ico.style.setProperty("--kind", node ? kindColor(node) : sv.color);
+    if (sv) ico.title = sv.label;
     name.append(guides, tog, ico, el("span", "rn", r.name));
     if (node) { const chips = nameChips(node); if (chips) name.append(chips); }
     row.append(name);
@@ -2947,7 +3005,9 @@ async function renderExecPanel(run, e, execs) {
  * Ties go to the graph with fewer ops the run never touched, then to the
  * one on screen. Null when no graph covers half of them. */
 function graphForRun(data) {
-  const ran = Object.keys((data && data.ops) || {});
+  // the ops that ran at the run's root: the steps an agent op records under
+  // itself are not graph ops, and counting them sank its graph's score
+  const ran = AgentSteps.rootOps(data);
   if (!ran.length) return state.graph;
   const opsOf = (g, out = new Set()) => {
     for (const n of (g && g.nodes) || []) { out.add(n.name); if (n.graph) opsOf(n.graph, out); }
@@ -3025,6 +3085,10 @@ async function showRunWorkflow(run) {
     state.expanded.clear();
     state.flowView = null;      // the Flow tab's remembered view was another graph's
   }
+  // an agent op opens onto the steps this run recorded under it
+  state.runRows = tree.rows;
+  state.stepsBase = state.graph;
+  paintSteps(true);
   const extras = [RunView.lensBar(), replayControl(run)];
   box.append(runHeader(run, tree, "workflow", extras));
   if (switched) {
@@ -3036,7 +3100,7 @@ async function showRunWorkflow(run) {
     box.append(note);
   }
   box.append(RunView.timeline(state.runTurns, tree.total_ms, (key) => {
-    state.runTurn = key; render(); renderFlowInfo();
+    state.runTurn = key; paintSteps(true); render(); renderFlowInfo();
   }));
   box.classList.add("workflow");
   const stage = $("#stage");
@@ -3050,8 +3114,31 @@ async function showRunWorkflow(run) {
   // corner (a phone showed 3 of 27 cards, at the edge): the run opens
   // fitted to its own, smaller box — the Flow tab's saved view untouched
   initView(true);
+  landOnAgent();
   pushView();
   renderFlowInfo();
+}
+
+/* A run whose agent op opened onto its steps lands on that agent: its
+ * turns are what the run did, and they are below the fold of a tall flow. */
+function landOnAgent() {
+  const agent = [...state.rendered.values()].find(x => x.inner && x.node.agentSteps);
+  if (!agent) return;
+  const stage = $("#stage"), r = stage.getBoundingClientRect();
+  const s = state.view.scale, ex = state.extent;
+  stage.scrollTop = Math.max(0, (agent.y - ex.minY) * s + VIEW_PAD - 16);
+  stage.scrollLeft = Math.max(0, (agent.x + agent.w / 2 - ex.minX) * s + VIEW_PAD - r.width / 2);
+}
+
+/* The painted graph: the run's graph with each agent op given the graph
+ * its recorded steps make (agentsteps.js) — for the picked turn, or the
+ * whole run. `open` opens the agents and their turns, so the run shows its
+ * structure at once. The Flow tab's graph (`stepsBase`) is never changed. */
+function paintSteps(open) {
+  if (!state.stepsBase) return;
+  const {graph, opened} = AgentSteps.withSteps(state.stepsBase, state.runRows || [], state.runTurn);
+  state.graph = state.stepsGraph = graph;
+  if (open) for (const key of opened) state.expanded.add(key);
 }
 
 /* "error →": center + select the errored ops one by one, opening
@@ -3091,6 +3178,9 @@ function leaveWorkflow() {
   state.runByOpTurn = null;
   state.runRollups = null;
   state.heatMax = 0;
+  // the Flow tab gets its own graph back, not the run's opened copy
+  if (state.stepsBase && state.graph === state.stepsGraph) state.graph = state.stepsBase;
+  state.stepsBase = state.stepsGraph = state.runRows = null;
   render();
   // ... and coming home it lost the Flow tab's view: it comes back once
   // the canvas shows at its full size (flushCanvas)
