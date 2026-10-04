@@ -21,3 +21,12 @@ Extraction always runs in a subprocess under the **project's own**
 interpreter: the studio needs nothing installed into the projects it
 inspects, stale imports cannot lie to the page, and a project that crashes
 on import reports the error instead of taking the studio down.
+
+A project that serves a knowledge base built with
+[operonx-kb](https://github.com/batman1m2001-cyber/operonx-kb) — its admin
+app, `operonx_kb.admin.kb_admin_app`, as an `asgi` service — gets a
+**Knowledge** tab: its collections and documents, each page with the boxes
+the parser drew, the chunk inspector, and an Ask page whose answers' `[n]`
+open the cited page with the cited boxes lit. The studio finds it by asking
+the running service (`/.well-known/operonx-kb`) and reads it over HTTP; it
+never imports operonx-kb.

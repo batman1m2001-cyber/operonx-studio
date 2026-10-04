@@ -3022,6 +3022,11 @@ def build_studio_app(recents: Optional[Recents] = None):
         evals_of=lambda w: [j for j in _jobs_of(w) if j.get("kind") == "eval"],
         datasets_of=_datasets, dataset_file=_dataset_file)
 
+    # knowledge bases (operonx-kb's admin services), found by asking: operonx_studio/knowledge.py
+    from operonx_studio import knowledge as _knowledge
+
+    _knowledge.register(app, watcher_of=_watcher)
+
     # ── the assistant's hands: UI actions and undo ──────────────────────
     # The studio tool server (operonx_studio.mcp) posts what it opened;
     # the page polls and shows it, so the user watches the agent work.

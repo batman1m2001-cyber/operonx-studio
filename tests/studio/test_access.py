@@ -157,7 +157,7 @@ def test_admin_routes_refuse_editors_and_viewers(people):
 def test_edit_routes_refuse_viewers_before_the_handler_runs(people):
     team = people["team"]
     edit_routes = _by_level(team, "edit")
-    assert len(edit_routes) == 28   # + PATCH a dataset case, POST run an eval (E6)
+    assert len(edit_routes) == 29   # + POST a knowledge-base query or eval case (K3)
     team.use(people["viewer"]["token"])
     # the real project id: a handler that ran would act on it
     for method, path in edit_routes:
