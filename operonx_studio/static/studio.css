@@ -1552,6 +1552,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   .runshead { flex-wrap: wrap; align-items: center; gap: 8px; }
   .runspicker { flex-basis: 100%; }
   .runstable .runname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 52vw; }
+  .runstable .runerr { max-width: 52vw; }
   .runstable .cellsub { display: none; }
   .runspicker { display: block; width: 100%; min-height: 38px; font-weight: 600; }
   .runssearch { flex-basis: 100%; order: -1; }
@@ -1573,6 +1574,20 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .verdict .bad { color: var(--err); font-weight: 600; }
 .verdict-next { margin-left: 6px; }
 .vsep { color: var(--border-strong); }
+.errlist { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.erritem { border-left: 2px solid var(--err); padding: 1px 0 1px 8px; min-width: 0; }
+.erritem > summary { display: flex; align-items: baseline; gap: 6px; cursor: pointer; list-style: none;
+  font-size: var(--fs-md); min-width: 0; }
+.erritem > summary::-webkit-details-marker { display: none; }
+.erritem .errtype { color: var(--err); font-weight: 600; flex: none; }
+.erritem .linkbtn { font-size: var(--fs-md); padding: 0 3px; min-height: 22px; flex: none; }
+.erritem .errcount { color: var(--err); font-size: var(--fs-sm); font-weight: 600; flex: none; }
+.erritem .errlast { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; flex: 1; }
+.erritem[open] .errlast { white-space: normal; }
+.erritem .errtrace { margin: 4px 0 6px; padding: 8px 10px; max-height: 260px; overflow: auto;
+  background: var(--err-soft); color: var(--text); border-radius: 6px; font-size: 11.5px;
+  white-space: pre-wrap; word-break: break-word; }
 .highlights { color: var(--text-2); font-size: var(--fs-md); display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
 .highlights .linkbtn { font-size: var(--fs-md); padding: 0 3px; min-height: 22px; }
 .highlights .vsep { margin: 0 8px; }

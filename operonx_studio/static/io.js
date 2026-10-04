@@ -149,23 +149,34 @@
   /* An LLM call's conversation, or null when the input is not one.
    * {messages, source: "recorded"|"rendered", missing, approx, used,
    *  template, knobs, extra} — `used` are the variables the template
-   * consumed, `extra` the inputs that are neither knob nor variable. */
+   * consumed, `extra` the inputs that are neither knob nor variable.
+   *
+   * Recorded messages win. operonx records the request it sent
+   * (`messages`) beside the template and its variables, so the template
+   * is kept for its fold and only read for which variables it used; an
+   * older trace has the template alone and is rendered here. */
   function chatOf(inputs) {
     if (!inputs || typeof inputs !== "object") return null;
     const knobs = {};
     for (const k of KNOBS) if (k in inputs && k !== "prompt" && k !== "messages") knobs[k] = inputs[k];
-    const msgs = inputs.messages;
-    if (Array.isArray(msgs) && msgs.length && msgs.every(isMessage)) {
-      const extra = {};
-      for (const [k, v] of Object.entries(inputs)) if (!KNOB.has(k)) extra[k] = v;
-      return { messages: msgs, source: "recorded", missing: [], approx: [], used: {}, template: null, knobs, extra };
-    }
     const tpl = inputs.prompt;
     const isTpl = typeof tpl === "string"
       || (tpl && typeof tpl === "object" && !Array.isArray(tpl) && ("system" in tpl || "user" in tpl)
           && Object.values(tpl).every((x) => typeof x === "string"));
-    if (!isTpl) return null;
     const vars = templateVars(inputs);
+    const msgs = inputs.messages;
+    if (Array.isArray(msgs) && msgs.length && msgs.every(isMessage)) {
+      const names = new Set();
+      if (isTpl) {
+        for (const s of typeof tpl === "string" ? [tpl] : Object.values(tpl))
+          for (const p of pyFormat(s, vars).parts) if (p.t === "var") names.add(p.name);
+      }
+      const used = {}, extra = {};
+      for (const [k, v] of Object.entries(vars)) (names.has(k) ? used : extra)[k] = v;
+      return { messages: msgs, source: "recorded", missing: [], approx: [], used,
+               template: isTpl ? tpl : null, knobs, extra };
+    }
+    if (!isTpl) return null;
     const used = new Set();
     const missing = new Set();
     const approx = new Set();
@@ -213,6 +224,19 @@
       error: outputs.error || null,
       rest,
     };
+  }
+
+  /* One tool call, whatever shape it came in: {id, name, args}.
+   * OpenAI: {id, function: {name, arguments: "<JSON text>"}}; operonx's
+   * agents: {id, name, args: {...}}; Anthropic: {id, name, input: {...}}.
+   * Arguments that are not JSON stay text; none at all is null. */
+  function toolCallOf(tc) {
+    const t = tc && typeof tc === "object" ? tc : {};
+    const fn = t.function && typeof t.function === "object" ? t.function : {};
+    let args = "arguments" in fn ? fn.arguments
+      : "args" in t ? t.args : "input" in t ? t.input : "arguments" in t ? t.arguments : null;
+    if (typeof args === "string") { const p = jsonish(args); if (p !== undefined) args = p; }
+    return { id: t.id || null, name: fn.name || t.name || null, args: args === undefined ? null : args };
   }
 
   /* A string that is really JSON (a model's structured reply, a payload
@@ -263,6 +287,16 @@
       }
       return { t: "value", value: b };
     });
+  }
+
+  /* What a message's body shows. An assistant turn that only calls
+   * tools has empty content ("" or null) — nothing to show above the
+   * calls. Without calls, empty content is shown: a reply that said
+   * nothing is worth seeing. */
+  function messageParts(m) {
+    const calls = Array.isArray(m && m.tool_calls) && m.tool_calls.length > 0;
+    if (calls && (m.content === "" || m.content === null || m.content === undefined)) return [];
+    return contentParts(m ? m.content : null);
   }
 
   function lineCount(s) {
@@ -464,15 +498,15 @@
     tool: "Tool", function: "Function" };
 
   function toolCallView(tc) {
-    const fn = (tc && tc.function) || tc || {};
+    const call = toolCallOf(tc);
     const card = h("div", "iotool");
     const head = h("div", "iotoolhead");
-    head.append(h("span", "iotoolname mono", `${fn.name || "tool"}()`));
-    if (tc && tc.id) head.append(h("span", "iotoolid mono", tc.id));
+    head.append(h("span", "iotoolname mono", `${call.name || "tool"}()`));
+    if (call.id) head.append(h("span", "iotoolid mono", call.id));
     card.append(head);
-    let args = fn.arguments;
-    if (typeof args === "string") { const p = jsonish(args); if (p !== undefined) args = p; }
-    card.append(typeof args === "string" ? textView(args, { lines: 10 }) : jsonView(args, 3));
+    const args = call.args;
+    if (args === null) card.append(h("span", "ioempty", "no arguments"));
+    else card.append(typeof args === "string" ? textView(args, { lines: 10 }) : jsonView(args, 3));
     return card;
   }
 
@@ -491,7 +525,7 @@
     const lines = role === "system" ? 8 : 18;
     if (m.parts && text !== null && m.parts.some((p) => p.t !== "text")) body.append(partsView(m.parts, text, lines));
     else {
-      const parts = contentParts(m.content);
+      const parts = messageParts(m);
       if (!parts.length && !(m.tool_calls || []).length) body.append(h("span", "ioempty", "no content"));
       for (const p of parts) {
         if (p.t === "text") body.append(textView(p.text, { lines }));
@@ -676,7 +710,7 @@
     return wrap;
   }
 
-  const api = { KNOBS, pyRepr, pyStr, pyFormat, chatOf, replyOf, jsonish, segments, contentParts,
+  const api = { KNOBS, pyRepr, pyStr, pyFormat, chatOf, replyOf, toolCallOf, messageParts, jsonish, segments, contentParts,
                 lineCount, panel, valueView, jsonView, textView };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.IO = api;
