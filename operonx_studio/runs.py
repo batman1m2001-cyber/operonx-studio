@@ -236,16 +236,18 @@ class _Guarded:
 
     Any method that fails other than on its arguments (``ValueError``,
     ``KeyError``, ``TypeError``) raises :class:`StoreUnreachable`, "can't
-    reach the trace store (<which>): <why>"; for ``_COOLDOWN`` seconds
+    reach the <what> (<which>): <why>" (``what``: the trace store, the
+    score store); for ``_COOLDOWN`` seconds
     after, every call raises the same at once, so one page's dozen
     requests do not each wait out a connect timeout."""
 
     _COOLDOWN = 10.0
     _PASS = (ValueError, KeyError, TypeError, NotImplementedError)
 
-    def __init__(self, store: RunStore, info: Dict[str, Any]):
+    def __init__(self, store: Any, info: Dict[str, Any], what: str = "trace store"):
         self._store = store
         self._info = info
+        self._what = what
         self._down_until = 0.0
         self._down = ""
 
@@ -263,7 +265,7 @@ class _Guarded:
                 raise
             except Exception as exc:  # noqa: BLE001 — every transport's own error type
                 label = self._info.get("label") or "?"
-                self._down = f"can't reach the trace store ({label}): {type(exc).__name__}: {exc}"
+                self._down = f"can't reach the {self._what} ({label}): {type(exc).__name__}: {exc}"
                 self._down_until = time.time() + self._COOLDOWN
                 raise StoreUnreachable(self._down, self._info) from exc
 

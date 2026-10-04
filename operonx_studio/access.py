@@ -109,6 +109,12 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/evals"): "read",
     ("GET", f"{P}/evals/{{name}}/runs/{{run_id}}"): "read",
     ("GET", f"{P}/datasets/{{name}}"): "read",
+    ("GET", f"{P}/datasets"): "read",
+    ("GET", f"{P}/datasets/{{name}}/cases/{{case}}/history"): "read",
+    ("GET", f"{P}/experiments"): "read",
+    ("GET", f"{P}/experiments/compare"): "read",
+    ("GET", f"{P}/experiments/{{eid}}"): "read",
+    ("GET", f"{P}/experiments/{{eid}}/cases/{{case}}"): "read",
     ("GET", f"{P}/pulse"): "read",
     ("GET", f"{P}/play/doors"): "read",
     ("GET", f"{P}/play/events"): "read",
@@ -131,6 +137,8 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/alerts/{{name}}/test"): "edit",      # calls a webhook
     ("POST", f"{P}/alerts/check"): "edit",
     ("POST", f"{P}/datasets/{{name}}/rows"): "edit",
+    ("PATCH", f"{P}/datasets/{{name}}/rows/{{case}}"): "edit",       # operonx Dataset.update: one line of the JSONL
+    ("POST", f"{P}/evals/{{name}}/run"): "edit",                     # operonx eval run: runs code, writes the score store
     ("POST", f"{P}/chat/undo"): "edit",                  # git checkout / unlink of project files
     ("POST", f"{P}/play/open"): "edit",
     ("POST", f"{P}/play/simulate"): "edit",              # spends LLM money
