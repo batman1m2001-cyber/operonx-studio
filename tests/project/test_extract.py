@@ -77,6 +77,13 @@ class TestShape:
         assert [(e["from"], e["to"]) for e in g["edges"]] == [("a", "b")]
         assert g["entries"] == ["a"] and g["exits"] == ["b"]
 
+    def test_each_node_carries_its_op_type(self, tmp_path):
+        """The op's own ``type`` (operonx OpType: ``code``, ``llm``, ``graph``,
+        ``agent``...): what the canvas and the tree key an op's look on,
+        where the class name says nothing (two ops of one class)."""
+        g = extract_project(project(tmp_path, LINEAR, LINEAR_MANIFEST))["graphs"][0]
+        assert [n["op_type"] for n in g["nodes"]] == ["code", "code"]
+
     def test_node_ids_are_hierarchical_full_names(self, tmp_path):
         g = extract_project(project(tmp_path, LINEAR, LINEAR_MANIFEST))["graphs"][0]
         assert [n["id"] for n in g["nodes"]] == ["flow.a", "flow.b"]

@@ -276,6 +276,9 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
         "id": op.full_name,
         "name": op.name,
         "kind": type(op).__name__,
+        # operonx's OpType (`code`, `llm`, `graph`, `agent`, ...): what an
+        # op IS, where `kind` is only its class
+        "op_type": _slot(op, "type"),
         "bound": _slot(op, "bound"),
         # Semantics a normal workflow tool does not have, and the reason a
         # viewer must carry them: a generator op is invoked once and its
