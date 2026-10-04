@@ -3436,7 +3436,9 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .iomsg.role-assistant .iorole { color: #845f05; }
 .iomsg.role-tool .iorole { color: #6a32c9; }
 .iomsgname { font-size: var(--fs-xs); color: var(--text-3); }
-.iomsgsize { font-size: var(--fs-xs); color: var(--text-3); }
+/* a call id is long and says little: it shortens, never wraps the head */
+.iomsgid { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iomsgsize { font-size: var(--fs-xs); color: var(--text-3); flex: none; white-space: nowrap; }
 .iomsghead .iocopy { opacity: 0; transition: opacity var(--tr); }
 .iomsg:hover .iocopy, .iomsg:focus-within .iocopy { opacity: 1; }
 @media (hover: none) { .iomsghead .iocopy { opacity: 1; } }
@@ -3506,7 +3508,8 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .iotool { border: 1px solid var(--border-soft); border-radius: var(--r-xs); padding: 6px 8px; background: var(--surface); }
 .iotoolhead { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
 .iotoolname { font-weight: 650; color: #6a32c9; }
-.iotoolid { font-size: var(--fs-xs); color: var(--text-3); }
+.iotoolid { font-size: var(--fs-xs); color: var(--text-3); min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
 .iofold { border-top: 1px solid var(--border-soft); padding-top: 8px; }
 .iofold > summary { cursor: pointer; font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); }
 .iofold[open] > summary { margin-bottom: 8px; }
