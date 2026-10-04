@@ -1539,6 +1539,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .runstable .stcell { width: 28px; padding-right: 0; }
 .stdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
 .stdot.bad { background: var(--err); }
+.stdot.run { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
 .runerr { color: var(--err); font-size: 12px; margin-top: 2px; max-width: 560px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runstable .runacts .iconbtn { opacity: 0; }

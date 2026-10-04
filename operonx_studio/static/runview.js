@@ -63,7 +63,10 @@ const RunView = (() => {
     // returned `error`, a subgraph failing around its children
     const failed = !!errs || records.length > 0 || s.status === "error";
     const line = el("div", "verdict");
-    const status = el("span", "status " + (failed ? "s-bad" : "s-ok"), failed ? "failed" : "ok");
+    // a run still going (or whose process died) has no verdict yet
+    const running = s.status === "running";
+    const status = el("span", "status " + (running ? "s-run" : failed ? "s-bad" : "s-ok"),
+      running ? "running" : failed ? "failed" : "ok");
     line.append(status);
     const bits = [fmtMs(s.duration_ms || data.total_ms || 0)];
     const cost = money(s.cost_usd, s.unpriced);
@@ -350,7 +353,7 @@ const RunView = (() => {
       open.onclick = () => showRunTree(s.trace_id);
       h.append(open);
       c.append(h);
-      const facts = [fmtMs(s.duration_ms || 0), s.status === "error" ? "failed" : "ok"];
+      const facts = [fmtMs(s.duration_ms || 0), s.status === "error" ? "failed" : s.status === "running" ? "running" : "ok"];
       const cost = money(s.cost_usd, s.unpriced);
       if (cost) facts.push(cost);
       if (s.version) facts.push(`@${String(s.version).slice(0, 7)}${s.version_dirty ? "*" : ""}`);

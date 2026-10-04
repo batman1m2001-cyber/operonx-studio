@@ -122,6 +122,15 @@ class TestItBuildsAndExtracts:
         assert [n["name"] for n in graph["nodes"]] == ["request", "clean", "report", "out"]
         assert [(e["from"], e["to"]) for e in graph["edges"]] == [
             ("request", "clean"), ("clean", "report"), ("report", "out")]
+        # what the door hands in is ingress's `item`, the JSON the caller
+        # POSTed; the flow reads its "text" (it read request["text"], an
+        # output ingress does not have, and so always got "")
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("scaffolded_workflow", tmp_path / "workflow.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        assert module.normalise.__wrapped__({"text": "  hello   world "}) == {"cleaned": "hello world"}
         roles = {n["name"]: n.get("serve_role") for n in graph["nodes"]}
         assert roles["request"] == "ingress" and roles["out"] == "egress", (
             "the serve boundary must be tagged so the canvas can draw doors")

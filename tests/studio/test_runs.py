@@ -162,6 +162,53 @@ def test_runs_a_plain_local_consumer_wrote_show_up(client, project):
     assert [r["run"] for r in client.get(f"/api/p/{pid}/runs").json()["runs"]] == ["written-elsewhere"]
 
 
+# -- R2 trace records: child executions, attempts, attrs, running runs ----------------
+
+
+def _exec(op_id, name, full, ctx, start, **kw):
+    return OpExecution(op_id=op_id, op_name=name, op_full_name=full, ctx=ctx, start_time=start,
+                       end_time=start + 0.01, inputs={}, outputs=kw.pop("outputs", {}), **kw)
+
+
+def test_the_tree_nests_each_attempts_child_executions_and_carries_attrs(client, project):
+    """A step an op records with ``child()`` hangs under the record of the
+    attempt that ran it: attempt 1 failed (``g.a#main@1``), attempt 2 did not.
+    Without the row's ``attempt`` the second attempt's step lands under the
+    first attempt's record."""
+    chat = {"gen_ai.operation.name": "chat"}
+    nodes = [
+        _exec("g.a.model#main.model[0]", "model", "g.a.model", ("main", "model[0]"), 100.0,
+              op_type="llm", attrs=chat),
+        _exec("g.a#main@1", "a", "g.a", ("main",), 100.0, status="error", error="503", attempt=1),
+        _exec("g.a.model#main.model[0]@2", "model", "g.a.model", ("main", "model[0]"), 100.1,
+              op_type="llm", attempt=2, attrs=chat),
+        _exec("g.a#main", "a", "g.a", ("main",), 100.1, outputs={"y": 1}, attempt=2),
+    ]
+    trace = WorkflowTrace(trace_id="kids", workflow_name="flow", started_at=100.0, ended_at=100.2,
+                          nodes=nodes, wall_started_at=NOW)
+    FilesRunStore(root=project / ".operonx" / "runs", refresh_every=0).consume(trace)
+    pid = _open(client, project)
+    rows = {r["id"]: r for r in client.get(f"/api/p/{pid}/trace/kids/tree").json()["rows"]}
+    assert rows["g.a.model#main.model[0]"]["parent"] == "g.a#main@1"
+    assert rows["g.a.model#main.model[0]@2"]["parent"] == "g.a#main"
+    assert rows["g.a.model#main.model[0]@2"]["attrs"] == chat
+    assert rows["g.a#main"]["attempt"] == 2 and rows["g.a#main@1"]["attempt"] == 1
+
+
+def test_a_running_run_is_listed_and_filtered_as_running(client, project, tmp_path):
+    (project / "resources.yaml").write_text("run_store:\n  default:\n    backend: sqlite\n    path: runs.sqlite\n")
+    store = SqliteRunStore(path=project / "runs.sqlite")
+    trace = _trace("going", origin="service", service="call")
+    store.on_start(trace)
+    store.on_execution(trace, trace.nodes[0])
+    assert store.live_writer.flush(5)
+    pid = _open(client, project)
+    page = client.get(f"/api/p/{pid}/runs", params={"status": "running"}).json()
+    assert [(r["run"], r["status"]) for r in page["runs"]] == [("going", "running")]
+    tree = client.get(f"/api/p/{pid}/trace/going/tree").json()
+    assert tree["summary"]["status"] == "running" and [r["op"] for r in tree["rows"]] == ["a"]
+
+
 # -- retention ------------------------------------------------------------------------
 
 

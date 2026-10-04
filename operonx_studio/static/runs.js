@@ -226,7 +226,8 @@ const RunsView = (() => {
     const tr = el("tr", "clickable" + (r.status === "error" ? " failed" : ""));
     tr.dataset.key = r.run;            // a revisit marks the rows it had not seen
     const st = el("td", "stcell");
-    const dot = el("span", "stdot " + (r.status === "error" ? "bad" : "ok"));
+    // a live store lists a run that has not ended (or whose process died) as running
+    const dot = el("span", "stdot " + (r.status === "error" ? "bad" : r.status === "running" ? "run" : "ok"));
     dot.title = r.status;
     const cb = el("input", "runpick");
     cb.type = "checkbox";
@@ -369,7 +370,7 @@ const RunsView = (() => {
     range.onchange = () => { v.range = range.value; save(); render(); };
     const status = el("select");
     status.setAttribute("aria-label", "Status");
-    for (const [k, label] of [["", "Any status"], ["ok", "Succeeded"], ["error", "Failed"]]) {
+    for (const [k, label] of [["", "Any status"], ["ok", "Succeeded"], ["error", "Failed"], ["running", "Running"]]) {
       const o = el("option", null, label); o.value = k; o.selected = k === v.status; status.append(o);
     }
     status.onchange = () => { v.status = status.value; save(); render(); };

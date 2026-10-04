@@ -82,9 +82,10 @@ from operonx.core.serve import egress, ingress
 
 
 @op
-def normalise(text: str = ""):
-    """Trim and collapse whitespace."""
-    return {{"cleaned": " ".join((text or "").split())}}
+def normalise(payload: dict = None):
+    """The payload's text, trimmed, whitespace collapsed."""
+    text = (payload or {{}}).get("text") or ""
+    return {{"cleaned": " ".join(text.split())}}
 
 
 @op
@@ -96,7 +97,7 @@ def summarise(cleaned: str):
 @graph
 def flow():
     request = ingress()
-    clean = normalise(text=request["text"])
+    clean = normalise(payload=request["item"])
     report = summarise(cleaned=clean["cleaned"])
     out = egress(item=report["summary"])
     START >> request >> clean >> report >> out >> END
@@ -120,15 +121,16 @@ from operonx.providers import LLMOp
 
 
 @op
-def normalise(text: str = ""):
-    """Trim and collapse whitespace."""
-    return {{"cleaned": " ".join((text or "").split())}}
+def normalise(payload: dict = None):
+    """The payload's text, trimmed, whitespace collapsed."""
+    text = (payload or {{}}).get("text") or ""
+    return {{"cleaned": " ".join(text.split())}}
 
 
 @graph
 def flow():
     request = ingress()
-    clean = normalise(text=request["text"])
+    clean = normalise(payload=request["item"])
     answer = LLMOp.of(
         resource="gpt-4o-mini",
         prompt={{"system": "Answer in one sentence.", "user": "{{question}}"}},
