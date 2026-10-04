@@ -120,6 +120,8 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/play/events"): "read",
     ("GET", f"{P}/play/rerun-plan"): "read",
     ("GET", f"{P}/assistant/suggest"): "read",
+    ("GET", f"{P}/knowledge"): "read",
+    ("GET", f"{P}/kb/{{service}}/{{path:path}}"): "read",      # a knowledge base's lists, pages, chunks
 
     # ── one project: changing it ──
     ("POST", f"{P}/edit"): "edit",
@@ -146,6 +148,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/play/end"): "edit",
     ("POST", f"{P}/play/rerun"): "edit",
     ("POST", f"{P}/play/restart"): "edit",
+    ("POST", f"{P}/kb/{{service}}/{{path:path}}"): "edit",     # a query runs the project's code and its answer model
 
     # ── the assistant's hands on your own screen ──
     ("POST", f"{P}/ui/action"): "self",
