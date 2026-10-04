@@ -195,6 +195,57 @@ def test_the_tree_nests_each_attempts_child_executions_and_carries_attrs(client,
     assert rows["g.a#main"]["attempt"] == 2 and rows["g.a#main@1"]["attempt"] == 1
 
 
+def test_a_real_runs_child_executions_come_back_nested(client, project):
+    """K1 end to end: an op records turn -> model, tool with ``child()``; the
+    run goes through the project's store and the tree endpoint returns one
+    root with the steps at depth 1 and 2, in order, attrs on the rows."""
+    import asyncio
+
+    from operonx import END, START, Operon, child, graph, op
+
+    @op
+    async def agent(question: str) -> dict:
+        for n in range(2):
+            async with child("turn", inputs={"n": n}, op_type="turn") as turn:
+                async with child("model", inputs={"q": question}, op_type="llm") as call:
+                    call.outputs = {"content": "use lookup"}
+                    call.attrs["gen_ai.operation.name"] = "chat"
+                async with child("lookup", inputs={"q": question}, op_type="tool") as tool:
+                    tool.outputs = {"hit": n}
+                turn.outputs = {"calls": 1}
+        return {"answer": "done"}
+
+    @graph
+    def flow(question):
+        a = agent(question=question)
+        START >> a >> END
+
+    store = FilesRunStore(root=project / ".operonx" / "runs", refresh_every=0)
+
+    async def go():
+        handle = Operon(flow, params={"question": None}, trace=store).start(
+            {"question": "where?"}, trace_id="agent-run"
+        )
+        await handle.collect()
+
+    asyncio.run(go())
+    pid = _open(client, project)
+    rows = client.get(f"/api/p/{pid}/trace/agent-run/tree").json()["rows"]
+    assert [(r["name"], r["depth"], r["ctx"]) for r in rows] == [
+        ("a", 0, "main"),
+        ("turn", 1, "main.turn[0]"),
+        ("model", 2, "main.turn[0].model[0]"),
+        ("lookup", 2, "main.turn[0].lookup[0]"),
+        ("turn", 1, "main.turn[1]"),
+        ("model", 2, "main.turn[1].model[0]"),
+        ("lookup", 2, "main.turn[1].lookup[0]"),
+    ]
+    assert [r for r in rows if r["parent"] is None] == rows[:1]
+    model = rows[2]
+    assert model["op_type"] == "llm" and model["parent"] == rows[1]["id"]
+    assert model["attrs"] == {"gen_ai.operation.name": "chat"}
+
+
 def test_a_running_run_is_listed_and_filtered_as_running(client, project, tmp_path):
     (project / "resources.yaml").write_text("run_store:\n  default:\n    backend: sqlite\n    path: runs.sqlite\n")
     store = SqliteRunStore(path=project / "runs.sqlite")
