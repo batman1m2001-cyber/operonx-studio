@@ -359,6 +359,8 @@ def _tree_records(records, run_name: str) -> Dict[str, Any]:
             inputs={}, outputs=rec.get("outputs") if isinstance(rec.get("outputs"), dict) else {},
             upstreams=ups, status=rec.get("status") or "ok", error=rec.get("error"),
             op_type=rec.get("op_type") or "", is_yield=bool(rec.get("is_yield")),
+            # a child execution hangs under the record of its own attempt
+            attempt=int(rec.get("attempt") or 1),
         ))
         raw_by_id[op_id] = rec
     if not execs:
@@ -383,9 +385,11 @@ def _tree_records(records, run_name: str) -> Dict[str, Any]:
             "kids": len(children.get(nid, [])),
         }
         if rec is not None:
+            raw = raw_by_id.get(nid, {})
             row.update({
                 "status": rec.status, "error": rec.error, "is_yield": rec.is_yield, "op_type": rec.op_type,
-                "wall_start": raw_by_id.get(nid, {}).get("wall_start"),
+                "attempt": rec.attempt, "attrs": raw.get("attrs") or {},
+                "wall_start": raw.get("wall_start"),
                 "upstreams": [{"from": u.from_op_id, "from_key": u.from_key, "to_key": u.to_key} for u in rec.upstreams],
                 "outputs": _printable_outputs(rec.outputs),
             })
