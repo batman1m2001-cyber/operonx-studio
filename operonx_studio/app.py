@@ -2851,7 +2851,13 @@ def build_studio_app(recents: Optional[Recents] = None):
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
-        evals = [{**j, "runs": _eval_runs(j)} for j in _jobs_of(watcher) if j.get("kind") == "eval"]
+        from operonx_studio import evals as ex
+
+        jobs = [j for j in _jobs_of(watcher) if j.get("kind") == "eval"]
+        scores = ex.project_scores(watcher.root)
+        dirs = list(dict.fromkeys(Path(j["record_dir"]) for j in jobs if j.get("record_dir")))
+        evals = [{**j, "runs": _eval_runs(j), "experiments": ex.experiment_rows(j["name"], scores, dirs)}
+                 for j in jobs]
         detail = None
         picked = next((e for e in evals if e["name"] == name), evals[0] if evals else None)
         if picked is not None:
@@ -2862,7 +2868,8 @@ def build_studio_app(recents: Optional[Recents] = None):
                 got = _eval_run_payload(job, shown["run_id"], against)
                 if got is not None:
                     detail = {"name": picked["name"], "run_id": shown["run_id"], "against_asked": against, **got}
-        return JSONResponse({"evals": evals, "datasets": _datasets(watcher), "detail": detail})
+        return JSONResponse({"evals": evals, "datasets": _datasets(watcher), "detail": detail,
+                             "scores": scores.said()})
 
     @app.get("/api/p/{pid}/evals/{name}/runs/{run_id}")
     def eval_run(pid: str, name: str, run_id: str, against: str = "") -> JSONResponse:
@@ -2922,18 +2929,28 @@ def build_studio_app(recents: Optional[Recents] = None):
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
+        from operonx_studio import evals as ex
+
         found = next((d for d in _datasets(watcher) if d["name"] == name), None)
         path = Path(found["path"]) if found else watcher.root / "datasets" / f"{name}.jsonl"
         try:
-            rows = Dataset(path).rows()
+            rows = Dataset(path).all_rows()   # archived cases too: the editor shows them
+            info = ex.dataset_info(path)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         try:
             shown = str(path.resolve().relative_to(watcher.root.resolve()))
         except ValueError:
             shown = str(path)
-        return JSONResponse({"name": name, "path": str(path), "shown": shown, "total": len(rows),
-                             "rows": rows[: max(1, min(limit, 5000))]})
+        # each case across the last experiments of the evals that use it (one hop)
+        jobs = [j for j in _jobs_of(watcher) if j.get("kind") == "eval"]
+        dirs = list(dict.fromkeys(Path(j["record_dir"]) for j in jobs if j.get("record_dir")))
+        scores = ex.project_scores(watcher.root)
+        columns, history = ex.dataset_history(found or {}, jobs, scores, dirs)
+        return JSONResponse({"name": name, "path": str(path), "shown": shown, **info,
+                             "used_by": (found or {}).get("used_by") or [],
+                             "rows": rows[: max(1, min(limit, 5000))],
+                             "experiments": columns, "history": history, "scores": scores.said()})
 
     @app.post("/api/p/{pid}/datasets/{name}/rows")
     def dataset_add(pid: str, name: str, body: Dict[str, Any]) -> JSONResponse:
@@ -2992,6 +3009,14 @@ def build_studio_app(recents: Optional[Recents] = None):
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse({"added": added, "path": str(path), "skipped": len(rows) - len(added)})
+
+    # experiments, compare and the dataset editor: operonx_studio/evals.py
+    from operonx_studio import evals as _experiments
+
+    _experiments.register(
+        app, watcher_of=_watcher,
+        evals_of=lambda w: [j for j in _jobs_of(w) if j.get("kind") == "eval"],
+        datasets_of=_datasets, dataset_file=_dataset_file)
 
     # ── the assistant's hands: UI actions and undo ──────────────────────
     # The studio tool server (operonx_studio.mcp) posts what it opened;

@@ -3766,6 +3766,9 @@ async function performUi(kind, args) {
     if (state.tab !== "traces") switchTab("traces", {quiet: true});
     if (args.lens) { state.lens = args.lens; store("lens", args.lens); }
     await (args.mode === "workflow" ? showRunWorkflow(args.run) : showRunTree(args.run));
+    // an execution to select: an eval's blamed op, a deep link's `op`
+    if (args.op) RunView.focusExec({op_id: args.op, op: args.op.split("#")[0].split(".").pop()},
+                                   args.mode === "workflow" ? "workflow" : "tree");
     if (!args.quiet) toast(`Assistant opened run ${args.run}`);
   } else if (kind === "open_monitor") {
     store(`monitor:${PID}`, {target: args.target || "", range: args.days >= 30 ? "30d" : args.days <= 1 ? "24h" : "7d"});
@@ -3790,7 +3793,7 @@ async function performUi(kind, args) {
   } else if (kind === "open_tab") {
     switchTab(args.tab);
   } else if (kind === "open_eval") {
-    switchTab("evals", {name: args.name, run: args.run});
+    switchTab("evals", {name: args.name, run: args.run, exp: args.exp});
   }
 }
 
@@ -3811,10 +3814,12 @@ window.oxStudioLink = (href) => {
 
 state.follow = recall("follow", false);
 // `/p/<pid>?run=<trace id>` opens that run: a served reply's
-// `x-operonx-trace-id` header is all a client needs to link to its run
+// `x-operonx-trace-id` header is all a client needs to link to its run;
+// `&op=<execution id>` selects one execution in it (an eval's blamed op)
 const linkedRun = new URLSearchParams(location.search).get("run");
+const linkedOp = new URLSearchParams(location.search).get("op");
 load(true).then(() => {
-  if (linkedRun) performUi("open_run", {run: linkedRun, quiet: true});
+  if (linkedRun) performUi("open_run", {run: linkedRun, op: linkedOp || undefined, quiet: true});
 }).catch((err) => {
   // the first paint failed (a dropped tunnel, a dead studio): say so where
   // the canvas would be; the pulse retries and draws when it can

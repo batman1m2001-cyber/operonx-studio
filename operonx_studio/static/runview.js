@@ -400,5 +400,5 @@ const RunView = (() => {
   }
 
   state.lens = recall("lens", "path");
-  return {header, lensBar, timeline, anomalies, rank, dots, compare, money, focusOp, background, LENSES};
+  return {header, lensBar, timeline, anomalies, rank, dots, compare, money, focusOp, focusExec, background, LENSES};
 })();
