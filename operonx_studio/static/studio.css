@@ -2973,6 +2973,11 @@ button.chip.kbpagechip.on { border-color: var(--accent); color: var(--accent-str
 .svcenv { font-size: 12.5px; padding: 10px 14px; border-radius: var(--r-sm); margin-bottom: 16px; }
 .svcenv.ok { background: color-mix(in srgb, var(--ok) 8%, transparent); color: var(--text-2); }
 .svcenv.bad { background: var(--warn-soft); color: var(--warn); }
+/* score trends (Monitor) */
+.monscores { margin: 8px 0 18px; }
+.monscoreshead { margin: 18px 0 2px; }
+.viztable { margin: 4px 0 12px; }
+.viztable summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-sm); }
 /* review queue rubric (Review) */
 .revrubric { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
 .revrubric span { min-width: 120px; color: var(--text-2); }

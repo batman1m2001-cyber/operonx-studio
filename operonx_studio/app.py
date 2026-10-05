@@ -1826,6 +1826,30 @@ def build_studio_app(recents: Optional[Recents] = None):
         data["key_ops"] = key_ops
         return JSONResponse(data)
 
+    @app.get("/api/p/{pid}/monitor/scores")
+    def monitor_scores(pid: str, origin: str = "", name: str = "", since: str = "", until: str = "",
+                       buckets: int = 24) -> JSONResponse:
+        """Each online-eval score of these runs over the range — mean and
+        share failed per bucket, with the thresholds alerts set on it."""
+        from operonx_studio.evals import project_scores
+        from operonx_studio.monitor import score_trends
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        held = project_scores(watcher.root)
+        if held.store is None:
+            return JSONResponse({"scores": [], "note": (held.info or {}).get("reason") or "no score store"})
+        until_t = float(until) if until else time.time()
+        since_t = float(since) if since else until_t - 7 * 86400
+        try:
+            alerts = _alerts(watcher.root)
+        except Exception:  # noqa: BLE001 — trends without thresholds beat no trends
+            alerts = []
+        got = score_trends(held.store, origin or None, name or None, since_t, until_t,
+                           max(1, min(int(buckets), 120)), alerts)
+        return JSONResponse({"scores": got})
+
     @app.get("/api/p/{pid}/trace/{run}")
     def trace(pid: str, run: str) -> JSONResponse:
         got = _record(pid, run)
@@ -2664,6 +2688,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     # user wrote, or by the Test button.
     from operonx.telemetry.runs.alerts import (
         METRICS,
+        SCORE_METRICS,
         Alert,
         AlertState,
         deliver,
@@ -2675,13 +2700,22 @@ def build_studio_app(recents: Optional[Recents] = None):
     def _alerts_file(root: Path) -> Path:
         return root / ".operonx" / "alerts.json"
 
+    def _scores_store(root: Path) -> Any:
+        """The project's score store, which score_mean: / score_fail_rate:
+        alerts read; None when it does not open (the alert says so)."""
+        from operonx_studio.evals import project_scores
+
+        return project_scores(root).store
+
     def _alerts(root: Path) -> List[Alert]:
         f = _alerts_file(root)
         if not f.is_file():
             return []
         try:
-            return [Alert.from_dict(d) for d in json.loads(f.read_text(encoding="utf-8")).get("alerts") or []]
-        except (ValueError, TypeError):
+            data = json.loads(f.read_text(encoding="utf-8"))
+            rows = data.get("alerts") if isinstance(data, dict) else data  # a hand-written bare list too
+            return [Alert.from_dict(d) for d in rows or []]
+        except (ValueError, TypeError, AttributeError):
             return []
 
     def _save_alerts(root: Path, alerts: List[Alert]) -> None:
@@ -2717,11 +2751,12 @@ def build_studio_app(recents: Optional[Recents] = None):
         if not rules:
             return []
         store = project_runs(watcher.root, sweep=False).store
+        scores = _scores_store(watcher.root)
         states = _states(watcher.root)
         base = os.environ.get("OPERONX_STUDIO_URL", "").rstrip("/")
         sent = []
         for a in rules:
-            cur = evaluate(store, a, now)
+            cur = evaluate(store, a, now, scores=scores)
             kind = step(a, states.get(a.name), cur)
             states[a.name] = cur
             if kind and a.webhook:
@@ -2760,12 +2795,14 @@ def build_studio_app(recents: Optional[Recents] = None):
         store = project_runs(watcher.root, sweep=False).store
         states = _states(watcher.root)
         out = []
+        scores = _scores_store(watcher.root)
         for a in _alerts(watcher.root):
-            now = dataclasses.asdict(evaluate(store, a))
+            now = dataclasses.asdict(evaluate(store, a, scores=scores))
             last = states.get(a.name)
             out.append({**a.to_dict(), "webhook_set": bool(a.webhook), "webhook": _mask(a.webhook), "now": now,
                         "last": dataclasses.asdict(last) if last else None})
-        return JSONResponse({"alerts": out, "metrics": list(METRICS)})
+        return JSONResponse({"alerts": out, "metrics": list(METRICS),
+                             "score_metrics": [f"{m}:<score>" for m in SCORE_METRICS]})
 
     def _mask(url: str) -> str:
         """A webhook URL is a secret: show where it goes, not its token."""
@@ -2818,7 +2855,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         rule = next((a for a in _alerts(watcher.root) if a.name == name), None) if watcher else None
         if rule is None or not rule.webhook:
             return JSONResponse({"error": "no such alert, or it has no webhook"}, status_code=404)
-        st = evaluate(project_runs(watcher.root, sweep=False).store, rule)
+        st = evaluate(project_runs(watcher.root, sweep=False).store, rule, scores=_scores_store(watcher.root))
         try:
             code = deliver(rule.webhook, message(rule, st, "test", project=_project_name(pid, watcher)))
         except Exception as exc:  # noqa: BLE001
