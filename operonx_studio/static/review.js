@@ -14,18 +14,22 @@ const ReviewView = (() => {
   const K = `review:${PID}`;
   const v = Object.assign({verdict: "unreviewed", target: "", run: ""}, recall(K, {}));
   let queue = [];
+  let queues = {queues: []};   // operonx [[queue]]s, for the picker
+  let lastSpec = null;          // the queue shown, in queue mode
   let token = 0;
   let current = null;       // {run, review, turns, summary}
   const save = () => store(K, v);
 
   async function show() {
+    if (v.target.startsWith("queue:")) return showQueue(v.target.slice(6));
     const mine = ++token;
     const [origin, name] = v.target ? v.target.split(":") : ["", ""];
     let got, groups;
     try {
-      [got, groups] = await Promise.all([
+      [got, groups, queues] = await Promise.all([
         api(`/api/p/${PID}/review/queue?verdict=${v.verdict}&origin=${origin}&name=${encodeURIComponent(name || "")}&limit=200&open=${encodeURIComponent(v.run || "")}`),
         api(`/api/p/${PID}/runs/groups`).catch(() => ({groups: []})),
+        api(`/api/p/${PID}/review/queues`).catch(() => ({queues: []})),
       ]);
     } catch (err) { box.textContent = ""; box.append(loadError(err, () => show())); return; }
     if (mine !== token) return;
@@ -38,7 +42,7 @@ const ReviewView = (() => {
     const opt = (label, value) => { const o = el("option", null, label); o.value = value; o.selected = value === v.target; pick.append(o); };
     opt("Every run", "");
     for (const g of (groups.groups || [])) if (g.origin && g.name) opt(`${g.origin} · ${g.name}`, `${g.origin}:${g.name}`);
-    pick.onchange = () => { v.target = pick.value; v.run = ""; save(); show(); };
+    addQueueOptions(pick, opt);
     const modes = el("span", "tlmodes");
     for (const [k, label] of [["unreviewed", `To review ${got.counts.unreviewed}`], ["bad", `Bad ${got.counts.bad}`], ["good", `Good ${got.counts.good}`], ["all", "All"]]) {
       const b = el("button", k === v.verdict ? "on" : "", label);
@@ -173,6 +177,8 @@ const ReviewView = (() => {
     current.focus = () => labels.focus();
   }
 
+  const go = (r) => v.target.startsWith("queue:") ? openItem(r.item_id, lastSpec) : open(r.run);
+
   // g good · b bad · j / k next / previous — never while typing
   document.addEventListener("keydown", (ev) => {
     if (box.hidden || !current || ev.ctrlKey || ev.metaKey || ev.altKey) return;
@@ -180,11 +186,176 @@ const ReviewView = (() => {
     const i = queue.findIndex(r => r.run === current.run);
     if (ev.key === "g") current.mark("good");
     else if (ev.key === "b") current.mark("bad");
-    else if (ev.key === "j" && queue[i + 1]) open(queue[i + 1].run);
-    else if (ev.key === "k" && i > 0) open(queue[i - 1].run);
+    else if (ev.key === "j" && queue[i + 1]) go(queue[i + 1]);
+    else if (ev.key === "k" && i > 0) go(queue[i - 1]);
     else return;
     ev.preventDefault();
   });
+
+  // The picker's review queues (operonx [[queue]]), after the run groups.
+  function addQueueOptions(pick, opt) {
+    const qs = queues.queues || [];
+    if (qs.length) {
+      const g = el("optgroup"); g.label = "Review queues";
+      for (const q of qs) {
+        const o = el("option", null, `${q.name} — ${q.waiting} waiting`);
+        o.value = `queue:${q.name}`; o.selected = o.value === v.target; g.append(o);
+      }
+      pick.append(g);
+    }
+    pick.onchange = () => { v.target = pick.value; v.run = ""; save(); show(); };
+  }
+
+  // A review queue: its items still waiting (or all), each read as the run
+  // it points at; the verdict and rubric are written as operonx scores.
+  async function showQueue(name) {
+    const mine = ++token;
+    let got;
+    try {
+      [got, queues] = await Promise.all([
+        api(`/api/p/${PID}/review/queues/${encodeURIComponent(name)}?open=${encodeURIComponent(v.run || "")}&done=${v.verdict === "all"}`),
+        api(`/api/p/${PID}/review/queues`).catch(() => ({queues: []})),
+      ]);
+    } catch (err) { box.textContent = ""; box.append(loadError(err, () => { v.target = ""; save(); show(); })); return; }
+    if (mine !== token) return;
+    const spec = got.queue;
+    lastSpec = spec;
+    queue = got.items.map(it => ({...it, run: it.item_id}));
+    box.textContent = "";
+    const head = el("div", "panehead");
+    head.append(el("h2", null, "Review"));
+    const pick = el("select", "montarget");
+    pick.setAttribute("aria-label", "Which runs");
+    const opt = (label, value) => { const o = el("option", null, label); o.value = value; pick.append(o); };
+    opt("Every run", "");
+    addQueueOptions(pick, opt);
+    const modes = el("span", "tlmodes");
+    for (const [k, label] of [["unreviewed", `Waiting ${got.waiting}`], ["all", "All"]]) {
+      const b = el("button", (k === "all") === (v.verdict === "all") ? "on" : "", label);
+      b.type = "button";
+      b.onclick = () => { v.verdict = k; v.run = ""; save(); show(); };
+      modes.append(b);
+    }
+    head.append(pick, modes);
+    box.append(head);
+    const sub = `Each item needs ${spec.reviewers} reviewer${spec.reviewers > 1 ? "s" : ""}; a review is saved as a score `
+      + "(source human), where judges are measured against it.";
+    box.append(el("p", "panesub", spec.description ? `${spec.description} — ${sub}` : sub));
+
+    const grid = el("div", "revgrid");
+    const list = el("div", "revlist");
+    const main = el("div", "revmain");
+    grid.append(list, main);
+    box.append(grid);
+    if (!queue.length) {
+      list.append(el("div", "note", "Nothing waits in this queue."));
+      main.append(paneNote("All caught up", "An online eval sends its failing runs here; "
+        + "`operonx eval queue add` adds runs by hand."));
+      return;
+    }
+    for (const it of queue) {
+      const row = el("button", "revrow" + (it.item_id === v.run ? " sel" : ""));
+      row.type = "button";
+      row.dataset.run = it.item_id;
+      row.append(el("span", "revdot " + (it.reviewed_by.length ? "good" : "")),
+                 el("span", "revid mono", (it.trace_id || it.session_id || it.item_id).slice(0, 13)),
+                 el("span", "revwhat", it.reason || it.source || it.target),
+                 el("span", "revwhen", it.reviewed_by.length ? `${it.reviewed_by.length}/${spec.reviewers}` : fmtAgo(it.added_at * 1000)));
+      row.onclick = () => openItem(it.item_id, spec);
+      list.append(row);
+    }
+    if (!queue.find(r => r.item_id === v.run)) v.run = queue[0].item_id;
+    await openItem(v.run, spec, main, got.detail && got.detail.item_id === v.run ? got.detail : null);
+  }
+
+  async function openItem(itemId, spec, mainEl, pre) {
+    v.run = itemId;
+    save();
+    const it = queue.find(r => r.item_id === itemId);
+    const main = mainEl || box.querySelector(".revmain");
+    for (const r of box.querySelectorAll(".revrow")) r.classList.toggle("sel", r.dataset.run === itemId);
+    main.textContent = "";
+    let got = pre;
+    if (!got && it.trace_id) {
+      try { got = await api(`/api/p/${PID}/review/run/${encodeURIComponent(it.trace_id)}`); }
+      catch (err) { main.append(el("div", "errbox", err.message)); }
+    }
+    current = {run: itemId};
+    if (got) {
+      const s = got.summary;
+      const top = el("div", "revtop");
+      top.append(el("span", "status " + (s.status === "error" ? "s-bad" : "s-ok"), s.status === "error" ? "failed" : "ok"),
+                 el("b", "mono", s.run), el("span", "note", `${s.origin} · ${s.name} · ${fmtAgo(s.started_at * 1000)}`));
+      const openRun = el("button", "linkbtn", "Open the trace");
+      openRun.type = "button";
+      openRun.onclick = () => performUi("open_run", {run: s.run, quiet: true});
+      top.append(openRun);
+      main.append(top);
+      const convo = el("div", "playlog revconvo");
+      if (!got.turns.length) convo.append(el("div", "note", "Nothing said was recorded in this run — open the trace to read it."));
+      for (const t of got.turns) {
+        const b = el("div", `chat-msg ${t.who === "user" ? "from-me" : "from-bot"}`);
+        b.append(el("span", null, t.text), el("span", "revop mono", t.op));
+        convo.append(b);
+      }
+      main.append(convo);
+    } else if (!it.trace_id) {
+      main.append(el("div", "note", `This item points at a ${it.target}; review it from the CLI (operonx eval queue).`));
+    }
+    if (it.reason) main.append(el("div", "note", `Why it is here: ${it.reason}`));
+
+    const form = el("div", "revform");
+    const vb = el("div", "revverdict needs-edit");
+    let verdict = null;
+    const good = el("button", "revgood", "Good"), bad = el("button", "revbad", "Bad");
+    good.type = bad.type = "button";
+    const paint = () => { good.classList.toggle("on", verdict === "good"); bad.classList.toggle("on", verdict === "bad"); };
+    good.onclick = () => { verdict = verdict === "good" ? null : "good"; paint(); };
+    bad.onclick = () => { verdict = verdict === "bad" ? null : "bad"; paint(); };
+    vb.append(good, bad);
+    form.append(vb);
+    const answers = {};
+    for (const [q, kind] of Object.entries(spec.rubric || {})) {
+      const line = el("label", "revrubric");
+      line.append(el("span", null, q));
+      let input;
+      if (kind === "bool") {
+        input = el("select"); for (const [l, x] of [["—", ""], ["yes", "true"], ["no", "false"]]) { const o = el("option", null, l); o.value = x; input.append(o); }
+      } else {
+        input = el("input", "mono"); if (kind === "numeric") input.type = "number";
+        input.placeholder = kind;
+      }
+      input.onchange = () => { answers[q] = input.value; };
+      line.append(input);
+      form.append(line);
+    }
+    const labels = el("input", "mono");
+    labels.placeholder = "labels, comma separated";
+    labels.setAttribute("aria-label", "Labels");
+    const note = el("textarea", "playjson revnote");
+    note.placeholder = "What went wrong, or right";
+    note.setAttribute("aria-label", "Note");
+    const acts = el("div", "priceacts needs-edit");
+    const saveBtn = el("button", "primary", "Save & next");
+    saveBtn.type = "button";
+    acts.append(saveBtn);
+    if (window.Account) Account.readonly(labels, note);
+    const who = el("div", "note", it.reviewed_by.length ? `Reviewed by ${it.reviewed_by.join(", ")}` : "");
+    form.append(labels, note, acts, who);
+    main.append(form);
+    saveBtn.onclick = async () => {
+      saveBtn.disabled = true;
+      try {
+        await api(`/api/p/${PID}/review/queues/${encodeURIComponent(spec.name)}/review`,
+                  {item_id: itemId, verdict, labels: labels.value, note: note.value, rubric: answers});
+        toast(verdict ? `Marked ${verdict}` : "Saved");
+      } catch (err) { toast(err.message, true); saveBtn.disabled = false; return; }
+      const i = queue.findIndex(r => r.item_id === itemId);
+      const next = queue[i + 1];
+      if (next) openItem(next.item_id, spec); else show();
+    };
+    current.mark = (x) => { verdict = x; paint(); };
+  }
 
   registerPane("review", {el: box, show});
   return {show};

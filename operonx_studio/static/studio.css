@@ -2973,6 +2973,10 @@ button.chip.kbpagechip.on { border-color: var(--accent); color: var(--accent-str
 .svcenv { font-size: 12.5px; padding: 10px 14px; border-radius: var(--r-sm); margin-bottom: 16px; }
 .svcenv.ok { background: color-mix(in srgb, var(--ok) 8%, transparent); color: var(--text-2); }
 .svcenv.bad { background: var(--warn-soft); color: var(--warn); }
+/* review queue rubric (Review) */
+.revrubric { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
+.revrubric span { min-width: 120px; color: var(--text-2); }
+.revrubric input, .revrubric select { flex: 1 1 180px; min-width: 0; }
 /* run queues (Services) */
 .rqsec { margin-top: 24px; }
 .rqsec h3 { margin: 0 0 4px; }

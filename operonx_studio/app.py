@@ -2496,6 +2496,13 @@ def build_studio_app(recents: Optional[Recents] = None):
                 "turns": conversation(rows, rec.summary.metadata or {}, _egress_ops(watcher)),
                 "review": ReviewLog(watcher.root).get(run)}
 
+    # operonx [[queue]] review queues: operonx_studio/reviewqueues.py
+    from operonx_studio import reviewqueues as _reviewqueues
+    from operonx_studio.evals import project_scores as _project_scores
+
+    _reviewqueues.register(app, watcher_of=_watcher, conversation_of=_review_payload,
+                           reviewer_of=lambda request: _reviewer(request), scores_of=_project_scores)
+
     @app.get("/api/p/{pid}/review/run/{run}")
     def review_run(pid: str, run: str) -> JSONResponse:
         watcher = _watcher(pid)
