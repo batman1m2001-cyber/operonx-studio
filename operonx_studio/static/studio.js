@@ -2748,6 +2748,27 @@ async function loadRunTree(run) {
   return api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/tree`);
 }
 
+// A run still going (a live run store lists it as running) is followed:
+// asked again every 2.5 s, drawn again only when it grew or ended — at the
+// same scroll position, so reading it while it runs is not a fight.
+const runSig = (t) => `${(t.summary || {}).status}|${(t.rows || []).length}|${t.total_ms || 0}`;
+function followRun(run, mine, tree, redraw) {
+  if (((tree || {}).summary || {}).status !== "running") return;
+  const sig = runSig(tree);
+  setTimeout(async () => {
+    if (state.tracesView !== mine) return;                        // another view now
+    if (state.tab !== "traces" || document.hidden) return followRun(run, mine, tree, redraw);
+    let now;
+    try { now = await loadRunTree(run); } catch { return followRun(run, mine, tree, redraw); }
+    if (state.tracesView !== mine) return;
+    if (runSig(now) === sig) return followRun(run, mine, tree, redraw);
+    const box = $("#traces");
+    const y = box.scrollTop;
+    await redraw();
+    box.scrollTop = y;
+  }, 2500);
+}
+
 async function showRunTree(run) {
   leaveWorkflow();
   const box = $("#traces");
@@ -2759,6 +2780,7 @@ async function showRunTree(run) {
   try { data = await loadRunTree(run); } catch (e) { box.append(el("div", "note", e.message)); return; }
   if (state.tracesView !== mine) return;
   state.runSummary = data.summary || null;
+  followRun(run, mine, data, () => showRunTree(run));
   box.append(runHeader(run, data, "tree"));
   const rows = data.rows, total = Math.max(1, data.total_ms), execs = execsOf(rows);
   const tree = el("div", "rtree");
@@ -3036,6 +3058,7 @@ async function showRunWorkflow(run) {
       api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`), loadRunTree(run)]);
   } catch (e) { box.append(el("div", "note", e.message)); return; }
   if (state.tracesView !== mine) return;
+  followRun(run, mine, tree, () => showRunWorkflow(run));
   state.run = data;
   state.errIdx = 0;
   // every execution with its values, by op and by turn — the cards
