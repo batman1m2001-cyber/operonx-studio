@@ -19,9 +19,10 @@ const ServicesView = (() => {
   async function show() {
     const mine = ++token;
     clearTimeout(timer);
-    let got, env = null;
+    let got, env = null, queues = {queues: []};
     try {
-      [got, env] = await Promise.all([api(`/api/p/${PID}/services`), api(`/api/p/${PID}/env-health`).catch(() => null)]);
+      [got, env, queues] = await Promise.all([api(`/api/p/${PID}/services`), api(`/api/p/${PID}/env-health`).catch(() => null),
+        api(`/api/p/${PID}/services/queues`).catch(() => ({queues: []}))]);
     } catch (err) { box.textContent = ""; box.append(loadError(err, () => show())); return; }
     if (mine !== token) return;
     box.textContent = "";
@@ -43,6 +44,13 @@ const ServicesView = (() => {
       box.append(line);
     }
 
+    const queued = (queues.queues || []).length ? queueSection(queues.queues) : null;
+    const moving = (queues.queues || []).some((q) => q.counts && (q.counts.running || q.counts.queued));
+    if (!got.listeners.length && queued) {
+      box.append(queued);
+      if (moving) timer = setTimeout(() => { if (!box.hidden) show(); }, 2000);
+      return;
+    }
     if (!got.listeners.length) {
       box.append(paneNote("No services declared", "A service is a graph behind a door — HTTP, a WebSocket — that clients call.",
         "[[serve]]\nname  = \"api\"\ngraph = \"main:flow\"\nkind  = \"http\"\npath  = \"/run\"",
@@ -59,7 +67,7 @@ const ServicesView = (() => {
                  el("b", "mono svckey", l.key));
       if (l.running && l.health) {
         top.append(el("span", "svchealth " + (l.health.status < 400 ? "ok" : "bad"),
-                      `GET /health ${l.health.status} · ${l.health.ms} ms`));
+                      `GET ${l.health.path || "/health"} ${l.health.status} · ${l.health.ms} ms`));
       }
       const acts = el("span", "svcacts");
       if (l.managed || (!l.running && !l.starting)) {
@@ -120,8 +128,72 @@ const ServicesView = (() => {
       if (l.starting || (l.managed && openLogs.has(l.key))) busy = true;
       box.append(card);
     }
-    // while something is starting or a log is open, look again
+    if (queued) {
+      box.append(queued);
+      if (moving) busy = true;
+    }
+    // while something is starting, a log is open or a queue moves, look again
     if (busy) timer = setTimeout(() => { if (!box.hidden) show(); }, 2000);
+  }
+
+  const ago = (s) => s == null ? "" : s < 60 ? `${Math.round(s)} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
+
+  // A durable service's run queue (`queue=`): what waits, runs, failed.
+  function queueSection(list) {
+    const sec = el("section", "rqsec");
+    sec.append(el("h3", null, "Run queues"),
+      el("p", "panesub", "Services declared with queue= keep each event in a queue before answering; "
+        + "any replica runs it. A run whose worker died is run again under the same id."));
+    for (const q of list) {
+      const card = el("div", "svccard rqcard");
+      const top = el("div", "svctop");
+      top.append(el("b", "mono svckey", q.service), el("span", "mono rqwhere", q.where || ""));
+      card.append(top);
+      if (q.error) { card.append(el("div", "rqerr", q.error)); sec.append(card); continue; }
+      const c = q.counts || {};
+      const stats = el("div", "rqstats");
+      const stat = (label, n, cls) => { const x = el("div", "rqstat " + (cls || "")); x.append(el("b", null, String(n || 0)), el("span", null, label)); return x; };
+      stats.append(stat("queued", c.queued), stat("running", c.running, c.running ? "run" : ""),
+        stat("done", c.done, "ok"), stat("failed", c.failed, c.failed ? "bad" : ""),
+        stat("stopped", (c.stopped || 0) + (c.discarded || 0)));
+      if (c.oldest_queued_s != null) stats.append(el("span", "note", `oldest waiting ${ago(c.oldest_queued_s)}`));
+      card.append(stats);
+      const table = (title, rows, withRetry) => {
+        if (!rows || !rows.length) return;
+        card.append(el("div", "rqhead", title));
+        const t = el("table", "rqtable");
+        const hr = el("tr");
+        for (const h of ["run", "thread", "attempt", withRetry ? "error" : "worker", "age", ""]) hr.append(el("th", null, h));
+        t.append(hr);
+        for (const r of rows) {
+          const tr = el("tr");
+          const id = el("td", "mono"); id.title = r.payload; id.textContent = r.id.slice(0, 12);
+          tr.append(id, el("td", "mono", r.thread_id || "—"), el("td", null, `${r.attempts}/${r.max_attempts}`),
+            el("td", withRetry ? "rqerrcell" : "mono", withRetry ? (r.error || r.status) : (r.worker || "—")),
+            el("td", null, ago(r.age_s)));
+          const act = el("td");
+          if (withRetry) {
+            const b = el("button", "linkbtn needs-edit", "Retry");
+            b.type = "button";
+            b.onclick = async () => {
+              b.disabled = true;
+              try { await api(`/api/p/${PID}/services/queues/requeue`, {service: q.service, id: r.id}); toast(`run ${r.id.slice(0, 12)} is queued again`); }
+              catch (err) { toast(err.message, true); }
+              show();
+            };
+            act.append(b);
+          }
+          tr.append(act);
+          t.append(tr);
+        }
+        const wrap = el("div", "rqscroll"); wrap.append(t); card.append(wrap);
+      };
+      table("Running", q.running, false);
+      table("Waiting", q.queued, false);
+      table("Failed or stopped", q.ended_badly, true);
+      sec.append(card);
+    }
+    return sec;
   }
 
   registerPane("services", {el: box, show});

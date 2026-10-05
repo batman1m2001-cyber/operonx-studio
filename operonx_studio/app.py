@@ -2367,20 +2367,25 @@ def build_studio_app(recents: Optional[Recents] = None):
         return listeners_of(services)
 
     def _health(host: str, port: int) -> Optional[Dict[str, Any]]:
-        """GET /health on a running listener — the admin route most apps mount."""
+        """GET /healthz (every operonx listener has it since 1.15), else
+        /health (the admin route most apps mount) on a running listener."""
         import urllib.error
         import urllib.request
 
         target = "127.0.0.1" if host in ("", "0.0.0.0", "::") else host
-        t0 = time.perf_counter()
-        try:
-            with urllib.request.urlopen(f"http://{target}:{port}/health", timeout=1.0) as res:
-                body = res.read(2000).decode("utf-8", "replace")
-                return {"status": res.status, "ms": round((time.perf_counter() - t0) * 1000, 1), "body": body[:300]}
-        except urllib.error.HTTPError as exc:
-            return {"status": exc.code, "ms": round((time.perf_counter() - t0) * 1000, 1)}
-        except Exception:  # noqa: BLE001 — a websocket-only port has no /health, and that is fine
-            return None
+        got = None
+        for path in ("/healthz", "/health"):
+            t0 = time.perf_counter()
+            try:
+                with urllib.request.urlopen(f"http://{target}:{port}{path}", timeout=1.0) as res:
+                    body = res.read(2000).decode("utf-8", "replace")
+                    return {"status": res.status, "ms": round((time.perf_counter() - t0) * 1000, 1),
+                            "body": body[:300], "path": path}
+            except urllib.error.HTTPError as exc:
+                got = {"status": exc.code, "ms": round((time.perf_counter() - t0) * 1000, 1), "path": path}
+            except Exception:  # noqa: BLE001 — a websocket-only port has no health route, and that is fine
+                return None
+        return got
 
     @app.get("/api/p/{pid}/services")
     def services_list(pid: str) -> JSONResponse:
@@ -2392,7 +2397,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             st = procs.state(pid, lst)
             st["detail"] = lst.services
             # only a listener with an http route can have /health; a 404 says it has none
-            web = any(x.get("kind") in ("http", "asgi") for x in lst.services)
+            web = any(x.get("kind") in ("http", "asgi", "webhook", "websocket") for x in lst.services)
             health = _health(lst.host, lst.port) if st["running"] and web else None
             st["health"] = health if health and health.get("status") != 404 else None
             out.append(st)
@@ -3043,6 +3048,11 @@ def build_studio_app(recents: Optional[Recents] = None):
     from operonx_studio import knowledge as _knowledge
 
     _knowledge.register(app, watcher_of=_watcher)
+
+    # the run queue of a durable service: operonx_studio/runqueue.py
+    from operonx_studio import runqueue as _runqueue
+
+    _runqueue.register(app, watcher_of=_watcher)
 
     # ── the assistant's hands: UI actions and undo ──────────────────────
     # The studio tool server (operonx_studio.mcp) posts what it opened;

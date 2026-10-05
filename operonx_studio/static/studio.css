@@ -2973,6 +2973,23 @@ button.chip.kbpagechip.on { border-color: var(--accent); color: var(--accent-str
 .svcenv { font-size: 12.5px; padding: 10px 14px; border-radius: var(--r-sm); margin-bottom: 16px; }
 .svcenv.ok { background: color-mix(in srgb, var(--ok) 8%, transparent); color: var(--text-2); }
 .svcenv.bad { background: var(--warn-soft); color: var(--warn); }
+/* run queues (Services) */
+.rqsec { margin-top: 24px; }
+.rqsec h3 { margin: 0 0 4px; }
+.rqwhere { color: var(--text-3); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rqstats { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.rqstat { display: flex; align-items: baseline; gap: 6px; }
+.rqstat b { font-size: var(--fs-lg, 18px); font-variant-numeric: tabular-nums; }
+.rqstat span { color: var(--text-2); }
+.rqstat.ok b { color: var(--ok); } .rqstat.bad b { color: var(--err); } .rqstat.run b { color: var(--accent); }
+.rqhead { padding: 10px 16px 4px; font-weight: 600; color: var(--text-2); font-size: var(--fs-sm); }
+.rqscroll { overflow-x: auto; padding: 0 16px 12px; }
+.rqtable { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.rqtable th { text-align: left; color: var(--text-3); font-weight: 500; padding: 4px 8px 4px 0; }
+.rqtable td { padding: 4px 8px 4px 0; border-top: 1px solid var(--border); vertical-align: top; white-space: nowrap; }
+.rqtable td.rqerrcell { white-space: normal; min-width: 220px; }
+.rqerrcell { color: var(--err); max-width: 420px; overflow-wrap: anywhere; }
+.rqerr { padding: 12px 16px; color: var(--err); }
 .svccard { border: 1px solid var(--border); border-radius: var(--r-md); margin-bottom: 14px; overflow: hidden; }
 .svccard.up { border-color: color-mix(in srgb, var(--ok) 35%, var(--border)); }
 .svctop { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; background: var(--surface-2); }

@@ -287,3 +287,15 @@ entry = "deep_pkg.mod:VALUE"
         before = list(sys.path)
         m.graph("g").resolve(m.root)
         assert sys.path == before
+
+
+def test_operonx_triggers_are_known_kinds(tmp_path):
+    """A webhook or schedule service extracts: they are operonx's own transports."""
+    from operonx_project.manifest import Manifest
+
+    (tmp_path / "operonx.toml").write_text(
+        '[project]\nname = "t"\n\n[[serve]]\nname = "mail"\nkind = "webhook"\ngraph = "main:flow"\npath = "/mail"\n\n'
+        '[[serve]]\nname = "tick"\nkind = "schedule"\ngraph = "main:flow"\nevery = "5m"\n'
+    )
+    m = Manifest.load(tmp_path)
+    assert [s.kind for s in m.serves] == ["webhook", "schedule"]
