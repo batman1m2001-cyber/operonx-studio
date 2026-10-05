@@ -87,8 +87,7 @@
       x: (i) => L + (i + 0.5) * (W - L - R) / series.length, bw: (W - L - R) / series.length};
   }
 
-  function yAxis(svg, f, max, fmt) {
-    const ticks = 3;
+  function yAxis(svg, f, max, fmt, ticks = 3) {
     for (let i = 0; i <= ticks; i++) {
       const val = max * i / ticks;
       const y = f.T + f.ph - f.ph * i / ticks;
@@ -196,6 +195,120 @@
     xLabels(svg, f, series);
     versionMarks(svg, f, series, versions);
     return svg;
+  }
+
+  // a round top for a 4-tick axis: 1, 2, 2.5 or 5 times a power of ten
+  function niceTop(x) {
+    if (!(x > 0)) return 1;
+    const step = x / 4, pow = Math.pow(10, Math.floor(Math.log10(step)));
+    const unit = [1, 2, 2.5, 5, 10].find(u => u * pow >= step);
+    return unit * pow * 4;
+  }
+
+  // a dashed rule at an alert's threshold; its label sits at the left end,
+  // haloed in the surface colour so a line crossing it stays readable
+  function thresholdRule(svg, f, y, label) {
+    svg.append(svgEl("line", {x1: f.L, x2: f.W - f.R, y1: y, y2: y, stroke: C.failed, "stroke-width": 1, "stroke-dasharray": "4 3"}));
+    const tx = svgEl("text", {x: f.L + 4, y: y - 4, class: "vizver", stroke: C.surface, "stroke-width": 3,
+                              "paint-order": "stroke", "stroke-linejoin": "round"});
+    tx.textContent = label;
+    return tx;  // appended last, above the marks
+  }
+
+  /* a score's mean per bucket: one 2px line, ringed dots, a crosshair */
+  function scoreMeanChart(sc) {
+    const series = sc.series;
+    const f = frame(series, 140);
+    const svg = svgEl("svg", {viewBox: `0 0 ${f.W} ${f.H}`, class: "vizsvg", role: "img", "aria-label": `${sc.score} mean over time`});
+    const vals = series.map(b => b.mean);
+    const top = niceTop(Math.max(...vals.filter(x => x != null), sc.mean_threshold || 0));
+    yAxis(svg, f, top, (x) => String(+x.toFixed(2)), 4);
+    const y = (val) => f.T + f.ph - f.ph * val / top;
+    const rule = sc.mean_threshold != null ? thresholdRule(svg, f, y(sc.mean_threshold), `alert under ${sc.mean_threshold}`) : null;
+    let d = "", pen = false;
+    vals.forEach((val, i) => {
+      if (val == null) { pen = false; return; }
+      d += `${pen ? "L" : "M"}${f.x(i).toFixed(1)},${y(val).toFixed(1)} `;
+      pen = true;
+    });
+    svg.append(svgEl("path", {d, fill: "none", stroke: C.line, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round"}));
+    vals.forEach((val, i) => {
+      if (val != null) svg.append(svgEl("circle", {cx: f.x(i), cy: y(val), r: 4, fill: C.line, stroke: C.surface, "stroke-width": 2}));
+    });
+    const cross = svgEl("line", {x1: 0, x2: 0, y1: f.T, y2: f.T + f.ph, stroke: C.axis, "stroke-width": 1, visibility: "hidden"});
+    svg.append(cross);
+    series.forEach((b, i) => {
+      const hit = svgEl("rect", {x: f.x(i) - f.bw / 2, y: f.T, width: f.bw, height: f.ph, fill: "transparent"});
+      hit.addEventListener("pointermove", (ev) => {
+        cross.setAttribute("x1", f.x(i)); cross.setAttribute("x2", f.x(i)); cross.setAttribute("visibility", "visible");
+        showTip(ev, [`${when(b.t0)} – ${when(b.t1)}`, b.mean == null ? "no scores" : `mean ${b.mean.toFixed(3)} · ${b.n} scores`]);
+      });
+      hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+      svg.append(hit);
+    });
+    if (rule) svg.append(rule);
+    xLabels(svg, f, series);
+    return svg;
+  }
+
+  /* the share of a score failing per bucket: thin bars from the baseline */
+  function scoreFailChart(sc) {
+    const series = sc.series;
+    const f = frame(series, 140);
+    const svg = svgEl("svg", {viewBox: `0 0 ${f.W} ${f.H}`, class: "vizsvg", role: "img", "aria-label": `${sc.score} share failing over time`});
+    const top = Math.min(1, niceTop(Math.max(0.04, ...series.map(b => b.fail_share || 0), sc.fail_threshold || 0)));
+    yAxis(svg, f, top, (x) => `${+(100 * x).toFixed(1)}%`, 4);
+    const base = f.T + f.ph;
+    const w = Math.max(2, Math.min(18, f.bw * 0.55));
+    series.forEach((b, i) => {
+      if (b.fail_share) {
+        const h = Math.max(1, f.ph * b.fail_share / top);
+        svg.append(svgEl("path", {d: bar(f.x(i) - w / 2, base - h, w, h, true), fill: C.failed}));
+      }
+      const hit = svgEl("rect", {x: f.x(i) - f.bw / 2, y: f.T, width: f.bw, height: f.ph, fill: "transparent"});
+      hit.addEventListener("pointermove", (ev) => showTip(ev, [`${when(b.t0)} – ${when(b.t1)}`,
+        b.fail_share == null ? "no pass/fail scores" : `${pct(b.fail_share)} failing · ${b.n} scores`]));
+      hit.addEventListener("pointerleave", hideTip);
+      svg.append(hit);
+    });
+    if (sc.fail_threshold != null) svg.append(thresholdRule(svg, f, base - f.ph * sc.fail_threshold / top, `alert over ${pct(sc.fail_threshold)}`));
+    xLabels(svg, f, series);
+    return svg;
+  }
+
+  // the numbers behind a score's two charts, one row per bucket that has any
+  function scoreTable(sc) {
+    const det = el("details", "viztable");
+    det.append(el("summary", null, "Table"));
+    const wrap = el("div", "tablewrap");
+    const table = el("table", "datatable");
+    const hr = el("tr");
+    for (const [h, cls] of [["From"], ["Scores", "num"], ["Mean", "num"], ["Failing", "num"]]) hr.append(el("th", cls || null, h));
+    const thead = el("thead"); thead.append(hr); table.append(thead);
+    const tbody = el("tbody");
+    for (const b of sc.series.filter(x => x.n)) {
+      const tr = el("tr");
+      tr.append(el("td", null, when(b.t0)), el("td", "num", String(b.n)),
+        el("td", "num", b.mean == null ? "—" : b.mean.toFixed(3)), el("td", "num", pct(b.fail_share)));
+      tbody.append(tr);
+    }
+    table.append(tbody); wrap.append(table); det.append(wrap);
+    return det;
+  }
+
+  function scoresSection(list) {
+    const sec = el("div", "monscores");
+    sec.append(el("h3", "monscoreshead", "Scores"),
+      el("p", "note", "What online evals scored these runs — the mean, and the share failing; a dashed line is an alert's threshold."));
+    for (const sc of list) {
+      const charts = el("div", "vizgrid");
+      const head = el("span", "note", `${sc.n.toLocaleString()} scores · mean ${sc.mean == null ? "—" : sc.mean.toFixed(3)} · ${pct(sc.fail_share)} failing`);
+      if (sc.series.some(b => b.mean != null)) charts.append(card(`${sc.score} · mean`, scoreMeanChart(sc), head));
+      if (sc.series.some(b => b.fail_share != null)) charts.append(card(`${sc.score} · failing`, scoreFailChart(sc),
+        sc.series.some(b => b.mean != null) ? null : head));
+      sec.append(charts, scoreTable(sc));
+    }
+    return sec;
   }
 
   function card(title, body, sub) {
@@ -386,8 +499,11 @@
       + `&buckets=${buckets}&playground=${withPlay ? 1 : 0}`;
     const loading = el("div", "note", "Loading…");
     box.append(loading);
-    let m;
-    try { m = await api(`/api/p/${PID}/monitor?${q}`); }
+    let m, scored = {scores: []};
+    try {
+      [m, scored] = await Promise.all([api(`/api/p/${PID}/monitor?${q}`),
+        api(`/api/p/${PID}/monitor/scores?${q}`).catch(() => ({scores: []}))]);
+    }
     catch (e) { if (mine === token) loading.replaceWith(loadError(e, () => show())); return; }
     if (mine !== token) return;
     loading.remove();
@@ -433,6 +549,7 @@
     const latCard = card("p95 duration", p95Chart(m.series, m.versions));
     charts.append(runsCard, latCard);
     box.append(charts);
+    if ((scored.scores || []).length) box.append(scoresSection(scored.scores));
 
     box.append(card("Where the time goes", opsTable(m.ops),
       m.key_ops && m.key_ops.length ? el("span", "note", `key ops first: ${m.key_ops.join(", ")}`) : null));

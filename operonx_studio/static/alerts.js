@@ -1,7 +1,8 @@
 /* operonx studio — Alerts: a threshold per service or job, and a webhook.
  *
  * Each rule watches one service or job over a trailing window — error
- * rate, p95 (of runs, or of one op), cost per hour, or too few runs — and
+ * rate, p95 (of runs, or of one op), cost per hour, too few runs, or an
+ * online eval's score (its mean dropping, its share failing) — and
  * posts to a webhook when it crosses, reminds while it stays over, and
  * says when it recovers. The studio checks every minute while it runs;
  * the number beside each rule is what it is right now.
@@ -14,9 +15,18 @@ const AlertsView = (() => {
   let token = 0;
   let editing = null;   // the rule being edited (a copy), or {} for a new one
 
-  const LABEL = {error_rate: "Error rate", p95_ms: "p95 duration", cost_per_hour: "Cost per hour", runs: "Runs (fewer than)"};
-  const fmt = (metric, x) => x == null ? "—" : metric === "error_rate" ? `${(100 * x).toFixed(1)}%`
-    : metric === "p95_ms" ? fmtMs(x) : metric === "cost_per_hour" ? `$${Number(x).toFixed(4)}/h` : String(x);
+  const LABEL = {error_rate: "Error rate", p95_ms: "p95 duration", cost_per_hour: "Cost per hour", runs: "Runs (fewer than)",
+                 score_mean: "Mean of a score (under)", score_fail_rate: "Share of a score failing"};
+  // `score_mean:<score>` / `score_fail_rate:<score>` — an online eval's score
+  const kindOf = (m) => (m || "").split(":")[0];
+  const scoreOf = (m) => (m || "").split(":").slice(1).join(":");
+  const label = (m) => kindOf(m) === "score_mean" ? `mean of ${scoreOf(m)}`
+    : kindOf(m) === "score_fail_rate" ? `${scoreOf(m)} failing` : LABEL[m];
+  const below = (m) => m === "runs" || kindOf(m) === "score_mean";   // fires under its threshold
+  const percent = (m) => m === "error_rate" || kindOf(m) === "score_fail_rate";
+  const fmt = (metric, x) => x == null ? "—" : percent(metric) ? `${(100 * x).toFixed(1)}%`
+    : metric === "p95_ms" ? fmtMs(x) : metric === "cost_per_hour" ? `$${Number(x).toFixed(4)}/h`
+    : kindOf(metric) === "score_mean" ? Number(x).toFixed(3) : String(x);
 
   async function show() {
     const mine = ++token;
@@ -82,14 +92,14 @@ const AlertsView = (() => {
       acts.append(del);
       top.append(acts);
       card.append(top);
-      const what = a.op ? `p95 of ${a.op}` : LABEL[a.metric];
+      const what = a.op ? `p95 of ${a.op}` : label(a.metric);
       const rule = el("div", "alrule");
-      rule.append(el("span", "mono", `${a.origin} ${a.target}`), el("span", null, ` · ${what} ${a.metric === "runs" ? "<" : ">"} `),
+      rule.append(el("span", "mono", `${a.origin} ${a.target}`), el("span", null, ` · ${what} ${below(a.metric) ? "<" : ">"} `),
                   el("b", null, fmt(a.metric, a.threshold)), el("span", null, ` over ${a.window_min} min`));
       card.append(rule);
       const nowRow = el("div", "alnow");
       nowRow.append(el("span", "alval" + (n.firing ? " bad" : ""), fmt(a.metric, n.value)),
-                    el("span", "note", judged ? ` now · ${n.runs} runs in the window${n.unpriced ? ` · ${n.unpriced} unpriced` : ""}` : ` — ${n.note || "not judged"}`));
+                    el("span", "note", judged ? ` now · ${n.runs} ${kindOf(a.metric).startsWith("score_") ? "scores" : "runs"} in the window${n.unpriced ? ` · ${n.unpriced} unpriced` : ""}` : ` — ${n.note || "not judged"}`));
       card.append(nowRow);
       const last = a.last;
       card.append(el("div", "note alsent", !a.webhook_set ? "No webhook — shown here only."
@@ -113,18 +123,21 @@ const AlertsView = (() => {
     if (a.origin) target.value = `${a.origin}:${a.target}`;
     field("Watches", target);
     const metric = el("select");
-    for (const m of metrics) { const o = el("option", null, LABEL[m] || m); o.value = m; metric.append(o); }
-    metric.value = a.metric || "error_rate";
+    for (const m of [...metrics, "score_mean", "score_fail_rate"]) { const o = el("option", null, LABEL[m] || m); o.value = m; metric.append(o); }
+    metric.value = kindOf(a.metric) || "error_rate";
     field("When", metric);
     const op = field("…of one op (p95 only)", inp(a.op || "", {placeholder: "all of the run"}));
+    const score = field("…of the score (online evals)", inp(scoreOf(a.metric), {placeholder: "helpfulness"}));
     // thresholds are typed as people think of them: a percent, milliseconds, dollars an hour
-    const shown = (m, x) => x == null ? "" : m === "error_rate" ? String(+(100 * x).toFixed(3)) : String(x);
-    const threshold = field("Is over", inp(shown(a.metric || "error_rate", a.threshold), {type: "number", step: "any"}));
-    const unit = () => ({error_rate: "%", p95_ms: "ms", cost_per_hour: "$ an hour", runs: "runs (fires under)"})[metric.value];
+    const shown = (m, x) => x == null ? "" : percent(m) ? String(+(100 * x).toFixed(3)) : String(x);
+    const threshold = field("Threshold", inp(shown(a.metric || "error_rate", a.threshold), {type: "number", step: "any"}));
+    const unit = () => ({error_rate: "% (fires over)", p95_ms: "ms (fires over)", cost_per_hour: "$ an hour (fires over)",
+                         runs: "runs (fires under)", score_mean: "mean (fires under)", score_fail_rate: "% failing (fires over)"})[metric.value];
     const unitEl = el("span", "note", unit());
     threshold.parentNode.append(unitEl);
-    metric.onchange = () => { unitEl.textContent = unit(); op.disabled = metric.value !== "p95_ms"; };
-    op.disabled = metric.value !== "p95_ms";
+    const sync = () => { unitEl.textContent = unit(); op.disabled = metric.value !== "p95_ms"; score.disabled = !metric.value.startsWith("score_"); };
+    metric.onchange = sync;
+    sync();
     const win = field("Window (min)", inp(a.window_min ?? 15, {type: "number", min: 1}));
     const minRuns = field("Judge from (runs)", inp(a.min_runs ?? 5, {type: "number", min: 0}));
     const repeat = field("Remind every (min)", inp(a.repeat_min ?? 60, {type: "number", min: 1}));
@@ -141,9 +154,10 @@ const AlertsView = (() => {
     save.onclick = async () => {
       const [origin, tgt] = target.value.split(":");
       const t = Number(threshold.value);
+      const m = metric.value.startsWith("score_") ? `${metric.value}:${score.value.trim()}` : metric.value;
       try {
-        await api(`/api/p/${PID}/alerts`, {name: name.value.trim(), origin, target: tgt, metric: metric.value,
-          op: metric.value === "p95_ms" ? op.value.trim() : "", threshold: metric.value === "error_rate" ? t / 100 : t,
+        await api(`/api/p/${PID}/alerts`, {name: name.value.trim(), origin, target: tgt, metric: m,
+          op: metric.value === "p95_ms" ? op.value.trim() : "", threshold: percent(m) ? t / 100 : t,
           window_min: Number(win.value) || 15, min_runs: Number(minRuns.value) || 0, repeat_min: Number(repeat.value) || 60,
           webhook: hook.value.trim(), enabled: true});
         editing = null;

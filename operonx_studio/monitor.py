@@ -186,3 +186,58 @@ def monitor(
         "playground_runs": playground,
         "with_playground": bool(with_playground and playground),
     }
+
+
+def score_trends(
+    scores: Any,
+    origin: Optional[str],
+    name: Optional[str],
+    since: float,
+    until: float,
+    buckets: int = 24,
+    alerts: Sequence[Any] = (),
+) -> List[Dict[str, Any]]:
+    """Each score written on these runs over ``[since, until)``: per bucket,
+    its mean (over scores with a value) and the share that failed (over
+    scores with pass/fail) — what ``score_mean:`` / ``score_fail_rate:``
+    alerts compute — with the thresholds of the alerts that watch it.
+    Reviews by people (``source="human"``) are not trends; they are left out."""
+    from operonx.telemetry.scores import ScoreFilter
+
+    rows = [s for s in scores.scores(ScoreFilter(origin=origin, name=name, since=since, until=until),
+                                     limit=200_000) if s.source != "human"]
+    width = max(1.0, (until - since) / max(1, buckets))
+    by: Dict[str, List[Any]] = {}
+    for s in rows:
+        by.setdefault(s.score_name, []).append(s)
+    out = []
+    for score, items in sorted(by.items()):
+        series = [{"t0": since + i * width, "t1": since + (i + 1) * width, "_v": [], "_p": []}
+                  for i in range(max(1, buckets))]
+        for s in items:
+            i = int((s.created_at - since) // width)
+            if 0 <= i < len(series):
+                if s.value is not None:
+                    series[i]["_v"].append(float(s.value))
+                if s.passed is not None:
+                    series[i]["_p"].append(bool(s.passed))
+        for b in series:
+            v, p = b.pop("_v"), b.pop("_p")
+            b["n"] = max(len(v), len(p))
+            b["mean"] = sum(v) / len(v) if v else None
+            b["fail_share"] = (sum(1 for x in p if not x) / len(p)) if p else None
+        values = [float(s.value) for s in items if s.value is not None]
+        passes = [s.passed for s in items if s.passed is not None]
+        watched = [a for a in alerts
+                   if (a.origin, a.target) == (origin, name) and a.metric.endswith(f":{score}")]
+        out.append({
+            "score": score,
+            "data_type": items[0].data_type,
+            "n": len(items),
+            "mean": sum(values) / len(values) if values else None,
+            "fail_share": (sum(1 for x in passes if not x) / len(passes)) if passes else None,
+            "series": series,
+            "mean_threshold": next((a.threshold for a in watched if a.metric.startswith("score_mean:")), None),
+            "fail_threshold": next((a.threshold for a in watched if a.metric.startswith("score_fail_rate:")), None),
+        })
+    return out
