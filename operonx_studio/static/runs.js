@@ -257,7 +257,10 @@ const RunsView = (() => {
       when.append(el("div", "cellsub", fmtWhen(r.mtime * 1000)));
     }
     tr.append(when);
-    tr.append(el("td", "num hide-sm", r.duration_ms ? fmtMs(r.duration_ms) : "—"));
+    // a run still going shows how long it has been going
+    tr.append(el("td", "num hide-sm" + (r.status === "running" ? " live" : ""),
+      r.status === "running" && r.started_at ? `${fmtMs(Date.now() - r.started_at * 1000)}…`
+        : r.duration_ms ? fmtMs(r.duration_ms) : "—"));
     const cost = el("td", "num hide-sm" + (r.cost_usd == null && r.llm_calls ? " dim" : ""), money(r));
     if (r.llm_calls) cost.title = `${r.llm_calls} LLM calls · ${r.tokens_in} in / ${r.tokens_out} out tokens`;
     tr.append(cost);
@@ -306,6 +309,16 @@ const RunsView = (() => {
     catch (e) { more.parentNode.replaceChild(el("div", "errbox", e.message), more); return null; }
     if (mine !== token) return null;
     for (const r of data.runs) tbody.append(row(r));
+    // a run still going on the first page: the list looks again in 5 s, in place
+    if (!append && data.runs.some(r => r.status === "running")) {
+      setTimeout(async () => {
+        if (mine !== token || state.tab !== "traces" || document.hidden || !tbody.isConnected) return;
+        const box = $("#traces");
+        const y = box.scrollTop;
+        await render();
+        box.scrollTop = y;
+      }, 5000);
+    }
     cursor = data.next;
     more.hidden = !cursor;
     foot.textContent = data.total != null ? `${tbody.childNodes.length} of ${data.total}` : "";

@@ -1,6 +1,6 @@
 # Studio: the pages operonx's platform work needs
 
-Status: plan (2026-10-05). Follows operonx E7 (#93, review queues, online evals, score alerts)
+Status: done (2026-10-05): S3 #18, S1 #19, S2 #20, S4. Follows operonx E7 (#93, review queues, online evals, score alerts)
 and R2–R4 (live traces, journal, run queue).
 
 ## 1. What operonx has that Studio does not show
