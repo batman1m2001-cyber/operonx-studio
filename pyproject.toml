@@ -21,7 +21,7 @@ requires-python = ">=3.10"
 dependencies = [
     # the ClickHouse driver: a project whose [tracing] records to ClickHouse
     # is read from there
-    "operonx[clickhouse]>=1.14.0",
+    "operonx[clickhouse]>=1.15.0",
     "tomli>=2.0; python_version < '3.11'",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
