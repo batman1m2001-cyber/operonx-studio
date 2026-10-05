@@ -203,8 +203,9 @@ class GraphSpec:
 #: by `module:Class` instead and needs no entry here — see the check in
 #: `Manifest.load`. `cron` and `queue` were listed here for years with
 #: nothing implementing either, so a manifest naming one linted clean and
-#: then failed at boot.
-SERVE_KINDS = ("websocket", "http", "asgi")
+#: then failed at boot. `webhook` and `schedule` ship with operonx (its
+#: triggers); without them here a project using one did not extract.
+SERVE_KINDS = ("websocket", "http", "asgi", "webhook", "schedule")
 
 
 @dataclass(frozen=True)
