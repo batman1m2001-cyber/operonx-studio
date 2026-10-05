@@ -8,6 +8,6 @@ stack; everything visual lives here.
 from operonx_studio.layout import Layout, layout_graph
 from operonx_studio.render import render_html, render_project
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = ["Layout", "layout_graph", "render_html", "render_project", "__version__"]
