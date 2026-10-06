@@ -1742,7 +1742,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         return got if isinstance(got, JSONResponse) else JSONResponse(got)
 
     def _origins(pid: str, since: str = "", until: str = "") -> Any:
-        """The Runs screen's tree: every service, job, runbook the
+        """The Runs screen's tree: every service, job, job of steps the
         application declares (so an idle one still shows, with 0), plus
         whatever the store holds beyond them, counted in the range."""
         watcher = _watcher(pid)
@@ -1771,7 +1771,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         runbooks: Dict[str, Dict[str, Any]] = {}
         for j in (ir or {}).get("jobs") or []:
             if j.get("kind") in ("runbook", "steps"):  # "steps": operonx 1.17
-                runbooks[j["name"]] = blank(j["name"], schedule=j.get("schedule"))
+                runbooks[j["name"]] = blank(j["name"], schedule=j.get("schedule"), steps=j.get("steps") or [])
             else:
                 folders["job"][j["name"]] = blank(j["name"], session=j.get("session"))
         for g in counted:

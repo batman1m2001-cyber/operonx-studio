@@ -2776,8 +2776,8 @@ function originLine(s) {
       }));
     }
     if (s.runbook) {
-      line.append(" · runbook ");
-      line.append(link(s.runbook, "Every trace of this runbook run",
+      line.append(" · steps ");
+      line.append(link(s.runbook, "Every trace of this steps run",
         () => RunsView.openFolder({kind: "runbook", name: s.runbook, runbook_run: s.runbook_run})));
     }
   } else if (s.origin === "service" || s.origin === "playground") {
@@ -4315,7 +4315,7 @@ function renderProjectMenu() {
     });
   });
   const jobs = (ir.jobs || []).map(j => row(j.name,
-    `${j.kind === "runbook" ? "runbook" : j.session}${j.schedule ? " · " + j.schedule : ""}`,
+    `${jobKind(j)}${j.schedule ? " · " + j.schedule : ""}`,
     () => { state.jobSel = j.name; switchTab("jobs"); }));
   box.append(col("Operons", operons), col("Services", services), col("Jobs", jobs));
 }
@@ -4403,7 +4403,7 @@ async function showJobs(sel, runId) {
     r.setAttribute("aria-selected", String(j.name === picked.name));
     const head = el("div", "jhead");
     head.append(el("span", "jn", j.name));
-    head.append(el("span", "jkind", (j.kind === "runbook" ? "runbook" : j.session) + (j.schedule ? ` · ${j.schedule}` : "")));
+    head.append(el("span", "jkind", jobKind(j) + (j.schedule ? ` · ${j.schedule}` : "")));
     r.append(head);
     if (j.description) r.append(el("div", "jdesc", j.description));
     const last = el("div", "jlast");
@@ -4433,7 +4433,7 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
   const refresh = Icons.button("refresh", undefined, "", "Refresh");
   refresh.onclick = () => showJobs(job.name, state.jobRun);
   bar.append(refresh);
-  if (job.kind !== "runbook" && job.session !== "stream") {
+  if (job.kind !== "runbook" && job.session !== "stream") {  // a steps job resumes every step
     const resume = Icons.button("resume", "Resume", "needs-edit");
     resume.title = "Run only the keys the last run did not finish";
     resume.onclick = () => startJob(job.name, true);
@@ -4445,9 +4445,16 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
   bar.append(run);
   detail.append(bar);
   if (job.description) detail.append(el("p", "jmeta", job.description));
-  const facts = [job.kind === "runbook" ? "Runbook" : `${job.session} job`];
+  // operonx >= 1.17: a job of steps, or a job over items; older: a runbook, or source → sink
+  const facts = job.kind === "steps" ? [`Steps: ${(job.steps || []).join(" → ")}`]
+    : job.kind === "runbook" ? ["Runbook"]
+    : job.session ? [`${job.session} job`] : [job.kind === "eval" ? "Eval" : "Job"];
   if (job.schedule) facts.push(`schedule ${job.schedule}`);
-  if (job.kind !== "runbook") facts.push(`${job.source || "—"} → ${job.sink || "—"}`);
+  if (job.kind === "steps" || job.kind === "runbook") { /* the steps say it */ }
+  else if (job.source || job.sink) facts.push(`${job.source || "—"} → ${job.sink || "—"}`);
+  else if (job.kind !== "eval") {
+    facts.push(`${job.items || "once"} → ${job.graph || "—"}` + (job.reduce ? ` → reduce ${job.reduce}` : ""));
+  }
   detail.append(el("p", "jpath", facts.join("  ·  ") + (job.record_dir ? `\nrecords in ${job.record_dir}` : "")));
   detail.querySelector(".jpath").style.whiteSpace = "pre-line";
 
@@ -4497,10 +4504,11 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
   }
   if (state.jobsView !== mine) return;
   if (one.run.error) detail.append(el("div", "errbox", one.run.error));
-  if (one.run.tree) {
-    detail.append(el("h3", "jsection", "Jobs in this run"));
+  const tree = one.run.tree || stepsTree(job.name, one.run, one.items);
+  if (tree) {
+    detail.append(el("h3", "jsection", "Steps in this run"));
     if ((one.run.wires || []).length) detail.append(renderWires(one.run.wires));
-    detail.append(renderRunbookTree(one.run.tree));
+    detail.append(renderRunbookTree(tree));
   } else {
     const n = (one.items || []).length;
     const h = el("h3", "jsection", "Items");
@@ -4514,6 +4522,23 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
   if (open.status === "running" && state.tab === "jobs") {
     _jobsPoll = setTimeout(() => { if (state.tab === "jobs") showJobs(job.name, open.run_id); }, 2500);
   }
+}
+
+/* What kind of job, in a word: steps, eval, or job (operonx >= 1.17);
+ * runbook, or its session, from an older operonx. */
+function jobKind(j) {
+  if (j.kind === "steps" || j.kind === "runbook" || j.kind === "eval") return j.kind;
+  return j.session || "job";
+}
+
+/* A steps run (operonx >= 1.17) as the tree a runbook run had: each step
+ * by name, with its status, its own run id and how long it took. */
+function stepsTree(name, run, items) {
+  if (!Array.isArray(run.steps) || !run.steps.length || typeof run.steps[0] !== "object") return null;
+  const ms = Object.fromEntries((items || []).map(i => [i.key, i.ms]));
+  return {kind: "runbook", name, status: run.status,
+          children: run.steps.map(s => ({kind: "job", name: s.name, status: s.status, run_id: s.run_id,
+                                         ms: ms[s.name]}))};
 }
 
 function countsOfTree(tree) {

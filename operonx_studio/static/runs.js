@@ -1,12 +1,13 @@
 /* operonx studio — Runs, by where they came from.
  *
- * Left, the origin tree: every service, job and runbook the application
+ * Left, the origin tree: every service, job and job of steps the application
  * declares (an idle one shows 0), then the playground and ad hoc runs,
  * each with its count in the time range and a red dot when something
  * failed. Right, the runs in the chosen folder: when, status, how long,
  * what it cost, the first error — the answers people open a trace for.
- * A job folder lists its runs as a strip above; a runbook folder lists
- * the runbook's runs, and each opens as the traces it grouped.
+ * A job folder lists its runs as a strip above; a steps folder lists the
+ * steps job's runs, and each opens as the traces it grouped. (Its kind is
+ * still "runbook" here: the run store's tags keep that name.)
  *
  * Everything reads the project's RunStore through /runs, /runs/groups and
  * /runs/origins. Opening a run is the run view (studio.js).
@@ -19,7 +20,7 @@ const RunsView = (() => {
                   ["7d", "Last 7 days", 7 * 86400], ["30d", "Last 30 days", 30 * 86400], ["all", "All time", 0]];
   const ORDERS = [["started_desc", "Newest"], ["duration_desc", "Slowest"],
                   ["cost_desc", "Most expensive"], ["errors_desc", "Most errors"]];
-  const SECTIONS = [["services", "Services", "service"], ["jobs", "Jobs", "job"], ["runbooks", "Runbooks", "runbook"],
+  const SECTIONS = [["services", "Services", "service"], ["jobs", "Jobs", "job"], ["runbooks", "Steps", "runbook"],
                     ["evals", "Evals", "eval"], ["playground", "Playground", "playground"], ["adhoc", "Ad hoc", "adhoc"]];
 
   const v = Object.assign({
@@ -125,7 +126,7 @@ const RunsView = (() => {
       rail.append(el("div", "railhead", label));
       for (const it of items) {
         const sub = kind === "service" ? `${it.kind || ""} ${it.path || ""}`.trim()
-          : kind === "runbook" ? (it.schedule ? `schedule ${it.schedule}` : "") : "";
+          : kind === "runbook" ? ((it.steps || []).join(" → ") || (it.schedule ? `schedule ${it.schedule}` : "")) : "";
         rail.append(railItem(it.name, it.runs, it.errors, same(v.folder, {kind, name: it.name}),
           () => pick({kind, name: it.name}), sub));
       }
@@ -162,18 +163,19 @@ const RunsView = (() => {
   function folderTitle() {
     const f = v.folder;
     if (f.kind === "all") return ["All runs", "Every run this project recorded"];
-    const kinds = {service: "Service", job: "Job", eval: "Eval", runbook: "Runbook", playground: "Playground", adhoc: "Ad hoc"};
+    const kinds = {service: "Service", job: "Job", eval: "Eval", runbook: "Steps", playground: "Playground", adhoc: "Ad hoc"};
     let sub = kinds[f.kind] || f.kind;
     const list = origins && (origins[{service: "services", job: "jobs", eval: "evals", runbook: "runbooks",
       playground: "playground", adhoc: "adhoc"}[f.kind]] || []);
     const it = (list || []).find(x => x.name === f.name);
     if (it && f.kind === "service") sub += ` · ${it.kind || ""} ${it.path || ""}`;
-    if (it && f.kind === "runbook" && it.schedule) sub += ` · ${it.schedule}`;
+    if (it && f.kind === "runbook" && (it.steps || []).length) sub += ` · ${it.steps.join(" → ")}`;
+    else if (it && f.kind === "runbook" && it.schedule) sub += ` · ${it.schedule}`;
     if (it && f.kind === "job" && it.session) sub += ` · ${it.session}`;
     return [f.name || sub, sub];
   }
 
-  /* a job's runs, or a runbook's, as a strip of chips above the table */
+  /* a job's runs, or a steps job's, as a strip of chips above the table */
   async function renderStrip(strip, mine) {
     const f = v.folder;
     strip.textContent = "";
@@ -188,7 +190,7 @@ const RunsView = (() => {
     const groups = (data.groups || []).filter(g => g[by]);
     strip.hidden = !groups.length;
     if (!groups.length) return;
-    strip.append(el("span", "striplabel", f.kind === "runbook" ? "Runbook runs" : "Job runs"));
+    strip.append(el("span", "striplabel", f.kind === "runbook" ? "Steps runs" : "Job runs"));
     const chips = el("div", "stripchips");
     const chosen = f[by];
     const chip = (label, sub, on, bad, onclick) => {
