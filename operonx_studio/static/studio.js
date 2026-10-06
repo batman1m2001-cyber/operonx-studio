@@ -192,9 +192,17 @@ function kindColor(node) { return (stepVisual(node) || visualOf(node.kind)).colo
  * to the canvas. */
 const LLM_PROVIDERS = Providers.PROVIDERS;
 
+/* An op names a resource without its category (`LLMOp(resource="assistant")`,
+ * `Model("assistant")`); the project's files key it with one (`llm:assistant`). */
+function resourceDetail(all, name) {
+  if (all[name]) return all[name];
+  const key = Object.keys(all).find(k => k.slice(k.indexOf(":") + 1) === name && k.includes(":"));
+  return key ? all[key] : null;
+}
+
 function resourceOf(node) {
   const name = Array.isArray(node.resource) ? node.resource[0] : node.resource;
-  return name ? ((state.ir.resources || {}).details || {})[name] || null : null;
+  return name ? resourceDetail((state.ir.resources || {}).details || {}, name) : null;
 }
 
 function llmProvider(node) {
@@ -1357,6 +1365,9 @@ function opCard(it) {
     const chips = state.run ? null : nameChips(n);
     if (chips) line.append(chips);
     card.append(line);
+    // an agent's tools are what it can DO: one line under its name
+    const tools = agentToolsLine(n);
+    if (tools) card.append(tools);
     // the kind line was card noise at fit-zoom; it lives in the
     // tooltip and the inspector — and, zoomed in close, on the card
     // itself (the .detail block shows only at [data-zoom="hi"])
@@ -1654,6 +1665,8 @@ function select(key) {
   if (!state.run) panel.append(portsSection(it));
   const res = resourceSection(n);
   if (res) panel.append(res);
+  const tools = toolsSection(n);
+  if (tools) panel.append(tools);
   const llm = llmSection(n, execP);
   if (llm) panel.append(llm);
   if (n.routes) panel.append(routeSection(it, execP));
@@ -1807,7 +1820,7 @@ function resourceSection(n) {
   sec.append(el("div", "stitle", "Resource"));
   const provider = llmProvider(n);
   for (const name of names) {
-    const det = all[name];
+    const det = resourceDetail(all, name);
     const head = el("div", "resname mono");
     head.append(`⛁ ${name}` + (det && det.category ? `  ·  ${det.category}` : ""));
     sec.append(head);
@@ -1830,6 +1843,48 @@ function resourceSection(n) {
       sec.append(el("div", "note",
         "named here, but no matching entry in the project's resource files"));
     }
+  }
+  return sec;
+}
+
+/* An agent op runs the tools its agent owns, and only those: the card
+ * names the first few, the inspector lists each with what it may do
+ * (read-only, destructive, asks a human first). */
+function toolFlags(tl) {
+  const flags = [];
+  if (tl.readonly) flags.push(["read-only", "tflag tro"]);
+  if (tl.destructive) flags.push(["destructive", "tflag tdes"]);
+  if (tl.approval && tl.approval !== "never") {
+    flags.push([tl.approval === "always" ? "asks approval" : "may ask approval", "tflag task"]);
+  }
+  return flags;
+}
+
+function agentToolsLine(n) {
+  const tools = (n.agent && n.agent.tools) || [];
+  if (!tools.length) return null;
+  const names = tools.map(tl => tl.name);
+  const shown = names.slice(0, 3).join(" · ") + (names.length > 3 ? ` +${names.length - 3}` : "");
+  const row = el("div", "agtools mono", "⚒ " + shown);
+  row.title = `${n.agent.name || "agent"} can call: ${names.join(", ")}`;
+  return row;
+}
+
+function toolsSection(n) {
+  const tools = (n.agent && n.agent.tools) || [];
+  if (!n.agent) return null;
+  const sec = el("section");
+  sec.append(el("div", "stitle", `Tools · ${tools.length}`));
+  if (!tools.length) {
+    sec.append(el("div", "note", `${n.agent.name || "this agent"} has no tools: it only answers`));
+    return sec;
+  }
+  for (const tl of tools) {
+    const head = el("div", "toolname mono");
+    head.append(el("span", null, `⚒ ${tl.name}`));
+    for (const [label, cls] of toolFlags(tl)) head.append(el("span", cls, label));
+    sec.append(head);
+    if (tl.description) sec.append(el("div", "tooldesc", tl.description));
   }
   return sec;
 }
