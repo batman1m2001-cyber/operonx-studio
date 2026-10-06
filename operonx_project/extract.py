@@ -508,9 +508,10 @@ def _subgraph(g: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[
 def build_entry(spec: GraphSpec, root: Path) -> Any:
     """Resolve and build one declared graph.
 
-    An entry is either a ``@graph`` — every parameter is a runtime input
-    port, wired here to ``PARENT`` — or a builder taking build-time
-    injections, which ``bind`` supplies.
+    An entry is a module-level ``@graph``: ``bind`` fixes some of its
+    parameters (a variant), every other parameter is a runtime input port,
+    wired here to ``PARENT``. A bound plain function (a graph factory) is
+    refused, per operonx guide 05.
 
     The instance is renamed to the manifest label *before* building.
     ``auto_name`` reads the caller's frame, so without this the graph would
@@ -523,12 +524,6 @@ def build_entry(spec: GraphSpec, root: Path) -> Any:
     if spec.bind and spec.obj is not None:
         # Handed over by the application: the values are the objects.
         bound = dict(spec.bind)
-        if not getattr(target, "_operonx_graph", False):
-            try:
-                target = target(**bound)
-            except Exception as exc:  # noqa: BLE001
-                raise ExtractError(f"graph '{spec.name}': builder raised {exc!r}") from exc
-            bound = {}
     elif spec.bind:
         # Each bound reference is used **as-is**, never called. An earlier
         # draft called a zero-argument provider, which is ambiguous the
@@ -538,18 +533,16 @@ def build_entry(spec: GraphSpec, root: Path) -> Any:
         # Projects that need construction expose a module-level instance,
         # which is what callbot already does (`agents.ahamove_hr:AGENT`).
         bound = spec.resolve_bind(root)
-        if not getattr(target, "_operonx_graph", False):
-            # A plain function: a factory that takes the injections and
-            # returns the @graph.
-            try:
-                target = target(**bound)
-            except Exception as exc:  # noqa: BLE001 — surface any project failure
-                raise ExtractError(f"graph '{spec.name}': builder raised {exc!r}") from exc
-            bound = {}
         # A @graph takes them as its own parameters: the decorator passes
         # a static value into the body as-is (operonx ≥ 1.7.2), and the
         # rest stay runtime inputs wired to PARENT below.
 
+    if bound and not getattr(target, "_operonx_graph", False):
+        raise ExtractError(
+            f"graph '{spec.name}': {spec.entry} is a plain function; bound values go to a "
+            "module-level @graph's own parameters, not to a function that builds a graph "
+            "(operonx guide 05)"
+        )
     try:
         params = list(inspect.signature(target).parameters)
     except (TypeError, ValueError) as exc:
