@@ -3,7 +3,8 @@
 Each template is a small, real product that runs offline — no model keys,
 no network — so a new project shows a green run, a trace and an eval in
 its first minutes. Where a model belongs, the code says so and names the
-op to swap for an ``LLMOp``. Everything is declared in ``operonx.toml``;
+op to swap for an ``LLMOp``. Services, jobs and evals are declared in
+``app.py`` (``operonx.toml`` points at it);
 the studio's playground drives the service, its Evals tab runs the eval.
 
 ``create(root, template, name)`` writes one; ``TEMPLATES`` lists them.
@@ -20,7 +21,7 @@ from typing import Any, Callable, Dict, List
 
 __all__ = ["TEMPLATES", "TemplateError", "create", "describe"]
 
-OPERONX_PIN = "1.9.0"
+OPERONX_PIN = "1.17.1"
 
 
 class TemplateError(Exception):
@@ -111,34 +112,39 @@ _API_TOML = '''\
 [project]
 name = "{name}"
 description = "An HTTP API: text in, a one-line summary and its keywords out."
-trace = ["trace_local:default"]
+app = "app:APP"
 
 [resources]
 overlay = "resources.yaml"
+'''
 
-[[serve]]
-name  = "summarize"
-kind  = "http"
-path  = "/summarize"
-port  = 8080
-graph = "main:summarize_flow"
-description = 'POST {{"text": "..."}} — a one-line summary and three keywords.'
+_API_APP = '''\
+"""The application: the summarizer behind HTTP, a batch job over a file, and an eval."""
 
-[[job]]
-name   = "summarize_all"
-graph  = "main:summarize_flow"
-source = "data/articles.jsonl"
-sink   = "out/summaries.jsonl"
-key    = "id"
-description = "Summarise every article in data/articles.jsonl."
+from pathlib import Path
 
-[[job]]
-name       = "quality"
-graph      = "main:summarize_flow"
-dataset    = "dataset:examples"
-evaluators = ["main:keywords_found"]
-threshold  = 0.75
-description = "Do the summaries keep the words that matter?"
+from operonx.app import Application, Eval, Service, http
+from operonx.app.jobs import Job
+
+from main import keywords_found, summarize_flow
+
+HERE = Path(__file__).resolve().parent
+
+APP = Application(
+    "{name}",
+    services=[
+        Service("summarize", http("POST", "/summarize", port=8080), graph=summarize_flow,
+                description='POST {{"text": "..."}} — a one-line summary and three keywords.'),
+    ],
+    jobs=[
+        Job("summarize_all", graph=summarize_flow, items=HERE / "data/articles.jsonl",
+            output=HERE / "out/summaries.jsonl", key="id",
+            description="Summarise every article in data/articles.jsonl."),
+        Eval("quality", graph=summarize_flow, dataset="dataset:examples", evaluators=[keywords_found],
+             threshold=0.75, description="Do the summaries keep the words that matter?"),
+    ],
+    trace=["trace_local:default"],
+)
 '''
 
 _API_DATA = [
@@ -198,36 +204,42 @@ _SCORER_TOML = '''\
 [project]
 name = "{name}"
 description = "A batch scorer: reviews in, a sentiment label per review out, with a record per run."
-trace = ["trace_local:default"]
+app = "app:APP"
 
 [resources]
 overlay = "resources.yaml"
+'''
 
-[[job]]
-name   = "score_reviews"
-graph  = "main:score_flow"
-source = "data/reviews.jsonl"
-sink   = "out/scores.jsonl"
-key    = "id"
-concurrency = 4
-schedule = "0 6 * * *"
-description = "Score every review in data/reviews.jsonl; one run per review."
+_SCORER_APP = '''\
+"""The application: a nightly scoring job, an eval against labels, and the scorer behind HTTP.
 
-[[job]]
-name       = "labels"
-graph      = "main:score_flow"
-dataset    = "dataset:labelled"
-evaluators = ["main:label_matches"]
-threshold  = 0.8
-description = "Does the scorer agree with the labels a person gave?"
+Run the job on a clock with cron: `0 6 * * *  operonx run score_reviews`.
+"""
 
-[[serve]]
-name  = "score"
-kind  = "http"
-path  = "/score"
-port  = 8081
-graph = "main:score_flow"
-description = 'POST {{"id": "r1", "text": "..."}} — one review scored.'
+from pathlib import Path
+
+from operonx.app import Application, Eval, Service, http
+from operonx.app.jobs import Job
+
+from main import label_matches, score_flow
+
+HERE = Path(__file__).resolve().parent
+
+APP = Application(
+    "{name}",
+    services=[
+        Service("score", http("POST", "/score", port=8081), graph=score_flow,
+                description='POST {{"id": "r1", "text": "..."}} — one review scored.'),
+    ],
+    jobs=[
+        Job("score_reviews", graph=score_flow, items=HERE / "data/reviews.jsonl",
+            output=HERE / "out/scores.jsonl", key="id", concurrency=4,
+            description="Score every review in data/reviews.jsonl; one run per review."),
+        Eval("labels", graph=score_flow, dataset="dataset:labelled", evaluators=[label_matches],
+             threshold=0.8, description="Does the scorer agree with the labels a person gave?"),
+    ],
+    trace=["trace_local:default"],
+)
 '''
 
 _REVIEWS = [
@@ -322,34 +334,39 @@ _RAG_TOML = '''\
 [project]
 name = "{name}"
 description = "Questions answered from the documents in docs/ — retrieve, then answer, with sources."
-trace = ["trace_local:default"]
+app = "app:APP"
 
 [resources]
 overlay = "resources.yaml"
+'''
 
-[[serve]]
-name  = "ask"
-kind  = "http"
-path  = "/ask"
-port  = 8082
-graph = "main:ask_flow"
-description = 'POST {{"question": "..."}} — an answer and its sources.'
+_RAG_APP = '''\
+"""The application: the question-answerer behind HTTP, a batch job, and an eval."""
 
-[[job]]
-name   = "answer_faq"
-graph  = "main:ask_flow"
-source = "data/questions.jsonl"
-sink   = "out/answers.jsonl"
-key    = "id"
-description = "Answer the questions in data/questions.jsonl."
+from pathlib import Path
 
-[[job]]
-name       = "grounded"
-graph      = "main:ask_flow"
-dataset    = "dataset:qa"
-evaluators = ["main:mentions"]
-threshold  = 0.75
-description = "Are the answers the documents' answers?"
+from operonx.app import Application, Eval, Service, http
+from operonx.app.jobs import Job
+
+from main import ask_flow, mentions
+
+HERE = Path(__file__).resolve().parent
+
+APP = Application(
+    "{name}",
+    services=[
+        Service("ask", http("POST", "/ask", port=8082), graph=ask_flow,
+                description='POST {{"question": "..."}} — an answer and its sources.'),
+    ],
+    jobs=[
+        Job("answer_faq", graph=ask_flow, items=HERE / "data/questions.jsonl",
+            output=HERE / "out/answers.jsonl", key="id",
+            description="Answer the questions in data/questions.jsonl."),
+        Eval("grounded", graph=ask_flow, dataset="dataset:qa", evaluators=[mentions],
+             threshold=0.75, description="Are the answers the documents' answers?"),
+    ],
+    trace=["trace_local:default"],
+)
 '''
 
 _RAG_DOCS = {
@@ -454,38 +471,39 @@ _VOICE_TOML = '''\
 [project]
 name = "{name}"
 description = "A voice agent to grow from: 16 kHz audio in and back out, a speech detector, a recordings job."
-trace = ["trace_local:default"]
+app = "app:APP"
 
 [resources]
 overlay = "resources.yaml"
+'''
 
-[[serve]]
-name  = "call"
-kind  = "websocket"
-path  = "/call"
-port  = 8083
-max_inflight = 512
-graph = "main:call_flow"
-playground = "main:VOICE"
-description = "16 kHz PCM in 20 ms frames; each frame played back."
+_VOICE_APP = '''\
+"""The application: the call behind a websocket, a recordings job, and an eval."""
 
-[[job]]
-name       = "label_recordings"
-graph      = "main:recording_flow"
-source     = "data/recordings.jsonl"
-sink       = "out/labels.jsonl"
-key        = "file"
-item_input = "file"
-description = "Label every recording: speech or silence."
+from pathlib import Path
 
-[[job]]
-name       = "detector"
-graph      = "main:recording_flow"
-dataset    = "dataset:recordings"
-evaluators = ["main:label_matches"]
-item_input = "file"
-threshold  = 1.0
-description = "Does the detector hear speech where there is some?"
+from operonx.app import Application, Eval, Service, websocket
+from operonx.app.jobs import Job
+
+from main import VOICE, call_flow, label_matches, recording_flow
+
+HERE = Path(__file__).resolve().parent
+
+APP = Application(
+    "{name}",
+    services=[
+        Service("call", websocket("/call", port=8083), graph=call_flow, max_inflight=512,
+                playground=VOICE, description="16 kHz PCM in 20 ms frames; each frame played back."),
+    ],
+    jobs=[
+        Job("label_recordings", graph=recording_flow, items=HERE / "data/recordings.jsonl",
+            output=HERE / "out/labels.jsonl", key="file", input="file",
+            description="Label every recording: speech or silence."),
+        Eval("detector", graph=recording_flow, dataset="dataset:recordings", evaluators=[label_matches],
+             input="file", threshold=1.0, description="Does the detector hear speech where there is some?"),
+    ],
+    trace=["trace_local:default"],
+)
 '''
 
 
@@ -522,7 +540,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
     "http-api": {
         "title": "An HTTP API",
         "description": "Text in, a one-line summary and keywords out — a service, a batch job and an eval.",
-        "files": {"main.py": _API_MAIN, "operonx.toml": _API_TOML, "data/articles.jsonl": _jsonl(_API_DATA),
+        "files": {"main.py": _API_MAIN, "operonx.toml": _API_TOML, "app.py": _API_APP, "data/articles.jsonl": _jsonl(_API_DATA),
                   "datasets/examples.jsonl": _jsonl(_API_CASES)},
         "first_runs": ["quality"],
         "try": {"service": "summarize", "message": {"kind": "json", "value": {"text": _API_DATA[0]["text"]}}},
@@ -530,7 +548,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
     "batch-scorer": {
         "title": "A batch scorer",
         "description": "A file of reviews scored overnight, with a record per run and an eval against labels.",
-        "files": {"main.py": _SCORER_MAIN, "operonx.toml": _SCORER_TOML, "data/reviews.jsonl": _jsonl(_REVIEWS),
+        "files": {"main.py": _SCORER_MAIN, "operonx.toml": _SCORER_TOML, "app.py": _SCORER_APP, "data/reviews.jsonl": _jsonl(_REVIEWS),
                   "datasets/labelled.jsonl": _jsonl(_LABELLED)},
         "first_runs": ["score_reviews", "labels"],
         "try": {"service": "score", "message": {"kind": "json", "value": _REVIEWS[0]}},
@@ -538,7 +556,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
     "rag-qa": {
         "title": "A RAG question-answerer",
         "description": "Questions answered from your documents, with sources — retrieval and an answer, and an eval.",
-        "files": {"main.py": _RAG_MAIN, "operonx.toml": _RAG_TOML, **_RAG_DOCS,
+        "files": {"main.py": _RAG_MAIN, "operonx.toml": _RAG_TOML, "app.py": _RAG_APP, **_RAG_DOCS,
                   "data/questions.jsonl": _jsonl(_QUESTIONS), "datasets/qa.jsonl": _jsonl(_QA)},
         "first_runs": ["grounded"],
         "try": {"service": "ask", "message": {"kind": "json", "value": {"question": "How long does a class last?"}}},
@@ -546,7 +564,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
     "voice-agent": {
         "title": "A voice agent",
         "description": "Audio in and back out over a websocket, a speech detector, and a recordings job to test it.",
-        "files": {"main.py": _VOICE_MAIN, "operonx.toml": _VOICE_TOML,
+        "files": {"main.py": _VOICE_MAIN, "operonx.toml": _VOICE_TOML, "app.py": _VOICE_APP,
                   "data/recordings.jsonl": _jsonl(_RECORDINGS), "datasets/recordings.jsonl": _jsonl(_RECORDING_CASES)},
         "extra": _voice_extra,
         "first_runs": ["detector"],
@@ -571,6 +589,7 @@ def create(root: Path | str, template: str, name: str | None = None) -> List[Pat
     files = {
         **t["files"],
         "operonx.toml": t["files"]["operonx.toml"].format(name=name),
+        "app.py": t["files"]["app.py"].format(name=name),
         "resources.yaml": _RESOURCES,
         "pyproject.toml": _PYPROJECT.format(dist=name.replace("_", "-"), description=t["description"], pin=OPERONX_PIN),
         ".gitignore": _GITIGNORE,

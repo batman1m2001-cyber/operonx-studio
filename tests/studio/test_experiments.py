@@ -69,26 +69,27 @@ def tone(output=None):
 tone.eval_kind = "judge"
 '''
 
+APP = '''
+from operonx.app import Application, Eval
+from operonx.app.evals import Gate
+
+from checks import label, tone
+from main import flow
+
+APP = Application("experiments-demo", jobs=[
+    Eval("labels", graph=flow, dataset="dataset:labels", input="text", evaluators=[label, tone],
+         repeats=3, concurrency=1, gate=Gate(baseline="latest", tolerance=0.1)),
+])
+'''
+
 MANIFEST = '''
 [project]
 name = "experiments-demo"
+app  = "app:APP"
 
 [[graph]]
 name  = "flow"
 entry = "main:flow"
-
-[[job]]
-name       = "labels"
-graph      = "main:flow"
-dataset    = "dataset:labels"
-item_input = "text"
-evaluators = ["checks:label", "checks:tone"]
-repeats    = 3
-concurrency = 1
-
-[job.gate]
-baseline  = "latest"
-tolerance = 0.1
 '''
 
 CASES = [
@@ -106,6 +107,7 @@ def project(tmp_path: Path) -> Path:
     (root / "datasets").mkdir(parents=True)
     (root / "main.py").write_text(MAIN, encoding="utf-8")
     (root / "checks.py").write_text(CHECKS, encoding="utf-8")
+    (root / "app.py").write_text(APP, encoding="utf-8")
     (root / "operonx.toml").write_text(MANIFEST, encoding="utf-8")
     (root / "datasets" / "labels.jsonl").write_text("".join(json.dumps(c) + "\n" for c in CASES))
     return root

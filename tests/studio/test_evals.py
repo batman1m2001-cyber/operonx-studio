@@ -47,28 +47,25 @@ def classify_flow():
 
 def label_is(output=None, expected=None):
     return {"passed": output == expected, "reason": f"got {output!r}"}
+
+
+from operonx.app import Application, Eval, Service, http  # noqa: E402
+
+APP = Application(
+    "evals-demo",
+    services=[Service("classify", http("POST", "/classify", port=8932), graph=classify_flow)],
+    jobs=[Eval("labels", graph=classify_flow, dataset="dataset:labels", evaluators=[label_is])],
+    trace=["trace_local:default"],
+)
 '''
 
 MANIFEST = '''
 [project]
 name = "evals-demo"
-trace = ["trace_local:default"]
+app  = "main:APP"
 
 [resources]
 overlay = "resources.yaml"
-
-[[serve]]
-name  = "classify"
-kind  = "http"
-path  = "/classify"
-port  = 8932
-graph = "main:classify_flow"
-
-[[job]]
-name       = "labels"
-graph      = "main:classify_flow"
-dataset    = "dataset:labels"
-evaluators = ["main:label_is"]
 '''
 
 CASES = [
@@ -120,7 +117,8 @@ def test_evals_and_datasets_are_listed(client, project):
     pid = _open(client, project)
     got = client.get(f"/api/p/{pid}/evals").json()
     (ev,) = got["evals"]
-    assert ev["kind"] == "eval" and ev["dataset"] == "dataset:labels" and ev["evaluators"] == ["main:label_is"]
+    assert ev["kind"] == "eval" and ev["dataset"].endswith("datasets/labels.jsonl")
+    assert [e.rsplit(":", 1)[-1] for e in ev["evaluators"]] == ["label_is"]
     assert ev["record_dir"] == str(project / "evals") and ev["runs"] == []
     (ds,) = got["datasets"]
     assert (ds["name"], ds["cases"], ds["expected"], ds["used_by"]) == ("labels", 3, 3, ["labels"])

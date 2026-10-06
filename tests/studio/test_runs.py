@@ -402,7 +402,7 @@ def test_the_automatic_sweep_can_be_switched_off(project, monkeypatch):
 
 APP_MAIN = '''
 from operonx.app import Application, Service, http
-from operonx.app.jobs import Job, Runbook
+from operonx.app.jobs import Job
 from operonx.core import graph, op, START, END
 
 @op
@@ -414,12 +414,12 @@ def flow():
     s = a()
     START >> s >> END
 
-j1 = Job("qc", graph=flow, source=[], sink=[])
-j2 = Job("report", graph=flow, source=[], sink=[])
+j1 = Job("qc", graph=flow, items=[])
+j2 = Job("report", graph=flow, items=[])
 APP = Application("tree-demo", services=[
     Service("call", http("POST", "/call", port=9999), graph=flow),
     Service("idle", http("POST", "/idle", port=9999), graph=flow),
-], jobs=[j1, j2, Runbook("nightly", j1 >> j2)])
+], jobs=[j1, j2, Job("nightly", steps=[j1, j2])])
 '''
 
 

@@ -116,7 +116,7 @@ const EvalsView = (() => {
     if (!data.evals.length && !data.datasets.length) {
       box.append(paneNote("No evals yet",
         "An eval runs a dataset of cases through a graph and judges each output — the way to know a change made things better.",
-        '[[job]]\nname       = "replies"\ngraph      = "bot:reply_flow"\ndataset    = "dataset:replies"     # datasets/replies.jsonl\nevaluators = ["evals:polite", "evals:correct"]\nrepeats    = 3\n\n[job.gate]\nbaseline  = "latest"\ntolerance = 0.05',
+        '# app.py — beside the other jobs in Application(jobs=[...])\nEval("replies", graph=reply_flow, dataset="dataset:replies",   # datasets/replies.jsonl\n     evaluators=[polite, correct], repeats=3,\n     gate=Gate(baseline="latest", tolerance=0.05))',
         {ask: {label: "Set up an eval", prompt: "Set up an eval for this project: pick the main service's graph, "
           + "build a small dataset from its recorded runs (or realistic examples if there are none), write evaluators "
           + "that check what matters, declare it, run it once, and report the pass rate."}}));
