@@ -255,48 +255,45 @@ class TestResources:
         assert "sk-do-not-leak" not in json.dumps(extract_project(m))
 
 
-class TestFactories:
-    def test_bind_supplies_a_factory_built_node(self, tmp_path):
-        """The callbot shape: nodes that do not exist until something is injected."""
+class TestBinding:
+    def test_bind_supplies_a_module_level_graphs_parameter(self, tmp_path):
         source = """
 from operonx.core import END, PARENT, START, graph, op
 
 tag_value = "injected"
 
-def build(tag):
-    @op
-    def tagger(x: int):
-        return {"out": f"{tag}:{x}"}
+@op
+def tagger(x: int, tag: str = ""):
+    return {"out": f"{tag}:{x}"}
 
-    @graph
-    def flow(x):
-        t = tagger(x=x)
-        t["out"] >> PARENT["out"]
-        START >> t >> END
-    return flow
+@graph
+def flow(x, tag):
+    t = tagger(x=x, tag=tag)
+    t["out"] >> PARENT["out"]
+    START >> t >> END
 """
         m = project(
             tmp_path,
             source,
-            '[project]\nname="d"\n[[graph]]\nname="flow"\nentry="wf:build"\n'
+            '[project]\nname="d"\n[[graph]]\nname="flow"\nentry="wf:flow"\n'
             '[graph.bind]\ntag="wf:tag_value"\n',
         )
         g = extract_project(m)["graphs"][0]
         assert [n["name"] for n in g["nodes"]] == ["t"]
 
-
-class TestFailures:
-    def test_builder_error_names_the_graph(self, tmp_path):
-        source = "def build(dep):\n    raise RuntimeError('boom')\n\nvalue = 1\n"
+    def test_a_graph_factory_is_refused_naming_the_rule(self, tmp_path):
+        source = "def build(dep):\n    raise RuntimeError('never called')\n\nvalue = 1\n"
         m = project(
             tmp_path,
             source,
             '[project]\nname="d"\n[[graph]]\nname="g"\nentry="wf:build"\n'
             '[graph.bind]\ndep="wf:value"\n',
         )
-        with pytest.raises(ExtractError, match="graph 'g'.*boom"):
+        with pytest.raises(ExtractError, match="graph 'g'.*plain function.*guide 05"):
             extract_project(m)
 
+
+class TestFailures:
     def test_construction_error_names_the_graph(self, tmp_path):
         m = project(tmp_path, "def flow(x):\n    raise ValueError('nope')\n", LINEAR_MANIFEST)
         with pytest.raises(ExtractError, match="graph 'flow'.*nope"):
@@ -319,38 +316,6 @@ def test_extracted_graph_still_runs(tmp_path):
     import asyncio
 
     assert asyncio.run(go())["z"] == 10
-
-
-class TestBuilderAnchors:
-    """A manifest entry names the builder; the body belongs to the graph inside it."""
-
-    BUILDER = """
-from operonx.core import END, PARENT, START, graph, op
-
-@op
-def step(x: int):
-    return {"y": x + 1}
-
-def build(tag):
-    @graph
-    def inner(x):
-        a = step(x=x)
-        a["y"] >> PARENT["y"]
-        START >> a >> END
-    return inner
-
-tag_value = "t"
-"""
-
-    def test_wired_at_resolves_through_the_builder(self, tmp_path):
-        m = project(
-            tmp_path,
-            self.BUILDER,
-            '[project]\nname="d"\n[[graph]]\nname="g"\nentry="wf:build"\n'
-            '[graph.bind]\ntag="wf:tag_value"\n',
-        )
-        node = extract_project(m)["graphs"][0]["nodes"][0]
-        assert node["source"]["wired_at"]["line"] > 0
 
 
 SHOW = """
