@@ -34,6 +34,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "httpx>=0.24",
     "ruff>=0.1",
+    "operonx-agents>=0.1.3",  # an agent op's tools in the IR (tests/project/test_extract.py)
 ]
 redis = [
     "redis>=4.5",

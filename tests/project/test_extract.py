@@ -471,3 +471,54 @@ class TestBranchEdges:
         assert len(ids) == len(set(ids))
         plain = [e for e in g["edges"] if e["from"] == "sc"]
         assert plain and all("kind" not in e and e["id"] == f"sc->{e['to']}" for e in plain)
+
+
+AGENT = """
+from operonx import END, START, graph
+from operonx.agents import Agent, AgentOp, Model, tool
+
+@tool(readonly=True)
+def order_status(order_id: str) -> str:
+    \"\"\"The shipping status of an order.
+
+    Args:
+        order_id: The order's id.
+    \"\"\"
+    return "shipped"
+
+@tool(destructive=True, approval="always")
+def refund(order_id: str, amount: int) -> str:
+    \"\"\"Refund an order.\"\"\"
+    return "refunded"
+
+SUPPORT = Agent(name="support", model=Model("assistant", fallback=["backup"]),
+                tools=[order_status, refund])
+
+@graph
+def flow(question):
+    a = AgentOp.of(agent=SUPPORT, input=question)
+    START >> a >> END
+"""
+
+
+class TestAgentOp:
+    """An agent op's node says which agent it runs, on which models, with which tools."""
+
+    def test_the_node_lists_the_agents_tools(self, tmp_path):
+        pytest.importorskip("operonx_agents")
+        ir = extract_project(project(tmp_path, AGENT, LINEAR_MANIFEST))
+        (node,) = [n for n in ir["graphs"][0]["nodes"] if n.get("op_type") == "agent"]
+        assert node["agent"]["name"] == "support"
+        assert node["agent"]["model"] == ["assistant", "backup"]
+        assert node["resource"] == ["assistant", "backup"]
+        assert node["agent"]["tools"] == [
+            {"name": "order_status", "description": "The shipping status of an order.",
+             "readonly": True, "destructive": False, "approval": "never"},
+            {"name": "refund", "description": "Refund an order.",
+             "readonly": False, "destructive": True, "approval": "always"},
+        ]  # fmt: skip
+        json.dumps(ir)
+
+    def test_an_op_without_an_agent_has_no_agent_entry(self, tmp_path):
+        ir = extract_project(project(tmp_path, LINEAR, LINEAR_MANIFEST))
+        assert all("agent" not in n for n in ir["graphs"][0]["nodes"])

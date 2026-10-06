@@ -262,6 +262,34 @@ def _edge_origin(edge: Any) -> str:
     return "authored"
 
 
+def _agent_of(op: Any) -> Optional[Dict[str, Any]]:
+    """An agent op's agent (operonx-agents ``AgentOp``): its name, model resources
+    and the tools it owns, each with what a reader needs to judge it — read-only,
+    destructive, needs approval. Read by duck typing: the studio does not import
+    operonx-agents, and an op without an ``agent`` is not one."""
+    agent = _slot(op, "agent")
+    tools = getattr(agent, "tools", None)
+    if agent is None or tools is None or not hasattr(agent, "model"):
+        return None
+    listed = []
+    for tool in getattr(tools, "tools", None) or list(tools):
+        spec = getattr(tool, "spec", tool)
+        approval = getattr(spec, "approval", "never")
+        listed.append(
+            {
+                "name": getattr(tool, "name", None) or getattr(spec, "name", "?"),
+                "description": (
+                    getattr(spec, "description", None) or getattr(tool, "description", None) or ""
+                ).strip().split("\n")[0][:200],
+                "readonly": bool(getattr(spec, "readonly", False)),
+                "destructive": bool(getattr(spec, "destructive", False)),
+                "approval": approval if isinstance(approval, str) else "when",
+            }
+        )
+    model = getattr(agent.model, "resources", None) or [getattr(agent.model, "resource", None)]
+    return {"name": getattr(agent, "name", None), "model": [m for m in model if m], "tools": listed}
+
+
 def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str, Any]:
     inputs = []
     for name, param in (_slot(op, "inputs") or {}).items():
@@ -298,6 +326,10 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
         value = _slot(op, extra)
         if value is not None:
             node[extra] = _json_safe(value)
+    agent = _agent_of(op)
+    if agent is not None:
+        node["agent"] = agent
+        node.setdefault("resource", agent["model"])
     # The serve boundary is not compute: ingress hands the client's frames
     # to the run, egress hands the run's answers back. A viewer that draws
     # them as ordinary ops invites the reader to look for business logic
