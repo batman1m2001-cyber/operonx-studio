@@ -342,7 +342,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                   "description": "Select an op on the user's Flow canvas, to point at it.",
                   "schema": _schema({"op": _S}, ["op"])},
     "run_job": {"fn": t_run_job,
-                "description": "Start one of the application's jobs (or runbooks); resume=true reruns only "
+                "description": "Start one of the application's jobs (or a job of steps); resume=true reruns only "
                                "what the last run did not finish.",
                 "schema": _schema({"name": _S, "resume": {"type": "boolean"}}, ["name"])},
     "rerun_op": {"fn": t_rerun_op,

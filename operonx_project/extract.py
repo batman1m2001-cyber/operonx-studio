@@ -792,14 +792,15 @@ def extract_application(manifest: Manifest) -> Dict[str, Any]:
         described = app.describe()
     except Exception as exc:                              # noqa: BLE001 — reported, never fatal
         return {**fallback, "error": f"{type(exc).__name__}: {exc}"}
-    # Where each job keeps its records: from the `[[job]]` block, or from
-    # the `Job` object when the application is declared in Python.
-    specs = {spec.name: spec.record_dir for spec in app.manifest.jobs}
-    if not specs and described["jobs"]:
-        try:
-            specs = {j.name: str(getattr(j, "record_dir", "") or "") for j in app.jobs}
-        except Exception:  # noqa: BLE001 — records unknown, jobs still listed
-            specs = {}
+    # Where each job keeps its records: the `Job` object says (operonx 1.17
+    # places it under the project root; an older one only when it was set).
+    try:
+        specs = {
+            j.name: str(j.records() if hasattr(j, "records") else (getattr(j, "record_dir", "") or ""))
+            for j in app.jobs
+        }
+    except Exception:  # noqa: BLE001 — records unknown, jobs still listed
+        specs = {}
     jobs = []
     for entry in described["jobs"]:
         rd = specs.get(entry["name"])

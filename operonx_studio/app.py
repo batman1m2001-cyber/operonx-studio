@@ -1770,7 +1770,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             folders["service"][sv["name"]] = blank(sv["name"], kind=sv.get("kind"), path=sv.get("path"))
         runbooks: Dict[str, Dict[str, Any]] = {}
         for j in (ir or {}).get("jobs") or []:
-            if j.get("kind") == "runbook":
+            if j.get("kind") in ("runbook", "steps"):  # "steps": operonx 1.17
                 runbooks[j["name"]] = blank(j["name"], schedule=j.get("schedule"))
             else:
                 folders["job"][j["name"]] = blank(j["name"], session=j.get("session"))

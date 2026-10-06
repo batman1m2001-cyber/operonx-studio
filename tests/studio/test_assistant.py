@@ -1225,11 +1225,11 @@ def test_a_viewers_turn_reads_with_deny_rules_and_no_project_servers(team, proje
 def test_a_viewer_is_never_offered_a_starter_it_cannot_act_on(team, tmp_path, fake):
     """A viewer's assistant only reads (TEAM_PLAN D10), so "Try … and
     report" and "Set up …" starters would only lead to a refusal."""
-    from test_app import JOBS_MAIN, JOBS_MANIFEST
+    from test_app import JOBS_APP, JOBS_MAIN, JOBS_MANIFEST
 
     project = tmp_path / "served"
     project.mkdir()
-    (project / "main.py").write_text(JOBS_MAIN, encoding="utf-8")
+    (project / "main.py").write_text(JOBS_MAIN + JOBS_APP, encoding="utf-8")
     (project / "operonx.toml").write_text(JOBS_MANIFEST, encoding="utf-8")
     team.use(team.admin_token)
     pid = team.client.post("/api/open", json={"path": str(project)}).json()["id"]

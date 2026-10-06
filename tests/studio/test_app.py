@@ -1053,25 +1053,24 @@ def door_flow():
 JOBS_MANIFEST = '''
 [project]
 name = "jobs-demo"
+app  = "main:APP"
 
 [[graph]]
 name  = "door_flow"
 entry = "main:door_flow"
+'''
 
-[[serve]]
-name  = "shout"
-kind  = "http"
-path  = "/shout"
-graph = "main:door_flow"
+JOBS_APP = '''
 
-[[job]]
-name   = "shout_all"
-graph  = "main:door_flow"
-source = "data.jsonl"
-sink   = "out.jsonl"
-key    = "id"
-schedule = "0 2 * * *"
-description = "louder, nightly"
+from operonx.app import Application, Service, http  # noqa: E402
+from operonx.app.jobs import Job  # noqa: E402
+
+APP = Application(
+    "jobs-demo",
+    services=[Service("shout", http("POST", "/shout"), graph=door_flow)],
+    jobs=[Job("shout_all", graph=door_flow, items="data.jsonl", output="out.jsonl", key="id",
+              record_dir="jobs", description="louder, nightly")],
+)
 '''
 
 
@@ -1079,7 +1078,7 @@ description = "louder, nightly"
 def jobs_project(tmp_path: Path) -> Path:
     root = tmp_path / "jobsdemo"
     root.mkdir()
-    (root / "main.py").write_text(JOBS_MAIN, encoding="utf-8")
+    (root / "main.py").write_text(JOBS_MAIN + JOBS_APP, encoding="utf-8")
     (root / "operonx.toml").write_text(JOBS_MANIFEST, encoding="utf-8")
     (root / "data.jsonl").write_text(
         '{"id": "a", "text": "x"}\n{"id": "b", "text": "y", "bad": true}\n{"id": "c", "text": "z"}\n',
@@ -1094,8 +1093,8 @@ def test_ir_carries_the_three_lists(client, jobs_project):
     assert [g["name"] for g in ir["graphs"]] == ["door_flow"]
     assert [(s["name"], s["kind"], s["path"]) for s in ir["services"]] == [("shout", "http", "/shout")]
     (job,) = ir["jobs"]
-    assert job["name"] == "shout_all" and job["kind"] == "job" and job["session"] == "per_item"
-    assert job["schedule"] == "0 2 * * *" and job["description"] == "louder, nightly"
+    assert job["name"] == "shout_all" and job["kind"] == "job" and job["items"] == "data.jsonl"
+    assert job["description"] == "louder, nightly"
     assert job["record_dir"] == str(jobs_project / "jobs")
 
 
@@ -1112,8 +1111,8 @@ def test_jobs_list_runs_and_items_from_the_records(client, jobs_project):
     sys.path.insert(0, str(jobs_project))
     try:
         main = importlib.import_module("main")
-        job = Job("shout_all", graph=main.door_flow, source=jobs_project / "data.jsonl",
-                  sink=jobs_project / "out.jsonl", key="id", record_dir=jobs_project / "jobs")
+        job = Job("shout_all", graph=main.door_flow, items=jobs_project / "data.jsonl",
+                  output=jobs_project / "out.jsonl", key="id", record_dir=jobs_project / "jobs")
         run = job.run_sync()
     finally:
         sys.path.remove(str(jobs_project))

@@ -474,7 +474,7 @@
     opt("Everything", "");
     const ir = state.ir || {};
     const svcs = (ir.services || []).filter(s => s.kind !== "asgi");
-    const jobs = (ir.jobs || []).filter(j => j.kind !== "runbook");
+    const jobs = (ir.jobs || []).filter(j => j.kind !== "runbook" && j.kind !== "steps");
     if (svcs.length) { const g = el("optgroup"); g.label = "Services"; for (const s of svcs) opt(s.name, `service:${s.name}`, g); targets.append(g); }
     if (jobs.length) { const g = el("optgroup"); g.label = "Jobs"; for (const j of jobs) opt(j.name, `job:${j.name}`, g); targets.append(g); }
     if (!targets.querySelector("option[selected]") && !targets.value) targets.value = "";

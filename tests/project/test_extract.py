@@ -376,8 +376,10 @@ class TestShowKeys:
 
 def test_the_ir_carries_services_and_jobs_from_the_application_layer(tmp_path):
     src = '''
-from operonx.core import graph, op, START, END
+from operonx.app import Application, Service, http
+from operonx.app.jobs import Job
 from operonx.app.serve import egress, ingress
+from operonx.core import graph, op, START, END
 
 @op(bound="sync")
 def echo(item: str = ""):
@@ -389,35 +391,28 @@ def door():
     e = echo(item=src["item"])
     out = egress(item=e["out"])
     START >> src >> e >> out >> END
+
+APP = Application(
+    "app-demo",
+    services=[Service("echo", http("POST", "/echo"), graph=door)],
+    jobs=[Job("echo_all", graph=door, items="in.jsonl", record_dir="records")],
+)
 '''
     manifest = project(tmp_path, src, '''
 [project]
 name = "app-demo"
+app  = "wf:APP"
 
 [[graph]]
 name  = "door"
 entry = "wf:door"
-
-[[serve]]
-name  = "echo"
-kind  = "http"
-path  = "/echo"
-graph = "wf:door"
-
-[[job]]
-name    = "echo_all"
-graph   = "wf:door"
-source  = "in.jsonl"
-session = "stream"
-record_dir = "records"
 ''')
     ir = extract_project(manifest)
     assert ir["application"] is True
     assert [(s["name"], s["kind"]) for s in ir["services"]] == [("echo", "http")]
     (job,) = ir["jobs"]
-    assert job["name"] == "echo_all" and job["session"] == "stream" and job["kind"] == "job"
+    assert job["name"] == "echo_all" and job["kind"] == "job" and job["items"] == "in.jsonl"
     assert job["record_dir"] == str(manifest.root / "records")
-    assert ir["serves"][0]["kind"] == "http"                 # the older key still there
 
 
 THREE_TO_ONE = """
