@@ -582,11 +582,17 @@ function drawDataLayer() {
   };
   let lastRoute = null;
 
+  // a card's box, read once: every wire appended dirties the layout, and a
+  // fresh offsetWidth after it would force a reflow per wire
+  const boxCache = new Map();
   const boxOf = (pt) => {
     const it2 = pt && pt.key && !pt.plate && R(pt.key);
     if (!it2 || it2.inner) return {left: pt.x, right: pt.x, top: pt.y, bottom: pt.y};
-    const c = state.cardEls.get(it2.key);
-    return {left: it2.x, right: it2.x + (c ? c.offsetWidth : it2.w), top: it2.y, bottom: it2.y + (c ? c.offsetHeight : it2.h)};
+    if (!boxCache.has(it2.key)) {
+      const c = state.cardEls.get(it2.key);
+      boxCache.set(it2.key, {left: it2.x, right: it2.x + (c ? c.offsetWidth : it2.w), top: it2.y, bottom: it2.y + (c ? c.offsetHeight : it2.h)});
+    }
+    return boxCache.get(it2.key);
   };
   // a free track if there is one; else one shared with another wire (a
   // shared track is better than a wire across a card); else the first try
@@ -699,9 +705,22 @@ function drawDataLayer() {
     const A = boxOf(a);
     const {yB0, x2} = gutter(b);
     const yA0 = (col != null ? a.y + 8 : A.bottom + 22) + LANE * depth;
-    const x1 = col != null ? col : scan(Math.max(a.x, A.right) + 20, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownOf(a)));
     let xc = scan2(x2, x => clearV(x, yA0, yB0));
-    const ymA = scan(yA0, 4, y => clearH(y, x1, xc) && clearV(x1, a.y, y) && clearV(xc, y, yB0), 200);
+    const chan = (x, y) => clearH(y, x, xc) && clearV(x, a.y, y) && clearV(xc, y, yB0);
+    // a column beside the source that reaches a free channel all the way
+    // down — not just one clear for its first few px, which would then share
+    // a run lower down with a wire already there
+    let x1 = col, ymA = null;
+    if (col == null) {
+      const x0 = Math.max(a.x, A.right) + 20;
+      for (let i = 0; i < 60 && ymA === null; i++) {
+        const x = x0 + 4 * i;
+        if (!(clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownOf(a)))) continue;
+        for (let j = 0; j < 200; j++) if (chan(x, yA0 + 4 * j)) { x1 = x; ymA = yA0 + 4 * j; break; }
+      }
+      if (ymA === null) x1 = scan(x0, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownOf(a)));
+    }
+    if (ymA === null) ymA = scan(yA0, 4, y => chan(x1, y), 200);
     const ymB = scan(yB0, -4, y => clearH(y, xc, x2) && clearV(x2, y, b.y), 200);
     if (!clearV(xc, ymA, ymB)) xc = scan2(xc, x => clearV(x, ymA, ymB));
     return keep(clean([[a.x, a.y], [x1, a.y], [x1, ymA], [xc, ymA], [xc, ymB], [x2, ymB], [x2, b.y], [b.x, b.y]]));
@@ -723,10 +742,15 @@ function drawDataLayer() {
   const onCtrl = (x, y) => {
     if (!ctrlCells) {
       ctrlCells = new Set();
+      // parsed, not measured: getPointAtLength on every edge cost seconds
+      const seen = new Set();
       for (const p of document.querySelectorAll("#edges path, #edgetop path")) {
-        let n = 0;
-        try { n = p.getTotalLength(); } catch { continue; }
-        for (let t = 0; t <= n; t += 6) { const q = p.getPointAtLength(t); ctrlCells.add(`${Math.floor(q.x / 12)},${Math.floor(q.y / 12)}`); }
+        const d = p.getAttribute("d");
+        if (!d || seen.has(d)) continue;
+        seen.add(d);
+        const smp = pathSampler(d);
+        if (!smp) continue;
+        for (let t = 0; t <= smp.len; t += 6) { const q = smp.at(t); ctrlCells.add(`${Math.floor(q.x / 12)},${Math.floor(q.y / 12)}`); }
       }
     }
     for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) if (ctrlCells.has(`${Math.floor(x / 12) + i},${Math.floor(y / 12) + j}`)) return true;
@@ -873,7 +897,7 @@ function drawDataLayer() {
     hit.setAttribute("class", "dfhit");
     hit.addEventListener("mouseenter", (ev) => {
       world.classList.add("dfwirehot");
-      p.classList.add("hot"); for (const f of flow) f.classList.add("hot");
+      p.dfFlowMake(); p.classList.add("hot"); for (const f of flow) f.classList.add("hot");
       // its line from the source and its hub light with it
       if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.add("hot"); H.el?.classList.add("hot"); }
       for (const h of [a, b]) if (h.row) h.row.classList.add("hot");
@@ -893,9 +917,12 @@ function drawDataLayer() {
     // the energy pulse: tiny bright beads running from source to reader
     // beads only run where the wire itself shows
     const flowCls = (/\b(focus|lit)\b/.test(cls) && !/\b(peek|dim|far)\b/.test(cls) ? "on" : "") + (/\blit\b/.test(cls) ? " lit" : "");
+    // a wire that shows at rest gets its comet now; one that only lights
+    // on hover gets it then (measuring every wire up front is slow)
     let flow = [];
     p.dfFlow = flow;
-    queueMicrotask(() => { if (p.parentNode) { flow.push(...dfComet(p, d, flowCls)); } });
+    p.dfFlowMake = () => { if (!p.dfFlowMade && p.parentNode) { p.dfFlowMade = true; flow.push(...dfComet(p, d, flowCls)); } };
+    if (/\bon\b/.test(flowCls)) queueMicrotask(p.dfFlowMake);
     // Data Flow's many wires run UNDER the cards and surface into their
     // holes; a focused op's few wires ride above
     (under ? svg : wsvg).append(p);
@@ -1101,24 +1128,45 @@ function drawDataLayer() {
     const rank = (x) => (lv && lv.has(x.b.id)) ? 0 : x.far ? 2 : 1;
     plan.sort((p, q) => (rank(p) - rank(q)) || (q.a.y - p.a.y) || (q.z.y - p.z.y));
     prepLanes(plan.filter(x => rank(x) < 2).map(x => [x.a, x.z]));
-    for (const {b, a, z, far} of plan) {
+    const draw = ({b, a, z, far}) => {
       const p = wire(a, z, "dfconn" + litCls(b) + (far ? " far" : ""), true, `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`);
-      if (!p) continue;
+      if (!p) return null;
       const tip = document.createElementNS(SVGNS, "title");
       tip.textContent = `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`;
       p.append(tip);
+      return p;
+    };
+    // a far wire hidden at rest is routed the first time it is asked for
+    // (its variable hovered): routing every one up front cost seconds
+    const later = new Map();   // hole row → its unrouted far wires
+    for (const x of plan) {
+      const {a, z, far} = x;
       if (far) for (const h of [a, z]) if (h.row) h.row.classList.add("remote");
-      addTo(a.row, p); addTo(z.row, p);
+      if (far && rank(x) === 2) {
+        for (const r of [a.row, z.row]) if (r) { if (!later.has(r)) later.set(r, []); later.get(r).push(x); }
+        continue;
+      }
+      const p = draw(x);
+      if (p) { addTo(a.row, p); addTo(z.row, p); }
     }
+    for (const [row, xs] of later) if (!byRow.has(row)) byRow.set(row, []);
     for (const [row, ps] of byRow) {
       // a hovered variable lights its wires, with the line to their hub
       const parts = (on) => { for (const p of ps) {
         p.classList.toggle("hot", on);
+        if (on && p.dfFlowMake) p.dfFlowMake();
         for (const f of p.dfFlow || []) f.classList.toggle("hot", on);
         const r0 = p.dfRoute;
         if (r0 && r0.hub) { const H = hubs.get(r0.hub); H.trunkEl?.classList.toggle("hot", on); H.el?.classList.toggle("hot", on); }
       } };
-      row.onmouseenter = () => parts(true);
+      row.onmouseenter = () => {
+        for (const x of later.get(row) || []) {
+          if (x.p !== undefined) continue;
+          x.p = draw(x);
+          if (x.p) for (const r of [x.a.row, x.z.row]) if (r && byRow.has(r)) byRow.get(r).push(x.p);
+        }
+        parts(true);
+      };
       row.onmouseleave = () => parts(false);
     }
     drawHubs(svg);
