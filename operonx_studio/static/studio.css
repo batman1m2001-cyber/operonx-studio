@@ -3910,16 +3910,26 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .node.dfpicker .dfports .dfport { cursor: pointer; }
 .dfport.picked { background: var(--df-soft); box-shadow: 0 0 0 1.5px var(--df), 0 0 10px color-mix(in srgb, var(--df) 45%, transparent); }
 
-/* data energy: tiny bright beads running source → reader, quicker and
-   finer than the control flow's sparks */
-.wires.dflinks path.dfflow { fill: none; stroke: var(--df-bead, var(--df)); stroke-width: 2.6;
-  stroke-linecap: round; stroke-dasharray: 0.1 46; opacity: 0; pointer-events: none;
-  animation: dfflow .25s linear infinite; }
-.wires.dflinks path.dfflow.on, .wires.dflinks path.dfflow.hot { opacity: .95;
-  filter: drop-shadow(0 0 2px var(--df)); }
+/* data energy: one comet per wire — a soft glowing tail and a bright
+   head — racing source → reader, quicker than the control flow's dots */
+.wires.dflinks path.dfflow { fill: none; stroke-linecap: round; opacity: 0; pointer-events: none;
+  animation-name: dfcomet; animation-timing-function: linear; animation-iteration-count: infinite; }
+.wires.dflinks path.dfflow.tail { stroke: var(--df); stroke-width: 3.2;
+  filter: drop-shadow(0 0 3px var(--df)) drop-shadow(0 0 6px color-mix(in srgb, var(--df) 60%, transparent)); }
+.wires.dflinks path.dfflow.head { stroke: var(--df-bead, var(--df)); stroke-width: 3.6;
+  filter: drop-shadow(0 0 4px var(--df)); }
+.wires.dflinks path.dfflow.on, .wires.dflinks path.dfflow.hot { opacity: .9; }
+.wires.dflinks path.dfflow.head.on, .wires.dflinks path.dfflow.head.hot { opacity: 1; }
 #world.dfwirehot .wires.dflinks path.dfflow:not(.hot) { opacity: 0; }
-@keyframes dfflow { to { stroke-dashoffset: -46.1; } }
+@keyframes dfcomet { from { stroke-dashoffset: var(--a); } to { stroke-dashoffset: var(--b); } }
 @media (prefers-reduced-motion: reduce) { .wires.dflinks path.dfflow { animation: none; opacity: 0 !important; } }
 #world.dfsel .wires.dflinks path.dfflow:not(.lit):not(.hot) { opacity: 0; }
 /* the toolbar's Direction toggle stills the beads too */
 body.nodots .wires.dflinks path.dfflow { display: none; }
+
+/* a generator's stack: copies of its card stepped behind it, empty */
+#nodes .node.genghost { pointer-events: none; padding: 0; min-height: 0; box-shadow: none;
+  transition: none; transform: none !important; }
+#nodes .node.genghost::before { display: none; }
+#nodes .node.genghost.g1 { opacity: .7; }
+#nodes .node.genghost.g2 { opacity: .4; }

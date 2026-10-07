@@ -112,13 +112,12 @@ states): 470 clean — only shared lanes left, mostly qc_flow.
    proved a hairball): an open START/SCRATCH/END lights every reader's hole
    and wires only the variable under the pointer, or the one clicked; a
    selected op with more than 5 wires does the same with its plugs. Wires
-   carry tiny fast "energy" beads, source → reader (off under
+   carry one glowing comet each (bright head, soft tail), source → reader at
+   ~2.6x the control dots' speed (follows the Direction toggle and
    reduced-motion).
-2. INGRESS/EGRESS door frames count as obstacles (wires currently hug the
-   dashed frame round `audio_in`).
-3. **Generator ops as a 3D stack** (user request): an op that yields
-   (`is_gen`) keeps its card with two offset copies stacked behind it, so it
-   reads as "many results".
+2. ~~INGRESS/EGRESS door frames count as obstacles~~ — done.
+3. ~~Generator ops as a 3D stack~~ — done: two empty copies of the card
+   stepped 6px down-right behind it.
 4. qc_flow dense fan-in: more frame spacing when plates show, so shared
    lanes become free lanes.
 5. Gates: full `ds/audit.py` (0 card-crossings/overlaps), `layout_audit.py`,

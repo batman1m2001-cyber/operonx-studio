@@ -498,6 +498,36 @@ function dfPortsBlock(it, only) {
   return box;
 }
 
+/* A wire's energy: ONE comet — a bright head with a soft glowing tail —
+ * racing source → reader, about 2.6x the control dots' speed. Two paths
+ * over the wire, dashed so each carries one dash, the head riding the
+ * tail's front. Returns both, placed right after `wire`. */
+const DF_SPEED = 190;   // px per second
+function dfComet(wire, d, cls) {
+  const mk = (part) => {
+    const q = document.createElementNS(SVGNS, "path");
+    q.setAttribute("d", d);
+    q.setAttribute("class", `dfflow ${part} ${cls}`.trim());
+    return q;
+  };
+  const tail = mk("tail"), head = mk("head");
+  wire.after(tail, head);
+  let len = 0;
+  try { len = tail.getTotalLength(); } catch { len = 0; }
+  if (len < 30) { tail.remove(); head.remove(); return []; }
+  const T = 34, Hd = 7;
+  const dur = `${Math.max(.35, len / DF_SPEED).toFixed(2)}s`;
+  const delay = `${(-Math.random() * 2).toFixed(2)}s`;
+  for (const [q, dash, a, b] of [[tail, T, T, -len], [head, Hd, Hd, -len - (T - Hd)]]) {
+    q.style.strokeDasharray = `${dash} ${len + T + 40}`;
+    q.style.setProperty("--a", a);
+    q.style.setProperty("--b", b);
+    q.style.animationDuration = dur;
+    q.style.animationDelay = delay;
+  }
+  return [tail, head];
+}
+
 /* The data layer, drawn after the cards are placed. Every wire runs from
  * an output hole to an input hole: out of a right-hand plate, into a
  * left-hand one. Cheap: it reads positions, never moves a card. */
@@ -529,6 +559,10 @@ function drawDataLayer() {
   const obst = [...state.rendered.values()]
     .filter(it2 => !it2.inner && it2.kind !== "knob" && state.cardEls.get(it2.key))
     .map(it2 => { const c = state.cardEls.get(it2.key);
+      // a serve door (INGRESS / EGRESS) is its dashed frame, not just its card
+      const door = it2.node && (it2.node.serve_role === "ingress" || it2.node.serve_role === "egress") && !it2.key.includes("/");
+      if (door) return {key: it2.key, l: it2.x - 12 - 10, t: it2.y - 26 - 10,
+        r: it2.x + Math.max(it2.w, c.offsetWidth) + 12 + 10, b: it2.y + Math.max(it2.h, c.offsetHeight) + 12 + 10};
       return {key: it2.key, l: it2.x - 16, t: it2.y - 16, r: it2.x + c.offsetWidth + 16, b: it2.y + c.offsetHeight + 16}; });
   const usedV = [], usedH = [];
   // a run keeps 7px from every run of another wire; only the wires of one
@@ -770,11 +804,8 @@ function drawDataLayer() {
       p.setAttribute("class", `${H.cls} trunk`);
       layer.prepend(p);
       H.trunkEl = p;
-      const flow = document.createElementNS(SVGNS, "path");
-      flow.setAttribute("d", H.trunk);
-      flow.setAttribute("class", "dfflow" + (/\b(focus|lit)\b/.test(H.cls) && !/\b(peek|dim|far)\b/.test(H.cls) ? " on" : "")
+      H.flow = dfComet(p, H.trunk, (/\b(focus|lit)\b/.test(H.cls) && !/\b(peek|dim|far)\b/.test(H.cls) ? "on" : "")
         + (/\blit\b/.test(H.cls) ? " lit" : ""));
-      p.after(flow);
       const c = document.createElementNS(SVGNS, "circle");
       c.setAttribute("cx", H.hx); c.setAttribute("cy", H.hy); c.setAttribute("r", 5);
       c.setAttribute("class", "dfhub" + (/\blit\b/.test(H.cls) ? " lit" : "") + (/\bpeek\b/.test(H.cls) ? " peek" : ""));
@@ -800,7 +831,7 @@ function drawDataLayer() {
     hit.setAttribute("class", "dfhit");
     hit.addEventListener("mouseenter", (ev) => {
       world.classList.add("dfwirehot");
-      p.classList.add("hot"); flow.classList.add("hot");
+      p.classList.add("hot"); for (const f of flow) f.classList.add("hot");
       // its line from the source and its hub light with it
       if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.add("hot"); H.el?.classList.add("hot"); }
       for (const h of [a, b]) if (h.row) h.row.classList.add("hot");
@@ -809,7 +840,7 @@ function drawDataLayer() {
     hit.addEventListener("mousemove", dfWireLabelMove);
     hit.addEventListener("mouseleave", () => {
       world.classList.remove("dfwirehot");
-      p.classList.remove("hot"); flow.classList.remove("hot");
+      p.classList.remove("hot"); for (const f of flow) f.classList.remove("hot");
       if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.remove("hot"); H.el?.classList.remove("hot"); }
       for (const h of [a, b]) if (h.row) h.row.classList.remove("hot");
       const t = dfWireLabel(); t.hidden = true;
@@ -818,13 +849,11 @@ function drawDataLayer() {
     p.setAttribute("class", cls);
     p.dfRoute = route0;
     // the energy pulse: tiny bright beads running from source to reader
-    const flow = document.createElementNS(SVGNS, "path");
-    flow.setAttribute("d", d);
     // beads only run where the wire itself shows
-    flow.setAttribute("class", "dfflow" + (/\b(focus|lit)\b/.test(cls) && !/\b(peek|dim|far)\b/.test(cls) ? " on" : "")
-      + (/\blit\b/.test(cls) ? " lit" : ""));
+    const flowCls = (/\b(focus|lit)\b/.test(cls) && !/\b(peek|dim|far)\b/.test(cls) ? "on" : "") + (/\blit\b/.test(cls) ? " lit" : "");
+    let flow = [];
     p.dfFlow = flow;
-    queueMicrotask(() => { if (p.parentNode) p.after(flow); });
+    queueMicrotask(() => { if (p.parentNode) { flow.push(...dfComet(p, d, flowCls)); } });
     // Data Flow's many wires run UNDER the cards and surface into their
     // holes; a focused op's few wires ride above
     (under ? svg : wsvg).append(p);
@@ -1043,7 +1072,7 @@ function drawDataLayer() {
       // a hovered variable lights its wires, with the line to their hub
       const parts = (on) => { for (const p of ps) {
         p.classList.toggle("hot", on);
-        p.dfFlow?.classList.toggle("hot", on);
+        for (const f of p.dfFlow || []) f.classList.toggle("hot", on);
         const r0 = p.dfRoute;
         if (r0 && r0.hub) { const H = hubs.get(r0.hub); H.trunkEl?.classList.toggle("hot", on); H.el?.classList.toggle("hot", on); }
       } };
@@ -1497,6 +1526,20 @@ function render() {
       card.style.top = `${it.y}px`;
     }
     state.cardEls.set(it.key, card);
+    // a generator is a STACK: the same card with two copies behind it,
+    // stepped down and right — one call, many results
+    if (!it.inner && it.kind !== "knob" && it.node && it.node.is_gen) {
+      for (const k of [2, 1]) {
+        const ghost = el("div", card.className.split(/\s+/)
+          .filter(c => !/^(selected|dfpeer|dfcard|dfpicker|live-|fresh|dimmed)/.test(c)).join(" ") + ` genghost g${k}`);
+        ghost.setAttribute("aria-hidden", "true");
+        ghost.style.left = `${it.x + 6 * k}px`;
+        ghost.style.top = `${it.y + 6 * k}px`;
+        ghost.style.width = `${it.w}px`;
+        ghost.style.height = `${it.h}px`;
+        nodesBox.append(ghost);
+      }
+    }
     nodesBox.append(card);
   }
   // each condition row's port DOT on the side its wire leaves by — the
