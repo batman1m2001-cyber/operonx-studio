@@ -1528,13 +1528,15 @@ function render() {
     state.cardEls.set(it.key, card);
     // a generator is a STACK: the same card with two copies behind it,
     // stepped down and right — one call, many results
-    if (!it.inner && it.kind !== "knob" && it.node && it.node.is_gen) {
+    // (cards fanned out behind it to the right, each a shade deeper — the
+    // ports top and bottom stay clear; an op open on its plugs drops it)
+    if (!it.inner && it.kind !== "knob" && it.node && it.node.is_gen && !card.classList.contains("dfcard")) {
       for (const k of [2, 1]) {
         const ghost = el("div", card.className.split(/\s+/)
           .filter(c => !/^(selected|dfpeer|dfcard|dfpicker|live-|fresh|dimmed)/.test(c)).join(" ") + ` genghost g${k}`);
         ghost.setAttribute("aria-hidden", "true");
-        ghost.style.left = `${it.x + 6 * k}px`;
-        ghost.style.top = `${it.y + 6 * k}px`;
+        ghost.style.left = `${it.x + 8 * k}px`;
+        ghost.style.top = `${it.y}px`;
         ghost.style.width = `${it.w}px`;
         ghost.style.height = `${it.h}px`;
         nodesBox.append(ghost);

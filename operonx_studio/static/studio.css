@@ -3931,5 +3931,8 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 #nodes .node.genghost { pointer-events: none; padding: 0; min-height: 0; box-shadow: none;
   transition: none; transform: none !important; }
 #nodes .node.genghost::before { display: none; }
-#nodes .node.genghost.g1 { opacity: .7; }
-#nodes .node.genghost.g2 { opacity: .4; }
+/* tinted by the op's own kind: each copy a step deeper in its hue */
+#nodes .node.genghost.g1 { background: color-mix(in srgb, var(--kind, var(--k-func)) 16%, var(--surface));
+  border-color: color-mix(in srgb, var(--kind, var(--k-func)) 50%, var(--surface)); }
+#nodes .node.genghost.g2 { background: color-mix(in srgb, var(--kind, var(--k-func)) 30%, var(--surface));
+  border-color: color-mix(in srgb, var(--kind, var(--k-func)) 65%, var(--surface)); }

@@ -116,8 +116,8 @@ states): 470 clean — only shared lanes left, mostly qc_flow.
    ~2.6x the control dots' speed (follows the Direction toggle and
    reduced-motion).
 2. ~~INGRESS/EGRESS door frames count as obstacles~~ — done.
-3. ~~Generator ops as a 3D stack~~ — done: two empty copies of the card
-   stepped 6px down-right behind it.
+3. ~~Generator ops as a 3D stack~~ — done: two copies of the card fanned 8px
+   to the right behind it, tinted a step deeper in the op's own kind hue.
 4. qc_flow dense fan-in: more frame spacing when plates show, so shared
    lanes become free lanes.
 5. Gates: full `ds/audit.py` (0 card-crossings/overlaps), `layout_audit.py`,
