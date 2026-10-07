@@ -634,7 +634,7 @@ function drawDataLayer() {
   };
   const clearV = (x, y0, y1) => {
     const lo = Math.min(y0, y1), hi = Math.max(y0, y1);
-    if (obst.some(o => x > o.l && x < o.r && hi > o.t && lo < o.b && !(o.ring && grp && grp.startsWith(o.ring)))) return false;
+    if (obst.some(o => x > o.l && x < o.r && hi > o.t && lo < o.b && !(o.ring && grp && (o.lane ? grp === o.ring : grp.startsWith(o.ring))))) return false;
     if (!relaxed && alongCtrl(true, x, lo, hi)) return false;
     // relaxed: a run may come close to another, but never lie on it
     const sep = relaxed ? 3.5 : 7;
@@ -643,7 +643,7 @@ function drawDataLayer() {
   // (the stub out of a hole starts inside its own card: that card is skipped)
   const clearH = (y, x0, x1, own) => {
     const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
-    if (obst.some(o => o.key !== own && y > o.t && y < o.b && hi > o.l && lo < o.r && !(o.ring && grp && grp.startsWith(o.ring)))) return false;
+    if (obst.some(o => !o.vonly && o.key !== own && y > o.t && y < o.b && hi > o.l && lo < o.r && !(o.ring && grp && grp.startsWith(o.ring)))) return false;
     if (!relaxed && alongCtrl(false, y, lo, hi)) return false;
     const sep = relaxed ? 3.5 : 7;
     return !usedH.some(u => u.g !== grp && Math.abs(u.y - y) < sep && hi > u.lo - 4 && lo < u.hi + 4);
@@ -745,14 +745,53 @@ function drawDataLayer() {
       let at = 0;
       for (const J of list) { J.x0 = x0; J.shift = at; at += LANE * J.n + 14; }
     }
-    // every ring stands before anything is routed, its lanes' last drop
-    // fenced off: only its own sources may come down there
+    /* Every ring stands before anything is routed. A lone ring stands
+     * beside its hole. The rings of one op's stacked outputs stand in ONE
+     * row, at or above the top one, stepping left: each runs a trunk down
+     * its own column and along its hole's row, so no trunk meets another,
+     * and every lane arrives above every ring. Each needs a row per lane
+     * above it, clear of every card and control edge; the lanes' last
+     * drop is fenced: only the ring's own sources come there. */
+    const hits = (l, t, r, bt, own) => obst.some(o => o.key !== own && r > o.l && l < o.r && bt > o.t && t < o.b);
+    const half = (J) => LANE * (J.n - 1) / 2;
+    // (lanes: how many arrive over this ring's row, each needing a row of its own)
+    const room = (J, x, y, lanes = J.n) => {
+      const h = half(J), b = J.b;
+      if (x + h + 8 > b.x) return false;   // the ring stays on the hole's entry side
+      // (a card's wires need the columns beside it: the lanes keep clear of them)
+      if (hits(x - h - 24, y - SPOKE - 26 - 8 * lanes, x + h + 24, y + 8, b.own)) return false;
+      if (y !== b.y && hits(x - 3, Math.min(y, b.y), x + 3, Math.max(y, b.y), b.own)) return false;
+      if (hits(x, b.y - 3, b.x - 4, b.y + 3, b.own)) return false;
+      return !onCtrl(x, y);
+    };
+    for (const list of stack.values()) {
+      const at = (dx, dy) => {   // the row's spots, top output first
+        let x = list[0].x0 - 30 + dx;
+        // neighbours a lane's gap and a fence apart
+        return list.map(J => { const h = half(J), p = [x - h, list[0].b.y + dy]; x -= 2 * h + 13; return p; });
+      };
+      const nAll = list.reduce((t, J) => t + J.n, 0);
+      let best = null;
+      for (let r = 0; r <= 60 && !best; r++) for (let i = 0; i <= r && !best; i++) {
+        const dy = -6 * i, dxs = [-6 * (r - i), 6 * (r - i)];
+        for (const dx of dxs) { const spots = at(dx, dy); if (spots.every(([x, y], k) => room(list[k], x, y, nAll))) { best = spots; break; } }
+      }
+      list.forEach((J, k) => { [J.hx, J.hy] = best ? best[k] : [J.x0 - 30 - half(J) - J.shift, J.b.y]; J.above = best ? nAll : J.n; });
+    }
     for (const [jk, J] of hubs) if (J.join) {
-      J.hx = J.x0 - 30 - LANE * (J.n - 1) / 2 - J.shift;
-      J.hy = J.b.y;
-      J.trunk = `M ${J.hx} ${J.hy} L ${J.b.x} ${J.b.y}`;
-      const half = LANE * (J.n - 1) / 2;
-      obst.push({key: `hub:${jk}`, ring: `${jk}#`, l: J.hx - half - 5, t: J.hy - SPOKE - 20, r: J.hx + half + 5, b: J.hy + 6});
+      const b = J.b;
+      J.trunk = J.hy === b.y ? `M ${J.hx} ${J.hy} L ${b.x} ${b.y}`
+        : `M ${J.hx} ${J.hy}` + rounded(clean([[J.hx, J.hy], [J.hx, b.y], [b.x, b.y]]));
+      grp = `${jk}#trunk`;
+      keep(clean([[J.hx, J.hy], [J.hx, b.y], [b.x, b.y]]));
+      const h = half(J);
+      obst.push({key: `hub:${jk}`, ring: `${jk}#`, l: J.hx - h - 5, t: J.hy - SPOKE - 20, r: J.hx + h + 5, b: J.hy + 6});
+      // and each lane's column, up through the rows the lanes arrive on:
+      // another wire (a sibling lane too) may cross it, never run down it
+      for (let k = 0; k < J.n; k++) {
+        const lx = J.hx + LANE * (k - (J.n - 1) / 2);
+        obst.push({key: `lane:${jk}#${k}`, ring: `${jk}#${k}`, lane: true, vonly: true, l: lx - 3.5, t: J.hy - SPOKE - 26 - 8 * (J.above || J.n), r: lx + 3.5, b: J.hy - SPOKE});
+      }
     }
   };
   // a join's lanes are laid before anything else: crowded among other
@@ -832,6 +871,13 @@ function drawDataLayer() {
     return d + lineTo(fx, fy, lx, ly);
   };
   const clean = (pts) => {
+    // a sub-pixel step is no step: two columns 0.2px apart made the corner
+    // rounding draw a long slanted line. Snap it (the ends never move)
+    pts = pts.map(q => [...q]);
+    for (let i = 1; i < pts.length; i++) for (const c of [0, 1]) {
+      const d = pts[i][c] - pts[i - 1][c];
+      if (d !== 0 && Math.abs(d) < 1) { if (i < pts.length - 1) pts[i][c] = pts[i - 1][c]; else if (i > 1) pts[i - 1][c] = pts[i][c]; }
+    }
     pts = pts.filter((q, i) => i === 0 || Math.abs(q[0] - pts[i - 1][0]) + Math.abs(q[1] - pts[i - 1][1]) > 0.5);
     return pts.filter((q, i) => i === 0 || i === pts.length - 1
       || !((q[0] === pts[i - 1][0] && q[0] === pts[i + 1][0]) || (q[1] === pts[i - 1][1] && q[1] === pts[i + 1][1])));
@@ -864,6 +910,7 @@ function drawDataLayer() {
    * → a free column beside it → the clear channel under it → a free column
    * down (or up) → the channel above b's row → b's gutter → into the hole.
    * `col` starts the trace already in its column (a spoke out of a hub). */
+  let orthoBad = false;
   const ortho = (a, b, col, depth = 0) => {
     const A = boxOf(a);
     const {yB0, x2} = gutter(b);
@@ -884,8 +931,14 @@ function drawDataLayer() {
       if (ymA === null) x1 = scan(x0, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownOf(a)));
     }
     if (ymA === null) ymA = scan(yA0, 4, y => chan(x1, y), 200);
-    const ymB = scan(yB0, -4, y => clearH(y, xc, x2) && clearV(x2, y, by(b)), 200);
-    if (!clearV(xc, ymA, ymB)) xc = scan2(xc, x => clearV(x, ymA, ymB));
+    const okB = (y) => clearH(y, xc, x2) && clearV(x2, y, by(b));
+    const ymB = scan(yB0, -4, okB, 200);
+    // a column moved here stretches both channels to it: they must still
+    // run clear (checked while the column stood elsewhere, a stretched one
+    // lay on another wire's run)
+    if (!clearV(xc, ymA, ymB)) xc = scan2(xc, x => clearV(x, ymA, ymB) && clearH(ymA, x1, x) && clearH(ymB, x, x2));
+    // no row of its own, even a close one: the trace would lie on another
+    relaxed = true; orthoBad = !(okB(ymB) && clearH(ymA, x1, xc) && clearV(xc, ymA, ymB)); relaxed = false;
     return keep(clean([[a.x, a.y], [x1, a.y], [x1, ymA], [xc, ymA], [xc, ymB], [x2, ymB], ...tailOf(b, x2)]));
   };
   /* A reader straight ahead — its hole right of the source's, nothing
@@ -895,11 +948,13 @@ function drawDataLayer() {
   const zig = (a, b) => {
     if (b.entry === "right" || b.fromTop) return null;
     const lim = Math.min(b.x, boxOf(b).left) - 6;
-    for (let x = a.x + 10; x <= lim; x += 4) {
-      if (clearH(a.y, a.x, x, ownOf(a)) && clearV(x, a.y, b.y) && clearH(b.y, x, b.x, ownOf(b)))
-        return keep(clean([[a.x, a.y], [x, a.y], [x, b.y], [b.x, b.y]]));
-    }
-    return null;
+    // a free column, else one close beside another (still apart)
+    const x = twice(() => {
+      for (let x = a.x + 10; x <= lim; x += 2)
+        if (clearH(a.y, a.x, x, ownOf(a)) && clearV(x, a.y, b.y) && clearH(b.y, x, b.x, ownOf(b))) return x;
+      return null;
+    });
+    return x === null ? null : keep(clean([[a.x, a.y], [x, a.y], [x, b.y], [b.x, b.y]]));
   };
   const SPOKE = 16;   // how far a spoke curves out of its hub before it runs straight
   const LANE = 9;     // the gap between two spokes of one fan
@@ -987,10 +1042,23 @@ function drawDataLayer() {
       const J = hubs.get(Jo.jg);
       grp = `${Jo.jg}#${Jo.k}`;
       lastRoute = {grp, hub: Jo.jg};
-      const ax = J.hx + LANE * (Jo.k - (J.n - 1) / 2), ay = J.hy - SPOKE;
+      const ax0 = J.hx + LANE * (Jo.k - (J.n - 1) / 2), ay = J.hy - SPOKE;
       // sources run left to right into lanes left to right; the leftmost
-      // takes the lowest channel, so no drop crosses another's run
-      const pts = ortho(a, {x: ax, y: ay, fromTop: true}, null, J.n - 1 - Jo.k);
+      // takes the lowest channel, so no drop crosses another's run. A lane
+      // whose trace finds no row of its own tries the columns beside it
+      // (a ring among others leaves some lanes boxed in); a failed try is
+      // taken back
+      // (outside the ring's own lanes: each sibling's column stays its own)
+      const half = LANE * (J.n - 1) / 2, tries = [ax0];
+      for (let i = 1; i <= 2; i++) tries.push(...(Jo.k < J.n / 2 ? [J.hx - half - i * LANE, J.hx + half + i * LANE] : [J.hx + half + i * LANE, J.hx - half - i * LANE]));
+      let ax = ax0, pts = null;
+      for (const c of tries) {
+        const nV = usedV.length, nH = usedH.length;
+        pts = ortho(a, {x: c, y: ay, fromTop: true}, null, J.n - 1 - Jo.k);
+        if (!orthoBad) { ax = c; break; }
+        usedV.length = nV; usedH.length = nH; pts = null;
+      }
+      if (!pts) pts = ortho(a, {x: ax0, y: ay, fromTop: true}, null, J.n - 1 - Jo.k);
       return `M ${a.x} ${a.y}` + rounded(pts)
         + ` C ${ax} ${ay + SPOKE * .55} ${J.hx} ${J.hy - SPOKE * .45} ${J.hx} ${J.hy}`;
     }
@@ -1171,7 +1239,9 @@ function drawDataLayer() {
         // a plate is a pass-through with two faces: the hole on the frame
         // line takes the outside wire, the plate's inner end the inside one
         const own = `plate:${key}:${dir2}:${port2}`;
-        obst.push({key: own, l: tl - 10, t: y - th / 2 - 8, r: tl + tw + 10, b: y + th / 2 + 8});
+        // (a pill, not a card: a wire may pass a few px off its ends — a
+        // wide margin walled the plate column off from the op beside it)
+        obst.push({key: own, l: tl - 4, t: y - th / 2 - 8, r: tl + tw + 4, b: y + th / 2 + 8});
         const inner = {x: tl + hi, y, row: tagEl, key, plate: true, own};
         map.set(dir2 + "|" + port2, {x, y, row: tagEl, key, plate: true, own, inner});
       });
@@ -1792,7 +1862,11 @@ function render() {
     }
     for (const k of wants) {
       const names = B.filter(b => b.to.key === k || b.from.key === k).map(b => b.to.key === k ? b.to.port : b.from.port);
-      if (names.length) platePad.set(k, Math.max(...names.map(n => n.length)) * 6.6 + 52);
+      // the plates' width, and a column for each wire that runs on from a
+      // plate to the cards inside (a fan into one op runs out of room)
+      const ins = new Set(B.filter(b => b.to.key === k && !b.to.export).map(b => b.to.port)).size;
+      const outs = new Set(B.filter(b => b.to.key === k && b.to.export).map(b => b.to.port)).size;
+      if (names.length) platePad.set(k, Math.max(...names.map(n => n.length)) * 6.6 + 52 + 8 * Math.max(ins, outs));
     }
   }
   const dataShown = canvasView === "data" || !!state.sel || !!state.dfTerm;
