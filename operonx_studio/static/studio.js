@@ -1069,8 +1069,16 @@ function drawDataLayer() {
     const it = R(key), card = state.cardEls.get(key);
     const r = card && card.querySelector(`.dfport.${dir}[data-port="${CSS.escape(port)}"]`);
     if (!it || !r) return null;
-    const h = {...holePt(card, it, r.querySelector(".dfhole")), row: r, key};
     const brow = r.classList.contains("brchip") && r.closest(".brrow");
+    let at;
+    if (brow) {
+      // a chip sits in the condition's text, where offsets are not to be
+      // trusted: measure the hole against its own card's box (a hover lift
+      // moves both alike)
+      const hr = r.querySelector(".dfhole").getBoundingClientRect(), cr = card.getBoundingClientRect(), k = state.view.scale || 1;
+      at = {x: it.x + (hr.left + hr.width / 2 - cr.left) / k, y: it.y + (hr.top + hr.height / 2 - cr.top) / k};
+    } else at = holePt(card, it, r.querySelector(".dfhole"));
+    const h = {...at, row: r, key};
     if (brow) {
       // a chip in a condition: in from the side its row's edge does not use
       let top = 0, e = brow;
