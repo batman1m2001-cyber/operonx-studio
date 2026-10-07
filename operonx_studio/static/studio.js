@@ -512,30 +512,122 @@ function drawDataLayer() {
   const wsvg = document.createElementNS(SVGNS, "svg");
   wsvg.setAttribute("class", "wires dflinks dfwires");
   over.append(wsvg);
-  /* A wire is ROUTED like a circuit trace, never flung across a card:
-   * out of its hole to the right, down the gutter beside its op, across
-   * the gap between the two rows, down the reader's left gutter and into
-   * the hole — rounded corners, and every wire its own lane, so parallel
-   * traces lie side by side instead of on top of each other. One style for
-   * every wire: a mix of curves and traces reads as an accident. */
-  const lanes = new Map();
-  const lane = (k) => { const n = lanes.get(k) || 0; lanes.set(k, n + 1); return n; };
+  /* A wire is ROUTED like a circuit trace and never crosses a card:
+   *   out of its hole → a free column beside the source → the clear channel
+   *   under the source's row → a free column down (or up) to the channel
+   *   above the reader's row → the reader's own gutter → into the hole.
+   * Every vertical and horizontal run is checked against every card, and
+   * against the runs already laid, so no two wires share a track. */
+  const obst = [...state.rendered.values()]
+    .filter(it2 => !it2.inner && it2.kind !== "knob" && state.cardEls.get(it2.key))
+    .map(it2 => { const c = state.cardEls.get(it2.key);
+      return {key: it2.key, l: it2.x - 9, t: it2.y - 9, r: it2.x + c.offsetWidth + 9, b: it2.y + c.offsetHeight + 9}; });
+  const usedV = [], usedH = [];
+  // a run may lie on a run of its OWN group (wires out of one hole are one
+  // trunk); any other run keeps 7px away
+  let grp = null;
+  const clearV = (x, y0, y1) => {
+    const lo = Math.min(y0, y1), hi = Math.max(y0, y1);
+    if (obst.some(o => x > o.l && x < o.r && hi > o.t && lo < o.b)) return false;
+    return !usedV.some(u => u.g !== grp && Math.abs(u.x - x) < 10 && hi > u.lo - 4 && lo < u.hi + 4);
+  };
+  // (the stub out of a hole starts inside its own card: that card is skipped)
+  const clearH = (y, x0, x1, own) => {
+    const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
+    if (obst.some(o => o.key !== own && y > o.t && y < o.b && hi > o.l && lo < o.r)) return false;
+    return !usedH.some(u => u.g !== grp && Math.abs(u.y - y) < 10 && hi > u.lo - 4 && lo < u.hi + 4);
+  };
+  const trunk = new Map();   // group → the first wire's column and channel
+  let lastRoute = null;
+  const routed = [];
+  // where a branch leaves its trunk: the furthest point along it that still
+  // lies on an earlier wire of the same hole — a junction dot goes there
+  const onPoly = (P, x, y) => P.some((q, i) => i > 0 && (() => {
+    const [ax, ay] = P[i - 1], [bx, by] = q;
+    return x >= Math.min(ax, bx) - .6 && x <= Math.max(ax, bx) + .6 && y >= Math.min(ay, by) - .6 && y <= Math.max(ay, by) + .6
+      && Math.abs((bx - ax) * (y - ay) - (by - ay) * (x - ax)) < .6 * Math.hypot(bx - ax, by - ay);
+  })());
+  const drawJunctions = (layer) => {
+    const groups = new Map();
+    for (const w of routed) { if (!groups.has(w.grp)) groups.set(w.grp, []); groups.get(w.grp).push(w); }
+    for (const ws of groups.values()) {
+      if (ws.length < 2) continue;
+      const seen = new Set();
+      for (let j = 1; j < ws.length; j++) {
+        const P = ws[j].pts;
+        let last = null;
+        for (let i = 1; i < P.length; i++) {
+          const [ax, ay] = P[i - 1], [bx, by] = P[i], n = Math.max(1, Math.hypot(bx - ax, by - ay) / 2);
+          for (let k = 0; k <= n; k++) {
+            const x = ax + (bx - ax) * k / n, y = ay + (by - ay) * k / n;
+            if (ws.slice(0, j).some(w => onPoly(w.pts, x, y))) last = [x, y]; else { i = P.length; break; }
+          }
+        }
+        if (!last) continue;
+        const key = `${Math.round(last[0])},${Math.round(last[1])}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const c = document.createElementNS(SVGNS, "circle");
+        c.setAttribute("cx", last[0]); c.setAttribute("cy", last[1]); c.setAttribute("r", 3);
+        c.setAttribute("class", "dfjunction" + (ws[j].cls || ""));
+        layer.append(c);
+      }
+    }
+  };
   const boxOf = (pt) => {
-    const it2 = pt && pt.key && R(pt.key);
-    return it2 ? {top: it2.y, bottom: it2.y + it2.h, left: it2.x, right: it2.x + it2.w} : null;
+    const it2 = pt && pt.key && !pt.plate && R(pt.key);
+    if (!it2 || it2.inner) return {left: pt.x, right: pt.x, top: pt.y, bottom: pt.y};
+    const c = state.cardEls.get(it2.key);
+    return {left: it2.x, right: it2.x + (c ? c.offsetWidth : it2.w), top: it2.y, bottom: it2.y + (c ? c.offsetHeight : it2.h)};
+  };
+  const scan = (from, step, ok, n = 160) => { for (let i = 0; i < n; i++) { const v = from + i * step; if (ok(v)) return v; } return from; };
+  const scan2 = (from, ok, step = 6, n = 160) => {
+    for (let i = 0; i < n; i++) for (const v of i ? [from - i * step, from + i * step] : [from]) if (ok(v)) return v;
+    return from;
+  };
+  /* Lanes are dealt from both ends before anything is routed, so a bundle
+   * never tangles: leaving a card, the LOWEST hole takes the innermost
+   * column and the nearest channel; arriving, the HIGHEST hole takes the
+   * innermost column. (A bundle that turns twice keeps its order.) */
+  const laneOut = new Map(), laneIn = new Map();
+  const side2 = (pt, dir) => `${pt.key}|${dir}|${Math.round(pt.x)}`;
+  const prepLanes = (pairs) => {
+    const outs = new Map(), ins = new Map();
+    for (const [a, b] of pairs) {
+      const ko = side2(a, "o"), ki = side2(b, "i");
+      if (!outs.has(ko)) outs.set(ko, new Set()); outs.get(ko).add(Math.round(a.y));
+      if (!ins.has(ki)) ins.set(ki, new Set()); ins.get(ki).add(Math.round(b.y));
+    }
+    for (const [k, ys] of outs) [...ys].sort((p, q) => q - p).forEach((y, i) => laneOut.set(`${k}|${y}`, i));
+    for (const [k, ys] of ins) [...ys].sort((p, q) => p - q).forEach((y, i) => laneIn.set(`${k}|${y}`, i));
   };
   const route = (a, b) => {
-    const A = boxOf(a) || {bottom: a.y + 20, top: a.y - 20, right: a.x}, Bx = boxOf(b) || {top: b.y - 20, bottom: b.y + 20, left: b.x};
-    const x1 = Math.max(a.x, A.right) + 14 + 5 * lane("o" + (a.key || "") + Math.round(A.right));
-    const x2 = Math.min(b.x, Bx.left) - 14 - 5 * lane("i" + (b.key || "") + Math.round(Bx.left));
-    // cross in the clear channel the layout leaves just below the
-    // source's layer, then descend the reader's gutter
-    let ym;
-    if (Bx.top > A.bottom + 16) ym = Math.min(A.bottom + 22, (A.bottom + Bx.top) / 2);
-    else ym = Math.max(A.bottom, Bx.bottom) + 22;                       // beside or above: under both
-    ym += 4 * lane("g" + Math.round(ym / 24));
-    const r = 8, sx = (u, v) => (v > u ? 1 : -1);
-    const pts = [[a.x, a.y], [x1, a.y], [x1, ym], [x2, ym], [x2, b.y], [b.x, b.y]];
+    grp = `${Math.round(a.x)}|${Math.round(a.y)}`;
+    const A = boxOf(a), Bx = boxOf(b);
+    const lo = laneOut.get(`${side2(a, "o")}|${Math.round(a.y)}`) || 0;
+    const li = laneIn.get(`${side2(b, "i")}|${Math.round(b.y)}`) || 0;
+    const yA0 = A.bottom + 16 + 12 * lo, yB0 = Bx.top - 16;
+    const T = trunk.get(grp);
+    const ownA = a.plate ? null : a.key, ownB = b.plate ? null : b.key;
+    const x1 = T ? T.x1 : scan(Math.max(a.x, A.right) + 12 + 12 * lo, 6, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownA));
+    const x2 = scan(Math.min(b.x, Bx.left) - 12 - 12 * li, -6, x => clearV(x, yB0, b.y) && clearH(b.y, x, b.x, ownB));
+    let xc = scan2(x2, x => clearV(x, yA0, yB0));
+    const ymA = T && clearH(T.ymA, x1, xc) ? T.ymA : scan(yA0, 5, y => clearH(y, x1, xc) && clearV(x1, a.y, y), 80);
+    if (!T) trunk.set(grp, {x1, ymA});
+    const ymB = scan(yB0, -5, y => clearH(y, xc, x2) && clearV(x2, y, b.y), 80);
+    if (!clearV(xc, ymA, ymB)) xc = scan2(xc, x => clearV(x, ymA, ymB));
+    let pts = [[a.x, a.y], [x1, a.y], [x1, ymA], [xc, ymA], [xc, ymB], [x2, ymB], [x2, b.y], [b.x, b.y]];
+    // drop repeats and straight-through corners
+    pts = pts.filter((q, i) => i === 0 || Math.abs(q[0] - pts[i - 1][0]) + Math.abs(q[1] - pts[i - 1][1]) > 0.5);
+    pts = pts.filter((q, i) => i === 0 || i === pts.length - 1
+      || !((q[0] === pts[i - 1][0] && q[0] === pts[i + 1][0]) || (q[1] === pts[i - 1][1] && q[1] === pts[i + 1][1])));
+    for (let i = 1; i < pts.length; i++) {
+      const [px, py] = pts[i - 1], [cx, cy] = pts[i];
+      if (px === cx) usedV.push({x: cx, lo: Math.min(py, cy), hi: Math.max(py, cy), g: grp});
+      else usedH.push({y: cy, lo: Math.min(px, cx), hi: Math.max(px, cx), g: grp});
+    }
+    lastRoute = {grp, pts};
+    const r = 7, sx = (u, v) => (v > u ? 1 : -1);
     let d = `M ${pts[0][0]} ${pts[0][1]}`;
     for (let i = 1; i < pts.length - 1; i++) {
       const [px, py] = pts[i - 1], [cx, cy] = pts[i], [nx, ny] = pts[i + 1];
@@ -544,12 +636,32 @@ function drawDataLayer() {
       const outx = cx + (nx !== cx ? sx(cx, nx) * r1 : 0), outy = cy + (ny !== cy ? sx(cy, ny) * r1 : 0);
       d += ` L ${inx} ${iny} Q ${cx} ${cy} ${outx} ${outy}`;
     }
-    return d + ` L ${b.x} ${b.y}`;
+    return d + ` L ${pts[pts.length - 1][0]} ${pts[pts.length - 1][1]}`;
   };
-  const wire = (a, b, cls, under) => {
+  const wire = (a, b, cls, under, label) => {
     if (!a || !b) return null;
     const p = document.createElementNS(SVGNS, "path");
-    p.setAttribute("d", route(a, b));
+    const d = route(a, b);
+    p.setAttribute("d", d);
+    if (!/\bfar\b/.test(cls)) routed.push({...lastRoute, cls: /\bpeek\b/.test(cls) ? " peek" : ""});
+    // hovering a wire singles it out: just it, its two plugs, its name
+    const hit = document.createElementNS(SVGNS, "path");
+    hit.setAttribute("d", d);
+    hit.setAttribute("class", "dfhit");
+    hit.addEventListener("mouseenter", (ev) => {
+      world.classList.add("dfwirehot");
+      p.classList.add("hot");
+      for (const h of [a, b]) if (h.row) h.row.classList.add("hot");
+      if (label) { const t = dfWireLabel(); t.textContent = label; t.hidden = false; dfWireLabelMove(ev); }
+    });
+    hit.addEventListener("mousemove", dfWireLabelMove);
+    hit.addEventListener("mouseleave", () => {
+      world.classList.remove("dfwirehot");
+      p.classList.remove("hot");
+      for (const h of [a, b]) if (h.row) h.row.classList.remove("hot");
+      const t = dfWireLabel(); t.hidden = true;
+    });
+    queueMicrotask(() => { if (p.parentNode && !p.classList.contains("far")) p.parentNode.append(hit); });
     p.setAttribute("class", cls);
     // Data Flow's many wires run UNDER the cards and surface into their
     // holes; a focused op's few wires ride above
@@ -557,10 +669,16 @@ function drawDataLayer() {
     return p;
   };
   // a hole's centre in world coordinates (the canvas may be zoomed)
+  // from layout offsets, not screen boxes: a card's hover lift or highlight
+  // transform must never move where its wires plug in
   const holePt = (card, it, hole) => {
-    const cr = card.getBoundingClientRect(), hr = hole.getBoundingClientRect();
-    const k = cr.width / (card.offsetWidth || 1) || 1;
-    return {x: it.x + (hr.left + hr.width / 2 - cr.left) / k, y: it.y + (hr.top + hr.height / 2 - cr.top) / k};
+    let x = hole.offsetWidth / 2, y = hole.offsetHeight / 2, e = hole;
+    while (e && e !== card) { x += e.offsetLeft; y += e.offsetTop; e = e.offsetParent; }
+    if (e !== card) {   // the card is not the hole's offset parent chain: fall back
+      const cr = card.getBoundingClientRect(), hr = hole.getBoundingClientRect(), k = state.view.scale || 1;
+      return {x: it.x + (hr.left + hr.width / 2 - cr.left) / k, y: it.y + (hr.top + hr.height / 2 - cr.top) / k};
+    }
+    return {x: it.x + x, y: it.y + y};
   };
   const cardHole = (key, dir, port) => {
     const it = R(key), card = state.cardEls.get(key);
@@ -586,11 +704,16 @@ function drawDataLayer() {
         const x = dir2 === "in" ? C.x : C.x + C.w;
         const y = dir2 === "in" ? C.y + 50 + i * 22 : C.y + C.h - 26 - (list.length - 1 - i) * 22;
         const tagEl = el("div", `dfplate ${dir2}`);
-        tagEl.append(el("span", "dfhole"), el("span", "dfname mono", port2));
+        const hole = el("span", "dfhole");
+        // the hole on the frame line itself: an input's at the plate's left
+        // end, an output's at its right end
+        if (dir2 === "in") tagEl.append(hole, el("span", "dfname mono", port2));
+        else tagEl.append(el("span", "dfname mono", port2), hole);
         over.append(tagEl);
+        const ho = hole.offsetLeft + hole.offsetWidth / 2;
         tagEl.style.top = `${y - tagEl.offsetHeight / 2}px`;
-        tagEl.style.left = dir2 === "in" ? `${x - 6}px` : `${x - tagEl.offsetWidth + 6}px`;
-        map.set(dir2 + "|" + port2, {x, y, row: tagEl, key});
+        tagEl.style.left = `${x - ho}px`;
+        map.set(dir2 + "|" + port2, {x, y, row: tagEl, key, plate: true});
       });
       put(ins, "in"); put(outs, "out");
       plates.set(key, map);
@@ -627,14 +750,22 @@ function drawDataLayer() {
     // away"), and hovering the variable draws it, a click its lineage.
     const byRow = new Map();   // hole row element → its wires
     const addTo = (row, p) => { if (!row) return; if (!byRow.has(row)) byRow.set(row, []); byRow.get(row).push(p); };
+    const plan = [];
     for (const b of B) {
       if (DataFlow.isBroadcast(b)) continue;
       const a = srcHole(b), z = dstHole(b);
       if (!a || !z) continue;
       const A = boxOf(a), Z = boxOf(z);
-      const gap = A && Z ? Z.top - A.bottom : 0;
-      const far = !A || !Z || gap < -4 || gap > 230;
-      const p = wire(a, z, "dfconn" + litCls(b) + (far ? " far" : ""), true);
+      const gap = Z.top - A.bottom;
+      plan.push({b, a, z, far: gap < -4 || gap > 230, len: Math.abs(z.y - a.y) + Math.abs(z.x - a.x)});
+    }
+    // short, visible wires claim their tracks first
+    // bottom holes first: they take the inner lanes, so a card's wires nest
+    // like brackets instead of crossing
+    plan.sort((p, q) => (p.far - q.far) || (q.a.y - p.a.y) || (q.z.y - p.z.y));
+    prepLanes(plan.filter(x => !x.far).map(x => [x.a, x.z]));
+    for (const {b, a, z, far} of plan) {
+      const p = wire(a, z, "dfconn" + litCls(b) + (far ? " far" : ""), true, `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`);
       if (!p) continue;
       const tip = document.createElementNS(SVGNS, "title");
       tip.textContent = `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`;
@@ -646,6 +777,7 @@ function drawDataLayer() {
       row.onmouseenter = () => { for (const p of ps) p.classList.add("hot"); };
       row.onmouseleave = () => { for (const p of ps) p.classList.remove("hot"); };
     }
+    drawJunctions(svg);
     markRows();
     return;
   }
@@ -680,26 +812,62 @@ function drawDataLayer() {
     over.append(t);
     const w = t.offsetWidth, h = t.offsetHeight;
     const y = P.y + Math.min(P.h - h - 4, 8 + n * (h + 4));
-    const x = dir === "out" ? P.x + P.w - 10 : P.x - w + 10;
+    // fully outside the partner: never over its name or its plugs
+    const x = dir === "out" ? P.x + P.w + 5 : P.x - w - 5;
     t.style.left = `${x}px`; t.style.top = `${y}px`;
     const pc = state.cardEls.get(pkey);
     if (pc) pc.classList.add("dfpeer");
-    return {x: dir === "out" ? x + w - 9 : x + 9, y: y + h / 2, key: pkey};
+    return {x: dir === "out" ? x + w - 9 : x + 9, y: y + h / 2, key: pkey, plate: true};
   };
-  const side = (dir) => ({x: dir === "in" ? it.x : it.x + it.w, y: it.y + it.h / 2, key: it.key});
   const cls0 = "dfconn focus" + (pinned ? "" : " peek");
+  const side = (dir) => ({x: dir === "in" ? it.x : it.x + it.w, y: it.y + it.h / 2, key: it.key, plate: true});
+  // a peek names each partner once: its first variable, and how many more
+  if (!pinned) {
+    const once = (list, pk) => {
+      const seen = new Map();
+      for (const b of list) { const k = pk(b); if (!seen.has(k)) seen.set(k, {b, n: 0}); seen.get(k).n++; }
+      return [...seen.values()];
+    };
+    const tagOf = (port, n) => n > 1 ? `${port} +${n - 1}` : port;
+    for (const {b, n} of once(nb.ins.filter(b => !DataFlow.isBroadcast(b) && (b.from.kind === "op" || b.from.key)), b => b.from.key)) {
+      const a = b.from.kind === "op" ? plug(b.from.key, "out", tagOf(b.from.port, n)) : containerHole(b.from.key, "in", b.from.port);
+      wire(a, side("in"), cls0);
+    }
+    for (const {b, n} of once(nb.outs, b => b.to.key)) {
+      const z = b.to.export ? containerHole(b.to.key, "out", b.to.port) : plug(b.to.key, "in", tagOf(b.to.port, n));
+      wire(side("out"), z, cls0 + " feed");
+    }
+    return;
+  }
+  const jobs = [];
   for (const b of nb.ins) {
     if (DataFlow.isBroadcast(b) || (b.from.kind !== "op" && !b.from.key)) continue;
     const a = b.from.kind === "op" ? plug(b.from.key, "out", b.from.port) : containerHole(b.from.key, "in", b.from.port);
     const end = pinned ? cardHole(it.key, "in", b.to.port) : side("in");
-    wire(a, end, cls0 + litCls(b));
+    if (a && end) jobs.push([a, end, cls0 + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
   }
   for (const b of nb.outs) {
     const start = pinned ? cardHole(it.key, "out", b.from.port) : side("out");
     const z = b.to.export ? containerHole(b.to.key, "out", b.to.port) : plug(b.to.key, "in", b.to.port);
-    wire(start, z, cls0 + " feed" + litCls(b));
+    if (start && z) jobs.push([start, z, cls0 + " feed" + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
   }
+  jobs.sort((p, q) => (q[0].y - p[0].y) || (q[1].y - p[1].y));
+  prepLanes(jobs);
+  for (const [a, z, cls, label] of jobs) wire(a, z, cls, false, label);
+  drawJunctions(wsvg);
   markRows();
+}
+
+// the floating name of a hovered wire
+function dfWireLabel() {
+  let t = document.getElementById("dfwirelabel");
+  if (!t) { t = el("div", "dfwirelabel mono"); t.id = "dfwirelabel"; t.hidden = true; document.body.append(t); }
+  return t;
+}
+function dfWireLabelMove(ev) {
+  const t = dfWireLabel();
+  t.style.left = `${ev.clientX + 14}px`;
+  t.style.top = `${ev.clientY - 30}px`;
 }
 
 // a hover's peek ends a beat after the pointer leaves the op
@@ -1738,7 +1906,7 @@ function opCard(it) {
     if (det.childNodes.length) card.append(det);
   }
 
-  if ((canvasView === "data" || (state.dfOpen && state.dfOpen.has(it.key) && !it.inner)) && !n.serve_role) {
+  if (canvasView === "data" || (state.dfOpen && state.dfOpen.has(it.key) && !it.inner)) {
     const ports = dfPortsBlock(it, canvasView === "workflow" ? state.dfOpen.get(it.key) : null);
     if (ports) { card.append(ports); card.classList.add("dfcard", canvasView === "data" ? "dfdata" : "dfopen"); }
   }

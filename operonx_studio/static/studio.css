@@ -3807,3 +3807,26 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .node.dfcard .dfport.out { padding: 0 4px 0 9px; justify-content: flex-start; }
 
 .node.dfcard .badges { margin-top: 7px; }
+
+/* plugs are buttons: the global 32px button height must not apply */
+.dfport, .dfdrow { min-height: 0 !important; }
+
+/* a trunk's junction: where one value branches to another reader */
+.wires.dflinks circle.dfjunction { fill: var(--df); stroke: var(--df-panel); stroke-width: 1.5; }
+.wires.dflinks circle.dfjunction.peek { opacity: .35; }
+#world.dfsel .wires.dflinks circle.dfjunction, #world.dfwirehot .wires.dflinks circle.dfjunction { opacity: .15; }
+/* a wire's wide invisible twin takes the hover */
+.wires.dflinks path.dfhit { fill: none; stroke: transparent; stroke-width: 10px; pointer-events: stroke; cursor: help; }
+.dfwires { pointer-events: none; }
+.dfwires path.dfhit { pointer-events: stroke; }
+#dflinks { pointer-events: none; }
+#dflinks path.dfhit { pointer-events: stroke; }
+/* hovering one wire: only it stays lit */
+#world.dfwirehot .wires.dflinks path.dfconn:not(.hot) { opacity: .1 !important; }
+#world.dfwirehot .wires.dflinks path.dfconn.hot { opacity: 1 !important; stroke-width: 2.6px; }
+.dfport.hot, .dfplate.hot, .dfplug.hot { border-color: var(--df) !important; background: var(--df-soft); }
+.dfwirelabel { position: fixed; z-index: 70; pointer-events: none; padding: 3px 8px; border-radius: 7px;
+  background: var(--df-panel); color: var(--df-ink); border: 1px solid color-mix(in srgb, var(--df) 50%, var(--df-line));
+  font-size: 11px; box-shadow: 0 6px 18px rgba(0, 0, 0, .3); white-space: nowrap; }
+/* every data wire solid: dashed parallels shimmer */
+.wires.dflinks path.dfconn.focus.feed { stroke-dasharray: none; }
