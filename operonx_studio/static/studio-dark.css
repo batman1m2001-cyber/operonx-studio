@@ -96,3 +96,24 @@
 :where(:root[data-theme="dark"]) :where(input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea) {
   background-color: var(--surface); color: var(--text);
 }
+
+/* Workflow / Data Flow views at night */
+:root[data-theme="dark"] { --df: #2dd4bf; --df-soft: rgba(45, 212, 191, .14); --df-ink: #99f6e4;
+  --df-scratch: #fb7aa8; --df-start: #7fb0ff; --df-panel: #121a26; --df-line: #263346; }
+:root[data-theme="dark"] .viewseg { background: #18212e; }
+:root[data-theme="dark"] .viewseg button.on { background: #253247; color: #e8eef6; }
+:root[data-theme="dark"] .dftray { box-shadow: 0 10px 30px rgba(0, 0, 0, .5); }
+:root[data-theme="dark"] { --df: #5ab4ef; --df-soft: rgba(90, 180, 239, .14); --df-ink: #cbe6fa; }
+:root[data-theme="dark"] .dfdrawer { box-shadow: 0 14px 30px rgba(0, 0, 0, .5); }
+
+:root[data-theme="dark"] { --plate: #1b2636; --hole: #05080d; }
+
+/* the data energy beads burn near-white on the dark canvas */
+:root[data-theme="dark"] { --df-bead: color-mix(in srgb, #fff 65%, var(--df)); }
+
+/* a generator's stack on the dark canvas: the copies keep the card's lit
+   edge (darkening a dark card only hides it), the front card's shadow
+   gives the depth */
+:root[data-theme="dark"] #stacks .genghost { box-shadow: inset 8px 8px 12px -6px rgba(0, 0, 0, .7); }
+:root[data-theme="dark"] #stacks .genghost.g1 { filter: none; opacity: .95; }
+:root[data-theme="dark"] #stacks .genghost.g2 { filter: none; opacity: .75; }

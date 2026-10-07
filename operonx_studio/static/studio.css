@@ -987,6 +987,7 @@ body:not([data-stage]) .canvasbar { display: none; }
 
 /* render()'s measuring pass: every name line at its natural width, for
    one layout, then back (studio.js) */
+#nodes.measuring .dfport, #nodes.measuring .dfname,
 #nodes.measuring .ntext, #nodes.measuring .brcond, #nodes.measuring .nname,
 #nodes.measuring .nkind { flex: none !important; width: max-content !important; }
 
@@ -3342,6 +3343,8 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 
   .canvasbar { left: 12px; bottom: 12px; }
   .canvasbar #btn-expand, .canvasbar .tsep:first-of-type { display: none; }
+  /* a phone pinches to zoom: the − / + buttons give their room to the view switch */
+  .canvasbar #btn-zoom-in, .canvasbar #btn-zoom-out { display: none; }
   .findbox, #legend { left: 12px; bottom: 64px; }
 
   #traces, #jobs, #resources, .pane { padding: 16px 14px 88px; }
@@ -3559,3 +3562,381 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   border: 1px solid var(--line, rgba(127,127,127,.35)); color: var(--text-3); }
 .tflag.tdes { color: #b0413e; border-color: rgba(176,65,62,.45); }
 .tflag.task { color: #a8642a; border-color: rgba(168,100,42,.45); }
+
+/* ── Workflow / Data Flow views (docs/WORKFLOW_DATAFLOW_VIEWS_PLAN.md) ──
+   Data has its own hue — teal — never control flow's blue, amber or violet. */
+:root { --df: #0d9488; --df-soft: rgba(13, 148, 136, .12); --df-ink: #0f5f58;
+        --df-scratch: #c2416f; --df-start: #3d7dd6; --df-panel: #ffffff; --df-line: #d5dee8; }
+
+/* the view switch at the head of the canvas toolbar */
+.viewseg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 999px;
+  background: var(--surface-2, #eef2f6); }
+.viewseg button { border: 0; background: transparent; border-radius: 999px; padding: 4px 11px;
+  font-size: 12px; font-weight: 600; color: var(--muted, #6b7685); cursor: pointer; min-height: 26px; }
+.viewseg button:hover { color: var(--text, #1d2433); }
+.viewseg button.on { background: var(--panel, #fff); color: var(--text, #1d2433);
+  box-shadow: 0 1px 3px rgba(20, 30, 50, .14); }
+.viewseg button[data-view="data"].on { color: var(--df-ink); }
+.viewseg button:focus-visible { outline: 2px solid var(--df); outline-offset: 1px; }
+
+/* Data Flow: control steps back, data steps forward */
+#world.dfview #edges path, #world.dfview #edges circle, #world.dfview #edges text,
+#world.dfview #edgetop path { opacity: .14; }
+#world.dfview #edges .eflow { display: none; }
+#world.dfview .node .port { opacity: .25; }
+#world.dfview .node.cell.dfcard { border-radius: 16px; }
+#world.dfview .node.cell.dfcard .iconband { top: 0; bottom: auto; height: 46px; }
+.dfports { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; margin-top: 7px;
+  padding-top: 6px; border-top: 1px dashed var(--df-line); }
+.dfcol { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dfcol.out { align-items: flex-end; }
+.dfport { display: flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0;
+  border: 0; background: transparent; padding: 1px 4px; border-radius: 5px; cursor: pointer;
+  font-size: 11px; color: var(--text, #1d2433); line-height: 16px; }
+.dfport:hover { background: var(--df-soft); }
+.dfport .dfname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dfport .dfdot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--df); }
+.dfport.in .dfdot { margin-left: -9px; }
+.dfport.out { flex-direction: row-reverse; }
+.dfport.out .dfdot { margin-right: -9px; }
+.dfsrc { flex: none; font-size: 9px; font-weight: 700; letter-spacing: .06em; padding: 0 5px;
+  border-radius: 999px; line-height: 14px; }
+.dfsrc.start { color: var(--df-start); background: color-mix(in srgb, var(--df-start) 12%, transparent); }
+.dfsrc.scratch { color: var(--df-scratch); background: color-mix(in srgb, var(--df-scratch) 12%, transparent); }
+
+/* connectors: one per node pair, combed into each port row */
+.wires.dflinks path { fill: none; stroke: var(--df); stroke-linecap: round; }
+.wires.dflinks path.dfconn { opacity: .55; stroke-width: 1.4; }
+.wires.dflinks path.dfconn.comb { stroke-width: 1.1; }
+#world.dfsel .wires.dflinks path.dfconn { opacity: .08; }
+#world.dfsel .wires.dflinks path.dfconn.lit { opacity: 1; }
+#world.dfsel .wires.dflinks path.dfconn.lit2 { opacity: .5; stroke-dasharray: 4 3; }
+#world.dfsel .node:not(.dfpeer):not(.container) { opacity: .4; }
+.dfport.lit, .dftrow.lit { background: var(--df-soft); color: var(--df-ink); font-weight: 650; }
+.dfport.lit2, .dftrow.lit2 { color: var(--df-ink); }
+.dfport.picked { box-shadow: inset 0 0 0 1.5px var(--df); }
+
+/* Workflow: the selected node's data, as a tray beside it */
+#dfover { position: absolute; left: 0; top: 0; pointer-events: none; }
+.dftray { position: absolute; z-index: 30; pointer-events: auto; min-width: 190px; max-width: 320px;
+  background: var(--df-panel); border: 1px solid var(--df-line); border-left: 3px solid var(--df);
+  border-radius: 10px; padding: 6px 6px 7px; box-shadow: 0 8px 24px rgba(15, 30, 50, .14); }
+.dfthead { font-size: 9.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted, #6b7685); padding: 5px 6px 3px; }
+.dftrow { display: flex; align-items: center; justify-content: flex-start; gap: 6px; width: 100%; border: 0; background: transparent;
+  border-radius: 6px; padding: 3px 6px; font-size: 11.5px; color: var(--text, #1d2433);
+  cursor: pointer; text-align: left; min-width: 0; }
+.dftrow:hover { background: var(--df-soft); }
+.dftrow .dfdot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--df); }
+.dftrow .dfname { font-weight: 650; flex: none; }
+.dftrow .dfarr { color: var(--muted, #6b7685); flex: none; }
+.dftrow .dfpeerlbl { color: var(--muted, #6b7685); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dftag { position: absolute; z-index: 29; font: 600 10.5px/18px var(--mono, ui-monospace, monospace);
+  padding: 0 7px; border-radius: 999px; white-space: nowrap; color: var(--df-ink);
+  background: var(--df-panel); border: 1px solid color-mix(in srgb, var(--df) 55%, var(--df-line)); }
+.wires.dflinks path.dfconn.focus { opacity: .9; stroke-width: 1.3; }
+.wires.dflinks path.dfconn.focus.dim { opacity: .12; }
+#world.dffocus .node:not(.dfpeer):not(.selected):not(.container):not(.bnode) { opacity: .55; }
+
+.dffocuslinks { position: absolute; left: 0; top: 0; overflow: visible; width: 1px; height: 1px; z-index: 28; }
+.wires.dflinks path.dfconn.focus.feed { stroke-dasharray: 5 3; }
+
+.dfsrc { font-size: 9px; padding: 0 4px; }
+.dfport .dfdot { margin: 0 !important; }
+.dfport.hot { background: var(--df-soft); color: var(--df-ink); }
+.wires.dflinks path.dfconn.hot { opacity: 1; stroke-width: 2.4px !important; }
+.wires.dflinks path.dfconn.back { stroke-dasharray: 5 4; }
+.wires.dflinks path.dfconn { pointer-events: stroke; cursor: help; }
+.wires.dflinks circle.dfattach { fill: var(--df); opacity: .8; }
+#world.dfsel .wires.dflinks circle.dfattach:not(.lit) { opacity: .15; }
+
+/* a connector spanning several rows stays quiet until it is hovered or lit */
+.wires.dflinks path.dfconn.far { opacity: .22; }
+#nodes.measuring .dfport { max-width: none !important; }
+.dfcol.in { align-items: flex-start; }
+.dfport { justify-content: flex-start; }
+.dfport.out { justify-content: flex-start; }
+
+.viewseg .vshort { display: none; }
+@media (max-width: 640px) {
+  .viewseg .vlong { display: none; }
+  .viewseg .vshort { display: inline; }
+  .viewseg button { padding: 4px 9px; }
+}
+
+/* data hue, drifted from cyan toward a calmer blue */
+:root { --df: #1477b8; --df-soft: rgba(20, 119, 184, .11); --df-ink: #0d4f7c; }
+
+/* Workflow: the op's ports, a drawer that swings open from its lower edge */
+.dfdrawer { position: absolute; z-index: 31; pointer-events: auto; box-sizing: border-box;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; padding: 16px 12px 9px;
+  background: var(--df-panel); border: 1px solid var(--df-line); border-top: 0;
+  border-radius: 0 0 14px 14px; box-shadow: 0 12px 26px rgba(15, 30, 50, .16);
+  transform-origin: 50% 0; animation: dfdoor .24s cubic-bezier(.2, .8, .25, 1); }
+@keyframes dfdoor { from { transform: perspective(700px) rotateX(-78deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dfdrawer { animation: none; } }
+.dfdcol { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dfdcol.out { align-items: flex-end; }
+.dfdcol .dfthead { padding: 0 2px 3px; }
+.dfdrow { display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; border: 0;
+  background: transparent; border-radius: 6px; padding: 2px 4px; cursor: pointer; font-size: 11px;
+  line-height: 16px; color: var(--text, #1d2433); }
+.dfdrow:hover { background: var(--df-soft); }
+.dfdrow .dfname { font-weight: 650; flex: none; }
+.dfdrow .dfpeerlbl { color: var(--muted, #6b7685); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-size: 10px; }
+.dfdrow .dfdot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--df);
+  box-shadow: 0 0 0 2px var(--df-panel); }
+.dfdrow.in .dfdot { margin-left: -17px; }
+.dfdrow.out .dfdot { margin-right: -17px; }
+.dfdrow.lit { background: var(--df-soft); color: var(--df-ink); }
+.dfnone { color: var(--muted, #6b7685); font-size: 11px; padding: 2px 4px; }
+
+/* hover peeks: the links and tags stay faint, nothing else changes */
+.wires.dflinks path.dfconn.focus.peek { opacity: .32; }
+.dftag.peek { opacity: .55; }
+/* a click pins: the rest of the workflow steps back */
+#world.dfpin .node:not(.dfpeer):not(.selected):not(.container):not(.bnode) { opacity: .28; }
+#world.dfpin #edges path:not(.hot), #world.dfpin #edges circle:not(.hot),
+#world.dfpin #edgetop path:not(.hot), #world.dfpin #edges text { opacity: .12; }
+
+/* Workflow: the selected op opens in place — its port panel inside the card */
+#world .node.cell.dfcard.dfopen { border-radius: 18px; }
+#world .node.cell.dfcard.dfopen .iconband { top: 0; bottom: auto; height: 46px; }
+.node.dfopen .dfports { animation: dfopen .22s ease-out; }
+@keyframes dfopen { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .node.dfopen .dfports { animation: none; } }
+
+
+/* ── plug plates: every variable is a plug hole ─────────────────────── */
+:root { --plate: #e9eef5; --hole: #1c2533; }
+.node.dfcard { padding-left: 26px !important; padding-right: 26px !important; }
+.node.cell.dfcard .nline, .node.cell.dfcard .detail, .node.cell.dfcard .badges { margin-left: 42px; }
+.node.dfcard .dfports { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; margin-top: 8px;
+  padding-top: 7px; border-top: 1px dashed var(--df-line); }
+/* the plates: slim strips down the op's left (inputs) and right (outputs) zones */
+.node.dfcard .dfports::before, .node.dfcard .dfports::after { content: ""; position: absolute;
+  top: 48px; bottom: 7px; width: 17px; background: var(--plate); }
+.node.dfcard .dfports::before { left: 0; border-radius: 0 7px 7px 0; }
+.node.dfcard .dfports::after { right: 0; border-radius: 7px 0 0 7px; }
+.dfport { position: static; }
+.dfport .dfhole { position: absolute; z-index: 1; margin: 2px 0 0; }
+.dfport.in .dfhole { left: 3px; }
+.dfport.out .dfhole { right: 3px; }
+.dfport.out { flex-direction: row; }
+.dfport .dfdot { display: none; }
+/* a hole: dark, ringed in the data blue */
+.dfhole { display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 11px; height: 11px; border-radius: 50%; background: var(--hole);
+  box-shadow: 0 0 0 1.5px var(--df), inset 0 1px 2px rgba(0, 0, 0, .55);
+  font-size: 6.5px; line-height: 1; color: #fff; }
+/* fed from the mains: lit, with where the power comes from */
+.dfhole.mains.start { background: var(--df-start); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--df-start) 60%, #fff), 0 0 6px color-mix(in srgb, var(--df-start) 60%, transparent); }
+.dfhole.mains.scratch { background: var(--df-scratch); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--df-scratch) 60%, #fff), 0 0 6px color-mix(in srgb, var(--df-scratch) 60%, transparent); }
+.dfport.lit .dfhole, .dfplug .dfhole, .dfplate .dfhole { box-shadow: 0 0 0 1.5px var(--df), 0 0 7px var(--df); }
+.dfport.picked .dfhole { background: var(--df); }
+.dfport.picked { box-shadow: none; background: var(--df-soft); }
+
+/* a partner's plug tag, and a GraphOp frame's plate holes */
+.dfplug, .dfplate { position: absolute; z-index: 31; display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 7px; border-radius: 999px; background: var(--df-panel);
+  border: 1px solid color-mix(in srgb, var(--df) 50%, var(--df-line));
+  font-size: 10.5px; color: var(--df-ink); white-space: nowrap; pointer-events: none; }
+.dfplug.peek { opacity: .5; }
+
+/* wires: hole to hole */
+.dfwires { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; z-index: 30; pointer-events: none; }
+.wires.dflinks path.dfconn { stroke: var(--df); stroke-width: 1.6; opacity: .75; fill: none; }
+.wires.dflinks path.dfconn.peek { opacity: .3; }
+.wires.dflinks path.dfconn.dim { opacity: .1; }
+.wires.dflinks path.dfconn.lit { opacity: 1; stroke-width: 2.2; }
+.wires.dflinks path.dfconn.lit2 { opacity: .5; stroke-dasharray: 4 3; }
+#world.dfview .wires.dflinks path.dfconn { opacity: .55; }
+#world.dfsel .wires.dflinks path.dfconn:not(.lit):not(.lit2) { opacity: .08; }
+
+/* a far wire is not drawn at rest: its holes wear a dashed ring */
+.wires.dflinks path.dfconn.far { opacity: 0; }
+.wires.dflinks path.dfconn.far.hot, .wires.dflinks path.dfconn.far.lit { opacity: 1; }
+.wires.dflinks path.dfconn.far.lit2 { opacity: .5; }
+.wires.dflinks path.dfconn.hot { opacity: 1 !important; stroke-width: 2.2; }
+.dfport.remote .dfhole:not(.mains) { box-shadow: none; outline: 1.5px dashed var(--df); outline-offset: 0; }
+#world.dfview .wires.dflinks path.dfconn.far { opacity: 0; }
+#world.dfview .wires.dflinks path.dfconn.far.hot, #world.dfview .wires.dflinks path.dfconn.far.lit { opacity: 1; }
+#world.dfview .wires.dflinks path.dfconn.far.lit2 { opacity: .5; }
+
+/* ── the electric side panels: each variable a plug pill ─────────────
+   Inputs: a socket strip flush with the op's LEFT edge, each pill
+   [◉ name] with its hole at the outer end. Outputs: the strip flush with
+   the RIGHT edge, [name ◉]. A wire plugs into the hole. */
+.node.dfcard .dfports::before, .node.dfcard .dfports::after { content: none; }
+.node.dfcard .dfports { gap: 0 10px; align-items: start; }
+.node.dfcard .dfcol { gap: 4px; padding: 6px 7px; min-width: 0; align-self: start;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--plate) 92%, var(--df)), var(--plate)); }
+.node.dfcard .dfcol.in { margin-left: -26px; align-items: flex-start; border-radius: 0 12px 12px 0;
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--df) 70%, transparent), 0 0 10px color-mix(in srgb, var(--df) 14%, transparent); }
+.node.dfcard .dfcol.out { margin-right: -26px; align-items: flex-end; border-radius: 12px 0 0 12px;
+  box-shadow: inset -2px 0 0 color-mix(in srgb, var(--df) 70%, transparent), 0 0 10px color-mix(in srgb, var(--df) 14%, transparent); }
+.node.dfcard .dfcol:empty { visibility: hidden; }
+.node.dfcard .dfport { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 4px;
+  border-radius: 999px; background: var(--df-panel); border: 1px solid color-mix(in srgb, var(--df) 50%, var(--df-line));
+  font-size: 10.5px; line-height: 15px; color: var(--df-ink); max-width: 100%; }
+.node.dfcard .dfport.out { flex-direction: row-reverse; padding: 2px 4px 2px 8px; }
+.node.dfcard .dfport .dfhole { position: static; margin: 0; }
+.node.dfcard .dfport:hover { background: var(--df-soft); }
+.node.dfcard .dfport.lit { background: var(--df-soft); border-color: var(--df); }
+.node.dfcard .dfport.picked { border-color: var(--df); box-shadow: 0 0 0 2px var(--df-soft); }
+.node.dfcard .dfport.remote { border-style: dashed; }
+.node.dfcard .dfcol { width: max-content; max-width: 100%; box-sizing: border-box; }
+.node.dfcard .dfcol.in { justify-self: start; }
+.node.dfcard .dfcol.out { justify-self: end; }
+
+/* the two panels size to their plugs: an empty side gives its room away */
+.node.dfcard .dfports { grid-template-columns: auto auto; justify-content: space-between; }
+
+/* plugs keep their names whole; the card grows to its panels instead */
+.node.dfcard .dfport, .node.dfcard .dfcol { max-width: none; }
+.node.dfcard .dfport .dfname { overflow: visible; text-overflow: clip; }
+#nodes.measuring .node.dfcard .dfports { width: max-content !important; }
+
+/* the side panel follows the op: inset from its edge, corners concentric
+   with the card's, a faint tint — part of the op, not a bolt-on */
+.node.dfcard .dfcol { display: grid; grid-auto-rows: 20px; gap: 4px; padding: 5px; background: color-mix(in srgb, var(--df) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--df) 16%, transparent); border-radius: 11px; box-shadow: none; }
+.node.dfcard .dfcol.in { margin-left: -20px; border-radius: 11px; box-shadow: none; }
+.node.dfcard .dfcol.out { margin-right: -20px; border-radius: 11px; box-shadow: none; }
+.node.dfcard .dfcol .dfthead { display: none; }
+/* every plug in a panel the same size: one height, the widest name's width */
+.node.dfcard .dfport { box-sizing: border-box; width: 100%; height: 20px; padding: 0 9px 0 4px; justify-content: flex-start; }
+.node.dfcard .dfport.out { padding: 0 4px 0 9px; justify-content: flex-start; }
+
+.node.dfcard .badges { margin-top: 7px; }
+
+/* plugs are buttons: the global 32px button height must not apply */
+.dfport, .dfdrow { min-height: 0 !important; }
+
+/* a trunk's junction: where one value branches to another reader */
+/* a source's hub: the one place its value splits */
+.wires.dflinks circle.dfhub { fill: var(--df-panel); stroke: var(--df); stroke-width: 2.2; opacity: 1;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--df) 70%, transparent)); }
+.wires.dflinks circle.dfhub.peek { opacity: .35; }
+.wires.dflinks circle.dfhub.lit { fill: var(--df); stroke: var(--df-panel); stroke-width: 1.5; opacity: 1; }
+#world.dfwirehot .wires.dflinks circle.dfhub:not(.hot) { opacity: .15; }
+.wires.dflinks circle.dfhub.hot { fill: var(--df); opacity: 1; }
+/* a wire's wide invisible twin takes the hover */
+.wires.dflinks path.dfhit { fill: none; stroke: transparent; stroke-width: 10px; pointer-events: stroke; cursor: help; }
+.dfwires { pointer-events: none; }
+.dfwires path.dfhit { pointer-events: stroke; }
+#dflinks { pointer-events: none; }
+#dflinks path.dfhit { pointer-events: stroke; }
+/* hovering one wire: only it stays lit */
+#world.dfwirehot .wires.dflinks path.dfconn:not(.hot) { opacity: .1 !important; }
+#world.dfwirehot .wires.dflinks path.dfconn.hot { opacity: 1 !important; stroke-width: 2.6px; }
+.dfport.hot, .dfplate.hot, .dfplug.hot { border-color: var(--df) !important; background: var(--df-soft); }
+.dfwirelabel { position: fixed; z-index: 70; pointer-events: none; padding: 3px 8px; border-radius: 7px;
+  background: var(--df-panel); color: var(--df-ink); border: 1px solid color-mix(in srgb, var(--df) 50%, var(--df-line));
+  font-size: 11px; box-shadow: 0 6px 18px rgba(0, 0, 0, .3); white-space: nowrap; }
+/* every data wire solid: dashed parallels shimmer */
+.wires.dflinks path.dfconn.focus.feed { stroke-dasharray: none; }
+
+/* the root graph's TERMINALS. START and END are the pill grown into a lit
+   capsule holding its plugs; the SCRATCH pad is its rose sibling. */
+:root { --term: var(--df-start); }
+.node.bnode.dfhosted { opacity: 0; pointer-events: none; }
+.dfterm { position: absolute; z-index: 30; pointer-events: auto; display: flex; flex-direction: column; gap: 5px;
+  padding: 9px 9px; border-radius: 16px; box-sizing: border-box;
+  background:
+    radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--term) 26%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--term) 10%, var(--df-panel)), var(--df-panel));
+  border: 1.5px solid color-mix(in srgb, var(--term) 75%, #fff);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--term) 13%, transparent),
+    0 0 22px color-mix(in srgb, var(--term) 38%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .14); }
+.dfterm.start { align-items: flex-end; }
+.dfterm.end { align-items: flex-start; }
+.dftermlabel { align-self: center; display: inline-flex; align-items: center; gap: 7px; margin: 2px 0 0;
+  font: 800 10px/1 var(--mono, ui-monospace, monospace); letter-spacing: .2em; color: color-mix(in srgb, var(--term) 70%, #fff); }
+.dfterm.end .dftermlabel { margin: 0 0 2px; }
+.dftermglyph { width: 9px; height: 9px; border-radius: 50%; background: var(--term);
+  box-shadow: 0 0 8px var(--term), 0 0 0 2px color-mix(in srgb, var(--term) 30%, transparent); }
+.dfterm.end .dftermglyph { background: transparent; border: 2px solid var(--term); box-sizing: border-box; }
+.dfterm .dftermrow { display: inline-flex; align-items: center; gap: 7px; height: 21px; min-height: 0 !important; box-sizing: border-box;
+  padding: 0 4px 0 10px; border-radius: 999px; font-size: 10.5px; color: var(--df-ink); cursor: default;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--term) 14%, var(--df-panel)), var(--df-panel));
+  border: 1px solid color-mix(in srgb, var(--term) 55%, var(--df-line)); }
+.dfterm.end .dftermrow { padding: 0 10px 0 4px; }
+.dfterm .dfhole { box-shadow: 0 0 0 1.5px var(--term), 0 0 7px color-mix(in srgb, var(--term) 70%, transparent), inset 0 1px 2px rgba(0,0,0,.6); }
+.dfterm .dftermrow.hot, .dfterm .dftermrow.lit { border-color: var(--term); box-shadow: 0 0 10px color-mix(in srgb, var(--term) 45%, transparent); }
+/* SCRATCH: the run's side notes, a note sheet — a margin line, a folded corner */
+.dfterm.scratch { --term: var(--df-scratch); align-items: flex-end; padding-left: 22px; border-radius: 5px 16px 5px 5px;
+  background:
+    linear-gradient(90deg, transparent 13px, color-mix(in srgb, var(--term) 40%, transparent) 13px 14px, transparent 14px),
+    radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--term) 20%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--term) 9%, var(--df-panel)), var(--df-panel)); }
+.dftermhead { align-self: flex-start; font: 800 9.5px/1 var(--mono, ui-monospace, monospace); letter-spacing: .16em;
+  color: color-mix(in srgb, var(--term) 75%, #fff); padding: 1px 0 3px; }
+.dfterm .dftermrow { max-width: none; width: max-content; }
+.dfterm .dftermrow .dfname { overflow: visible; text-overflow: clip; white-space: nowrap; }
+/* every plug in a terminal the same size */
+.dfterm.start, .dfterm.end, .dfterm.scratch { align-items: stretch; }
+.dfterm .dftermrow { width: auto !important; justify-content: flex-end; }
+.dfterm.end .dftermrow { justify-content: flex-start; }
+.dfterm .dftermlabel, .dfterm .dftermhead { align-self: center; }
+.dfterm.scratch .dftermhead { align-self: flex-start; }
+/* a terminal is as wide as its longest name */
+.dfterm { width: max-content; }
+.dfterm .dftermrow { flex: none; max-width: none !important; min-width: 0; }
+.dfterm .dftermrow .dfname { flex: none; overflow: visible; }
+.dfterm .dftermrow .dfhole { position: static; margin: 0; }
+/* a lineage is one chain: the other wires step out entirely */
+#world.dfsel .wires.dflinks path.dfconn:not(.lit):not(.lit2) { opacity: 0 !important; }
+#world.dfsel .wires.dflinks circle.dfhub:not(.lit) { opacity: 0; }
+
+/* a terminal is clickable; picked, it glows brighter */
+.dfterm { cursor: pointer; transition: box-shadow .2s; }
+.dfterm:hover { box-shadow: 0 0 0 4px color-mix(in srgb, var(--term) 20%, transparent), 0 0 28px color-mix(in srgb, var(--term) 50%, transparent), inset 0 1px 0 rgba(255,255,255,.14); }
+.dfterm.picked { box-shadow: 0 0 0 5px color-mix(in srgb, var(--term) 28%, transparent), 0 0 34px color-mix(in srgb, var(--term) 60%, transparent), inset 0 1px 0 rgba(255,255,255,.18); }
+.node.bnode:not(.knob) { cursor: pointer; }
+
+/* a lit wire in a focus keeps the normal weight: brightness, not bulk */
+.wires.dflinks path.dfconn.focus.lit { stroke-width: 1.7; }
+
+/* an open terminal wires one variable at a time: its rows are the picker */
+.dfterm .dftermrow { cursor: pointer; transition: opacity .15s, box-shadow .15s; }
+.dfterm.haspick .dftermrow:not(.picked) { opacity: .5; }
+.dfterm .dftermrow.picked { border-color: var(--term); box-shadow: 0 0 12px color-mix(in srgb, var(--term) 55%, transparent); }
+.dfterm .dftermrow.pinned .dfhole { background: var(--term); box-shadow: 0 0 6px var(--term); }
+
+/* a picker is open: the readers not picked step back */
+#world.dftpick .dfport.lit:not(.picked) { opacity: .45; }
+.node.dfpicker .dfports .dfport { cursor: pointer; }
+.dfport.picked { background: var(--df-soft); box-shadow: 0 0 0 1.5px var(--df), 0 0 10px color-mix(in srgb, var(--df) 45%, transparent); }
+
+/* data energy: one comet per wire — a soft glowing tail and a bright
+   head — racing source → reader, quicker than the control flow's dots */
+.wires.dflinks path.dfflow { fill: none; stroke-linecap: round; opacity: 0; pointer-events: none;
+  animation-name: dfcomet; animation-timing-function: linear; animation-iteration-count: infinite; }
+.wires.dflinks path.dfflow.tail { stroke: var(--df); stroke-width: 3.2;
+  filter: drop-shadow(0 0 3px var(--df)) drop-shadow(0 0 6px color-mix(in srgb, var(--df) 60%, transparent)); }
+.wires.dflinks path.dfflow.head { stroke: var(--df-bead, var(--df)); stroke-width: 3.6;
+  filter: drop-shadow(0 0 4px var(--df)); }
+.wires.dflinks path.dfflow.on, .wires.dflinks path.dfflow.hot { opacity: .9; }
+.wires.dflinks path.dfflow.head.on, .wires.dflinks path.dfflow.head.hot { opacity: 1; }
+#world.dfwirehot .wires.dflinks path.dfflow:not(.hot) { opacity: 0; }
+@keyframes dfcomet { from { stroke-dashoffset: var(--a); } to { stroke-dashoffset: var(--b); } }
+@media (prefers-reduced-motion: reduce) { .wires.dflinks path.dfflow { animation: none; opacity: 0 !important; } }
+#world.dfsel .wires.dflinks path.dfflow:not(.lit):not(.hot) { opacity: 0; }
+/* the toolbar's Direction toggle stills the beads too */
+body.nodots .wires.dflinks path.dfflow { display: none; }
+
+/* a generator's stack: plain copies of its card's outline fanned behind
+   it, tinted a step deeper in its own kind hue each */
+#stacks .genghost { position: absolute; pointer-events: none; box-sizing: border-box;
+  border: 1.5px solid; transition: opacity var(--tr);
+  /* depth: the card in front casts a soft shadow onto each copy */
+  box-shadow: inset 8px 8px 10px -6px rgba(20, 40, 80, .28); }
+#stacks .genghost.g1 { filter: brightness(.97); }
+#stacks .genghost.g2 { filter: brightness(.92); }
+/* a stack dims with its card (its classes are mirrored onto the copies) */
+#stacks .genghost.dimmed { opacity: .18 !important; }
+#world.dfsel #stacks .genghost:not(.dfpeer) { opacity: .4 !important; }
+#world.dffocus #stacks .genghost:not(.dfpeer):not(.selected) { opacity: .55 !important; }
+#world.dfpin #stacks .genghost:not(.dfpeer):not(.selected) { opacity: .28 !important; }

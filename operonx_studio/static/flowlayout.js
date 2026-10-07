@@ -165,8 +165,11 @@
       let L;
       if (n.graph && opts.expanded.has(key)) {
         const sub = buildLevel(n.graph, key + "/", depth + 1, opts, true);
+        // opts.padOf: extra side room a container needs (the data views'
+        // plates sit there, clear of its inner cards)
+        const extra = (opts.padOf && opts.padOf(key)) || 0;
         L = {id: n.id, key, node: n, kind: "container", sub,
-             w: Math.max(C.CMIN_W, sub.w + 2 * C.CPAD), h: sub.h};
+             w: Math.max(C.CMIN_W, sub.w + 2 * (C.CPAD + extra)), h: sub.h};
       } else {
         const s = opts.sizeOf(key, n) || {};
         L = {id: n.id, key, node: n, kind: "card",
@@ -756,12 +759,18 @@
    * Returns absolute items (cards, containers, knobs), the main flow's
    * pills, every wire with its path, and each decision card's row sides. */
   function layout(graph, opts) {
-    const lv = buildLevel(graph, "", 0, opts, false);
-    const out = {items: [], pills: [], wires: [], zones: [], rowSides: new Map(), w: lv.w, h: lv.h};
-    emit(lv, 0, 0, out);
-    out.start = out.pills.find(p => p.node.boundary === "start") || null;
-    out.end = out.pills.find(p => p.node.boundary === "end") || null;
-    return out;
+    // opts.spacing: wider gaps for one layout (the data views need room
+    // for their wires between cards); the defaults come back after
+    const keep = {H_GAP: C.H_GAP, V_GAP: C.V_GAP};
+    if (opts.spacing) Object.assign(C, opts.spacing);
+    try {
+      const lv = buildLevel(graph, "", 0, opts, false);
+      const out = {items: [], pills: [], wires: [], zones: [], rowSides: new Map(), w: lv.w, h: lv.h};
+      emit(lv, 0, 0, out);
+      out.start = out.pills.find(p => p.node.boundary === "start") || null;
+      out.end = out.pills.find(p => p.node.boundary === "end") || null;
+      return out;
+    } finally { Object.assign(C, keep); }
   }
 
   const api = {layout, loopsOf, loopHeader, exitText, C};

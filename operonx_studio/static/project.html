@@ -62,8 +62,13 @@
     <div id="stage">
       <div id="world">
         <div id="plane">
+          <!-- a generator's stack: copies of its card, under the wires -->
+          <div id="stacks"></div>
           <svg id="edges" class="wires"></svg>
+          <!-- data flow: connectors under the cards, tray and tags above -->
+          <svg id="dflinks" class="wires dflinks"></svg>
           <div id="nodes"></div>
+          <div id="dfover"></div>
           <!-- decision wires re-surface here: the stretch that would
                hide under a branch card paints again above it -->
           <svg id="edgetop" class="wires"></svg>
@@ -86,6 +91,11 @@
     <!-- the canvas's own controls: they float over the canvas wherever it
          is showing (the Flow tab, or a run's workflow view) -->
     <div id="canvasbar" class="canvasbar" role="toolbar" aria-label="Canvas">
+      <div class="viewseg" role="radiogroup" aria-label="Canvas view">
+        <button type="button" data-view="workflow" role="radio" title="Workflow — what runs before what  ( D )"><span class="vlong">Workflow</span><span class="vshort">Flow</span></button>
+        <button type="button" data-view="data" role="radio" title="Data Flow — what each op reads and feeds  ( D )"><span class="vlong">Data Flow</span><span class="vshort">Data</span></button>
+      </div>
+      <span class="tsep" aria-hidden="true"></span>
       <button id="btn-find" class="iconbtn" aria-label="Find a node" title="Find a node  ( / or Ctrl+K )"><i data-icon="search"></i></button>
       <button id="btn-expand" class="iconbtn" aria-label="Open every nested graph" title="Open / close every nested graph"><i data-icon="unfold"></i></button>
       <span class="tsep" aria-hidden="true"></span>
@@ -127,6 +137,7 @@
 <script src="/static/timeline.js"></script>
 <script src="/static/flowlayout.js"></script>
 <script src="/static/agentsteps.js"></script>
+<script src="/static/dataflow.js"></script>
 <script src="/static/studio.js"></script>
 <script src="/static/runview.js"></script>
 <script src="/static/runs.js"></script>
