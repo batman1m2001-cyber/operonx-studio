@@ -417,8 +417,22 @@ let flowDotsOn = recall("ox:flowdots", true) !== false;
  * Model: static/dataflow.js. Plan: docs/WORKFLOW_DATAFLOW_VIEWS_PLAN.md */
 let canvasView = recall(`canvasView:${PID}`, "workflow") === "data" ? "data" : "workflow";
 let dfPort = null;   // {key, port, dir}: the port whose lineage is shown
-let dfHoverPort = null;   // {key, port, dir}: a selected op's plug under the pointer
 let dfPlatePin = null;    // {key, port, dir}: a selected GraphOp's plate, clicked
+/* A variable's pill singles out its wires: every drawn wire registers
+ * with the pills at its two ends, and pointing at a pill lights just its
+ * wires and fades the rest — classes only, no redraw, so the sparks keep
+ * running. A clicked plate holds it (dfRowPinned). */
+let dfRowWires = new Map(), dfRowPinned = null;
+function dfRowHot(row, on) {
+  if (!on && row === dfRowPinned) return;
+  const held = dfRowPinned && dfRowPinned !== row ? dfRowPinned : null;
+  // another pill takes the light from the held one while it is pointed at
+  if (on && held) { for (const f of dfRowWires.get(held) || []) f(false); held.classList.remove("hot"); }
+  for (const f of dfRowWires.get(row) || []) f(on);
+  row.classList.toggle("hot", on);
+  $("#world").classList.toggle("dftpick", on);
+  if (!on && held) dfRowHot(held, true);
+}
 
 function setCanvasView(v) {
   if (v === canvasView) return;
@@ -477,9 +491,9 @@ function dfPortsBlock(it, only) {
     const hole = el("span", "dfhole" + (mains ? ` mains ${mains}` : ""), mains === "start" ? "▶" : mains === "scratch" ? "✎" : "");
     r.append(hole, el("span", "dfname mono", port));
     r.title = tip;
-    // a selected op with many wires shows the plug under the pointer
-    r.onmouseenter = () => { if (state.sel !== it.key) return; dfHoverPort = {key: it.key, port, dir}; drawDataLayer(); };
-    r.onmouseleave = () => { if (!dfHoverPort) return; dfHoverPort = null; drawDataLayer(); };
+    // pointing at a variable singles out its wires
+    r.onmouseenter = () => dfRowHot(r, true);
+    r.onmouseleave = () => dfRowHot(r, false);
     r.onclick = (ev) => {
       ev.stopPropagation();
       dfPort = dfPort && dfPort.key === it.key && dfPort.port === port && dfPort.dir === dir ? null : {key: it.key, port, dir};
@@ -500,10 +514,23 @@ function dfPortsBlock(it, only) {
 }
 
 /* A wire's energy: ONE electric spark racing source -> reader, about
- * 2.6x the control dots' speed. A single dashed copy of the wire: a few
+ * 8x the control dots' speed. A single dashed copy of the wire: a few
  * short crackle dashes growing into a bright head at the front, sliding
  * along with CSS and flickering. One element per wire. */
-const DF_SPEED = 190;   // px per second
+// a stack's copies wear their card's own skin — a real card behind it, not
+// a tint. A copy, not a class, so they follow the theme by being re-read
+// when it changes (a page drawn dark and switched to light kept dark copies)
+function skinStacks() {
+  for (const g of document.querySelectorAll("#stacks .genghost")) {
+    const cs = getComputedStyle(g.card);
+    g.style.borderRadius = cs.borderRadius;
+    g.style.background = cs.background;
+    g.style.borderColor = cs.borderTopColor;
+  }
+}
+document.addEventListener("oxtheme", () => requestAnimationFrame(skinStacks));
+
+const DF_SPEED = 560;   // px per second
 // the spark, back to front: crackle, crackle, crackle, head (dash, gap)…
 const DF_SPARK = [1, 3.5, 1.6, 3, 2.4, 2.4, 6];
 const DF_SPARK_LEN = DF_SPARK.reduce((p, q) => p + q, 0);
@@ -518,8 +545,8 @@ function dfComet(wire, d, cls) {
   q.style.strokeDasharray = `${DF_SPARK.join(" ")} ${len + 40}`;
   q.style.setProperty("--a", DF_SPARK_LEN);
   q.style.setProperty("--b", -len);
-  q.style.animationDuration = `${Math.max(.35, len / DF_SPEED).toFixed(2)}s, .16s`;
-  q.style.animationDelay = `${(-Math.random() * 2).toFixed(2)}s, ${(-Math.random() * .16).toFixed(2)}s`;
+  q.style.animationDuration = `${Math.max(.2, len / DF_SPEED).toFixed(2)}s, .16s`;
+  q.style.animationDelay = `${(-Math.random() * .8).toFixed(2)}s, ${(-Math.random() * .16).toFixed(2)}s`;
   return [q];
 }
 
@@ -545,6 +572,7 @@ function drawDataLayer() {
   // its hover state and label go with it
   world.classList.remove("dfwirehot");
   { const t = document.getElementById("dfwirelabel"); if (t) t.hidden = true; }
+  dfRowWires = new Map(); dfRowPinned = null;
   world.classList.remove("dfpin", "dfpeek", "dftpick");
   for (const c of state.cardEls.values()) c.classList.remove("dfpeer");
   for (const r of document.querySelectorAll(".dfport.lit, .dfport.lit2, .dfport.picked, .dfport.remote")) r.classList.remove("lit", "lit2", "picked", "remote");
@@ -606,7 +634,7 @@ function drawDataLayer() {
   };
   const clearV = (x, y0, y1) => {
     const lo = Math.min(y0, y1), hi = Math.max(y0, y1);
-    if (obst.some(o => x > o.l && x < o.r && hi > o.t && lo < o.b)) return false;
+    if (obst.some(o => x > o.l && x < o.r && hi > o.t && lo < o.b && !(o.ring && grp && grp.startsWith(o.ring)))) return false;
     if (!relaxed && alongCtrl(true, x, lo, hi)) return false;
     // relaxed: a run may come close to another, but never lie on it
     const sep = relaxed ? 3.5 : 7;
@@ -615,7 +643,7 @@ function drawDataLayer() {
   // (the stub out of a hole starts inside its own card: that card is skipped)
   const clearH = (y, x0, x1, own) => {
     const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
-    if (obst.some(o => o.key !== own && y > o.t && y < o.b && hi > o.l && lo < o.r)) return false;
+    if (obst.some(o => o.key !== own && y > o.t && y < o.b && hi > o.l && lo < o.r && !(o.ring && grp && grp.startsWith(o.ring)))) return false;
     if (!relaxed && alongCtrl(false, y, lo, hi)) return false;
     const sep = relaxed ? 3.5 : 7;
     return !usedH.some(u => u.g !== grp && Math.abs(u.y - y) < sep && hi > u.lo - 4 && lo < u.hi + 4);
@@ -699,9 +727,37 @@ function drawDataLayer() {
       list.sort((p, q) => p[0].x - q[0].x);
       // (a plate's hole is one shared object: key by the pair, not the hole)
       list.forEach(([a, b], k) => { if (!joinOf.has(b)) joinOf.set(b, new Map()); joinOf.get(b).set(a, {jg: jk, k}); });
-      hubs.set(jk, {n: list.length, join: true, b: list[0][1]});
+      hubs.set(jk, {n: list.length, join: true, b: list[0][1], shift: 0});
+    }
+    // rings down one side of a card (an op's stacked outputs) step left,
+    // each lower one past the one above: their arrival lanes drop past the
+    // rings above them, so no two rings may share a lane's column
+    const stack = new Map();
+    for (const [jk, J] of hubs) if (J.join) {
+      const sk = J.b.key;
+      if (!stack.has(sk)) stack.set(sk, []);
+      stack.get(sk).push(J);
+    }
+    for (const list of stack.values()) {
+      list.sort((p, q) => p.b.y - q.b.y);
+      // one base column for the lot (plates differ in width)
+      const x0 = Math.min(...list.map(J => Math.min(J.b.x, boxOf(J.b).left)));
+      let at = 0;
+      for (const J of list) { J.x0 = x0; J.shift = at; at += LANE * J.n + 14; }
+    }
+    // every ring stands before anything is routed, its lanes' last drop
+    // fenced off: only its own sources may come down there
+    for (const [jk, J] of hubs) if (J.join) {
+      J.hx = J.x0 - 30 - LANE * (J.n - 1) / 2 - J.shift;
+      J.hy = J.b.y;
+      J.trunk = `M ${J.hx} ${J.hy} L ${J.b.x} ${J.b.y}`;
+      const half = LANE * (J.n - 1) / 2;
+      obst.push({key: `hub:${jk}`, ring: `${jk}#`, l: J.hx - half - 5, t: J.hy - SPOKE - 20, r: J.hx + half + 5, b: J.hy + 6});
     }
   };
+  // a join's lanes are laid before anything else: crowded among other
+  // wires' columns, its sources found no lane of their own and shared one
+  const joinFirst = (list) => list.sort((p, q) => (joinOf.get(q[1])?.has(q[0]) ? 1 : 0) - (joinOf.get(p[1])?.has(p[0]) ? 1 : 0));
   /* Where a data run crosses a control edge it HOPS: a small arc over it,
    * the wiring-diagram sign for "these cross, they do not join". The
    * control edges are sampled once per draw, as polylines. */
@@ -832,6 +888,19 @@ function drawDataLayer() {
     if (!clearV(xc, ymA, ymB)) xc = scan2(xc, x => clearV(x, ymA, ymB));
     return keep(clean([[a.x, a.y], [x1, a.y], [x1, ymA], [xc, ymA], [xc, ymB], [x2, ymB], ...tailOf(b, x2)]));
   };
+  /* A reader straight ahead — its hole right of the source's, nothing
+   * between — takes ONE jog: across, down (or up) a free column, across
+   * into the hole. Columns are taken left to right, and wires are laid
+   * from the lowest source up, so a jog never crosses its neighbours'. */
+  const zig = (a, b) => {
+    if (b.entry === "right" || b.fromTop) return null;
+    const lim = Math.min(b.x, boxOf(b).left) - 6;
+    for (let x = a.x + 10; x <= lim; x += 4) {
+      if (clearH(a.y, a.x, x, ownOf(a)) && clearV(x, a.y, b.y) && clearH(b.y, x, b.x, ownOf(b)))
+        return keep(clean([[a.x, a.y], [x, a.y], [x, b.y], [b.x, b.y]]));
+    }
+    return null;
+  };
   const SPOKE = 16;   // how far a spoke curves out of its hub before it runs straight
   const LANE = 9;     // the gap between two spokes of one fan
   const median = (v) => { const s = [...v].sort((p, q) => p - q); return s[Math.floor((s.length - 1) / 2)]; };
@@ -912,17 +981,10 @@ function drawDataLayer() {
   const route = (a, b) => {
     const Jo = joinOf.get(b) && joinOf.get(b).get(a);
     if (Jo) {
+      // the ring stands just outside the hole, on its entry side (placed
+      // in prepLanes); the arrival lanes sit side by side above it, in
+      // source order
       const J = hubs.get(Jo.jg);
-      if (J.hx == null) {
-        // the ring stands just outside the hole, on its entry side; the
-        // arrival lanes sit side by side above it, in source order
-        const Bx = boxOf(b);
-        J.hx = Math.min(b.x, Bx.left) - 30 - LANE * (J.n - 1) / 2;
-        J.hy = b.y;
-        // sorted already (prepLanes), so the arrival lanes keep source order
-        J.trunk = `M ${J.hx} ${J.hy} L ${b.x} ${b.y}`;
-        obst.push({key: `hub:${Jo.jg}`, l: J.hx - 6, t: J.hy - 6, r: J.hx + 6, b: J.hy + 6});
-      }
       grp = `${Jo.jg}#${Jo.k}`;
       lastRoute = {grp, hub: Jo.jg};
       const ax = J.hx + LANE * (Jo.k - (J.n - 1) / 2), ay = J.hy - SPOKE;
@@ -938,7 +1000,7 @@ function drawDataLayer() {
     if (!H || H.n < 2) {
       grp = `solo${++solo}`;
       lastRoute = {grp, hub: null};
-      return `M ${a.x} ${a.y}` + rounded(ortho(a, b));
+      return `M ${a.x} ${a.y}` + rounded(zig(a, b) || ortho(a, b));
     }
     if (H.hx == null) placeHub(H, g);
     grp = `${g}#${Bi.k}`;
@@ -1002,20 +1064,23 @@ function drawDataLayer() {
     const hit = document.createElementNS(SVGNS, "path");
     hit.setAttribute("d", d);
     hit.setAttribute("class", "dfhit");
-    hit.addEventListener("mouseenter", (ev) => {
-      world.classList.add("dfwirehot");
-      p.dfFlowMake(); p.classList.add("hot"); for (const f of flow) f.classList.add("hot");
+    const hot = (on) => {
+      world.classList.toggle("dfwirehot", on);
+      if (on) p.dfFlowMake();
+      p.classList.toggle("hot", on); for (const f of flow) f.classList.toggle("hot", on);
       // its line from the source and its hub light with it
-      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.add("hot"); H.el?.classList.add("hot"); }
-      for (const h of [a, b]) if (h.row) h.row.classList.add("hot");
+      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.toggle("hot", on); H.el?.classList.toggle("hot", on); }
+      for (const h of [a, b]) if (h.row) h.row.classList.toggle("hot", on);
+    };
+    for (const h of [a, b]) if (h.row) { if (!dfRowWires.has(h.row)) dfRowWires.set(h.row, []); dfRowWires.get(h.row).push(hot); }
+    hit.addEventListener("mouseenter", (ev) => {
+      hot(true);
       if (label) { const t = dfWireLabel(); t.textContent = label; t.hidden = false; dfWireLabelMove(ev); }
     });
     hit.addEventListener("mousemove", dfWireLabelMove);
     hit.addEventListener("mouseleave", () => {
-      world.classList.remove("dfwirehot");
-      p.classList.remove("hot"); for (const f of flow) f.classList.remove("hot");
-      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.remove("hot"); H.el?.classList.remove("hot"); }
-      for (const h of [a, b]) if (h.row) h.row.classList.remove("hot");
+      hot(false);
+      if (dfRowPinned) dfRowHot(dfRowPinned, true);
       const t = dfWireLabel(); t.hidden = true;
     });
     queueMicrotask(() => { if (p.parentNode && !p.classList.contains("far")) p.parentNode.append(hit); });
@@ -1327,6 +1392,7 @@ function drawDataLayer() {
     }
     pairs.sort((p, q) => (q[0].y - p[0].y) || (q[1].y - p[1].y));
     prepLanes(pairs);
+    joinFirst(pairs);
     for (const [a, z, cls, label] of pairs) wire(a, z, cls, false, label);
     drawHubs(wsvg);
     over.querySelector(`.dfterm.${state.dfTerm}`)?.classList.add("picked");
@@ -1344,43 +1410,40 @@ function drawDataLayer() {
     // the plate a binding passes through: in by its START side, out by END
     const plateOf = (b) => b.to.key === it.key ? {dir: b.to.export ? "out" : "in", port: b.to.port}
       : {dir: b.from.kind === "input" ? "in" : "out", port: b.from.port};
-    // many wires: one plate at a time, the one under the pointer or pinned
-    const pick = rel.length > 5 ? (dfHoverPort && dfHoverPort.key === it.key ? dfHoverPort
-      : dfPlatePin && dfPlatePin.key === it.key ? dfPlatePin : null) : null;
-    world.classList.toggle("dftpick", !!pick);
+    // every wire shows; a plate under the pointer, or clicked, singles
+    // out its own
     const pairs = [];
     for (const b of rel) {
       const a = srcHole(b), z = dstHole(b);
       for (const k of [b.from.key, b.to.key]) state.cardEls.get(k)?.classList.add("dfpeer");
-      const pl = plateOf(b);
-      const on = !pick || (pl.dir === pick.dir && pl.port === pick.port);
-      for (const h of [a, z]) if (h && h.row && !h.plate) h.row.classList.add(on && pick ? "picked" : "lit");
-      if (rel.length > 5 && !pick) continue;
-      if (on && a && z) pairs.push([a, z, "dfconn focus" + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
+      for (const h of [a, z]) if (h && h.row && !h.plate) h.row.classList.add("lit");
+      if (a && z) pairs.push([a, z, "dfconn focus" + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
     }
-    // the plates are the picker
+    let pinRow = null;
     for (const [k2, P] of plates.get(it.key) || []) {
       const [dir2, port2] = [k2.slice(0, k2.indexOf("|")), k2.slice(k2.indexOf("|") + 1)];
       const row = P.row;
-      row.dataset.pk = it.key; row.dataset.pp = port2; row.dataset.pd = dir2;
-      row.classList.toggle("picked", !!pick && pick.dir === dir2 && pick.port === port2);
-      row.classList.toggle("pickable", rel.length > 5);
-      if (rel.length <= 5) continue;
-      row.onmouseenter = () => {
-        if (dfHoverPort && dfHoverPort.key === it.key && dfHoverPort.port === port2 && dfHoverPort.dir === dir2) return;
-        dfHoverPort = {key: it.key, port: port2, dir: dir2}; drawDataLayer();
-      };
+      row.classList.add("pickable");
+      if (dfPlatePin && dfPlatePin.key === it.key && dfPlatePin.port === port2 && dfPlatePin.dir === dir2) pinRow = row;
+      row.onmouseenter = () => dfRowHot(row, true);
+      row.onmouseleave = () => dfRowHot(row, false);
       row.onclick = (ev) => {
         ev.stopPropagation();
-        dfPlatePin = dfPlatePin && dfPlatePin.key === it.key && dfPlatePin.port === port2 && dfPlatePin.dir === dir2 ? null : {key: it.key, port: port2, dir: dir2};
-        dfHoverPort = null; drawDataLayer();
+        const same = dfPlatePin && dfPlatePin.key === it.key && dfPlatePin.port === port2 && dfPlatePin.dir === dir2;
+        dfPlatePin = same ? null : {key: it.key, port: port2, dir: dir2};
+        const was = dfRowPinned;
+        dfRowPinned = null;
+        if (was) dfRowHot(was, false);
+        if (!same) { dfRowPinned = row; dfRowHot(row, true); }
       };
     }
     pairs.sort((p, q) => (q[0].y - p[0].y) || (q[1].y - p[1].y));
     prepLanes(pairs);
+    joinFirst(pairs);
     for (const [a, z, cls, label] of pairs) wire(a, z, cls, false, label);
     drawHubs(wsvg);
     markRows();
+    if (pinRow) { dfRowPinned = pinRow; dfRowHot(pinRow, true); }
     return;
   }
   if (!it || it.inner || it.kind === "knob" || (it.node && it.node.boundary)) return;
@@ -1444,15 +1507,16 @@ function drawDataLayer() {
       j[end] = {...j[end], y: it.y + it.h * (i + 1) / (list.length + 1)};
     });
     // a busy op's peek only lights its partners: faint wires to many of
-    // them would cross each other — a click shows them, one plug at a time
+    // them would cross each other — a click shows them all
     if (jobs2.length > 5) return;
     spreadEnds(jobs2.filter(j => j[1].own === it.key), 1);
     spreadEnds(jobs2.filter(j => j[0].own === it.key), 0);
     prepLanes(jobs2);
+    joinFirst(jobs2);
     for (const [a, z, cls, label] of jobs2) wire(a, z, cls, false, label);
     return;
   }
-  let jobs = [];
+  const jobs = [];
   for (const b of nb.ins) {
     const a = b.from.kind === "op" ? plug(b.from.key, "out", b.from.port) : srcHole(b);
     const end = pinned ? cardHole(it.key, "in", b.to.port) : side("in");
@@ -1463,23 +1527,9 @@ function drawDataLayer() {
     const z = b.to.end || b.to.export ? dstHole(b) : plug(b.to.key, "in", b.to.port);
     if (start && z) jobs.push([start, z, cls0 + " feed" + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`, {dir: "out", port: b.from.port}]);
   }
-  /* An op with many wires wires ONE plug at a time, like a terminal: the
-   * plug under the pointer, or the one clicked. Every partner's hole stays
-   * lit, so what it touches is still plain. */
-  const many = pinned && jobs.length > 5;
-  card?.classList.toggle("dfpicker", many);
-  if (many && !dfPort) {
-    const hp = dfHoverPort && dfHoverPort.key === it.key ? dfHoverPort : null;
-    world.classList.toggle("dftpick", !!hp);
-    for (const j of jobs) {
-      const far = j[4].dir === "in" ? j[0] : j[1];
-      const on = hp && j[4].dir === hp.dir && j[4].port === hp.port;
-      if (far && far.row) far.row.classList.add(on ? "picked" : "lit");
-    }
-    jobs = hp ? jobs.filter(j => j[4].dir === hp.dir && j[4].port === hp.port) : [];
-  }
   jobs.sort((p, q) => (q[0].y - p[0].y) || (q[1].y - p[1].y));
   prepLanes(jobs);
+  joinFirst(jobs);
   for (const [a, z, cls, label] of jobs) wire(a, z, cls, false, label);
   drawHubs(wsvg);
   markRows();
@@ -1781,7 +1831,7 @@ function render() {
     // the drawn card's outline and hue, and nothing that looks for cards
     // (find, the audits, dimming) ever sees them.
     if (stacksBox && !it.inner && it.kind !== "knob" && it.node && it.node.is_gen && !card.classList.contains("dfcard")) {
-      const cs = getComputedStyle(card), ghosts = [];
+      const ghosts = [];
       for (const k of [2, 1]) {
         const ghost = el("div", `genghost g${k}`);
         ghost.setAttribute("aria-hidden", "true");
@@ -1789,10 +1839,7 @@ function render() {
         ghost.style.top = `${it.y + 6 * k}px`;
         ghost.style.width = `${card.offsetWidth || it.w}px`;
         ghost.style.height = `${card.offsetHeight || it.h}px`;
-        // the card's own skin: a real card behind it, not a tint
-        ghost.style.borderRadius = cs.borderRadius;
-        ghost.style.background = cs.background;
-        ghost.style.borderColor = cs.borderTopColor;
+        ghost.card = card;
         ghosts.push(ghost);
         stacksBox.append(ghost);
       }
@@ -1803,6 +1850,7 @@ function render() {
       new MutationObserver(mirror).observe(card, {attributes: true, attributeFilter: ["class"]});
     }
   }
+  if (stacksBox) skinStacks();
   // each condition row's port DOT on the side its wire leaves by — the
   // side the layout chose (where its target lies; END left, a loop's
   // return right) — and where that dot is, card-relative
@@ -2110,7 +2158,7 @@ function renderKeeping(key) {
 }
 
 function deselect() {
-  dfPlatePin = dfHoverPort = null;
+  dfPlatePin = null;
   const before = state.sel;
   state.sel = null;
   if (canvasView === "workflow" && before) renderKeeping(before);
@@ -2392,13 +2440,6 @@ document.addEventListener("pointermove", (ev) => {
   if (state.dfTermHover != null) {
     const r = ev.target.closest && ev.target.closest(".dfterm .dftermrow");
     if (!(r && r.dataset.port === state.dfTermHover)) { state.dfTermHover = null; drawDataLayer(); }
-  }
-  if (dfHoverPort) {
-    const r = ev.target.closest && ev.target.closest(".dfport");
-    const pl = ev.target.closest && ev.target.closest(".dfplate");
-    const onRow = r && r.dataset.port === dfHoverPort.port && r.dataset.dir === dfHoverPort.dir && r.closest(".node") === state.cardEls.get(dfHoverPort.key);
-    const onPlate = pl && pl.dataset.pk === dfHoverPort.key && pl.dataset.pp === dfHoverPort.port && pl.dataset.pd === dfHoverPort.dir;
-    if (!onRow && !onPlate) { dfHoverPort = null; drawDataLayer(); }
   }
 });
 
@@ -2849,7 +2890,7 @@ new ResizeObserver(() => flushCanvas()).observe($("#stage"));
  * code, prompts and source live in collapsed sections underneath, so
  * they are one click away but never in the way. */
 function select(key) {
-  dfPlatePin = dfHoverPort = null;
+  dfPlatePin = null;
   state.dfTerm = null;
   state.dfTermPort = state.dfTermHover = null;
   const before = state.sel;

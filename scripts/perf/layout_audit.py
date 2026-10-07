@@ -75,6 +75,9 @@ AUDIT_JS = r"""
   for (const [k, c] of state.cardEls) keyOf.set(c, k);
   const boxes = [];
   for (const c of document.querySelector('#nodes').children) {
+    // a loop's zone is a backdrop under its cards, drawn to hold them and
+    // the edges between them: not a card
+    if (c.classList.contains('loopzone')) continue;
     let key = keyOf.get(c);
     if (!key) key = c.classList.contains('bnode') ? `__main/${c.classList.contains('b-start') ? 'start' : 'end'}`
       : c.classList.contains('serve-node') ? `__serve/${c.textContent.slice(0, 20)}` : `?${c.className}`;
