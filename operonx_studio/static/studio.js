@@ -613,6 +613,7 @@ function drawDataLayer() {
    * lanes; arriving, the highest hole takes the innermost column. */
   const hubs = new Map();       // hole → {n, off, a, targets, hx, hy, cls}
   const branchOf = new Map();   // target hole → {g, k}
+  const joinOf = new Map();     // target hole → {jg, k}: one of several sources into it
   const laneIn = new Map();
   const side2 = (pt, dir) => `${pt.key}|${dir}|${Math.round(pt.x)}`;
   const hubKey = (a) => `${a.own || a.key}|${Math.round(a.x)}|${Math.round(a.y)}`;
@@ -636,6 +637,24 @@ function drawDataLayer() {
       });
     }
     for (const [k, ys] of ins) [...ys].sort((p, q) => p - q).forEach((y, i) => laneIn.set(`${k}|${y}`, i));
+    // ONE join point per hole fed by several sources (alternative branches
+    // into one export, say): each arrives on its own lane into a ring
+    // beside the hole, and one short line goes in
+    const into = new Map();
+    for (const [a, b] of pairs) {
+      const Bi = branchOf.get(b);
+      if (Bi && hubs.get(Bi.g) && hubs.get(Bi.g).n > 1) continue;   // a spoke already
+      const jk = `join|${b.own || b.key}|${Math.round(b.x)}|${Math.round(b.y)}`;
+      if (!into.has(jk)) into.set(jk, []);
+      into.get(jk).push([a, b]);
+    }
+    for (const [jk, list] of into) {
+      if (list.length < 2) continue;
+      list.sort((p, q) => p[0].x - q[0].x);
+      // (a plate's hole is one shared object: key by the pair, not the hole)
+      list.forEach(([a, b], k) => { if (!joinOf.has(b)) joinOf.set(b, new Map()); joinOf.get(b).set(a, {jg: jk, k}); });
+      hubs.set(jk, {n: list.length, join: true, b: list[0][1]});
+    }
   };
   // a polyline with rounded corners, from its first point on
   const rounded = (pts) => {
@@ -676,10 +695,10 @@ function drawDataLayer() {
    * → a free column beside it → the clear channel under it → a free column
    * down (or up) → the channel above b's row → b's gutter → into the hole.
    * `col` starts the trace already in its column (a spoke out of a hub). */
-  const ortho = (a, b, col) => {
+  const ortho = (a, b, col, depth = 0) => {
     const A = boxOf(a);
     const {yB0, x2} = gutter(b);
-    const yA0 = col != null ? a.y + 8 : A.bottom + 22;
+    const yA0 = (col != null ? a.y + 8 : A.bottom + 22) + LANE * depth;
     const x1 = col != null ? col : scan(Math.max(a.x, A.right) + 20, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownOf(a)));
     let xc = scan2(x2, x => clearV(x, yA0, yB0));
     const ymA = scan(yA0, 4, y => clearH(y, x1, xc) && clearV(x1, a.y, y) && clearV(xc, y, yB0), 200);
@@ -760,6 +779,28 @@ function drawDataLayer() {
     D.forEach((b, k) => H.spoke.set(b, {dir: 0, x: H.hx + LANE * (k - (D.length - 1) / 2)}));
   };
   const route = (a, b) => {
+    const Jo = joinOf.get(b) && joinOf.get(b).get(a);
+    if (Jo) {
+      const J = hubs.get(Jo.jg);
+      if (J.hx == null) {
+        // the ring stands just outside the hole, on its entry side; the
+        // arrival lanes sit side by side above it, in source order
+        const Bx = boxOf(b);
+        J.hx = Math.min(b.x, Bx.left) - 30 - LANE * (J.n - 1) / 2;
+        J.hy = b.y;
+        // sorted already (prepLanes), so the arrival lanes keep source order
+        J.trunk = `M ${J.hx} ${J.hy} L ${b.x} ${b.y}`;
+        obst.push({key: `hub:${Jo.jg}`, l: J.hx - 6, t: J.hy - 6, r: J.hx + 6, b: J.hy + 6});
+      }
+      grp = `${Jo.jg}#${Jo.k}`;
+      lastRoute = {grp, hub: Jo.jg};
+      const ax = J.hx + LANE * (Jo.k - (J.n - 1) / 2), ay = J.hy - SPOKE;
+      // sources run left to right into lanes left to right; the leftmost
+      // takes the lowest channel, so no drop crosses another's run
+      const pts = ortho(a, {x: ax, y: ay, fromTop: true}, null, J.n - 1 - Jo.k);
+      return `M ${a.x} ${a.y}` + rounded(pts)
+        + ` C ${ax} ${ay + SPOKE * .55} ${J.hx} ${J.hy - SPOKE * .45} ${J.hx} ${J.hy}`;
+    }
     const Bi = branchOf.get(b);
     const g = Bi ? Bi.g : null;
     const H = g ? hubs.get(g) : null;
@@ -810,7 +851,7 @@ function drawDataLayer() {
       const c = document.createElementNS(SVGNS, "circle");
       c.setAttribute("cx", H.hx); c.setAttribute("cy", H.hy); c.setAttribute("r", 5);
       c.setAttribute("class", "dfhub" + (/\blit\b/.test(H.cls) ? " lit" : "") + (/\bpeek\b/.test(H.cls) ? " peek" : ""));
-      c.append(Object.assign(document.createElementNS(SVGNS, "title"), {textContent: `one value → ${H.n} readers`}));
+      c.append(Object.assign(document.createElementNS(SVGNS, "title"), {textContent: H.join ? `${H.n} sources → one input` : `one value → ${H.n} readers`}));
       layer.append(c);
       H.el = c;
     }
