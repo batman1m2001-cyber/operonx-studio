@@ -53,7 +53,7 @@ ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 FLAGS = {a for a in sys.argv[1:] if a.startswith("--")}
 BASE, OUT = ARGS[0], ARGS[1]
 PIDS = ARGS[2:] or [
-    "3d65b3e448e4", "9595297a4df8", "c3d87c6cae2e", "5f5c06a34d20", "d5e0f6b8b653",
+    "c3d87c6cae2e", "5f5c06a34d20", "d5e0f6b8b653",
     "adbca90511ee", "67155a45bfd6", "0c745df89ed3", "af28abc41e22", "64121f45b5db",
     "aa5476d3b0b9", "4efc1a6a2c78", "0a8872a2074a",
 ]
