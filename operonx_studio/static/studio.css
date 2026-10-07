@@ -3794,3 +3794,16 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .node.dfcard .dfport, .node.dfcard .dfcol { max-width: none; }
 .node.dfcard .dfport .dfname { overflow: visible; text-overflow: clip; }
 #nodes.measuring .node.dfcard .dfports { width: max-content !important; }
+
+/* the side panel follows the op: inset from its edge, corners concentric
+   with the card's, a faint tint — part of the op, not a bolt-on */
+.node.dfcard .dfcol { display: grid; grid-auto-rows: 20px; gap: 4px; padding: 5px; background: color-mix(in srgb, var(--df) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--df) 16%, transparent); border-radius: 11px; box-shadow: none; }
+.node.dfcard .dfcol.in { margin-left: -20px; border-radius: 11px; box-shadow: none; }
+.node.dfcard .dfcol.out { margin-right: -20px; border-radius: 11px; box-shadow: none; }
+.node.dfcard .dfcol .dfthead { display: none; }
+/* every plug in a panel the same size: one height, the widest name's width */
+.node.dfcard .dfport { box-sizing: border-box; width: 100%; height: 20px; padding: 0 9px 0 4px; justify-content: flex-start; }
+.node.dfcard .dfport.out { padding: 0 4px 0 9px; justify-content: flex-start; }
+
+.node.dfcard .badges { margin-top: 7px; }

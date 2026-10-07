@@ -528,8 +528,10 @@ function drawDataLayer() {
     const A = boxOf(a) || {bottom: a.y + 20, top: a.y - 20, right: a.x}, Bx = boxOf(b) || {top: b.y - 20, bottom: b.y + 20, left: b.x};
     const x1 = Math.max(a.x, A.right) + 14 + 5 * lane("o" + (a.key || "") + Math.round(A.right));
     const x2 = Math.min(b.x, Bx.left) - 14 - 5 * lane("i" + (b.key || "") + Math.round(Bx.left));
+    // cross in the clear channel the layout leaves just below the
+    // source's layer, then descend the reader's gutter
     let ym;
-    if (Bx.top > A.bottom + 16) ym = (A.bottom + Bx.top) / 2;          // a reader below: the gap between
+    if (Bx.top > A.bottom + 16) ym = Math.min(A.bottom + 22, (A.bottom + Bx.top) / 2);
     else ym = Math.max(A.bottom, Bx.bottom) + 22;                       // beside or above: under both
     ym += 4 * lane("g" + Math.round(ym / 24));
     const r = 8, sx = (u, v) => (v > u ? 1 : -1);
@@ -578,8 +580,11 @@ function drawDataLayer() {
       const outs = [...new Set(B.filter(b => (b.to.key === key && b.to.export) || (b.from.kind === "op" && b.from.key === key))
         .map(b => b.to.key === key && b.to.export ? b.to.port : b.from.port))];
       const map = new Map();
+      // inputs enter by its START (top left), outputs leave by its END
+      // (bottom right) — where the values really go in and come out
       const put = (list, dir2) => list.forEach((port2, i) => {
-        const x = dir2 === "in" ? C.x : C.x + C.w, y = C.y + 50 + i * 20;
+        const x = dir2 === "in" ? C.x : C.x + C.w;
+        const y = dir2 === "in" ? C.y + 50 + i * 22 : C.y + C.h - 26 - (list.length - 1 - i) * 22;
         const tagEl = el("div", `dfplate ${dir2}`);
         tagEl.append(el("span", "dfhole"), el("span", "dfname mono", port2));
         over.append(tagEl);
