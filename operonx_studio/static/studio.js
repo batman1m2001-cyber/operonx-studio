@@ -516,8 +516,8 @@ function drawDataLayer() {
    * out of its hole to the right, down the gutter beside its op, across
    * the gap between the two rows, down the reader's left gutter and into
    * the hole — rounded corners, and every wire its own lane, so parallel
-   * traces lie side by side instead of on top of each other. A reader far
-   * enough to the right gets a plain curve. */
+   * traces lie side by side instead of on top of each other. One style for
+   * every wire: a mix of curves and traces reads as an accident. */
   const lanes = new Map();
   const lane = (k) => { const n = lanes.get(k) || 0; lanes.set(k, n + 1); return n; };
   const boxOf = (pt) => {
@@ -525,10 +525,6 @@ function drawDataLayer() {
     return it2 ? {top: it2.y, bottom: it2.y + it2.h, left: it2.x, right: it2.x + it2.w} : null;
   };
   const route = (a, b) => {
-    if (b.x - a.x > 90 && Math.abs(b.y - a.y) < 600) {
-      const h = Math.min(160, Math.max(40, (b.x - a.x) * 0.5));
-      return `M ${a.x} ${a.y} C ${a.x + h} ${a.y}, ${b.x - h} ${b.y}, ${b.x} ${b.y}`;
-    }
     const A = boxOf(a) || {bottom: a.y + 20, top: a.y - 20, right: a.x}, Bx = boxOf(b) || {top: b.y - 20, bottom: b.y + 20, left: b.x};
     const x1 = Math.max(a.x, A.right) + 14 + 5 * lane("o" + (a.key || "") + Math.round(A.right));
     const x2 = Math.min(b.x, Bx.left) - 14 - 5 * lane("i" + (b.key || "") + Math.round(Bx.left));
@@ -881,7 +877,7 @@ function render() {
   const measured = [];
   for (const it of leaves) {
     const card = cardOf.get(it.key);
-    let els = [...card.querySelectorAll(".ntext, .brcond, .dfport")];
+    let els = [...card.querySelectorAll(".ntext, .brcond, .dfports")];
     // gates: plain name line, plus the transport line below it
     if (!els.length) els = [".nname", ".nkind"].map(sel => card.querySelector(sel)).filter(Boolean);
     measured.push({it, card, els});
@@ -894,7 +890,7 @@ function render() {
     if (!laidOut[i].shown || !m.els.length) return;
     // a port row sits in one of two equal columns: the card must grow by
     // twice its deficit for that column to gain it
-    const need = Math.max(...m.els.map((e, j) => (natural[i][j] - laidOut[i].widths[j]) * (e.classList.contains("dfport") ? 2 : 1)));
+    const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
     const want = Math.ceil(m.it.w + need + 8);
     const cap = m.card.querySelector(".dfports") ? 420 : 310;
     const w = Math.max(180, Math.min(cap, want));

@@ -3786,3 +3786,11 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .node.dfcard .dfcol { width: max-content; max-width: 100%; box-sizing: border-box; }
 .node.dfcard .dfcol.in { justify-self: start; }
 .node.dfcard .dfcol.out { justify-self: end; }
+
+/* the two panels size to their plugs: an empty side gives its room away */
+.node.dfcard .dfports { grid-template-columns: auto auto; justify-content: space-between; }
+
+/* plugs keep their names whole; the card grows to its panels instead */
+.node.dfcard .dfport, .node.dfcard .dfcol { max-width: none; }
+.node.dfcard .dfport .dfname { overflow: visible; text-overflow: clip; }
+#nodes.measuring .node.dfcard .dfports { width: max-content !important; }
