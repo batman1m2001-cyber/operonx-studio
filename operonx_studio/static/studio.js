@@ -704,7 +704,9 @@ function drawDataLayer() {
         const x = dir2 === "in" ? C.x : C.x + C.w;
         const y = dir2 === "in" ? C.y + 50 + i * 22 : C.y + C.h - 26 - (list.length - 1 - i) * 22;
         const tagEl = el("div", `dfplate ${dir2}`);
-        const hole = el("span", "dfhole");
+        const feed = dir2 === "in" && B.find(b => b.to.key === key && !b.to.export && b.to.port === port2);
+        const mains = feed && DataFlow.isBroadcast(feed) ? (feed.from.kind === "scratch" ? "scratch" : "start") : null;
+        const hole = el("span", "dfhole" + (mains ? ` mains ${mains}` : ""), mains === "start" ? "▶" : mains === "scratch" ? "✎" : "");
         // the hole on the frame line itself: an input's at the plate's left
         // end, an output's at its right end
         if (dir2 === "in") tagEl.append(hole, el("span", "dfname mono", port2));
@@ -789,6 +791,25 @@ function drawDataLayer() {
   const pinned = !!state.sel;
   const key = state.sel || state.dfHover || null;
   const it = key && R(key);
+  if (it && it.inner && pinned) {
+    // a selected opened GraphOp: into its frame, through it, and out
+    world.classList.add("dfpin");
+    state.cardEls.get(it.key)?.classList.add("dfpeer");
+    containerHole(it.key, "in", "");   // its plates exist even when no wire comes
+    const rel = B.filter(b => b.to.key === it.key || b.from.key === it.key);
+    const pairs = [];
+    for (const b of rel) {
+      const a = DataFlow.isBroadcast(b) ? null : srcHole(b), z = dstHole(b);
+      for (const k of [b.from.key, b.to.key]) state.cardEls.get(k)?.classList.add("dfpeer");
+      if (a && z) pairs.push([a, z, "dfconn focus" + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
+    }
+    pairs.sort((p, q) => (q[0].y - p[0].y) || (q[1].y - p[1].y));
+    prepLanes(pairs);
+    for (const [a, z, cls, label] of pairs) wire(a, z, cls, false, label);
+    drawJunctions(wsvg);
+    markRows();
+    return;
+  }
   if (!it || it.inner || it.kind === "knob" || (it.node && it.node.boundary)) return;
   const nb = DataFlow.nodeBindings(B, it.key);
   if (!nb.ins.length && !nb.outs.length) return;
@@ -1009,12 +1030,14 @@ function render() {
   // hole on one open op to a hole on another
   state.dfOpen = new Map();
   if (canvasView === "workflow" && state.sel) {
-    const own = DataFlow.nodeBindings(state.dfB, state.sel);
+    // every binding touching the selection — for an opened GraphOp that is
+    // what crosses its frame both ways and what its own ops read and export
     state.dfOpen.set(state.sel, null);   // null: every bound variable
-    for (const b of [...own.ins, ...own.outs]) {
+    for (const b of state.dfB) {
       if (DataFlow.isBroadcast(b)) continue;
+      if (b.to.key !== state.sel && b.from.key !== state.sel) continue;
       const pk = b.to.key === state.sel ? b.from.key : b.to.key;
-      if (!pk || pk === state.sel || (b.from.kind !== "op" && b.to.key === state.sel)) continue;
+      if (!pk || pk === state.sel) continue;
       if (!state.dfOpen.has(pk)) state.dfOpen.set(pk, new Set());
       state.dfOpen.get(pk).add(b.id);
     }

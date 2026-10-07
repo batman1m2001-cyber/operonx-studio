@@ -84,3 +84,15 @@ test("pairs: one connector per node pair, broadcasts left out", () => {
   const P = pairs(B).map(p => `${p.from}>${p.to}:${p.bindings.length}`);
   assert.deepEqual(P, ["r>k:1", "k>l:1", "l>s:1"]);
 });
+
+test("a nested graph with no name: its ops read its inputs by the GraphOp's id", () => {
+  const H = {name: "qc", nodes: [
+    {id: "qc.sa", name: "sa", inputs: [{name: "conversation", binding: ref("qc", "conversation")}],
+     graph: {nodes: [{id: "qc.sa.l1", name: "l1", inputs: [{name: "conversation", binding: ref("qc.sa", "conversation")}]}],
+             exports: [{from: "qc.sa.l1", output: "result", as: "result"}]}},
+  ]};
+  const B = dataBindings(H, new Set(["qc.sa"]));
+  const s = B.map(b => `${b.from.kind}:${b.from.key}.${b.from.port}→${b.to.key}.${b.to.port}${b.to.export ? "!" : ""}`);
+  assert.ok(s.includes("input:qc.sa.conversation→qc.sa/qc.sa.l1.conversation"));
+  assert.ok(s.includes("op:qc.sa/qc.sa.l1.result→qc.sa.result!"));
+});

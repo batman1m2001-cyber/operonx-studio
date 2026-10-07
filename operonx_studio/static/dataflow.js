@@ -25,11 +25,15 @@
   function dataBindings(graph, expanded) {
     const out = [];
     const open = expanded || new Set();
-    (function walk(g, prefix) {
+    // a nested graph may carry no name of its own: its ops then name their
+    // graph inputs by the GraphOp's id (`qc_flow.sentiment_agent`)
+    (function walk(g, prefix, owner) {
       const byName = new Map((g.nodes || []).map(n => [n.name, n]));
       const level = prefix ? prefix.slice(0, -1) : "";
+      const self = (from) => (g.name && last(from) === g.name)
+        || (owner && (from === owner.id || last(from) === owner.name));
       const source = (from, output) => {
-        if (last(from) === g.name) return {kind: "input", key: level, port: output};
+        if (self(from)) return {kind: "input", key: level, port: output};
         const n = byName.get(last(from));
         return n ? {kind: "op", key: prefix + n.id, port: output} : null;
       };
@@ -43,14 +47,14 @@
           if (!from || (from.kind === "op" && from.key === key)) continue;
           out.push({from, to: {key, port: inp.name}});
         }
-        if (n.graph && open.has(key)) walk(n.graph, key + "/");
+        if (n.graph && open.has(key)) walk(n.graph, key + "/", n);
       }
       // an opened GraphOp hands its exports out through its own card
       if (prefix) for (const e of g.exports || []) {
         const from = source(e.from, e.output);
         if (from) out.push({from, to: {key: level, port: e.as, export: true}});
       }
-    })(graph, "");
+    })(graph, "", null);
     out.forEach((b, i) => { b.id = i; });
     return out;
   }
