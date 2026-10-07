@@ -516,7 +516,7 @@ function dfComet(wire, d, cls) {
   let len = 0;
   try { len = tail.getTotalLength(); } catch { len = 0; }
   if (len < 30) { tail.remove(); head.remove(); return []; }
-  const T = 34, Hd = 7;
+  const T = 26, Hd = 6;
   const dur = `${Math.max(.35, len / DF_SPEED).toFixed(2)}s`;
   const delay = `${(-Math.random() * 2).toFixed(2)}s`;
   for (const [q, dash, a, b] of [[tail, T, T, -len], [head, Hd, Hd, -len - (T - Hd)]]) {
@@ -527,6 +527,22 @@ function dfComet(wire, d, cls) {
     q.style.animationDelay = delay;
   }
   return [tail, head];
+}
+
+/* A data wire is SILK: the run between two ops is a hairline, barely there,
+ * and only its two ends — where it leaves a hole and where it plugs into
+ * one — glow at full strength. One extra path over the wire, dashed so it
+ * draws just those two ends. */
+const DF_END = 18;
+function dfEnds(wire, d, cls) {
+  const q = document.createElementNS(SVGNS, "path");
+  q.setAttribute("d", d);
+  q.setAttribute("class", cls.replace(/\bdfconn\b/, "dfends"));
+  wire.after(q);
+  let len = 0;
+  try { len = q.getTotalLength(); } catch { len = 0; }
+  if (len > 2 * DF_END + 8) q.style.strokeDasharray = `${DF_END} ${len - 2 * DF_END} ${DF_END} 0`;
+  return q;
 }
 
 /* The data layer, drawn after the cards are placed. Every wire runs from
@@ -569,9 +585,44 @@ function drawDataLayer() {
   // a run keeps 7px from every run of another wire; only the wires of one
   // source share anything, and only the line from the source to its hub
   let grp = null, relaxed = false;
+  /* A data run never lies ALONG a control edge (a branch card's sides
+   * carry its branch edges): it keeps 8px off one, or crosses it square.
+   * Cells mark where control edges run steeply and where flat. */
+  // indexed by column (steep runs) and by row (flat runs): a check is a
+  // binary search per nearby column/row, not a walk along the span
+  let ctrlByCol = null, ctrlByRow = null;
+  const CC = 6;
+  const ctrlIndex = () => {
+    if (ctrlByCol) return;
+    ctrlByCol = new Map(); ctrlByRow = new Map();
+    const put = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
+    for (const pl of ctrlPolys()) for (let i = 1; i < pl.length; i++) {
+      const a = pl[i - 1], b = pl[i];
+      if (Math.abs(b.y - a.y) >= Math.abs(b.x - a.x)) put(ctrlByCol, Math.floor(b.x / CC), b.y);
+      else put(ctrlByRow, Math.floor(b.y / CC), b.x);
+    }
+    for (const m of [ctrlByCol, ctrlByRow]) for (const v of m.values()) v.sort((p, q) => p - q);
+  };
+  const anyIn = (arr, lo, hi) => {
+    let l = 0, h = arr.length;
+    while (l < h) { const m = (l + h) >> 1; if (arr[m] < lo) l = m + 1; else h = m; }
+    return l < arr.length && arr[l] <= hi;
+  };
+  const alongCtrl = (vertical, c, a0, a1) => {
+    ctrlIndex();
+    const m = vertical ? ctrlByCol : ctrlByRow;
+    if (!m.size) return false;
+    const lo = Math.min(a0, a1), hi = Math.max(a0, a1);
+    for (let k = Math.floor((c - 8) / CC); k <= Math.floor((c + 8) / CC); k++) {
+      const arr = m.get(k);
+      if (arr && anyIn(arr, lo, hi)) return true;
+    }
+    return false;
+  };
   const clearV = (x, y0, y1) => {
     const lo = Math.min(y0, y1), hi = Math.max(y0, y1);
     if (obst.some(o => x > o.l && x < o.r && hi > o.t && lo < o.b)) return false;
+    if (!relaxed && alongCtrl(true, x, lo, hi)) return false;
     // relaxed: a run may come close to another, but never lie on it
     const sep = relaxed ? 3.5 : 7;
     return !usedV.some(u => u.g !== grp && Math.abs(u.x - x) < sep && hi > u.lo - 4 && lo < u.hi + 4);
@@ -580,6 +631,7 @@ function drawDataLayer() {
   const clearH = (y, x0, x1, own) => {
     const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
     if (obst.some(o => o.key !== own && y > o.t && y < o.b && hi > o.l && lo < o.r)) return false;
+    if (!relaxed && alongCtrl(false, y, lo, hi)) return false;
     const sep = relaxed ? 3.5 : 7;
     return !usedH.some(u => u.g !== grp && Math.abs(u.y - y) < sep && hi > u.lo - 4 && lo < u.hi + 4);
   };
@@ -665,18 +717,78 @@ function drawDataLayer() {
       hubs.set(jk, {n: list.length, join: true, b: list[0][1]});
     }
   };
+  /* Where a data run crosses a control edge it HOPS: a small arc over it,
+   * the wiring-diagram sign for "these cross, they do not join". The
+   * control edges are sampled once per draw, as polylines. */
+  let ctrlLines = null;
+  function ctrlPolys() {
+    if (ctrlLines) return ctrlLines;
+    ctrlLines = [];
+    const seen = new Set();
+    for (const p of document.querySelectorAll("#edges path, #edgetop path")) {
+      const d = p.getAttribute("d");
+      if (!d || seen.has(d)) continue;
+      seen.add(d);
+      const smp = pathSampler(d);
+      if (!smp || smp.len < 10) continue;
+      const pl = [];
+      for (let t = 0; t <= smp.len; t += 4) pl.push(smp.at(t));
+      pl.push(smp.at(smp.len));
+      ctrlLines.push(pl);
+    }
+    return ctrlLines;
+  }
+  const HOP = 5;
+  // a horizontal stretch at y from x0 to x1: where it crosses control edges
+  // control segments bucketed by height, so a stretch looks at its own band
+  let segBands = null;
+  const BAND = 32;
+  const bandsOf = () => {
+    if (segBands) return segBands;
+    segBands = new Map();
+    for (const pl of ctrlPolys()) for (let i = 1; i < pl.length; i++) {
+      const a = pl[i - 1], b = pl[i];
+      for (let k = Math.floor(Math.min(a.y, b.y) / BAND); k <= Math.floor(Math.max(a.y, b.y) / BAND); k++) {
+        if (!segBands.has(k)) segBands.set(k, []);
+        segBands.get(k).push([a, b]);
+      }
+    }
+    return segBands;
+  };
+  const hopsOn = (y, x0, x1) => {
+    const lo = Math.min(x0, x1) + HOP + 3, hi = Math.max(x0, x1) - HOP - 3, xs = [];
+    if (hi <= lo) return xs;
+    for (const [a, b] of bandsOf().get(Math.floor(y / BAND)) || []) {
+      if ((a.y - y) * (b.y - y) > 0 || a.y === b.y) continue;
+      const x = a.x + (b.x - a.x) * (y - a.y) / (b.y - a.y);
+      // a steep crossing only: a control edge running along is not a hop
+      if (x > lo && x < hi && Math.abs(b.y - a.y) > Math.abs(b.x - a.x) * .5) xs.push(x);
+    }
+    xs.sort((p, q) => p - q);
+    return xs.filter((x, i) => i === 0 || x - xs[i - 1] > 2 * HOP + 2);
+  };
+  const lineTo = (fx, fy, tx, ty) => {
+    if (fy !== ty || fx === tx) return ` L ${tx} ${ty}`;
+    const dir = tx > fx ? 1 : -1;
+    let d = "";
+    for (const x of (dir > 0 ? hopsOn(fy, fx, tx) : hopsOn(fy, tx, fx).reverse()))
+      d += ` L ${x - dir * HOP} ${fy} A ${HOP} ${HOP} 0 0 ${dir > 0 ? 1 : 0} ${x + dir * HOP} ${fy}`;
+    return d + ` L ${tx} ${ty}`;
+  };
   // a polyline with rounded corners, from its first point on
   const rounded = (pts) => {
     const r = 7, sx = (u, v) => (v > u ? 1 : -1);
-    let d = "";
+    let d = "", [fx, fy] = pts[0];
     for (let i = 1; i < pts.length - 1; i++) {
       const [px, py] = pts[i - 1], [cx, cy] = pts[i], [nx, ny] = pts[i + 1];
       const r1 = Math.min(r, Math.abs(cx - px) / 2 + Math.abs(cy - py) / 2, Math.abs(nx - cx) / 2 + Math.abs(ny - cy) / 2);
       const inx = cx - (cx !== px ? sx(px, cx) * r1 : 0), iny = cy - (cy !== py ? sx(py, cy) * r1 : 0);
       const outx = cx + (nx !== cx ? sx(cx, nx) * r1 : 0), outy = cy + (ny !== cy ? sx(cy, ny) * r1 : 0);
-      d += ` L ${inx} ${iny} Q ${cx} ${cy} ${outx} ${outy}`;
+      d += lineTo(fx, fy, inx, iny) + ` Q ${cx} ${cy} ${outx} ${outy}`;
+      [fx, fy] = [outx, outy];
     }
-    return d + ` L ${pts[pts.length - 1][0]} ${pts[pts.length - 1][1]}`;
+    const [lx, ly] = pts[pts.length - 1];
+    return d + lineTo(fx, fy, lx, ly);
   };
   const clean = (pts) => {
     pts = pts.filter((q, i) => i === 0 || Math.abs(q[0] - pts[i - 1][0]) + Math.abs(q[1] - pts[i - 1][1]) > 0.5);
@@ -692,13 +804,20 @@ function drawDataLayer() {
     return pts;
   };
   const ownOf = (h) => h.own || (h.plate ? null : h.key);
-  const entryX = (b) => Math.min(b.x, boxOf(b).left) - 20;
+  /* Where a wire comes in. A plug row is entered from the card's left. A
+   * branch condition's chip is entered from the side its row's branch
+   * edge does NOT leave by: from the right, the wire runs in through the
+   * gap above its row and drops into the chip's hole. */
+  const entryX = (b) => b.entry === "right" ? Math.max(b.x, boxOf(b).right) + 20 : Math.min(b.x, boxOf(b).left) - 20;
+  const by = (b) => b.entry === "right" ? b.gapY : b.y;
+  const tailOf = (b, x2) => b.entry === "right" ? [[x2, b.gapY], [b.x, b.gapY], [b.x, b.y]] : [[x2, b.y], [b.x, b.y]];
   // the reader's own gutter: the column it is plugged in from
   const gutter = (b) => {
     if (b.fromTop) return {yB0: b.y - 26, x2: b.x};
     const Bx = boxOf(b), yB0 = Bx.top - 22;
     const li = laneIn.get(`${side2(b, "i")}|${Math.round(b.y)}`) || 0;
-    return {yB0, x2: scan(entryX(b) - 8 * li, -4, x => clearV(x, yB0, b.y) && clearH(b.y, x, b.x, ownOf(b)))};
+    const dir = b.entry === "right" ? 1 : -1;
+    return {yB0, x2: scan(entryX(b) + dir * 8 * li, dir * 4, x => clearV(x, yB0, by(b)) && clearH(by(b), x, b.x, ownOf(b)))};
   };
   /* A circuit trace from a to b that never crosses a card: out of a's hole
    * → a free column beside it → the clear channel under it → a free column
@@ -724,9 +843,9 @@ function drawDataLayer() {
       if (ymA === null) x1 = scan(x0, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownOf(a)));
     }
     if (ymA === null) ymA = scan(yA0, 4, y => chan(x1, y), 200);
-    const ymB = scan(yB0, -4, y => clearH(y, xc, x2) && clearV(x2, y, b.y), 200);
+    const ymB = scan(yB0, -4, y => clearH(y, xc, x2) && clearV(x2, y, by(b)), 200);
     if (!clearV(xc, ymA, ymB)) xc = scan2(xc, x => clearV(x, ymA, ymB));
-    return keep(clean([[a.x, a.y], [x1, a.y], [x1, ymA], [xc, ymA], [xc, ymB], [x2, ymB], [x2, b.y], [b.x, b.y]]));
+    return keep(clean([[a.x, a.y], [x1, a.y], [x1, ymA], [xc, ymA], [xc, ymB], [x2, ymB], ...tailOf(b, x2)]));
   };
   const SPOKE = 16;   // how far a spoke curves out of its hub before it runs straight
   const LANE = 9;     // the gap between two spokes of one fan
@@ -848,9 +967,9 @@ function drawDataLayer() {
       const sx = H.hx + sp.dir * SPOKE, ly = sp.y;
       head = `M ${H.hx} ${H.hy} C ${H.hx + sp.dir * SPOKE * .5} ${H.hy} ${H.hx + sp.dir * SPOKE * .5} ${ly} ${sx} ${ly}`;
       const xc = scan2(x2, x => clearV(x, ly, yB0) && clearH(ly, sx, x));
-      const ymB = scan(yB0, -4, y => clearH(y, xc, x2) && clearV(x2, y, b.y), 200);
+      const ymB = scan(yB0, -4, y => clearH(y, xc, x2) && clearV(x2, y, by(b)), 200);
       if (clearH(ly, sx, xc) && clearV(xc, ly, ymB)) {
-        pts = keep(clean([[sx, ly], [xc, ly], [xc, ymB], [x2, ymB], [x2, b.y], [b.x, b.y]]));
+        pts = keep(clean([[sx, ly], [xc, ly], [xc, ymB], [x2, ymB], ...tailOf(b, x2)]));
         return head + rounded(pts);
       }
       pts = ortho({x: sx, y: ly}, b, sx);
@@ -859,8 +978,8 @@ function drawDataLayer() {
     // straight down in its own column
     const sy = H.hy + SPOKE, xk = sp.x;
     head = `M ${H.hx} ${H.hy} C ${H.hx} ${H.hy + SPOKE * .5} ${xk} ${H.hy + SPOKE * .5} ${xk} ${sy}`;
-    const ym = scan(yB0, -4, y => clearV(xk, sy, y) && clearH(y, xk, x2) && clearV(x2, y, b.y), Math.max(4, Math.abs(yB0 - sy) / 4));
-    if (clearV(xk, sy, ym) && clearH(ym, xk, x2) && clearV(x2, ym, b.y)) pts = keep(clean([[xk, sy], [xk, ym], [x2, ym], [x2, b.y], [b.x, b.y]]));
+    const ym = scan(yB0, -4, y => clearV(xk, sy, y) && clearH(y, xk, x2) && clearV(x2, y, by(b)), Math.max(4, Math.abs(yB0 - sy) / 4));
+    if (clearV(xk, sy, ym) && clearH(ym, xk, x2) && clearV(x2, ym, by(b))) pts = keep(clean([[xk, sy], [xk, ym], [x2, ym], ...tailOf(b, x2)]));
     else pts = ortho({x: xk, y: sy}, b, xk);
     return head + rounded(pts);
   };
@@ -873,10 +992,11 @@ function drawDataLayer() {
       p.setAttribute("class", `${H.cls} trunk`);
       layer.prepend(p);
       H.trunkEl = p;
+      H.trunkEnds = dfEnds(p, H.trunk, `${H.cls} trunk`);
       H.flow = dfComet(p, H.trunk, (/\b(focus|lit)\b/.test(H.cls) && !/\b(peek|dim|far)\b/.test(H.cls) ? "on" : "")
         + (/\blit\b/.test(H.cls) ? " lit" : ""));
       const c = document.createElementNS(SVGNS, "circle");
-      c.setAttribute("cx", H.hx); c.setAttribute("cy", H.hy); c.setAttribute("r", 5);
+      c.setAttribute("cx", H.hx); c.setAttribute("cy", H.hy); c.setAttribute("r", 4);
       c.setAttribute("class", "dfhub" + (/\blit\b/.test(H.cls) ? " lit" : "") + (/\bpeek\b/.test(H.cls) ? " peek" : ""));
       c.append(Object.assign(document.createElementNS(SVGNS, "title"), {textContent: H.join ? `${H.n} sources → one input` : `one value → ${H.n} readers`}));
       layer.append(c);
@@ -900,23 +1020,25 @@ function drawDataLayer() {
     hit.setAttribute("class", "dfhit");
     hit.addEventListener("mouseenter", (ev) => {
       world.classList.add("dfwirehot");
-      p.dfFlowMake(); p.classList.add("hot"); for (const f of flow) f.classList.add("hot");
+      p.dfFlowMake(); p.classList.add("hot"); p.dfEnds?.classList.add("hot"); for (const f of flow) f.classList.add("hot");
       // its line from the source and its hub light with it
-      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.add("hot"); H.el?.classList.add("hot"); }
+      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.add("hot"); H.trunkEnds?.classList.add("hot"); H.el?.classList.add("hot"); }
       for (const h of [a, b]) if (h.row) h.row.classList.add("hot");
       if (label) { const t = dfWireLabel(); t.textContent = label; t.hidden = false; dfWireLabelMove(ev); }
     });
     hit.addEventListener("mousemove", dfWireLabelMove);
     hit.addEventListener("mouseleave", () => {
       world.classList.remove("dfwirehot");
-      p.classList.remove("hot"); for (const f of flow) f.classList.remove("hot");
-      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.remove("hot"); H.el?.classList.remove("hot"); }
+      p.classList.remove("hot"); p.dfEnds?.classList.remove("hot"); for (const f of flow) f.classList.remove("hot");
+      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.remove("hot"); H.trunkEnds?.classList.remove("hot"); H.el?.classList.remove("hot"); }
       for (const h of [a, b]) if (h.row) h.row.classList.remove("hot");
       const t = dfWireLabel(); t.hidden = true;
     });
     queueMicrotask(() => { if (p.parentNode && !p.classList.contains("far")) p.parentNode.append(hit); });
     p.setAttribute("class", cls);
     p.dfRoute = route0;
+    // its two glowing ends, laid with it (after it's in the page)
+    queueMicrotask(() => { if (p.parentNode) p.dfEnds = dfEnds(p, d, cls); });
     // the energy pulse: tiny bright beads running from source to reader
     // beads only run where the wire itself shows
     const flowCls = (/\b(focus|lit)\b/.test(cls) && !/\b(peek|dim|far)\b/.test(cls) ? "on" : "") + (/\blit\b/.test(cls) ? " lit" : "");
@@ -947,7 +1069,16 @@ function drawDataLayer() {
     const it = R(key), card = state.cardEls.get(key);
     const r = card && card.querySelector(`.dfport.${dir}[data-port="${CSS.escape(port)}"]`);
     if (!it || !r) return null;
-    return {...holePt(card, it, r.querySelector(".dfhole")), row: r, key};
+    const h = {...holePt(card, it, r.querySelector(".dfhole")), row: r, key};
+    const brow = r.classList.contains("brchip") && r.closest(".brrow");
+    if (brow) {
+      // a chip in a condition: in from the side its row's edge does not use
+      let top = 0, e = brow;
+      while (e && e !== card) { top += e.offsetTop; e = e.offsetParent; }
+      h.entry = brow.classList.contains("left") ? "right" : "left";
+      h.gapY = it.y + top - 5;
+    }
+    return h;
   };
   // an opened GraphOp's plates, on its frame: a hole has an outside face
   // (outer wires) and an inside face (its own ops)
@@ -1157,10 +1288,11 @@ function drawDataLayer() {
       // a hovered variable lights its wires, with the line to their hub
       const parts = (on) => { for (const p of ps) {
         p.classList.toggle("hot", on);
+        p.dfEnds?.classList.toggle("hot", on);
         if (on && p.dfFlowMake) p.dfFlowMake();
         for (const f of p.dfFlow || []) f.classList.toggle("hot", on);
         const r0 = p.dfRoute;
-        if (r0 && r0.hub) { const H = hubs.get(r0.hub); H.trunkEl?.classList.toggle("hot", on); H.el?.classList.toggle("hot", on); }
+        if (r0 && r0.hub) { const H = hubs.get(r0.hub); H.trunkEl?.classList.toggle("hot", on); H.trunkEnds?.classList.toggle("hot", on); H.el?.classList.toggle("hot", on); }
       } };
       row.onmouseenter = () => {
         for (const x of later.get(row) || []) {
@@ -1692,6 +1824,8 @@ function render() {
     it.condDots = [];
     for (const {row, side} of sides) {
       row.el.classList.toggle("left", side < 0);
+      // its chip's hole faces the side the data comes in by: the other one
+      for (const ch of row.el.querySelectorAll(".dfport.brchip")) ch.classList.toggle("holeR", side < 0);
       const dot = {x: side < 0 ? row.left - 1 : row.left + row.w + 1, y: row.top + row.h / 2};
       it.condDots.push(dot);
       if (!(row.target in it.condPorts)) it.condPorts[row.target] = {...dot, side};
@@ -2432,6 +2566,43 @@ function lensBadge(card, badges, n) {
   }
 }
 
+/* A branch reads its inputs IN its conditions: each input's plug moves
+ * into the first condition that names it (the wire plugs into the name),
+ * later mentions wear the same chip, hole-less; nothing is listed twice.
+ * An input no condition names keeps its plug row. */
+function inlineBranchPlugs(card, ports) {
+  const conds = [...card.querySelectorAll(".brrow .brcond")];
+  const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const plug of [...ports.querySelectorAll(".dfcol.in .dfport.in")]) {
+    const name = plug.dataset.port;
+    const re = new RegExp(`(^|[^\\w.])(${esc(name)})(?![\\w])`);
+    let placed = false;
+    for (const c of conds) {
+      // split this condition's text nodes round the name, once per node
+      for (const tn of [...c.childNodes].filter(x => x.nodeType === 3)) {
+        const m = re.exec(tn.data);
+        if (!m) continue;
+        const at = m.index + m[1].length;
+        const after = tn.splitText(at);
+        after.data = after.data.slice(name.length);
+        if (!placed) {
+          plug.classList.add("brchip");
+          c.insertBefore(plug, after);
+          placed = true;
+        } else {
+          const ghost = el("span", "brchip ghost mono", name);
+          ghost.title = `${name} — plugged in above`;
+          c.insertBefore(ghost, after);
+        }
+        break;
+      }
+    }
+  }
+  const cin = ports.querySelector(".dfcol.in");
+  if (cin && !cin.children.length) cin.remove();
+  if (!ports.querySelector(".dfport")) ports.remove();
+}
+
 function opCard(it) {
   const n = it.node;
   if (n.kind === "__boundary__") return boundaryCard(it);
@@ -2527,7 +2698,14 @@ function opCard(it) {
 
   if (canvasView === "data" || (state.dfOpen && state.dfOpen.has(it.key) && !it.inner)) {
     const ports = dfPortsBlock(it, canvasView === "workflow" ? state.dfOpen.get(it.key) : null);
-    if (ports) { card.append(ports); card.classList.add("dfcard", canvasView === "data" ? "dfdata" : "dfopen"); }
+    if (ports) {
+      card.append(ports); card.classList.add("dfcard", canvasView === "data" ? "dfdata" : "dfopen");
+      // its plugs name its outputs now: the "→ key" lines would say it
+      // twice (a run's painted values stay — they say something new)
+      const det = card.querySelector(".detail");
+      if (det && !det.querySelector(".dval")) det.remove();
+      if (n.routes && n.routes.length) inlineBranchPlugs(card, ports);
+    }
   }
   // At most TWO badges: one semantic marker, plus the run chip. Density
   // is respect — everything else is one click away in the inspector.
@@ -4294,11 +4472,13 @@ async function showRunWorkflow(run) {
   let switched = null;
   if (ranGraph !== state.graph) {
     switched = state.graph ? state.graph.name : null;
+    // the run BORROWS the canvas for its graph: the Flow tab's own graph,
+    // its open GraphOps and its view are kept and come back on leaving
+    if (!state.flowHome) state.flowHome = {graph: state.graph, sel: state.sel, expanded: new Set(state.expanded)};
     state.graph = ranGraph;
     $("#graph-pick").value = ranGraph.name;
     state.sel = null;
     state.expanded.clear();
-    state.flowView = null;      // the Flow tab's remembered view was another graph's
   }
   // an agent op opens onto the steps this run recorded under it
   state.runRows = tree.rows;
@@ -4396,6 +4576,18 @@ function leaveWorkflow() {
   // the Flow tab gets its own graph back, not the run's opened copy
   if (state.stepsBase && state.graph === state.stepsGraph) state.graph = state.stepsBase;
   state.stepsBase = state.stepsGraph = state.runRows = null;
+  // ... nor the run's graph: the one it showed before the run borrowed it
+  if (state.flowHome) {
+    const h = state.flowHome;
+    state.flowHome = null;
+    if (h.graph && state.ir && state.ir.graphs.includes(h.graph)) {
+      state.graph = h.graph;
+      state.sel = h.sel;
+      state.expanded = h.expanded;
+      const pick = $("#graph-pick");
+      if (pick) pick.value = h.graph.name;
+    }
+  }
   render();
   // ... and coming home it lost the Flow tab's view: it comes back once
   // the canvas shows at its full size (flushCanvas)
@@ -4727,6 +4919,7 @@ for (const b of document.querySelectorAll(".tabs button[data-tab]"))
 })();
 
 $("#graph-pick").onchange = (ev) => {
+  state.flowHome = null;   // a graph picked by hand is the one to come back to
   state.graph = state.ir.graphs.find(g => g.name === ev.target.value);
   state.sel = null;
   state.expanded.clear();
