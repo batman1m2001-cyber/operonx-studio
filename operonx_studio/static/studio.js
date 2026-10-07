@@ -446,6 +446,7 @@ function dfSourceLabel(b) {
   return `${s ? s.node.name : b.from.key}.${b.from.port}`;
 }
 const dfTargetLabel = (b) => {
+  if (b.to.end) return `END.${b.to.port}`;
   const t = state.rendered.get(b.to.key);
   return `${t ? t.node.name : b.to.key}.${b.to.port}`;
 };
@@ -529,13 +530,13 @@ function drawDataLayer() {
   const clearV = (x, y0, y1) => {
     const lo = Math.min(y0, y1), hi = Math.max(y0, y1);
     if (obst.some(o => x > o.l && x < o.r && hi > o.t && lo < o.b)) return false;
-    return !usedV.some(u => u.g !== grp && Math.abs(u.x - x) < 10 && hi > u.lo - 4 && lo < u.hi + 4);
+    return !usedV.some(u => u.g !== grp && Math.abs(u.x - x) < 7 && hi > u.lo - 4 && lo < u.hi + 4);
   };
   // (the stub out of a hole starts inside its own card: that card is skipped)
   const clearH = (y, x0, x1, own) => {
     const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
     if (obst.some(o => o.key !== own && y > o.t && y < o.b && hi > o.l && lo < o.r)) return false;
-    return !usedH.some(u => u.g !== grp && Math.abs(u.y - y) < 10 && hi > u.lo - 4 && lo < u.hi + 4);
+    return !usedH.some(u => u.g !== grp && Math.abs(u.y - y) < 7 && hi > u.lo - 4 && lo < u.hi + 4);
   };
   const trunk = new Map();   // group → the first wire's column and channel
   let lastRoute = null;
@@ -606,11 +607,11 @@ function drawDataLayer() {
     const A = boxOf(a), Bx = boxOf(b);
     const lo = laneOut.get(`${side2(a, "o")}|${Math.round(a.y)}`) || 0;
     const li = laneIn.get(`${side2(b, "i")}|${Math.round(b.y)}`) || 0;
-    const yA0 = A.bottom + 16 + 12 * lo, yB0 = Bx.top - 16;
+    const yA0 = A.bottom + 14 + 8 * lo, yB0 = Bx.top - 14;
     const T = trunk.get(grp);
-    const ownA = a.plate ? null : a.key, ownB = b.plate ? null : b.key;
-    const x1 = T ? T.x1 : scan(Math.max(a.x, A.right) + 12 + 12 * lo, 6, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownA));
-    const x2 = scan(Math.min(b.x, Bx.left) - 12 - 12 * li, -6, x => clearV(x, yB0, b.y) && clearH(b.y, x, b.x, ownB));
+    const ownA = a.own || (a.plate ? null : a.key), ownB = b.own || (b.plate ? null : b.key);
+    const x1 = T ? T.x1 : scan(Math.max(a.x, A.right) + 10 + 8 * lo, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownA));
+    const x2 = scan(Math.min(b.x, Bx.left) - 10 - 8 * li, -4, x => clearV(x, yB0, b.y) && clearH(b.y, x, b.x, ownB));
     let xc = scan2(x2, x => clearV(x, yA0, yB0));
     const ymA = T && clearH(T.ymA, x1, xc) ? T.ymA : scan(yA0, 5, y => clearH(y, x1, xc) && clearV(x1, a.y, y), 80);
     if (!T) trunk.set(grp, {x1, ymA});
@@ -713,19 +714,79 @@ function drawDataLayer() {
         else tagEl.append(el("span", "dfname mono", port2), hole);
         over.append(tagEl);
         const ho = hole.offsetLeft + hole.offsetWidth / 2;
-        tagEl.style.top = `${y - tagEl.offsetHeight / 2}px`;
-        tagEl.style.left = `${x - ho}px`;
-        map.set(dir2 + "|" + port2, {x, y, row: tagEl, key, plate: true});
+        const tw = tagEl.offsetWidth, th = tagEl.offsetHeight, tl = x - ho;
+        tagEl.style.top = `${y - th / 2}px`;
+        tagEl.style.left = `${tl}px`;
+        // a plate is a pass-through with two faces: the hole on the frame
+        // line takes the outside wire, the plate's inner end the inside one
+        const own = `plate:${key}:${dir2}:${port2}`;
+        obst.push({key: own, l: tl - 4, t: y - th / 2 - 4, r: tl + tw + 4, b: y + th / 2 + 4});
+        const inner = dir2 === "in" ? {x: tl + tw, y, row: tagEl, key, plate: true, own}
+                                    : {x: tl, y, row: tagEl, key, plate: true, own};
+        map.set(dir2 + "|" + port2, {x, y, row: tagEl, key, plate: true, own, inner});
       });
       put(ins, "in"); put(outs, "out");
       plates.set(key, map);
     }
     return plates.get(key).get(dir + "|" + port) || null;
   };
-  const srcHole = (b) => b.from.kind === "op"
+  /* The root graph's TERMINALS: START's plugs (one per graph input), the
+   * SCRATCH pad (one per key the run's ops read), END's plugs (one per
+   * graph output). START and SCRATCH grow upward from the START pill (to
+   * its right and left), END downward from the END pill — where nothing
+   * else is drawn. */
+  const terms = new Map();
+  const termHole = (kind, port) => {
+    if (!terms.has(kind)) {
+      const pill = document.querySelector(`#nodes > .bnode.b-${kind === "end" ? "end" : "start"}:not(.knob)`);
+      const ports = [...new Set(B.filter(b => kind === "end" ? b.to.end
+        : kind === "scratch" ? b.from.kind === "scratch" : (b.from.kind === "input" && !b.from.key))
+        .map(b => kind === "end" ? b.to.port : b.from.port))];
+      const map = new Map();
+      terms.set(kind, map);
+      if (!pill || !ports.length) return null;
+      const px = parseFloat(pill.style.left), py = parseFloat(pill.style.top), pw = pill.offsetWidth, ph = pill.offsetHeight;
+      const panel = el("div", `dfterm ${kind}`);
+      if (kind === "scratch") panel.append(el("div", "dftermhead", "✎ SCRATCH"));
+      for (const port2 of ports) {
+        const r = el("div", "dfport dftermrow " + (kind === "end" ? "in" : "out"));
+        r.dataset.port = port2;
+        const hole = el("span", "dfhole");
+        if (kind === "end") r.append(hole, el("span", "dfname mono", port2));
+        else r.append(el("span", "dfname mono", port2), hole);
+        panel.append(r);
+      }
+      over.append(panel);
+      const w = panel.offsetWidth, h = panel.offsetHeight;
+      const left = kind === "start" ? px + pw + 14 : kind === "scratch" ? px - 14 - w : px + pw + 14;
+      const top = kind === "end" ? py : py + ph - h;
+      panel.style.left = `${left}px`; panel.style.top = `${top}px`;
+      const own = `term:${kind}`;
+      obst.push({key: own, l: left - 4, t: top - 4, r: left + w + 4, b: top + h + 4});
+      const ex = state.extent;
+      if (ex) {
+        const before = `${ex.minX},${ex.minY},${ex.maxX},${ex.maxY}`;
+        ex.minX = Math.min(ex.minX, left - 30); ex.minY = Math.min(ex.minY, top - 30);
+        ex.maxX = Math.max(ex.maxX, left + w + 30); ex.maxY = Math.max(ex.maxY, top + h + 30);
+        if (`${ex.minX},${ex.minY},${ex.maxX},${ex.maxY}` !== before) requestAnimationFrame(applyView);
+      }
+      for (const r of panel.children) {
+        if (!r.dataset.port) continue;
+        const hole = r.querySelector(".dfhole");
+        let hx = hole.offsetWidth / 2, hy = hole.offsetHeight / 2, e = hole;
+        while (e && e !== panel) { hx += e.offsetLeft; hy += e.offsetTop; e = e.offsetParent; }
+        map.set(r.dataset.port, {x: left + hx, y: top + hy, row: r, key: own, plate: true, own});
+      }
+    }
+    return terms.get(kind).get(port) || null;
+  };
+  const srcHole = (b) => b.from.kind === "scratch" ? termHole("scratch", b.from.port)
+    : b.from.kind === "input" && !b.from.key ? termHole("start", b.from.port)
+    : b.from.kind === "op"
     ? (R(b.from.key) && R(b.from.key).inner ? containerHole(b.from.key, "out", b.from.port) : cardHole(b.from.key, "out", b.from.port))
-    : b.from.kind === "input" && b.from.key ? containerHole(b.from.key, "in", b.from.port) : null;
-  const dstHole = (b) => b.to.export ? containerHole(b.to.key, "out", b.to.port)
+    : (containerHole(b.from.key, "in", b.from.port) || {}).inner || null;
+  const dstHole = (b) => b.to.end ? termHole("end", b.to.port)
+    : b.to.export ? (containerHole(b.to.key, "out", b.to.port) || {}).inner || null
     : R(b.to.key) && R(b.to.key).inner ? containerHole(b.to.key, "in", b.to.port) : cardHole(b.to.key, "in", b.to.port);
   const litCls = (b) => {
     if (!lv) return "";
@@ -753,13 +814,16 @@ function drawDataLayer() {
     const byRow = new Map();   // hole row element → its wires
     const addTo = (row, p) => { if (!row) return; if (!byRow.has(row)) byRow.set(row, []); byRow.get(row).push(p); };
     const plan = [];
+    for (const k of ["start", "scratch", "end"]) termHole(k, "");
     for (const b of B) {
-      if (DataFlow.isBroadcast(b)) continue;
       const a = srcHole(b), z = dstHole(b);
       if (!a || !z) continue;
       const A = boxOf(a), Z = boxOf(z);
       const gap = Z.top - A.bottom;
-      plan.push({b, a, z, far: gap < -4 || gap > 230, len: Math.abs(z.y - a.y) + Math.abs(z.x - a.x)});
+      // a broadcast (START, SCRATCH) or an output to END reaches far: shown
+      // on hover and in a lineage, not at rest
+      const far = DataFlow.isBroadcast(b) || !!b.to.end || gap < -4 || gap > 230;
+      plan.push({b, a, z, far, len: Math.abs(z.y - a.y) + Math.abs(z.x - a.x)});
     }
     // short, visible wires claim their tracks first
     // bottom holes first: they take the inner lanes, so a card's wires nest
@@ -799,7 +863,7 @@ function drawDataLayer() {
     const rel = B.filter(b => b.to.key === it.key || b.from.key === it.key);
     const pairs = [];
     for (const b of rel) {
-      const a = DataFlow.isBroadcast(b) ? null : srcHole(b), z = dstHole(b);
+      const a = srcHole(b), z = dstHole(b);
       for (const k of [b.from.key, b.to.key]) state.cardEls.get(k)?.classList.add("dfpeer");
       if (a && z) pairs.push([a, z, "dfconn focus" + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
     }
@@ -862,14 +926,13 @@ function drawDataLayer() {
   }
   const jobs = [];
   for (const b of nb.ins) {
-    if (DataFlow.isBroadcast(b) || (b.from.kind !== "op" && !b.from.key)) continue;
-    const a = b.from.kind === "op" ? plug(b.from.key, "out", b.from.port) : containerHole(b.from.key, "in", b.from.port);
+    const a = b.from.kind === "op" ? plug(b.from.key, "out", b.from.port) : srcHole(b);
     const end = pinned ? cardHole(it.key, "in", b.to.port) : side("in");
     if (a && end) jobs.push([a, end, cls0 + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
   }
   for (const b of nb.outs) {
     const start = pinned ? cardHole(it.key, "out", b.from.port) : side("out");
-    const z = b.to.export ? containerHole(b.to.key, "out", b.to.port) : plug(b.to.key, "in", b.to.port);
+    const z = b.to.end || b.to.export ? dstHole(b) : plug(b.to.key, "in", b.to.port);
     if (start && z) jobs.push([start, z, cls0 + " feed" + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
   }
   jobs.sort((p, q) => (q[0].y - p[0].y) || (q[1].y - p[1].y));

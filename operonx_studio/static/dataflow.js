@@ -49,10 +49,12 @@
         }
         if (n.graph && open.has(key)) walk(n.graph, key + "/", n);
       }
-      // an opened GraphOp hands its exports out through its own card
-      if (prefix) for (const e of g.exports || []) {
+      // an opened GraphOp hands its exports out through its own card; the
+      // root graph hands its out to END
+      for (const e of g.exports || []) {
         const from = source(e.from, e.output);
-        if (from) out.push({from, to: {key: level, port: e.as, export: true}});
+        if (from) out.push({from, to: prefix ? {key: level, port: e.as, export: true}
+                                             : {key: "", port: e.as, export: true, end: true}});
       }
     })(graph, "", null);
     out.forEach((b, i) => { b.id = i; });

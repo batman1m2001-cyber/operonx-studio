@@ -3830,3 +3830,26 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   font-size: 11px; box-shadow: 0 6px 18px rgba(0, 0, 0, .3); white-space: nowrap; }
 /* every data wire solid: dashed parallels shimmer */
 .wires.dflinks path.dfconn.focus.feed { stroke-dasharray: none; }
+
+/* the root graph's terminals: START's plugs, the SCRATCH pad, END's plugs */
+.dfterm { position: absolute; z-index: 30; pointer-events: auto; display: flex; flex-direction: column; gap: 4px;
+  padding: 6px; border-radius: 11px; background: color-mix(in srgb, var(--df-start) 8%, var(--df-panel));
+  border: 1px solid color-mix(in srgb, var(--df-start) 30%, transparent); }
+.dfterm.start { align-items: flex-end; }
+.dfterm.end { align-items: flex-start; }
+.dfterm .dftermrow { display: inline-flex; align-items: center; gap: 6px; height: 20px; min-height: 0 !important; box-sizing: border-box;
+  padding: 0 4px 0 9px; border-radius: 999px; background: var(--df-panel); font-size: 10.5px; color: var(--df-ink);
+  border: 1px solid color-mix(in srgb, var(--df) 50%, var(--df-line)); cursor: default; }
+.dfterm.end .dftermrow { padding: 0 9px 0 4px; }
+/* SCRATCH: the run's side notes, a note sheet — ruled, a margin, a folded corner */
+.dfterm.scratch { align-items: flex-end; background:
+    linear-gradient(90deg, transparent 12px, color-mix(in srgb, var(--df-scratch) 35%, transparent) 12px 13px, transparent 13px),
+    color-mix(in srgb, var(--df-scratch) 7%, var(--df-panel));
+  border-color: color-mix(in srgb, var(--df-scratch) 35%, transparent); border-radius: 4px 11px 4px 4px; padding-left: 20px; }
+.dftermhead { align-self: flex-start; font: 700 9.5px/1 var(--mono, ui-monospace, monospace); letter-spacing: .14em;
+  color: var(--df-scratch); padding: 2px 0 3px; }
+.dfterm.scratch .dftermrow { border-color: color-mix(in srgb, var(--df-scratch) 45%, var(--df-line)); }
+.dfterm.scratch .dfhole { box-shadow: 0 0 0 1.5px var(--df-scratch), inset 0 1px 2px rgba(0,0,0,.55); }
+.dfterm.start .dfhole { box-shadow: 0 0 0 1.5px var(--df-start), inset 0 1px 2px rgba(0,0,0,.55); }
+.dfterm .dftermrow { max-width: none; width: max-content; }
+.dfterm .dftermrow .dfname { overflow: visible; text-overflow: clip; white-space: nowrap; }
