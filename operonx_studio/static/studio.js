@@ -703,17 +703,20 @@ function drawDataLayer() {
       // (bottom right) — where the values really go in and come out
       const put = (list, dir2) => list.forEach((port2, i) => {
         const x = dir2 === "in" ? C.x : C.x + C.w;
-        const y = dir2 === "in" ? C.y + 50 + i * 22 : C.y + C.h - 26 - (list.length - 1 - i) * 22;
+        const y = dir2 === "in" ? C.y + 52 + i * 26 : C.y + C.h - 28 - (list.length - 1 - i) * 26;
         const tagEl = el("div", `dfplate ${dir2}`);
         const feed = dir2 === "in" && B.find(b => b.to.key === key && !b.to.export && b.to.port === port2);
         const mains = feed && DataFlow.isBroadcast(feed) ? (feed.from.kind === "scratch" ? "scratch" : "start") : null;
         const hole = el("span", "dfhole" + (mains ? ` mains ${mains}` : ""), mains === "start" ? "▶" : mains === "scratch" ? "✎" : "");
         // the hole on the frame line itself: an input's at the plate's left
         // end, an output's at its right end
-        if (dir2 === "in") tagEl.append(hole, el("span", "dfname mono", port2));
-        else tagEl.append(el("span", "dfname mono", port2), hole);
+        // a pass-through plug: a hole on each face
+        const inHole = el("span", "dfhole dfinner");
+        if (dir2 === "in") tagEl.append(hole, el("span", "dfname mono", port2), inHole);
+        else tagEl.append(inHole, el("span", "dfname mono", port2), hole);
         over.append(tagEl);
         const ho = hole.offsetLeft + hole.offsetWidth / 2;
+        const hi = inHole.offsetLeft + inHole.offsetWidth / 2;
         const tw = tagEl.offsetWidth, th = tagEl.offsetHeight, tl = x - ho;
         tagEl.style.top = `${y - th / 2}px`;
         tagEl.style.left = `${tl}px`;
@@ -721,8 +724,7 @@ function drawDataLayer() {
         // line takes the outside wire, the plate's inner end the inside one
         const own = `plate:${key}:${dir2}:${port2}`;
         obst.push({key: own, l: tl - 4, t: y - th / 2 - 4, r: tl + tw + 4, b: y + th / 2 + 4});
-        const inner = dir2 === "in" ? {x: tl + tw, y, row: tagEl, key, plate: true, own}
-                                    : {x: tl, y, row: tagEl, key, plate: true, own};
+        const inner = {x: tl + hi, y, row: tagEl, key, plate: true, own};
         map.set(dir2 + "|" + port2, {x, y, row: tagEl, key, plate: true, own, inner});
       });
       put(ins, "in"); put(outs, "out");
@@ -925,15 +927,25 @@ function drawDataLayer() {
       for (const b of list) { const k = pk(b); if (!seen.has(k)) seen.set(k, {b, n: 0}); seen.get(k).n++; }
       return [...seen.values()];
     };
-    const tagOf = (port, n) => n > 1 ? `${port} +${n - 1}` : port;
-    for (const {b, n} of once(nb.ins.filter(b => !DataFlow.isBroadcast(b) && (b.from.kind === "op" || b.from.key)), b => b.from.key)) {
-      const a = b.from.kind === "op" ? plug(b.from.key, "out", tagOf(b.from.port, n)) : containerHole(b.from.key, "in", b.from.port);
-      wire(a, side("in"), cls0);
+    // a peek: one faint wire per partner, card edge to card edge, the
+    // partners lit — no tags to land on the cards around them
+    const edgeOf = (pkey, dir) => {
+      const P = R(pkey);
+      if (!P || P.inner) return null;
+      state.cardEls.get(pkey)?.classList.add("dfpeer");
+      return {x: dir === "out" ? P.x + P.w : P.x, y: P.y + P.h / 2, key: pkey, own: pkey, plate: true};
+    };
+    const jobs2 = [];
+    for (const {b, n} of once(nb.ins.filter(b => b.from.kind === "op"), b => b.from.key)) {
+      const a = edgeOf(b.from.key, "out");
+      if (a) jobs2.push([a, {...side("in"), own: it.key}, cls0, `${b.from.port}${n > 1 ? ` +${n - 1}` : ""} → ${it.node.name}`]);
     }
-    for (const {b, n} of once(nb.outs, b => b.to.key)) {
-      const z = b.to.export ? containerHole(b.to.key, "out", b.to.port) : plug(b.to.key, "in", tagOf(b.to.port, n));
-      wire(side("out"), z, cls0 + " feed");
+    for (const {b, n} of once(nb.outs.filter(b => !b.to.end && !b.to.export), b => b.to.key)) {
+      const z = edgeOf(b.to.key, "in");
+      if (z) jobs2.push([{...side("out"), own: it.key}, z, cls0, `${it.node.name} → ${b.to.port}${n > 1 ? ` +${n - 1}` : ""}`]);
     }
+    prepLanes(jobs2);
+    for (const [a, z, cls, label] of jobs2) wire(a, z, cls, false, label);
     return;
   }
   const jobs = [];
