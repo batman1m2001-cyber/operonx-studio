@@ -3831,25 +3831,52 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 /* every data wire solid: dashed parallels shimmer */
 .wires.dflinks path.dfconn.focus.feed { stroke-dasharray: none; }
 
-/* the root graph's terminals: START's plugs, the SCRATCH pad, END's plugs */
-.dfterm { position: absolute; z-index: 30; pointer-events: auto; display: flex; flex-direction: column; gap: 4px;
-  padding: 6px; border-radius: 11px; background: color-mix(in srgb, var(--df-start) 8%, var(--df-panel));
-  border: 1px solid color-mix(in srgb, var(--df-start) 30%, transparent); }
+/* the root graph's TERMINALS. START and END are the pill grown into a lit
+   capsule holding its plugs; the SCRATCH pad is its rose sibling. */
+:root { --term: var(--df-start); }
+.node.bnode.dfhosted { opacity: 0; pointer-events: none; }
+.dfterm { position: absolute; z-index: 30; pointer-events: auto; display: flex; flex-direction: column; gap: 5px;
+  padding: 9px 9px; border-radius: 16px; box-sizing: border-box;
+  background:
+    radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--term) 26%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--term) 10%, var(--df-panel)), var(--df-panel));
+  border: 1.5px solid color-mix(in srgb, var(--term) 75%, #fff);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--term) 13%, transparent),
+    0 0 22px color-mix(in srgb, var(--term) 38%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .14); }
 .dfterm.start { align-items: flex-end; }
 .dfterm.end { align-items: flex-start; }
-.dfterm .dftermrow { display: inline-flex; align-items: center; gap: 6px; height: 20px; min-height: 0 !important; box-sizing: border-box;
-  padding: 0 4px 0 9px; border-radius: 999px; background: var(--df-panel); font-size: 10.5px; color: var(--df-ink);
-  border: 1px solid color-mix(in srgb, var(--df) 50%, var(--df-line)); cursor: default; }
-.dfterm.end .dftermrow { padding: 0 9px 0 4px; }
-/* SCRATCH: the run's side notes, a note sheet — ruled, a margin, a folded corner */
-.dfterm.scratch { align-items: flex-end; background:
-    linear-gradient(90deg, transparent 12px, color-mix(in srgb, var(--df-scratch) 35%, transparent) 12px 13px, transparent 13px),
-    color-mix(in srgb, var(--df-scratch) 7%, var(--df-panel));
-  border-color: color-mix(in srgb, var(--df-scratch) 35%, transparent); border-radius: 4px 11px 4px 4px; padding-left: 20px; }
-.dftermhead { align-self: flex-start; font: 700 9.5px/1 var(--mono, ui-monospace, monospace); letter-spacing: .14em;
-  color: var(--df-scratch); padding: 2px 0 3px; }
-.dfterm.scratch .dftermrow { border-color: color-mix(in srgb, var(--df-scratch) 45%, var(--df-line)); }
-.dfterm.scratch .dfhole { box-shadow: 0 0 0 1.5px var(--df-scratch), inset 0 1px 2px rgba(0,0,0,.55); }
-.dfterm.start .dfhole { box-shadow: 0 0 0 1.5px var(--df-start), inset 0 1px 2px rgba(0,0,0,.55); }
+.dftermlabel { align-self: center; display: inline-flex; align-items: center; gap: 7px; margin: 2px 0 0;
+  font: 800 10px/1 var(--mono, ui-monospace, monospace); letter-spacing: .2em; color: color-mix(in srgb, var(--term) 70%, #fff); }
+.dfterm.end .dftermlabel { margin: 0 0 2px; }
+.dftermglyph { width: 9px; height: 9px; border-radius: 50%; background: var(--term);
+  box-shadow: 0 0 8px var(--term), 0 0 0 2px color-mix(in srgb, var(--term) 30%, transparent); }
+.dfterm.end .dftermglyph { background: transparent; border: 2px solid var(--term); box-sizing: border-box; }
+.dfterm .dftermrow { display: inline-flex; align-items: center; gap: 7px; height: 21px; min-height: 0 !important; box-sizing: border-box;
+  padding: 0 4px 0 10px; border-radius: 999px; font-size: 10.5px; color: var(--df-ink); cursor: default;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--term) 14%, var(--df-panel)), var(--df-panel));
+  border: 1px solid color-mix(in srgb, var(--term) 55%, var(--df-line)); }
+.dfterm.end .dftermrow { padding: 0 10px 0 4px; }
+.dfterm .dfhole { box-shadow: 0 0 0 1.5px var(--term), 0 0 7px color-mix(in srgb, var(--term) 70%, transparent), inset 0 1px 2px rgba(0,0,0,.6); }
+.dfterm .dftermrow.hot, .dfterm .dftermrow.lit { border-color: var(--term); box-shadow: 0 0 10px color-mix(in srgb, var(--term) 45%, transparent); }
+/* SCRATCH: the run's side notes, a note sheet — a margin line, a folded corner */
+.dfterm.scratch { --term: var(--df-scratch); align-items: flex-end; padding-left: 22px; border-radius: 5px 16px 5px 5px;
+  background:
+    linear-gradient(90deg, transparent 13px, color-mix(in srgb, var(--term) 40%, transparent) 13px 14px, transparent 14px),
+    radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--term) 20%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--term) 9%, var(--df-panel)), var(--df-panel)); }
+.dftermhead { align-self: flex-start; font: 800 9.5px/1 var(--mono, ui-monospace, monospace); letter-spacing: .16em;
+  color: color-mix(in srgb, var(--term) 75%, #fff); padding: 1px 0 3px; }
 .dfterm .dftermrow { max-width: none; width: max-content; }
 .dfterm .dftermrow .dfname { overflow: visible; text-overflow: clip; white-space: nowrap; }
+/* every plug in a terminal the same size */
+.dfterm.start, .dfterm.end, .dfterm.scratch { align-items: stretch; }
+.dfterm .dftermrow { width: auto !important; justify-content: flex-end; }
+.dfterm.end .dftermrow { justify-content: flex-start; }
+.dfterm .dftermlabel, .dfterm .dftermhead { align-self: center; }
+.dfterm.scratch .dftermhead { align-self: flex-start; }
+/* a terminal is as wide as its longest name */
+.dfterm { width: max-content; }
+.dfterm .dftermrow { flex: none; max-width: none !important; min-width: 0; }
+.dfterm .dftermrow .dfname { flex: none; overflow: visible; }
+.dfterm .dftermrow .dfhole { position: static; margin: 0; }

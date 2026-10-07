@@ -747,7 +747,12 @@ function drawDataLayer() {
       if (!pill || !ports.length) return null;
       const px = parseFloat(pill.style.left), py = parseFloat(pill.style.top), pw = pill.offsetWidth, ph = pill.offsetHeight;
       const panel = el("div", `dfterm ${kind}`);
-      if (kind === "scratch") panel.append(el("div", "dftermhead", "✎ SCRATCH"));
+      // START and END become the terminal itself: the pill grows into a
+      // capsule holding its plugs, its label where the control flow meets it
+      const label = kind === "scratch" ? el("div", "dftermhead", "✎ SCRATCH")
+        : el("div", "dftermlabel", kind === "start" ? "START" : "END");
+      if (kind !== "scratch") label.prepend(el("span", "dftermglyph"));
+      if (kind !== "start") panel.append(label);
       for (const port2 of ports) {
         const r = el("div", "dfport dftermrow " + (kind === "end" ? "in" : "out"));
         r.dataset.port = port2;
@@ -756,10 +761,17 @@ function drawDataLayer() {
         else r.append(el("span", "dfname mono", port2), hole);
         panel.append(r);
       }
+      if (kind === "start") panel.append(label);
       over.append(panel);
+      panel.style.minWidth = `${pw + 24}px`;
       const w = panel.offsetWidth, h = panel.offsetHeight;
-      const left = kind === "start" ? px + pw + 14 : kind === "scratch" ? px - 14 - w : px + pw + 14;
-      const top = kind === "end" ? py : py + ph - h;
+      // START grows upward from its pill, END downward, both centred on it;
+      // the SCRATCH pad stands to START's left
+      // (the pad stands clear of START's capsule, not just of its pill)
+      const stCap = kind === "scratch" && (termHole("start", ""), over.querySelector(".dfterm.start"));
+      const left = kind === "scratch" ? (stCap ? parseFloat(stCap.style.left) : px) - 24 - w : px + pw / 2 - w / 2;
+      const top = kind === "end" ? py - 4 : py + ph + 4 - h;
+      if (kind !== "scratch") pill.classList.add("dfhosted");
       panel.style.left = `${left}px`; panel.style.top = `${top}px`;
       const own = `term:${kind}`;
       obst.push({key: own, l: left - 4, t: top - 4, r: left + w + 4, b: top + h + 4});
