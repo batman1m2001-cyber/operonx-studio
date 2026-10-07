@@ -572,13 +572,16 @@ function drawDataLayer() {
   const clearV = (x, y0, y1) => {
     const lo = Math.min(y0, y1), hi = Math.max(y0, y1);
     if (obst.some(o => x > o.l && x < o.r && hi > o.t && lo < o.b)) return false;
-    return relaxed || !usedV.some(u => u.g !== grp && Math.abs(u.x - x) < 7 && hi > u.lo - 4 && lo < u.hi + 4);
+    // relaxed: a run may come close to another, but never lie on it
+    const sep = relaxed ? 3.5 : 7;
+    return !usedV.some(u => u.g !== grp && Math.abs(u.x - x) < sep && hi > u.lo - 4 && lo < u.hi + 4);
   };
   // (the stub out of a hole starts inside its own card: that card is skipped)
   const clearH = (y, x0, x1, own) => {
     const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
     if (obst.some(o => o.key !== own && y > o.t && y < o.b && hi > o.l && lo < o.r)) return false;
-    return relaxed || !usedH.some(u => u.g !== grp && Math.abs(u.y - y) < 7 && hi > u.lo - 4 && lo < u.hi + 4);
+    const sep = relaxed ? 3.5 : 7;
+    return !usedH.some(u => u.g !== grp && Math.abs(u.y - y) < sep && hi > u.lo - 4 && lo < u.hi + 4);
   };
   let lastRoute = null;
 
