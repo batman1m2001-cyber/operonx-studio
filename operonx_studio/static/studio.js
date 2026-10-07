@@ -1635,6 +1635,8 @@ function render() {
   // in paint order: a container before its members, so they sit on its box
   // — and a loop's zone between the two: over the box, under its cards
   nodesBox.textContent = "";
+  const stacksBox = $("#stacks");
+  if (stacksBox) stacksBox.textContent = "";
   const zoneDrawn = new Set();
   for (const it of L.items) {
     state.rendered.set(it.key, it);
@@ -1651,23 +1653,34 @@ function render() {
       card.style.top = `${it.y}px`;
     }
     state.cardEls.set(it.key, card);
-    // a generator is a STACK: the same card with two copies behind it,
-    // stepped down and right — one call, many results
-    // (cards fanned out behind it to the right, each a shade deeper — the
-    // ports top and bottom stay clear; an op open on its plugs drops it)
-    if (!it.inner && it.kind !== "knob" && it.node && it.node.is_gen && !card.classList.contains("dfcard")) {
-      for (const k of [2, 1]) {
-        const ghost = el("div", card.className.split(/\s+/)
-          .filter(c => !/^(selected|dfpeer|dfcard|dfpicker|live-|fresh|dimmed)/.test(c)).join(" ") + ` genghost g${k}`);
-        ghost.setAttribute("aria-hidden", "true");
-        ghost.style.left = `${it.x + 8 * k}px`;
-        ghost.style.top = `${it.y}px`;
-        ghost.style.width = `${it.w}px`;
-        ghost.style.height = `${it.h}px`;
-        nodesBox.append(ghost);
-      }
-    }
     nodesBox.append(card);
+    // a generator is a STACK: two copies of its card stepped down and right
+    // behind it, each a shade deeper — a deck, "many results"; an op open on
+    // its plugs drops it. Plain decorations, not cards: they copy
+    // the drawn card's outline and hue, and nothing that looks for cards
+    // (find, the audits, dimming) ever sees them.
+    if (stacksBox && !it.inner && it.kind !== "knob" && it.node && it.node.is_gen && !card.classList.contains("dfcard")) {
+      const cs = getComputedStyle(card), ghosts = [];
+      for (const k of [2, 1]) {
+        const ghost = el("div", `genghost g${k}`);
+        ghost.setAttribute("aria-hidden", "true");
+        ghost.style.left = `${it.x + 6 * k}px`;
+        ghost.style.top = `${it.y + 6 * k}px`;
+        ghost.style.width = `${card.offsetWidth || it.w}px`;
+        ghost.style.height = `${card.offsetHeight || it.h}px`;
+        // the card's own skin: a real card behind it, not a tint
+        ghost.style.borderRadius = cs.borderRadius;
+        ghost.style.background = cs.background;
+        ghost.style.borderColor = cs.borderTopColor;
+        ghosts.push(ghost);
+        stacksBox.append(ghost);
+      }
+      // the stack lives under the wires (a wire out of the card's port must
+      // not vanish behind it), so it mirrors its card's dimming by class
+      const mirror = () => { for (const g of ghosts) for (const c of ["dimmed", "dfpeer", "selected"]) g.classList.toggle(c, card.classList.contains(c)); };
+      mirror();
+      new MutationObserver(mirror).observe(card, {attributes: true, attributeFilter: ["class"]});
+    }
   }
   // each condition row's port DOT on the side its wire leaves by — the
   // side the layout chose (where its target lies; END left, a loop's
@@ -1720,7 +1733,8 @@ function render() {
   const doorFrame = (it, label) => {
     const rect = document.createElementNS(SVGNS, "rect");
     rect.setAttribute("x", it.x - 12); rect.setAttribute("y", it.y - 26);
-    rect.setAttribute("width", it.w + 24); rect.setAttribute("height", it.h + 38);
+    // a generator's stack stands inside the door too
+    rect.setAttribute("width", it.w + 24 + (it.node && it.node.is_gen ? 12 : 0)); rect.setAttribute("height", it.h + 38 + (it.node && it.node.is_gen ? 12 : 0));
     rect.setAttribute("rx", 16);
     rect.setAttribute("class", "zoneband");
     svg.append(rect);
@@ -1953,11 +1967,30 @@ function refreshSelection() {
   }
 }
 
+/* Opening or closing an op lays the flow out again (its plugs need room).
+ * The op the reader is looking at stays where it is on screen — otherwise
+ * the canvas jumps, and an Esc can leave the view on empty space. */
+function renderKeeping(key) {
+  const before = key && state.cardEls.get(key), stage = $("#stage");
+  let r0 = before && before.isConnected ? before.getBoundingClientRect() : null;
+  // only an op in view is held in place: one off screen (a find's target)
+  // is the caller's to bring in
+  const sr = stage.getBoundingClientRect();
+  if (r0 && (r0.right < sr.left || r0.left > sr.right || r0.bottom < sr.top || r0.top > sr.bottom)) r0 = null;
+  render();
+  if (!r0) return;
+  const c = state.cardEls.get(key);
+  if (!c || !c.isConnected) return;
+  const r1 = c.getBoundingClientRect();
+  stage.scrollLeft += r1.left - r0.left;
+  stage.scrollTop += r1.top - r0.top;
+}
+
 function deselect() {
   dfPlatePin = dfHoverPort = null;
   const before = state.sel;
   state.sel = null;
-  if (canvasView === "workflow" && before) render();
+  if (canvasView === "workflow" && before) renderKeeping(before);
   refreshSelection();
   pushView();
   renderFlowInfo();
@@ -2655,7 +2688,7 @@ function select(key) {
   const before = state.sel;
   state.sel = (state.sel === key) ? null : key;
   // Workflow opens the selected op in place: a re-layout round the card
-  if (canvasView === "workflow" && before !== state.sel) render();
+  if (canvasView === "workflow" && before !== state.sel) renderKeeping(before && !state.sel ? before : state.sel);
   refreshSelection();
   pushView();
   const panel = $("#inspector");

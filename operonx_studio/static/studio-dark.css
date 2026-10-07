@@ -110,3 +110,10 @@
 
 /* the data energy beads burn near-white on the dark canvas */
 :root[data-theme="dark"] { --df-bead: color-mix(in srgb, #fff 65%, var(--df)); }
+
+/* a generator's stack on the dark canvas: the copies keep the card's lit
+   edge (darkening a dark card only hides it), the front card's shadow
+   gives the depth */
+:root[data-theme="dark"] #stacks .genghost { box-shadow: inset 8px 8px 12px -6px rgba(0, 0, 0, .7); }
+:root[data-theme="dark"] #stacks .genghost.g1 { filter: none; opacity: .95; }
+:root[data-theme="dark"] #stacks .genghost.g2 { filter: none; opacity: .75; }

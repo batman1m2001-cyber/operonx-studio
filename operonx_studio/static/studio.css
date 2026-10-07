@@ -3927,15 +3927,16 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 /* the toolbar's Direction toggle stills the beads too */
 body.nodots .wires.dflinks path.dfflow { display: none; }
 
-/* a generator's stack: copies of its card stepped behind it, empty */
-#nodes .node.genghost { pointer-events: none; padding: 0; min-height: 0; box-shadow: none;
-  transition: none; transform: none !important; }
-#nodes .node.genghost::before { display: none; }
-/* tinted by the op's own kind: each copy a step deeper in its hue */
-#nodes .node.genghost.g1 { background: color-mix(in srgb, var(--kind, var(--k-func)) 16%, var(--surface));
-  border-color: color-mix(in srgb, var(--kind, var(--k-func)) 50%, var(--surface)); }
-#nodes .node.genghost.g2 { background: color-mix(in srgb, var(--kind, var(--k-func)) 30%, var(--surface));
-  border-color: color-mix(in srgb, var(--kind, var(--k-func)) 65%, var(--surface)); }
-/* a busy GraphOp's plates are its picker */
-.dfplate.pickable { cursor: pointer; pointer-events: auto; }
-.dfplate.picked { border-color: var(--df); box-shadow: 0 0 0 1.5px var(--df), 0 0 10px color-mix(in srgb, var(--df) 45%, transparent); }
+/* a generator's stack: plain copies of its card's outline fanned behind
+   it, tinted a step deeper in its own kind hue each */
+#stacks .genghost { position: absolute; pointer-events: none; box-sizing: border-box;
+  border: 1.5px solid; transition: opacity var(--tr);
+  /* depth: the card in front casts a soft shadow onto each copy */
+  box-shadow: inset 8px 8px 10px -6px rgba(20, 40, 80, .28); }
+#stacks .genghost.g1 { filter: brightness(.97); }
+#stacks .genghost.g2 { filter: brightness(.92); }
+/* a stack dims with its card (its classes are mirrored onto the copies) */
+#stacks .genghost.dimmed { opacity: .18 !important; }
+#world.dfsel #stacks .genghost:not(.dfpeer) { opacity: .4 !important; }
+#world.dffocus #stacks .genghost:not(.dfpeer):not(.selected) { opacity: .55 !important; }
+#world.dfpin #stacks .genghost:not(.dfpeer):not(.selected) { opacity: .28 !important; }
