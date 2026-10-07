@@ -406,6 +406,324 @@ function pathSampler(d) {
 const FLOW_DOTS_MAX = 150;
 let flowDotsOn = recall("ox:flowdots", true) !== false;
 
+/* ── two views of one graph: Workflow and Data Flow ─────────────────
+ * Workflow is the control flow (graph.edges): what runs before what.
+ * Data Flow is lineage (the inputs' bindings): what each op reads and
+ * feeds. The two are never shown at full strength together. In Workflow
+ * a selected node reveals only its own bindings (a tray beside it, tags
+ * on its partners); in Data Flow every card lists its bound ports and one
+ * connector joins each pair of nodes that pass data, while the control
+ * edges fade. A port click shows that port's lineage in either view.
+ * Model: static/dataflow.js. Plan: docs/WORKFLOW_DATAFLOW_VIEWS_PLAN.md */
+let canvasView = recall(`canvasView:${PID}`, "workflow") === "data" ? "data" : "workflow";
+let dfPort = null;   // {key, port, dir}: the port whose lineage is shown
+
+function setCanvasView(v) {
+  if (v === canvasView) return;
+  canvasView = v;
+  dfPort = null;
+  store(`canvasView:${PID}`, v);
+  showViewSeg();
+  render();
+}
+function showViewSeg() {
+  for (const b of document.querySelectorAll(".viewseg button")) {
+    const on = b.dataset.view === canvasView;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", String(on));
+  }
+}
+
+// a binding's source, in words: "rank.top", "START.question", "scratch.clock"
+function dfSourceLabel(b) {
+  if (b.from.kind === "scratch") return `scratch.${b.from.port}`;
+  if (b.from.kind === "input") {
+    if (!b.from.key) return `START.${b.from.port}`;
+    const c = state.rendered.get(b.from.key);
+    return `${c ? c.node.name : "graph"}.${b.from.port}`;
+  }
+  const s = state.rendered.get(b.from.key);
+  return `${s ? s.node.name : b.from.key}.${b.from.port}`;
+}
+const dfTargetLabel = (b) => {
+  const t = state.rendered.get(b.to.key);
+  return `${t ? t.node.name : b.to.key}.${b.to.port}`;
+};
+
+// Data Flow view: a card's bound ports, inputs left and outputs right
+function dfPortsBlock(it) {
+  const nb = DataFlow.nodeBindings(state.dfB || [], it.key);
+  const ins = [...new Map(nb.ins.map(b => [b.to.port, b])).values()];
+  const outs = [...new Set(nb.outs.map(b => b.from.port))];
+  if (!ins.length && !outs.length) return null;
+  const box = el("div", "dfports");
+  const col = (dir) => el("div", `dfcol ${dir}`);
+  const cin = col("in"), cout = col("out");
+  const row = (dir, port, extra, tip) => {
+    const r = el("button", `dfport ${dir}`);
+    r.type = "button";
+    r.dataset.port = port;
+    r.dataset.dir = dir;
+    r.append(el("span", "dfdot"), el("span", "dfname mono", port));
+    if (extra) r.append(extra);
+    r.title = tip;
+    r.onclick = (ev) => {
+      ev.stopPropagation();
+      dfPort = dfPort && dfPort.key === it.key && dfPort.port === port && dfPort.dir === dir ? null : {key: it.key, port, dir};
+      drawDataLayer();
+    };
+    return r;
+  };
+  for (const b of ins) {
+    const bc = DataFlow.isBroadcast(b);
+    const chip = bc ? el("span", "dfsrc " + (b.from.kind === "scratch" ? "scratch" : "start"),
+      b.from.kind === "scratch" ? "✎" : "▶") : null;
+    cin.append(row("in", b.to.port, chip, `${b.to.port} ← ${dfSourceLabel(b)}`));
+  }
+  for (const port of outs) {
+    const readers = nb.outs.filter(b => b.from.port === port).map(dfTargetLabel);
+    cout.append(row("out", port, null, `${port} → ${readers.join(", ")}`));
+  }
+  box.append(cin, cout);
+  return box;
+}
+
+/* The data layer, drawn after the cards are placed: Data Flow's pair
+ * connectors, Workflow's focus tray, and a port's lineage. Cheap: it
+ * reads positions, never moves a card. */
+function drawDataLayer() {
+  const svg = $("#dflinks"), over = $("#dfover");
+  if (!svg || !over) return;
+  svg.textContent = ""; over.textContent = "";
+  const world = $("#world");
+  const B = state.dfB || [];
+  const R = (k) => state.rendered.get(k);
+  const lv = dfPort ? DataFlow.lineage(B, dfPort) : null;
+  world.classList.toggle("dfsel", !!lv);
+  for (const c of state.cardEls.values()) c.classList.remove("dfpeer");
+  for (const r of document.querySelectorAll(".dfport.lit, .dfport.lit2, .dfport.picked")) r.classList.remove("lit", "lit2", "picked");
+  const path = (d, cls, w) => {
+    const p = document.createElementNS(SVGNS, "path");
+    p.setAttribute("d", d);
+    p.setAttribute("class", cls);
+    if (w) p.style.strokeWidth = w;
+    svg.append(p);
+    return p;
+  };
+  const curve = (a, b, ta, tb) => {
+    const k = Math.max(26, Math.hypot(b.x - a.x, b.y - a.y) * 0.4);
+    return `M ${a.x} ${a.y} C ${a.x + ta * k} ${a.y}, ${b.x + tb * k} ${b.y}, ${b.x} ${b.y}`;
+  };
+
+  if (canvasView === "data") {
+    // Data leaves a card through its bottom edge and enters through its
+    // top — the layout's own direction — at attachment points ordered by
+    // where the partner sits, so neighbouring connectors do not cross.
+    // The centre stays clear for the control edge's contact.
+    const P = DataFlow.pairs(B).filter(q => R(q.from) && R(q.to) && !R(q.from).inner && !R(q.to).inner);
+    const cx = (k) => { const it = R(k); return it.x + it.w / 2; };
+    const slots = (key, list, side) => {
+      // list: pairs leaving (bottom) or arriving (top) at this card
+      const it = R(key);
+      list.sort((p, q) => side === "out" ? cx(p.to) - cx(q.to) : cx(p.from) - cx(q.from));
+      const n = list.length, lo = it.x + Math.min(28, it.w * 0.18), hi = it.x + it.w - Math.min(28, it.w * 0.18);
+      const mid = it.x + it.w / 2;
+      list.forEach((q, i) => {
+        let x = n === 1 ? (side === "out" ? cx(q.to) : cx(q.from)) : lo + (hi - lo) * i / (n - 1);
+        x = Math.max(lo, Math.min(hi, x));
+        if (Math.abs(x - mid) < 12) x = mid + (x >= mid ? 12 : -12);
+        q[side === "out" ? "sx" : "tx"] = x;
+      });
+    };
+    const outsOf = new Map(), insOf = new Map();
+    for (const q of P) {
+      if (!outsOf.has(q.from)) outsOf.set(q.from, []);
+      if (!insOf.has(q.to)) insOf.set(q.to, []);
+      outsOf.get(q.from).push(q); insOf.get(q.to).push(q);
+    }
+    for (const [k, l] of outsOf) slots(k, l, "out");
+    for (const [k, l] of insOf) slots(k, l, "in");
+    const dots = document.createElementNS(SVGNS, "svg");
+    dots.setAttribute("class", "wires dflinks dffocuslinks");
+    over.append(dots);
+    for (const q of P) {
+      const A = R(q.from), Bn = R(q.to);
+      const s = {x: q.sx, y: A.y + A.h}, t = {x: q.tx, y: Bn.y};
+      const dy = t.y - s.y;
+      let d;
+      if (dy > 20) {
+        const k = Math.max(24, dy * 0.45);
+        d = `M ${s.x} ${s.y} C ${s.x} ${s.y + k}, ${t.x} ${t.y - k}, ${t.x} ${t.y}`;
+      } else {
+        // data flowing back up: out round the side, never through a card
+        const side = t.x >= s.x ? 1 : -1, bow = Math.max(A.w, Bn.w) / 2 + 40;
+        d = `M ${s.x} ${s.y} C ${s.x} ${s.y + 60}, ${t.x + side * bow} ${t.y - 60}, ${t.x} ${t.y}`;
+      }
+      const lit = lv ? Math.min(...q.bindings.map(b => lv.get(b.id) || 9)) : 0;
+      const far = dy > 2.6 * Math.max(A.h, Bn.h) + 120;
+      const cls = "dfconn" + (lit === 1 ? " lit" : lit === 2 ? " lit2" : "") + (dy > 20 ? "" : " back") + (far ? " far" : "");
+      const p = path(d, cls, (1.3 + 0.6 * Math.log2(q.bindings.length)).toFixed(2));
+      const tip = document.createElementNS(SVGNS, "title");
+      tip.textContent = q.bindings.map(b => `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`).join("\n");
+      p.append(tip);
+      // hovering a connector lights the rows it carries
+      const rowsOf = () => q.bindings.flatMap(b => [
+        state.cardEls.get(b.from.key)?.querySelector(`.dfport.out[data-port="${CSS.escape(b.from.port)}"]`),
+        state.cardEls.get(b.to.key)?.querySelector(`.dfport.in[data-port="${CSS.escape(b.to.port)}"]`)]).filter(Boolean);
+      p.addEventListener("mouseenter", () => { p.classList.add("hot"); for (const r of rowsOf()) r.classList.add("hot"); });
+      p.addEventListener("mouseleave", () => { p.classList.remove("hot"); for (const r of rowsOf()) r.classList.remove("hot"); });
+      q.el = p;
+      for (const [x, y] of [[s.x, s.y], [t.x, t.y]]) {
+        const c = document.createElementNS(SVGNS, "circle");
+        c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", 2.6);
+        c.setAttribute("class", "dfattach" + (lit === 1 ? " lit" : ""));
+        dots.append(c);
+      }
+    }
+    // hovering a port row lights the connectors that carry it
+    for (const card of state.cardEls.values()) for (const r of card.querySelectorAll(".dfport")) {
+      const key = [...state.cardEls].find(([, c]) => c === card)?.[0];
+      const mine = () => P.filter(q => q.bindings.some(b => r.dataset.dir === "in"
+        ? b.to.key === key && b.to.port === r.dataset.port
+        : b.from.key === key && b.from.port === r.dataset.port));
+      r.onmouseenter = () => { for (const q of mine()) q.el.classList.add("hot"); };
+      r.onmouseleave = () => { for (const q of mine()) q.el.classList.remove("hot"); };
+    }
+    if (lv) {
+      for (const [id, l] of lv) {
+        const b = B[id];
+        for (const [key, dir, port] of [[b.to.key, "in", b.to.port], [b.from.key, "out", b.from.port]]) {
+          const card = state.cardEls.get(key);
+          const r = card && card.querySelector(`.dfport.${dir}[data-port="${CSS.escape(port)}"]`);
+          if (r) r.classList.add(l === 1 ? "lit" : "lit2");
+          if (card) card.classList.add("dfpeer");
+        }
+      }
+      const pc = state.cardEls.get(dfPort.key);
+      const pr = pc && pc.querySelector(`.dfport.${dfPort.dir}[data-port="${CSS.escape(dfPort.port)}"]`);
+      if (pr) pr.classList.add("picked");
+      if (pc) pc.classList.add("dfpeer");
+    }
+    return;
+  }
+
+  // Workflow: only the selected node's data, as a tray beside it
+  world.classList.remove("dffocus");
+  const it = state.sel && R(state.sel);
+  if (!it || it.inner || it.kind === "knob" || (it.node && it.node.boundary)) return;
+  const nb = DataFlow.nodeBindings(B, it.key);
+  if (!nb.ins.length && !nb.outs.length) return;
+  world.classList.add("dffocus");
+  const tray = el("div", "dftray");
+  tray.style.left = `${it.x + it.w + 18}px`;
+  tray.style.top = `${it.y - 4}px`;
+  const section = (title) => { tray.append(el("div", "dfthead", title)); };
+  const trow = (dir, b) => {
+    const r = el("button", `dftrow ${dir}`);
+    r.type = "button";
+    const port = dir === "in" ? b.to.port : b.from.port;
+    r.append(el("span", "dfdot"), el("span", "dfname mono", port), el("span", "dfarr", dir === "in" ? "←" : "→"),
+             el("span", "dfpeerlbl mono", dir === "in" ? dfSourceLabel(b) : dfTargetLabel(b)));
+    r.dataset.bid = b.id;
+    r.title = dir === "in" ? `${port} ← ${dfSourceLabel(b)}` : `${port} → ${dfTargetLabel(b)}`;
+    r.onclick = (ev) => {
+      ev.stopPropagation();
+      const p = {key: it.key, port, dir};
+      dfPort = dfPort && dfPort.key === p.key && dfPort.port === p.port && dfPort.dir === p.dir ? null : p;
+      drawDataLayer();
+    };
+    tray.append(r);
+    return r;
+  };
+  // rows in the order their partners stand, left to right: the fan of
+  // links into the tray then never crosses itself; sources without a
+  // wire (START, scratch) close the list
+  const px = (key) => { const P = R(key); return P ? P.x + P.w / 2 : 1e9; };
+  const ins = [...nb.ins].sort((a, b) => (DataFlow.isBroadcast(a) - DataFlow.isBroadcast(b)) || px(a.from.key) - px(b.from.key));
+  const outs = [...nb.outs].sort((a, b) => px(a.to.key) - px(b.to.key));
+  const rows = [];
+  if (ins.length) { section("reads"); for (const b of ins) rows.push([trow("in", b), b, "in"]); }
+  if (outs.length) { section("feeds"); for (const b of outs) rows.push([trow("out", b), b, "out"]); }
+  over.append(tray);
+  // focus links ride above the cards (the others are dimmed anyway)
+  const fsvg = document.createElementNS(SVGNS, "svg");
+  fsvg.setAttribute("class", "wires dflinks dffocuslinks");
+  over.append(fsvg);
+  const fpath = (d, cls) => {
+    const p = document.createElementNS(SVGNS, "path");
+    p.setAttribute("d", d); p.setAttribute("class", cls);
+    fsvg.append(p);
+    return p;
+  };
+  // partner tags: the one port involved, docked on the side of the partner
+  // that faces the tray; every link lands on the tray's left edge
+  const trayX = parseFloat(tray.style.left);
+  const tagCount = new Map();
+  const trayTop = parseFloat(tray.style.top), trayBot = trayTop + tray.offsetHeight;
+  const tag = (key, sideHint, text) => {
+    const P = R(key);
+    if (!P) return null;
+    void sideHint;
+    // a partner above the tray wears its tag under its card and its link
+    // leaves downward; below the tray, over its card and upward; level
+    // with it, on the side that faces the tray
+    const side = P.y + P.h < trayTop - 8 ? "below" : P.y > trayBot + 8 ? "above"
+      : P.x + P.w / 2 < trayX ? "right" : "left";
+    const n = tagCount.get(key + side) || 0;
+    tagCount.set(key + side, n + 1);
+    const t = el("div", `dftag ${side}`, text);
+    over.append(t);
+    const w = t.offsetWidth, h = t.offsetHeight;
+    let x, y, a, tan;
+    if (side === "below" || side === "above") {
+      x = P.x + P.w / 2 + 14 + n * (w + 4);
+      y = side === "below" ? P.y + P.h + 5 : P.y - 5 - h;
+      a = {x: x + w / 2, y: side === "below" ? y + h : y};
+      tan = {x: 0, y: side === "below" ? 1 : -1};
+    } else {
+      x = side === "right" ? P.x + P.w + 6 : P.x - 6 - w;
+      y = P.y + 6 + n * (h + 3);
+      a = {x: side === "right" ? x + w : x, y: y + h / 2};
+      tan = {x: side === "right" ? 1 : -1, y: 0};
+    }
+    t.style.left = `${x}px`; t.style.top = `${y}px`;
+    const card = state.cardEls.get(key);
+    if (card) card.classList.add("dfpeer");
+    return {...a, tan};
+  };
+  // a curve between two anchors, each leaving along its own tangent
+  // (short handles: a link drops out of its tag, then heads for the tray —
+  // a long handle swings it into a deep U)
+  const curveT = (a, ta, b, tb) => {
+    const k = Math.min(70, Math.max(28, Math.hypot(b.x - a.x, b.y - a.y) * 0.3));
+    return `M ${a.x} ${a.y} C ${a.x + ta.x * k} ${a.y + ta.y * k}, ${b.x - tb.x * k} ${b.y - tb.y * k}, ${b.x} ${b.y}`;
+  };
+  const tr = tray.getBoundingClientRect();
+  void tr;
+  for (const [r, b, dir] of rows) {
+    const ry = parseFloat(tray.style.top) + r.offsetTop + r.offsetHeight / 2;
+    const tx = parseFloat(tray.style.left);
+    const lit = lv ? (lv.get(b.id) || 0) : 0;
+    if (lv) r.classList.toggle("lit", lit === 1), r.classList.toggle("lit2", lit === 2);
+    const cls = "dfconn focus" + (lv ? (lit === 1 ? " lit" : lit === 2 ? " lit2" : " dim") : "");
+    // a link lands on the tray edge that faces its partner
+    const tw = tray.offsetWidth;
+    const edge = (key) => px(key) > tx + tw / 2
+      ? {at: {x: tx + tw, y: ry}, inward: {x: -1, y: 0}}
+      : {at: {x: tx, y: ry}, inward: {x: 1, y: 0}};
+    if (dir === "in") {
+      if (DataFlow.isBroadcast(b) || b.from.kind !== "op" && !b.from.key) continue;
+      const a = tag(b.from.key, "right", b.from.port);
+      const E = edge(b.from.key);
+      if (a) fpath(curveT(a, a.tan, E.at, E.inward), cls);
+    } else {
+      const a = tag(b.to.key, "left", b.to.port);
+      const E = edge(b.to.key);
+      if (a) fpath(curveT(E.at, {x: -E.inward.x, y: 0}, a, {x: -a.tan.x, y: -a.tan.y}), cls + " feed");
+    }
+  }
+}
+
 function flowDot(svg, path, cls) {
   if (!flowDotsOn || svg.querySelectorAll(".eflow").length >= FLOW_DOTS_MAX) return;
   const d = path.getAttribute("d");
@@ -522,6 +840,8 @@ function render() {
   state.rendered.clear();
   state.cardEls.clear();
   state.edgeEls = [];
+  state.dfB = g ? DataFlow.dataBindings(g, state.expanded) : [];
+  $("#world").classList.toggle("dfview", canvasView === "data");
 
   // ── cards first, measured; then ONE layout places everything ──
   // Every card goes into the DOM before anything is placed: the layout
@@ -552,7 +872,7 @@ function render() {
   const measured = [];
   for (const it of leaves) {
     const card = cardOf.get(it.key);
-    let els = [...card.querySelectorAll(".ntext, .brcond")];
+    let els = [...card.querySelectorAll(canvasView === "data" ? ".ntext, .brcond, .dfport" : ".ntext, .brcond")];
     // gates: plain name line, plus the transport line below it
     if (!els.length) els = [".nname", ".nkind"].map(sel => card.querySelector(sel)).filter(Boolean);
     measured.push({it, card, els});
@@ -563,10 +883,13 @@ function render() {
   const laidOut = measured.map(m => ({shown: !!m.card.offsetHeight, widths: m.els.map(e => e.clientWidth)}));
   measured.forEach((m, i) => {
     if (!laidOut[i].shown || !m.els.length) return;
-    const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
+    // a port row sits in one of two equal columns: the card must grow by
+    // twice its deficit for that column to gain it
+    const need = Math.max(...m.els.map((e, j) => (natural[i][j] - laidOut[i].widths[j]) * (e.classList.contains("dfport") ? 2 : 1)));
     const want = Math.ceil(m.it.w + need + 8);
-    const w = Math.max(180, Math.min(310, want));
-    if (want > 310) {
+    const cap = canvasView === "data" ? 420 : 310;
+    const w = Math.max(180, Math.min(cap, want));
+    if (want > cap) {
       // a name cut short says itself in full on hover
       m.card.dataset.capped = "";
       for (const e of m.els) if (e.classList.contains("ntext")) e.title = e.textContent;
@@ -650,7 +973,7 @@ function render() {
   // width includes the right margin where loop returns bulge
   state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: bottom};
 
-  for (const layer of [svg, $("#edgetop")]) {
+  for (const layer of [svg, $("#edgetop"), $("#dflinks")]) {
     layer.setAttribute("width", maxX + 620);
     layer.setAttribute("height", maxY + 640);
     layer.style.left = "-200px";
@@ -888,6 +1211,8 @@ function render() {
  * flow must not blink the whole canvas. */
 function refreshSelection() {
   for (const [k, c] of state.cardEls) c.classList.toggle("selected", k === state.sel);
+  if (canvasView === "workflow" && dfPort && dfPort.key !== state.sel) dfPort = null;
+  drawDataLayer();
   for (const g of state.edgeEls) {
     const hot = !!state.sel && (g.a === state.sel || g.b === state.sel);
     for (const e of g.els) e.classList.toggle("hot", hot);
@@ -1400,6 +1725,10 @@ function opCard(it) {
     if (det.childNodes.length) card.append(det);
   }
 
+  if (canvasView === "data" && !n.serve_role) {
+    const ports = dfPortsBlock(it);
+    if (ports) { card.append(ports); card.classList.add("dfcard"); }
+  }
   // At most TWO badges: one semantic marker, plus the run chip. Density
   // is respect — everything else is one click away in the inspector.
   const badges = el("div", "badges");
@@ -3599,6 +3928,8 @@ $("#graph-pick").onchange = (ev) => {
 };
 
 $("#btn-fit").onclick = fit;
+for (const b of document.querySelectorAll(".viewseg button")) b.onclick = () => setCanvasView(b.dataset.view);
+showViewSeg();
 {
   const b = $("#btn-flowdots");
   const show = () => { b.setAttribute("aria-pressed", String(flowDotsOn)); b.classList.toggle("on", flowDotsOn); };
@@ -3662,12 +3993,16 @@ $("#btn-zoom-pct").onclick = () => {
     }
     if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA") return;
     if (ev.key === "Escape") {
+      if (dfPort) { dfPort = null; drawDataLayer(); return; }
       if (!$("#find").hidden) closeFind();
       else if (!$("#legend").hidden) $("#legend").hidden = true;
       else if (state.sel) deselect();
       return;
     }
     if (ev.key === "/") { ev.preventDefault(); openFind(); return; }
+    if ((ev.key === "d" || ev.key === "D") && !ev.ctrlKey && !ev.metaKey && !ev.altKey && state.tab === "flow") {
+      setCanvasView(canvasView === "data" ? "workflow" : "data"); return;
+    }
     if (ev.key === " ") { spaceHeld = true; stage.classList.add("panmode"); ev.preventDefault(); return; }
     // walk the wires: ↓/→ follows an outgoing edge, ↑/← an incoming one
     if ((ev.key === "ArrowRight" || ev.key === "ArrowLeft"
@@ -3695,7 +4030,8 @@ $("#btn-zoom-pct").onclick = () => {
 
   stage.addEventListener("click", (ev) => {
     if (ev.target.closest(".node") || ev.target.closest("#find")
-        || ev.target.closest("#legend")) return;
+        || ev.target.closest("#legend") || ev.target.closest(".dftray")) return;
+    if (dfPort) { dfPort = null; drawDataLayer(); }
     deselect();
   });
 })();
