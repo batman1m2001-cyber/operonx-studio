@@ -165,8 +165,11 @@
       let L;
       if (n.graph && opts.expanded.has(key)) {
         const sub = buildLevel(n.graph, key + "/", depth + 1, opts, true);
+        // opts.padOf: extra side room a container needs (the data views'
+        // plates sit there, clear of its inner cards)
+        const extra = (opts.padOf && opts.padOf(key)) || 0;
         L = {id: n.id, key, node: n, kind: "container", sub,
-             w: Math.max(C.CMIN_W, sub.w + 2 * C.CPAD), h: sub.h};
+             w: Math.max(C.CMIN_W, sub.w + 2 * (C.CPAD + extra)), h: sub.h};
       } else {
         const s = opts.sizeOf(key, n) || {};
         L = {id: n.id, key, node: n, kind: "card",

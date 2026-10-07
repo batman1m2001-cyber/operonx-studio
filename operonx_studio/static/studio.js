@@ -526,17 +526,17 @@ function drawDataLayer() {
   const usedV = [], usedH = [];
   // a run may lie on a run of its OWN group (wires out of one hole are one
   // trunk); any other run keeps 7px away
-  let grp = null;
+  let grp = null, relaxed = false;
   const clearV = (x, y0, y1) => {
     const lo = Math.min(y0, y1), hi = Math.max(y0, y1);
     if (obst.some(o => x > o.l && x < o.r && hi > o.t && lo < o.b)) return false;
-    return !usedV.some(u => u.g !== grp && Math.abs(u.x - x) < 7 && hi > u.lo - 4 && lo < u.hi + 4);
+    return relaxed || !usedV.some(u => u.g !== grp && Math.abs(u.x - x) < 7 && hi > u.lo - 4 && lo < u.hi + 4);
   };
   // (the stub out of a hole starts inside its own card: that card is skipped)
   const clearH = (y, x0, x1, own) => {
     const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
     if (obst.some(o => o.key !== own && y > o.t && y < o.b && hi > o.l && lo < o.r)) return false;
-    return !usedH.some(u => u.g !== grp && Math.abs(u.y - y) < 7 && hi > u.lo - 4 && lo < u.hi + 4);
+    return relaxed || !usedH.some(u => u.g !== grp && Math.abs(u.y - y) < 7 && hi > u.lo - 4 && lo < u.hi + 4);
   };
   const trunk = new Map();   // group → the first wire's column and channel
   let lastRoute = null;
@@ -581,10 +581,21 @@ function drawDataLayer() {
     const c = state.cardEls.get(it2.key);
     return {left: it2.x, right: it2.x + (c ? c.offsetWidth : it2.w), top: it2.y, bottom: it2.y + (c ? c.offsetHeight : it2.h)};
   };
-  const scan = (from, step, ok, n = 160) => { for (let i = 0; i < n; i++) { const v = from + i * step; if (ok(v)) return v; } return from; };
+  // a free track if there is one; else one shared with another wire (a
+  // shared track is better than a wire across a card); else the first try
+  const twice = (find) => {
+    let v = find();
+    if (v !== null) return v;
+    relaxed = true; v = find(); relaxed = false;
+    return v;
+  };
+  const scan = (from, step, ok, n = 160) => {
+    const v = twice(() => { for (let i = 0; i < n; i++) { const t = from + i * step; if (ok(t)) return t; } return null; });
+    return v === null ? from : v;
+  };
   const scan2 = (from, ok, step = 6, n = 160) => {
-    for (let i = 0; i < n; i++) for (const v of i ? [from - i * step, from + i * step] : [from]) if (ok(v)) return v;
-    return from;
+    const v = twice(() => { for (let i = 0; i < n; i++) for (const t of i ? [from - i * step, from + i * step] : [from]) if (ok(t)) return t; return null; });
+    return v === null ? from : v;
   };
   /* Lanes are dealt from both ends before anything is routed, so a bundle
    * never tangles: leaving a card, the LOWEST hole takes the innermost
@@ -613,9 +624,9 @@ function drawDataLayer() {
     const x1 = T ? T.x1 : scan(Math.max(a.x, A.right) + 10 + 8 * lo, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownA));
     const x2 = scan(Math.min(b.x, Bx.left) - 10 - 8 * li, -4, x => clearV(x, yB0, b.y) && clearH(b.y, x, b.x, ownB));
     let xc = scan2(x2, x => clearV(x, yA0, yB0));
-    const ymA = T && clearH(T.ymA, x1, xc) ? T.ymA : scan(yA0, 5, y => clearH(y, x1, xc) && clearV(x1, a.y, y), 80);
+    const ymA = T && clearH(T.ymA, x1, xc) ? T.ymA : scan(yA0, 4, y => clearH(y, x1, xc) && clearV(x1, a.y, y) && clearV(xc, y, yB0), 200);
     if (!T) trunk.set(grp, {x1, ymA});
-    const ymB = scan(yB0, -5, y => clearH(y, xc, x2) && clearV(x2, y, b.y), 80);
+    const ymB = scan(yB0, -4, y => clearH(y, xc, x2) && clearV(x2, y, b.y), 200);
     if (!clearV(xc, ymA, ymB)) xc = scan2(xc, x => clearV(x, ymA, ymB));
     let pts = [[a.x, a.y], [x1, a.y], [x1, ymA], [xc, ymA], [xc, ymB], [x2, ymB], [x2, b.y], [b.x, b.y]];
     // drop repeats and straight-through corners
@@ -1198,8 +1209,26 @@ function render() {
     }
   }
   const sized = new Map(leaves.map(it => [it.key, it]));
+  // GraphOps whose plates will show get side room for them: every opened
+  // one in Data Flow; in Workflow those the selection's data crosses
+  const platePad = new Map();
+  {
+    const B = state.dfB || [];
+    const wants = new Set();
+    if (canvasView === "data") for (const k of state.expanded) wants.add(k);
+    else if (state.sel) {
+      if (state.expanded.has(state.sel)) wants.add(state.sel);
+      for (const b of B) if (b.to.key === state.sel || b.from.key === state.sel)
+        for (const k of [b.from.key, b.to.key]) if (state.expanded.has(k)) wants.add(k);
+    }
+    for (const k of wants) {
+      const names = B.filter(b => b.to.key === k || b.from.key === k).map(b => b.to.key === k ? b.to.port : b.from.port);
+      if (names.length) platePad.set(k, Math.max(...names.map(n => n.length)) * 6.6 + 52);
+    }
+  }
   const L = FlowLayout.layout(g, {
     expanded: state.expanded,
+    padOf: (key) => platePad.get(key) || 0,
     textWidth: zoneTextWidth,
     sizeOf: (key) => { const it = sized.get(key); return it ? {w: it.w, h: it.h, rows: it.rows || []} : null; },
   });
