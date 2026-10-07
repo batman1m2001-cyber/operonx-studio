@@ -3880,3 +3880,6 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dfterm .dftermrow { flex: none; max-width: none !important; min-width: 0; }
 .dfterm .dftermrow .dfname { flex: none; overflow: visible; }
 .dfterm .dftermrow .dfhole { position: static; margin: 0; }
+/* a lineage is one chain: the other wires step out entirely */
+#world.dfsel .wires.dflinks path.dfconn:not(.lit):not(.lit2) { opacity: 0 !important; }
+#world.dfsel .wires.dflinks circle.dfjunction { opacity: 0; }

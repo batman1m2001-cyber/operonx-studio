@@ -853,8 +853,11 @@ function drawDataLayer() {
     // short, visible wires claim their tracks first
     // bottom holes first: they take the inner lanes, so a card's wires nest
     // like brackets instead of crossing
-    plan.sort((p, q) => (p.far - q.far) || (q.a.y - p.a.y) || (q.z.y - p.z.y));
-    prepLanes(plan.filter(x => !x.far).map(x => [x.a, x.z]));
+    // what is visible routes first: a lit lineage, then near wires, then far
+    // ones hidden at rest — so the wires on screen get the free lanes
+    const rank = (x) => (lv && lv.has(x.b.id)) ? 0 : x.far ? 2 : 1;
+    plan.sort((p, q) => (rank(p) - rank(q)) || (q.a.y - p.a.y) || (q.z.y - p.z.y));
+    prepLanes(plan.filter(x => rank(x) < 2).map(x => [x.a, x.z]));
     for (const {b, a, z, far} of plan) {
       const p = wire(a, z, "dfconn" + litCls(b) + (far ? " far" : ""), true, `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`);
       if (!p) continue;
@@ -955,6 +958,12 @@ function drawDataLayer() {
       const z = edgeOf(b.to.key, "in");
       if (z) jobs2.push([{...side("out"), own: it.key}, z, cls0, `${it.node.name} → ${b.to.port}${n > 1 ? ` +${n - 1}` : ""}`]);
     }
+    // each peek wire lands on its own point down the op's side
+    const spreadEnds = (list, end) => list.forEach((j, i) => {
+      j[end] = {...j[end], y: it.y + it.h * (i + 1) / (list.length + 1)};
+    });
+    spreadEnds(jobs2.filter(j => j[1].own === it.key), 1);
+    spreadEnds(jobs2.filter(j => j[0].own === it.key), 0);
     prepLanes(jobs2);
     for (const [a, z, cls, label] of jobs2) wire(a, z, cls, false, label);
     return;
