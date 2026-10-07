@@ -418,6 +418,7 @@ let flowDotsOn = recall("ox:flowdots", true) !== false;
 let canvasView = recall(`canvasView:${PID}`, "workflow") === "data" ? "data" : "workflow";
 let dfPort = null;   // {key, port, dir}: the port whose lineage is shown
 let dfHoverPort = null;   // {key, port, dir}: a selected op's plug under the pointer
+let dfPlatePin = null;    // {key, port, dir}: a selected GraphOp's plate, clicked
 
 function setCanvasView(v) {
   if (v === canvasView) return;
@@ -1127,11 +1128,40 @@ function drawDataLayer() {
     state.cardEls.get(it.key)?.classList.add("dfpeer");
     containerHole(it.key, "in", "");   // its plates exist even when no wire comes
     const rel = B.filter(b => b.to.key === it.key || b.from.key === it.key);
+    // the plate a binding passes through: in by its START side, out by END
+    const plateOf = (b) => b.to.key === it.key ? {dir: b.to.export ? "out" : "in", port: b.to.port}
+      : {dir: b.from.kind === "input" ? "in" : "out", port: b.from.port};
+    // many wires: one plate at a time, the one under the pointer or pinned
+    const pick = rel.length > 5 ? (dfHoverPort && dfHoverPort.key === it.key ? dfHoverPort
+      : dfPlatePin && dfPlatePin.key === it.key ? dfPlatePin : null) : null;
+    world.classList.toggle("dftpick", !!pick);
     const pairs = [];
     for (const b of rel) {
       const a = srcHole(b), z = dstHole(b);
       for (const k of [b.from.key, b.to.key]) state.cardEls.get(k)?.classList.add("dfpeer");
-      if (a && z) pairs.push([a, z, "dfconn focus" + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
+      const pl = plateOf(b);
+      const on = !pick || (pl.dir === pick.dir && pl.port === pick.port);
+      for (const h of [a, z]) if (h && h.row && !h.plate) h.row.classList.add(on && pick ? "picked" : "lit");
+      if (rel.length > 5 && !pick) continue;
+      if (on && a && z) pairs.push([a, z, "dfconn focus" + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
+    }
+    // the plates are the picker
+    for (const [k2, P] of plates.get(it.key) || []) {
+      const [dir2, port2] = [k2.slice(0, k2.indexOf("|")), k2.slice(k2.indexOf("|") + 1)];
+      const row = P.row;
+      row.dataset.pk = it.key; row.dataset.pp = port2; row.dataset.pd = dir2;
+      row.classList.toggle("picked", !!pick && pick.dir === dir2 && pick.port === port2);
+      row.classList.toggle("pickable", rel.length > 5);
+      if (rel.length <= 5) continue;
+      row.onmouseenter = () => {
+        if (dfHoverPort && dfHoverPort.key === it.key && dfHoverPort.port === port2 && dfHoverPort.dir === dir2) return;
+        dfHoverPort = {key: it.key, port: port2, dir: dir2}; drawDataLayer();
+      };
+      row.onclick = (ev) => {
+        ev.stopPropagation();
+        dfPlatePin = dfPlatePin && dfPlatePin.key === it.key && dfPlatePin.port === port2 && dfPlatePin.dir === dir2 ? null : {key: it.key, port: port2, dir: dir2};
+        dfHoverPort = null; drawDataLayer();
+      };
     }
     pairs.sort((p, q) => (q[0].y - p[0].y) || (q[1].y - p[1].y));
     prepLanes(pairs);
@@ -1200,6 +1230,9 @@ function drawDataLayer() {
     const spreadEnds = (list, end) => list.forEach((j, i) => {
       j[end] = {...j[end], y: it.y + it.h * (i + 1) / (list.length + 1)};
     });
+    // a busy op's peek only lights its partners: faint wires to many of
+    // them would cross each other — a click shows them, one plug at a time
+    if (jobs2.length > 5) return;
     spreadEnds(jobs2.filter(j => j[1].own === it.key), 1);
     spreadEnds(jobs2.filter(j => j[0].own === it.key), 0);
     prepLanes(jobs2);
@@ -1829,6 +1862,7 @@ function refreshSelection() {
 }
 
 function deselect() {
+  dfPlatePin = dfHoverPort = null;
   const before = state.sel;
   state.sel = null;
   if (canvasView === "workflow" && before) render();
@@ -2113,9 +2147,10 @@ document.addEventListener("pointermove", (ev) => {
   }
   if (dfHoverPort) {
     const r = ev.target.closest && ev.target.closest(".dfport");
-    if (!(r && r.dataset.port === dfHoverPort.port && r.dataset.dir === dfHoverPort.dir && r.closest(".node") === state.cardEls.get(dfHoverPort.key))) {
-      dfHoverPort = null; drawDataLayer();
-    }
+    const pl = ev.target.closest && ev.target.closest(".dfplate");
+    const onRow = r && r.dataset.port === dfHoverPort.port && r.dataset.dir === dfHoverPort.dir && r.closest(".node") === state.cardEls.get(dfHoverPort.key);
+    const onPlate = pl && pl.dataset.pk === dfHoverPort.key && pl.dataset.pp === dfHoverPort.port && pl.dataset.pd === dfHoverPort.dir;
+    if (!onRow && !onPlate) { dfHoverPort = null; drawDataLayer(); }
   }
 });
 
@@ -2522,6 +2557,7 @@ new ResizeObserver(() => flushCanvas()).observe($("#stage"));
  * code, prompts and source live in collapsed sections underneath, so
  * they are one click away but never in the way. */
 function select(key) {
+  dfPlatePin = dfHoverPort = null;
   state.dfTerm = null;
   state.dfTermPort = state.dfTermHover = null;
   const before = state.sel;
@@ -4642,6 +4678,7 @@ $("#btn-zoom-pct").onclick = () => {
     if (ev.key === "Escape") {
       if (dfPort) { dfPort = null; drawDataLayer(); return; }
       if (state.dfTermPort != null) { state.dfTermPort = null; drawDataLayer(); return; }
+      if (dfPlatePin) { dfPlatePin = null; drawDataLayer(); return; }
       if (state.dfTerm) { toggleTerm(state.dfTerm); return; }
       if (!$("#find").hidden) closeFind();
       else if (!$("#legend").hidden) $("#legend").hidden = true;
