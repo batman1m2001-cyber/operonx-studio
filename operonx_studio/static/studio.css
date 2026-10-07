@@ -3654,3 +3654,135 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dfcol.in { align-items: flex-start; }
 .dfport { justify-content: flex-start; }
 .dfport.out { justify-content: flex-start; }
+
+.viewseg .vshort { display: none; }
+@media (max-width: 640px) {
+  .viewseg .vlong { display: none; }
+  .viewseg .vshort { display: inline; }
+  .viewseg button { padding: 4px 9px; }
+}
+
+/* data hue, drifted from cyan toward a calmer blue */
+:root { --df: #1477b8; --df-soft: rgba(20, 119, 184, .11); --df-ink: #0d4f7c; }
+
+/* Workflow: the op's ports, a drawer that swings open from its lower edge */
+.dfdrawer { position: absolute; z-index: 31; pointer-events: auto; box-sizing: border-box;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; padding: 16px 12px 9px;
+  background: var(--df-panel); border: 1px solid var(--df-line); border-top: 0;
+  border-radius: 0 0 14px 14px; box-shadow: 0 12px 26px rgba(15, 30, 50, .16);
+  transform-origin: 50% 0; animation: dfdoor .24s cubic-bezier(.2, .8, .25, 1); }
+@keyframes dfdoor { from { transform: perspective(700px) rotateX(-78deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dfdrawer { animation: none; } }
+.dfdcol { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dfdcol.out { align-items: flex-end; }
+.dfdcol .dfthead { padding: 0 2px 3px; }
+.dfdrow { display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; border: 0;
+  background: transparent; border-radius: 6px; padding: 2px 4px; cursor: pointer; font-size: 11px;
+  line-height: 16px; color: var(--text, #1d2433); }
+.dfdrow:hover { background: var(--df-soft); }
+.dfdrow .dfname { font-weight: 650; flex: none; }
+.dfdrow .dfpeerlbl { color: var(--muted, #6b7685); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-size: 10px; }
+.dfdrow .dfdot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--df);
+  box-shadow: 0 0 0 2px var(--df-panel); }
+.dfdrow.in .dfdot { margin-left: -17px; }
+.dfdrow.out .dfdot { margin-right: -17px; }
+.dfdrow.lit { background: var(--df-soft); color: var(--df-ink); }
+.dfnone { color: var(--muted, #6b7685); font-size: 11px; padding: 2px 4px; }
+
+/* hover peeks: the links and tags stay faint, nothing else changes */
+.wires.dflinks path.dfconn.focus.peek { opacity: .32; }
+.dftag.peek { opacity: .55; }
+/* a click pins: the rest of the workflow steps back */
+#world.dfpin .node:not(.dfpeer):not(.selected):not(.container):not(.bnode) { opacity: .28; }
+#world.dfpin #edges path:not(.hot), #world.dfpin #edges circle:not(.hot),
+#world.dfpin #edgetop path:not(.hot), #world.dfpin #edges text { opacity: .12; }
+
+/* Workflow: the selected op opens in place — its port panel inside the card */
+#world .node.cell.dfcard.dfopen { border-radius: 18px; }
+#world .node.cell.dfcard.dfopen .iconband { top: 0; bottom: auto; height: 46px; }
+.node.dfopen .dfports { animation: dfopen .22s ease-out; }
+@keyframes dfopen { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .node.dfopen .dfports { animation: none; } }
+
+
+/* ── plug plates: every variable is a plug hole ─────────────────────── */
+:root { --plate: #e9eef5; --hole: #1c2533; }
+.node.dfcard { padding-left: 26px !important; padding-right: 26px !important; }
+.node.cell.dfcard .nline, .node.cell.dfcard .detail, .node.cell.dfcard .badges { margin-left: 42px; }
+.node.dfcard .dfports { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; margin-top: 8px;
+  padding-top: 7px; border-top: 1px dashed var(--df-line); }
+/* the plates: slim strips down the op's left (inputs) and right (outputs) zones */
+.node.dfcard .dfports::before, .node.dfcard .dfports::after { content: ""; position: absolute;
+  top: 48px; bottom: 7px; width: 17px; background: var(--plate); }
+.node.dfcard .dfports::before { left: 0; border-radius: 0 7px 7px 0; }
+.node.dfcard .dfports::after { right: 0; border-radius: 7px 0 0 7px; }
+.dfport { position: static; }
+.dfport .dfhole { position: absolute; z-index: 1; margin: 2px 0 0; }
+.dfport.in .dfhole { left: 3px; }
+.dfport.out .dfhole { right: 3px; }
+.dfport.out { flex-direction: row; }
+.dfport .dfdot { display: none; }
+/* a hole: dark, ringed in the data blue */
+.dfhole { display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 11px; height: 11px; border-radius: 50%; background: var(--hole);
+  box-shadow: 0 0 0 1.5px var(--df), inset 0 1px 2px rgba(0, 0, 0, .55);
+  font-size: 6.5px; line-height: 1; color: #fff; }
+/* fed from the mains: lit, with where the power comes from */
+.dfhole.mains.start { background: var(--df-start); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--df-start) 60%, #fff), 0 0 6px color-mix(in srgb, var(--df-start) 60%, transparent); }
+.dfhole.mains.scratch { background: var(--df-scratch); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--df-scratch) 60%, #fff), 0 0 6px color-mix(in srgb, var(--df-scratch) 60%, transparent); }
+.dfport.lit .dfhole, .dfplug .dfhole, .dfplate .dfhole { box-shadow: 0 0 0 1.5px var(--df), 0 0 7px var(--df); }
+.dfport.picked .dfhole { background: var(--df); }
+.dfport.picked { box-shadow: none; background: var(--df-soft); }
+
+/* a partner's plug tag, and a GraphOp frame's plate holes */
+.dfplug, .dfplate { position: absolute; z-index: 31; display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 7px; border-radius: 999px; background: var(--df-panel);
+  border: 1px solid color-mix(in srgb, var(--df) 50%, var(--df-line));
+  font-size: 10.5px; color: var(--df-ink); white-space: nowrap; pointer-events: none; }
+.dfplug.peek { opacity: .5; }
+
+/* wires: hole to hole */
+.dfwires { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; z-index: 30; pointer-events: none; }
+.wires.dflinks path.dfconn { stroke: var(--df); stroke-width: 1.6; opacity: .75; fill: none; }
+.wires.dflinks path.dfconn.peek { opacity: .3; }
+.wires.dflinks path.dfconn.dim { opacity: .1; }
+.wires.dflinks path.dfconn.lit { opacity: 1; stroke-width: 2.2; }
+.wires.dflinks path.dfconn.lit2 { opacity: .5; stroke-dasharray: 4 3; }
+#world.dfview .wires.dflinks path.dfconn { opacity: .55; }
+#world.dfsel .wires.dflinks path.dfconn:not(.lit):not(.lit2) { opacity: .08; }
+
+/* a far wire is not drawn at rest: its holes wear a dashed ring */
+.wires.dflinks path.dfconn.far { opacity: 0; }
+.wires.dflinks path.dfconn.far.hot, .wires.dflinks path.dfconn.far.lit { opacity: 1; }
+.wires.dflinks path.dfconn.far.lit2 { opacity: .5; }
+.wires.dflinks path.dfconn.hot { opacity: 1 !important; stroke-width: 2.2; }
+.dfport.remote .dfhole:not(.mains) { box-shadow: none; outline: 1.5px dashed var(--df); outline-offset: 0; }
+#world.dfview .wires.dflinks path.dfconn.far { opacity: 0; }
+#world.dfview .wires.dflinks path.dfconn.far.hot, #world.dfview .wires.dflinks path.dfconn.far.lit { opacity: 1; }
+#world.dfview .wires.dflinks path.dfconn.far.lit2 { opacity: .5; }
+
+/* ── the electric side panels: each variable a plug pill ─────────────
+   Inputs: a socket strip flush with the op's LEFT edge, each pill
+   [◉ name] with its hole at the outer end. Outputs: the strip flush with
+   the RIGHT edge, [name ◉]. A wire plugs into the hole. */
+.node.dfcard .dfports::before, .node.dfcard .dfports::after { content: none; }
+.node.dfcard .dfports { gap: 0 10px; align-items: start; }
+.node.dfcard .dfcol { gap: 4px; padding: 6px 7px; min-width: 0; align-self: start;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--plate) 92%, var(--df)), var(--plate)); }
+.node.dfcard .dfcol.in { margin-left: -26px; align-items: flex-start; border-radius: 0 12px 12px 0;
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--df) 70%, transparent), 0 0 10px color-mix(in srgb, var(--df) 14%, transparent); }
+.node.dfcard .dfcol.out { margin-right: -26px; align-items: flex-end; border-radius: 12px 0 0 12px;
+  box-shadow: inset -2px 0 0 color-mix(in srgb, var(--df) 70%, transparent), 0 0 10px color-mix(in srgb, var(--df) 14%, transparent); }
+.node.dfcard .dfcol:empty { visibility: hidden; }
+.node.dfcard .dfport { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 4px;
+  border-radius: 999px; background: var(--df-panel); border: 1px solid color-mix(in srgb, var(--df) 50%, var(--df-line));
+  font-size: 10.5px; line-height: 15px; color: var(--df-ink); max-width: 100%; }
+.node.dfcard .dfport.out { flex-direction: row-reverse; padding: 2px 4px 2px 8px; }
+.node.dfcard .dfport .dfhole { position: static; margin: 0; }
+.node.dfcard .dfport:hover { background: var(--df-soft); }
+.node.dfcard .dfport.lit { background: var(--df-soft); border-color: var(--df); }
+.node.dfcard .dfport.picked { border-color: var(--df); box-shadow: 0 0 0 2px var(--df-soft); }
+.node.dfcard .dfport.remote { border-style: dashed; }
+.node.dfcard .dfcol { width: max-content; max-width: 100%; box-sizing: border-box; }
+.node.dfcard .dfcol.in { justify-self: start; }
+.node.dfcard .dfcol.out { justify-self: end; }

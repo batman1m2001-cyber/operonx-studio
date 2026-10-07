@@ -103,3 +103,7 @@
 :root[data-theme="dark"] .viewseg { background: #18212e; }
 :root[data-theme="dark"] .viewseg button.on { background: #253247; color: #e8eef6; }
 :root[data-theme="dark"] .dftray { box-shadow: 0 10px 30px rgba(0, 0, 0, .5); }
+:root[data-theme="dark"] { --df: #5ab4ef; --df-soft: rgba(90, 180, 239, .14); --df-ink: #cbe6fa; }
+:root[data-theme="dark"] .dfdrawer { box-shadow: 0 14px 30px rgba(0, 0, 0, .5); }
+
+:root[data-theme="dark"] { --plate: #1b2636; --hole: #05080d; }

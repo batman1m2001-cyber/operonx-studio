@@ -450,22 +450,29 @@ const dfTargetLabel = (b) => {
   return `${t ? t.node.name : b.to.key}.${b.to.port}`;
 };
 
-// Data Flow view: a card's bound ports, inputs left and outputs right
-function dfPortsBlock(it) {
-  const nb = DataFlow.nodeBindings(state.dfB || [], it.key);
+/* An open op's PLUG PLATES: every variable is a plug hole. Inputs sit on
+ * the left zone of the op (its input plate), outputs on the right zone
+ * (its output plate), each hole level with its variable's name. A wire
+ * plugs straight into a hole. A variable fed from the mains — a graph
+ * input (▶) or the run's SCRATCH (✎) — has its hole lit with that glyph
+ * and no wire. */
+function dfPortsBlock(it, only) {
+  const nb0 = DataFlow.nodeBindings(state.dfB || [], it.key);
+  // a partner opened for the selected op lists only what they share
+  const keep = (b) => !only || only.has(b.id);
+  const nb = {ins: nb0.ins.filter(keep), outs: nb0.outs.filter(keep), exports: nb0.exports};
   const ins = [...new Map(nb.ins.map(b => [b.to.port, b])).values()];
   const outs = [...new Set(nb.outs.map(b => b.from.port))];
   if (!ins.length && !outs.length) return null;
   const box = el("div", "dfports");
-  const col = (dir) => el("div", `dfcol ${dir}`);
-  const cin = col("in"), cout = col("out");
-  const row = (dir, port, extra, tip) => {
+  const cin = el("div", "dfcol in"), cout = el("div", "dfcol out");
+  const row = (dir, port, mains, tip) => {
     const r = el("button", `dfport ${dir}`);
     r.type = "button";
     r.dataset.port = port;
     r.dataset.dir = dir;
-    r.append(el("span", "dfdot"), el("span", "dfname mono", port));
-    if (extra) r.append(extra);
+    const hole = el("span", "dfhole" + (mains ? ` mains ${mains}` : ""), mains === "start" ? "▶" : mains === "scratch" ? "✎" : "");
+    r.append(hole, el("span", "dfname mono", port));
     r.title = tip;
     r.onclick = (ev) => {
       ev.stopPropagation();
@@ -475,10 +482,8 @@ function dfPortsBlock(it) {
     return r;
   };
   for (const b of ins) {
-    const bc = DataFlow.isBroadcast(b);
-    const chip = bc ? el("span", "dfsrc " + (b.from.kind === "scratch" ? "scratch" : "start"),
-      b.from.kind === "scratch" ? "✎" : "▶") : null;
-    cin.append(row("in", b.to.port, chip, `${b.to.port} ← ${dfSourceLabel(b)}`));
+    const mains = DataFlow.isBroadcast(b) ? (b.from.kind === "scratch" ? "scratch" : "start") : null;
+    cin.append(row("in", b.to.port, mains, `${b.to.port} ← ${dfSourceLabel(b)}`));
   }
   for (const port of outs) {
     const readers = nb.outs.filter(b => b.from.port === port).map(dfTargetLabel);
@@ -488,9 +493,9 @@ function dfPortsBlock(it) {
   return box;
 }
 
-/* The data layer, drawn after the cards are placed: Data Flow's pair
- * connectors, Workflow's focus tray, and a port's lineage. Cheap: it
- * reads positions, never moves a card. */
+/* The data layer, drawn after the cards are placed. Every wire runs from
+ * an output hole to an input hole: out of a right-hand plate, into a
+ * left-hand one. Cheap: it reads positions, never moves a card. */
 function drawDataLayer() {
   const svg = $("#dflinks"), over = $("#dfover");
   if (!svg || !over) return;
@@ -500,228 +505,216 @@ function drawDataLayer() {
   const R = (k) => state.rendered.get(k);
   const lv = dfPort ? DataFlow.lineage(B, dfPort) : null;
   world.classList.toggle("dfsel", !!lv);
+  world.classList.remove("dfpin", "dfpeek");
   for (const c of state.cardEls.values()) c.classList.remove("dfpeer");
-  for (const r of document.querySelectorAll(".dfport.lit, .dfport.lit2, .dfport.picked")) r.classList.remove("lit", "lit2", "picked");
-  const path = (d, cls, w) => {
+  for (const r of document.querySelectorAll(".dfport.lit, .dfport.lit2, .dfport.picked, .dfport.remote")) r.classList.remove("lit", "lit2", "picked", "remote");
+  // wires ride above the cards: they end in holes on the plates
+  const wsvg = document.createElementNS(SVGNS, "svg");
+  wsvg.setAttribute("class", "wires dflinks dfwires");
+  over.append(wsvg);
+  /* A wire is ROUTED like a circuit trace, never flung across a card:
+   * out of its hole to the right, down the gutter beside its op, across
+   * the gap between the two rows, down the reader's left gutter and into
+   * the hole — rounded corners, and every wire its own lane, so parallel
+   * traces lie side by side instead of on top of each other. A reader far
+   * enough to the right gets a plain curve. */
+  const lanes = new Map();
+  const lane = (k) => { const n = lanes.get(k) || 0; lanes.set(k, n + 1); return n; };
+  const boxOf = (pt) => {
+    const it2 = pt && pt.key && R(pt.key);
+    return it2 ? {top: it2.y, bottom: it2.y + it2.h, left: it2.x, right: it2.x + it2.w} : null;
+  };
+  const route = (a, b) => {
+    if (b.x - a.x > 90 && Math.abs(b.y - a.y) < 600) {
+      const h = Math.min(160, Math.max(40, (b.x - a.x) * 0.5));
+      return `M ${a.x} ${a.y} C ${a.x + h} ${a.y}, ${b.x - h} ${b.y}, ${b.x} ${b.y}`;
+    }
+    const A = boxOf(a) || {bottom: a.y + 20, top: a.y - 20, right: a.x}, Bx = boxOf(b) || {top: b.y - 20, bottom: b.y + 20, left: b.x};
+    const x1 = Math.max(a.x, A.right) + 14 + 5 * lane("o" + (a.key || "") + Math.round(A.right));
+    const x2 = Math.min(b.x, Bx.left) - 14 - 5 * lane("i" + (b.key || "") + Math.round(Bx.left));
+    let ym;
+    if (Bx.top > A.bottom + 16) ym = (A.bottom + Bx.top) / 2;          // a reader below: the gap between
+    else ym = Math.max(A.bottom, Bx.bottom) + 22;                       // beside or above: under both
+    ym += 4 * lane("g" + Math.round(ym / 24));
+    const r = 8, sx = (u, v) => (v > u ? 1 : -1);
+    const pts = [[a.x, a.y], [x1, a.y], [x1, ym], [x2, ym], [x2, b.y], [b.x, b.y]];
+    let d = `M ${pts[0][0]} ${pts[0][1]}`;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const [px, py] = pts[i - 1], [cx, cy] = pts[i], [nx, ny] = pts[i + 1];
+      const r1 = Math.min(r, Math.abs(cx - px) / 2 + Math.abs(cy - py) / 2, Math.abs(nx - cx) / 2 + Math.abs(ny - cy) / 2);
+      const inx = cx - (cx !== px ? sx(px, cx) * r1 : 0), iny = cy - (cy !== py ? sx(py, cy) * r1 : 0);
+      const outx = cx + (nx !== cx ? sx(cx, nx) * r1 : 0), outy = cy + (ny !== cy ? sx(cy, ny) * r1 : 0);
+      d += ` L ${inx} ${iny} Q ${cx} ${cy} ${outx} ${outy}`;
+    }
+    return d + ` L ${b.x} ${b.y}`;
+  };
+  const wire = (a, b, cls, under) => {
+    if (!a || !b) return null;
     const p = document.createElementNS(SVGNS, "path");
-    p.setAttribute("d", d);
+    p.setAttribute("d", route(a, b));
     p.setAttribute("class", cls);
-    if (w) p.style.strokeWidth = w;
-    svg.append(p);
+    // Data Flow's many wires run UNDER the cards and surface into their
+    // holes; a focused op's few wires ride above
+    (under ? svg : wsvg).append(p);
     return p;
   };
-  const curve = (a, b, ta, tb) => {
-    const k = Math.max(26, Math.hypot(b.x - a.x, b.y - a.y) * 0.4);
-    return `M ${a.x} ${a.y} C ${a.x + ta * k} ${a.y}, ${b.x + tb * k} ${b.y}, ${b.x} ${b.y}`;
+  // a hole's centre in world coordinates (the canvas may be zoomed)
+  const holePt = (card, it, hole) => {
+    const cr = card.getBoundingClientRect(), hr = hole.getBoundingClientRect();
+    const k = cr.width / (card.offsetWidth || 1) || 1;
+    return {x: it.x + (hr.left + hr.width / 2 - cr.left) / k, y: it.y + (hr.top + hr.height / 2 - cr.top) / k};
+  };
+  const cardHole = (key, dir, port) => {
+    const it = R(key), card = state.cardEls.get(key);
+    const r = card && card.querySelector(`.dfport.${dir}[data-port="${CSS.escape(port)}"]`);
+    if (!it || !r) return null;
+    return {...holePt(card, it, r.querySelector(".dfhole")), row: r, key};
+  };
+  // an opened GraphOp's plates, on its frame: a hole has an outside face
+  // (outer wires) and an inside face (its own ops)
+  const plates = new Map();
+  const containerHole = (key, dir, port) => {
+    const C = R(key);
+    if (!C || !C.inner) return null;
+    if (!plates.has(key)) {
+      const ins = [...new Set(B.filter(b => (b.to.key === key && !b.to.export) || (b.from.kind === "input" && b.from.key === key))
+        .map(b => b.to.key === key && !b.to.export ? b.to.port : b.from.port))];
+      const outs = [...new Set(B.filter(b => (b.to.key === key && b.to.export) || (b.from.kind === "op" && b.from.key === key))
+        .map(b => b.to.key === key && b.to.export ? b.to.port : b.from.port))];
+      const map = new Map();
+      const put = (list, dir2) => list.forEach((port2, i) => {
+        const x = dir2 === "in" ? C.x : C.x + C.w, y = C.y + 50 + i * 20;
+        const tagEl = el("div", `dfplate ${dir2}`);
+        tagEl.append(el("span", "dfhole"), el("span", "dfname mono", port2));
+        over.append(tagEl);
+        tagEl.style.top = `${y - tagEl.offsetHeight / 2}px`;
+        tagEl.style.left = dir2 === "in" ? `${x - 6}px` : `${x - tagEl.offsetWidth + 6}px`;
+        map.set(dir2 + "|" + port2, {x, y, row: tagEl, key});
+      });
+      put(ins, "in"); put(outs, "out");
+      plates.set(key, map);
+    }
+    return plates.get(key).get(dir + "|" + port) || null;
+  };
+  const srcHole = (b) => b.from.kind === "op"
+    ? (R(b.from.key) && R(b.from.key).inner ? containerHole(b.from.key, "out", b.from.port) : cardHole(b.from.key, "out", b.from.port))
+    : b.from.kind === "input" && b.from.key ? containerHole(b.from.key, "in", b.from.port) : null;
+  const dstHole = (b) => b.to.export ? containerHole(b.to.key, "out", b.to.port)
+    : R(b.to.key) && R(b.to.key).inner ? containerHole(b.to.key, "in", b.to.port) : cardHole(b.to.key, "in", b.to.port);
+  const litCls = (b) => {
+    if (!lv) return "";
+    const l = lv.get(b.id) || 0;
+    return l === 1 ? " lit" : l === 2 ? " lit2" : " dim";
+  };
+  const markRows = () => {
+    if (!lv) return;
+    for (const [id, l] of lv) {
+      const b = B[id];
+      for (const h of [srcHole(b), dstHole(b)]) if (h && h.row) h.row.classList.add(l === 1 ? "lit" : "lit2");
+      for (const k of [b.from.key, b.to.key]) { const c = state.cardEls.get(k); if (c) c.classList.add("dfpeer"); }
+    }
+    const pc = state.cardEls.get(dfPort.key);
+    const pr = pc && pc.querySelector(`.dfport.${dfPort.dir}[data-port="${CSS.escape(dfPort.port)}"]`);
+    if (pr) pr.classList.add("picked");
+    if (pc) pc.classList.add("dfpeer");
   };
 
   if (canvasView === "data") {
-    // Data leaves a card through its bottom edge and enters through its
-    // top — the layout's own direction — at attachment points ordered by
-    // where the partner sits, so neighbouring connectors do not cross.
-    // The centre stays clear for the control edge's contact.
-    const P = DataFlow.pairs(B).filter(q => R(q.from) && R(q.to) && !R(q.from).inner && !R(q.to).inner);
-    const cx = (k) => { const it = R(k); return it.x + it.w / 2; };
-    const slots = (key, list, side) => {
-      // list: pairs leaving (bottom) or arriving (top) at this card
-      const it = R(key);
-      list.sort((p, q) => side === "out" ? cx(p.to) - cx(q.to) : cx(p.from) - cx(q.from));
-      const n = list.length, lo = it.x + Math.min(28, it.w * 0.18), hi = it.x + it.w - Math.min(28, it.w * 0.18);
-      const mid = it.x + it.w / 2;
-      list.forEach((q, i) => {
-        let x = n === 1 ? (side === "out" ? cx(q.to) : cx(q.from)) : lo + (hi - lo) * i / (n - 1);
-        x = Math.max(lo, Math.min(hi, x));
-        if (Math.abs(x - mid) < 12) x = mid + (x >= mid ? 12 : -12);
-        q[side === "out" ? "sx" : "tx"] = x;
-      });
-    };
-    const outsOf = new Map(), insOf = new Map();
-    for (const q of P) {
-      if (!outsOf.has(q.from)) outsOf.set(q.from, []);
-      if (!insOf.has(q.to)) insOf.set(q.to, []);
-      outsOf.get(q.from).push(q); insOf.get(q.to).push(q);
-    }
-    for (const [k, l] of outsOf) slots(k, l, "out");
-    for (const [k, l] of insOf) slots(k, l, "in");
-    const dots = document.createElementNS(SVGNS, "svg");
-    dots.setAttribute("class", "wires dflinks dffocuslinks");
-    over.append(dots);
-    for (const q of P) {
-      const A = R(q.from), Bn = R(q.to);
-      const s = {x: q.sx, y: A.y + A.h}, t = {x: q.tx, y: Bn.y};
-      const dy = t.y - s.y;
-      let d;
-      if (dy > 20) {
-        const k = Math.max(24, dy * 0.45);
-        d = `M ${s.x} ${s.y} C ${s.x} ${s.y + k}, ${t.x} ${t.y - k}, ${t.x} ${t.y}`;
-      } else {
-        // data flowing back up: out round the side, never through a card
-        const side = t.x >= s.x ? 1 : -1, bow = Math.max(A.w, Bn.w) / 2 + 40;
-        d = `M ${s.x} ${s.y} C ${s.x} ${s.y + 60}, ${t.x + side * bow} ${t.y - 60}, ${t.x} ${t.y}`;
-      }
-      const lit = lv ? Math.min(...q.bindings.map(b => lv.get(b.id) || 9)) : 0;
-      const far = dy > 2.6 * Math.max(A.h, Bn.h) + 120;
-      const cls = "dfconn" + (lit === 1 ? " lit" : lit === 2 ? " lit2" : "") + (dy > 20 ? "" : " back") + (far ? " far" : "");
-      const p = path(d, cls, (1.3 + 0.6 * Math.log2(q.bindings.length)).toFixed(2));
+    // One wire per variable, hole to hole. A NEAR wire (into the next row
+    // down) is drawn; a FAR one — rows away, or back up — is not, at rest:
+    // its holes wear a dashed ring ("plugged into something further
+    // away"), and hovering the variable draws it, a click its lineage.
+    const byRow = new Map();   // hole row element → its wires
+    const addTo = (row, p) => { if (!row) return; if (!byRow.has(row)) byRow.set(row, []); byRow.get(row).push(p); };
+    for (const b of B) {
+      if (DataFlow.isBroadcast(b)) continue;
+      const a = srcHole(b), z = dstHole(b);
+      if (!a || !z) continue;
+      const A = boxOf(a), Z = boxOf(z);
+      const gap = A && Z ? Z.top - A.bottom : 0;
+      const far = !A || !Z || gap < -4 || gap > 230;
+      const p = wire(a, z, "dfconn" + litCls(b) + (far ? " far" : ""), true);
+      if (!p) continue;
       const tip = document.createElementNS(SVGNS, "title");
-      tip.textContent = q.bindings.map(b => `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`).join("\n");
+      tip.textContent = `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`;
       p.append(tip);
-      // hovering a connector lights the rows it carries
-      const rowsOf = () => q.bindings.flatMap(b => [
-        state.cardEls.get(b.from.key)?.querySelector(`.dfport.out[data-port="${CSS.escape(b.from.port)}"]`),
-        state.cardEls.get(b.to.key)?.querySelector(`.dfport.in[data-port="${CSS.escape(b.to.port)}"]`)]).filter(Boolean);
-      p.addEventListener("mouseenter", () => { p.classList.add("hot"); for (const r of rowsOf()) r.classList.add("hot"); });
-      p.addEventListener("mouseleave", () => { p.classList.remove("hot"); for (const r of rowsOf()) r.classList.remove("hot"); });
-      q.el = p;
-      for (const [x, y] of [[s.x, s.y], [t.x, t.y]]) {
-        const c = document.createElementNS(SVGNS, "circle");
-        c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", 2.6);
-        c.setAttribute("class", "dfattach" + (lit === 1 ? " lit" : ""));
-        dots.append(c);
-      }
+      if (far) for (const h of [a, z]) if (h.row) h.row.classList.add("remote");
+      addTo(a.row, p); addTo(z.row, p);
     }
-    // hovering a port row lights the connectors that carry it
-    for (const card of state.cardEls.values()) for (const r of card.querySelectorAll(".dfport")) {
-      const key = [...state.cardEls].find(([, c]) => c === card)?.[0];
-      const mine = () => P.filter(q => q.bindings.some(b => r.dataset.dir === "in"
-        ? b.to.key === key && b.to.port === r.dataset.port
-        : b.from.key === key && b.from.port === r.dataset.port));
-      r.onmouseenter = () => { for (const q of mine()) q.el.classList.add("hot"); };
-      r.onmouseleave = () => { for (const q of mine()) q.el.classList.remove("hot"); };
+    for (const [row, ps] of byRow) {
+      row.onmouseenter = () => { for (const p of ps) p.classList.add("hot"); };
+      row.onmouseleave = () => { for (const p of ps) p.classList.remove("hot"); };
     }
-    if (lv) {
-      for (const [id, l] of lv) {
-        const b = B[id];
-        for (const [key, dir, port] of [[b.to.key, "in", b.to.port], [b.from.key, "out", b.from.port]]) {
-          const card = state.cardEls.get(key);
-          const r = card && card.querySelector(`.dfport.${dir}[data-port="${CSS.escape(port)}"]`);
-          if (r) r.classList.add(l === 1 ? "lit" : "lit2");
-          if (card) card.classList.add("dfpeer");
-        }
-      }
-      const pc = state.cardEls.get(dfPort.key);
-      const pr = pc && pc.querySelector(`.dfport.${dfPort.dir}[data-port="${CSS.escape(dfPort.port)}"]`);
-      if (pr) pr.classList.add("picked");
-      if (pc) pc.classList.add("dfpeer");
-    }
+    markRows();
     return;
   }
 
-  // Workflow: only the selected node's data, as a tray beside it
-  world.classList.remove("dffocus");
-  const it = state.sel && R(state.sel);
+  // Workflow. A click opens the op (its plates are part of the card, the
+  // flow laid out again round it) and every partner shows a plug tag with
+  // its own hole on the matching side; the rest steps back. A hover only
+  // peeks: faint wires to the op's sides, nothing moves.
+  const pinned = !!state.sel;
+  const key = state.sel || state.dfHover || null;
+  const it = key && R(key);
   if (!it || it.inner || it.kind === "knob" || (it.node && it.node.boundary)) return;
   const nb = DataFlow.nodeBindings(B, it.key);
   if (!nb.ins.length && !nb.outs.length) return;
-  world.classList.add("dffocus");
-  const tray = el("div", "dftray");
-  tray.style.left = `${it.x + it.w + 18}px`;
-  tray.style.top = `${it.y - 4}px`;
-  const section = (title) => { tray.append(el("div", "dfthead", title)); };
-  const trow = (dir, b) => {
-    const r = el("button", `dftrow ${dir}`);
-    r.type = "button";
-    const port = dir === "in" ? b.to.port : b.from.port;
-    r.append(el("span", "dfdot"), el("span", "dfname mono", port), el("span", "dfarr", dir === "in" ? "←" : "→"),
-             el("span", "dfpeerlbl mono", dir === "in" ? dfSourceLabel(b) : dfTargetLabel(b)));
-    r.dataset.bid = b.id;
-    r.title = dir === "in" ? `${port} ← ${dfSourceLabel(b)}` : `${port} → ${dfTargetLabel(b)}`;
-    r.onclick = (ev) => {
-      ev.stopPropagation();
-      const p = {key: it.key, port, dir};
-      dfPort = dfPort && dfPort.key === p.key && dfPort.port === p.port && dfPort.dir === p.dir ? null : p;
-      drawDataLayer();
-    };
-    tray.append(r);
-    return r;
-  };
-  // rows in the order their partners stand, left to right: the fan of
-  // links into the tray then never crosses itself; sources without a
-  // wire (START, scratch) close the list
-  const px = (key) => { const P = R(key); return P ? P.x + P.w / 2 : 1e9; };
-  const ins = [...nb.ins].sort((a, b) => (DataFlow.isBroadcast(a) - DataFlow.isBroadcast(b)) || px(a.from.key) - px(b.from.key));
-  const outs = [...nb.outs].sort((a, b) => px(a.to.key) - px(b.to.key));
-  const rows = [];
-  if (ins.length) { section("reads"); for (const b of ins) rows.push([trow("in", b), b, "in"]); }
-  if (outs.length) { section("feeds"); for (const b of outs) rows.push([trow("out", b), b, "out"]); }
-  over.append(tray);
-  // focus links ride above the cards (the others are dimmed anyway)
-  const fsvg = document.createElementNS(SVGNS, "svg");
-  fsvg.setAttribute("class", "wires dflinks dffocuslinks");
-  over.append(fsvg);
-  const fpath = (d, cls) => {
-    const p = document.createElementNS(SVGNS, "path");
-    p.setAttribute("d", d); p.setAttribute("class", cls);
-    fsvg.append(p);
-    return p;
-  };
-  // partner tags: the one port involved, docked on the side of the partner
-  // that faces the tray; every link lands on the tray's left edge
-  const trayX = parseFloat(tray.style.left);
-  const tagCount = new Map();
-  const trayTop = parseFloat(tray.style.top), trayBot = trayTop + tray.offsetHeight;
-  const tag = (key, sideHint, text) => {
-    const P = R(key);
+  world.classList.add(pinned ? "dfpin" : "dfpeek");
+  const card = state.cardEls.get(it.key);
+  if (card) card.classList.add("dfpeer");
+  const plugCount = new Map();
+  // a partner's plug: [name ◉] on its right edge (it feeds), [◉ name] on
+  // its left edge (it reads)
+  const plug = (pkey, dir, text) => {
+    const P = R(pkey);
     if (!P) return null;
-    void sideHint;
-    // a partner above the tray wears its tag under its card and its link
-    // leaves downward; below the tray, over its card and upward; level
-    // with it, on the side that faces the tray
-    const side = P.y + P.h < trayTop - 8 ? "below" : P.y > trayBot + 8 ? "above"
-      : P.x + P.w / 2 < trayX ? "right" : "left";
-    const n = tagCount.get(key + side) || 0;
-    tagCount.set(key + side, n + 1);
-    const t = el("div", `dftag ${side}`, text);
+    if (P.inner) return containerHole(pkey, dir, text);
+    if (pinned) { const h = cardHole(pkey, dir, text); if (h) { state.cardEls.get(pkey)?.classList.add("dfpeer"); return h; } }
+    const n = plugCount.get(pkey + dir) || 0;
+    plugCount.set(pkey + dir, n + 1);
+    const t = el("div", `dfplug ${dir}` + (pinned ? "" : " peek"));
+    const hole = el("span", "dfhole");
+    if (dir === "out") t.append(el("span", "dfname mono", text), hole);
+    else t.append(hole, el("span", "dfname mono", text));
     over.append(t);
     const w = t.offsetWidth, h = t.offsetHeight;
-    let x, y, a, tan;
-    if (side === "below" || side === "above") {
-      x = P.x + P.w / 2 + 14 + n * (w + 4);
-      y = side === "below" ? P.y + P.h + 5 : P.y - 5 - h;
-      a = {x: x + w / 2, y: side === "below" ? y + h : y};
-      tan = {x: 0, y: side === "below" ? 1 : -1};
-    } else {
-      x = side === "right" ? P.x + P.w + 6 : P.x - 6 - w;
-      y = P.y + 6 + n * (h + 3);
-      a = {x: side === "right" ? x + w : x, y: y + h / 2};
-      tan = {x: side === "right" ? 1 : -1, y: 0};
-    }
+    const y = P.y + Math.min(P.h - h - 4, 8 + n * (h + 4));
+    const x = dir === "out" ? P.x + P.w - 10 : P.x - w + 10;
     t.style.left = `${x}px`; t.style.top = `${y}px`;
-    const card = state.cardEls.get(key);
-    if (card) card.classList.add("dfpeer");
-    return {...a, tan};
+    const pc = state.cardEls.get(pkey);
+    if (pc) pc.classList.add("dfpeer");
+    return {x: dir === "out" ? x + w - 9 : x + 9, y: y + h / 2, key: pkey};
   };
-  // a curve between two anchors, each leaving along its own tangent
-  // (short handles: a link drops out of its tag, then heads for the tray —
-  // a long handle swings it into a deep U)
-  const curveT = (a, ta, b, tb) => {
-    const k = Math.min(70, Math.max(28, Math.hypot(b.x - a.x, b.y - a.y) * 0.3));
-    return `M ${a.x} ${a.y} C ${a.x + ta.x * k} ${a.y + ta.y * k}, ${b.x - tb.x * k} ${b.y - tb.y * k}, ${b.x} ${b.y}`;
-  };
-  const tr = tray.getBoundingClientRect();
-  void tr;
-  for (const [r, b, dir] of rows) {
-    const ry = parseFloat(tray.style.top) + r.offsetTop + r.offsetHeight / 2;
-    const tx = parseFloat(tray.style.left);
-    const lit = lv ? (lv.get(b.id) || 0) : 0;
-    if (lv) r.classList.toggle("lit", lit === 1), r.classList.toggle("lit2", lit === 2);
-    const cls = "dfconn focus" + (lv ? (lit === 1 ? " lit" : lit === 2 ? " lit2" : " dim") : "");
-    // a link lands on the tray edge that faces its partner
-    const tw = tray.offsetWidth;
-    const edge = (key) => px(key) > tx + tw / 2
-      ? {at: {x: tx + tw, y: ry}, inward: {x: -1, y: 0}}
-      : {at: {x: tx, y: ry}, inward: {x: 1, y: 0}};
-    if (dir === "in") {
-      if (DataFlow.isBroadcast(b) || b.from.kind !== "op" && !b.from.key) continue;
-      const a = tag(b.from.key, "right", b.from.port);
-      const E = edge(b.from.key);
-      if (a) fpath(curveT(a, a.tan, E.at, E.inward), cls);
-    } else {
-      const a = tag(b.to.key, "left", b.to.port);
-      const E = edge(b.to.key);
-      if (a) fpath(curveT(E.at, {x: -E.inward.x, y: 0}, a, {x: -a.tan.x, y: -a.tan.y}), cls + " feed");
-    }
+  const side = (dir) => ({x: dir === "in" ? it.x : it.x + it.w, y: it.y + it.h / 2, key: it.key});
+  const cls0 = "dfconn focus" + (pinned ? "" : " peek");
+  for (const b of nb.ins) {
+    if (DataFlow.isBroadcast(b) || (b.from.kind !== "op" && !b.from.key)) continue;
+    const a = b.from.kind === "op" ? plug(b.from.key, "out", b.from.port) : containerHole(b.from.key, "in", b.from.port);
+    const end = pinned ? cardHole(it.key, "in", b.to.port) : side("in");
+    wire(a, end, cls0 + litCls(b));
   }
+  for (const b of nb.outs) {
+    const start = pinned ? cardHole(it.key, "out", b.from.port) : side("out");
+    const z = b.to.export ? containerHole(b.to.key, "out", b.to.port) : plug(b.to.key, "in", b.to.port);
+    wire(start, z, cls0 + " feed" + litCls(b));
+  }
+  markRows();
+}
+
+// a hover's peek ends a beat after the pointer leaves the op
+function dfHoverEnter(key) {
+  clearTimeout(state.dfHoverOff);
+  if (canvasView !== "workflow" || state.sel || state.dfHover === key) return;
+  state.dfHover = key;
+  drawDataLayer();
+}
+function dfHoverLeave(key) {
+  clearTimeout(state.dfHoverOff);
+  state.dfHoverOff = setTimeout(() => {
+    if (state.dfHover !== key) return;
+    state.dfHover = null;
+    drawDataLayer();
+  }, 160);
 }
 
 function flowDot(svg, path, cls) {
@@ -841,6 +834,22 @@ function render() {
   state.cardEls.clear();
   state.edgeEls = [];
   state.dfB = g ? DataFlow.dataBindings(g, state.expanded) : [];
+  state.dfHover = null;
+  // Workflow: a click opens the op AND its partners — each partner showing
+  // only the variables it shares with the op — so every wire runs from a
+  // hole on one open op to a hole on another
+  state.dfOpen = new Map();
+  if (canvasView === "workflow" && state.sel) {
+    const own = DataFlow.nodeBindings(state.dfB, state.sel);
+    state.dfOpen.set(state.sel, null);   // null: every bound variable
+    for (const b of [...own.ins, ...own.outs]) {
+      if (DataFlow.isBroadcast(b)) continue;
+      const pk = b.to.key === state.sel ? b.from.key : b.to.key;
+      if (!pk || pk === state.sel || (b.from.kind !== "op" && b.to.key === state.sel)) continue;
+      if (!state.dfOpen.has(pk)) state.dfOpen.set(pk, new Set());
+      state.dfOpen.get(pk).add(b.id);
+    }
+  }
   $("#world").classList.toggle("dfview", canvasView === "data");
 
   // ── cards first, measured; then ONE layout places everything ──
@@ -872,7 +881,7 @@ function render() {
   const measured = [];
   for (const it of leaves) {
     const card = cardOf.get(it.key);
-    let els = [...card.querySelectorAll(canvasView === "data" ? ".ntext, .brcond, .dfport" : ".ntext, .brcond")];
+    let els = [...card.querySelectorAll(".ntext, .brcond, .dfport")];
     // gates: plain name line, plus the transport line below it
     if (!els.length) els = [".nname", ".nkind"].map(sel => card.querySelector(sel)).filter(Boolean);
     measured.push({it, card, els});
@@ -887,7 +896,7 @@ function render() {
     // twice its deficit for that column to gain it
     const need = Math.max(...m.els.map((e, j) => (natural[i][j] - laidOut[i].widths[j]) * (e.classList.contains("dfport") ? 2 : 1)));
     const want = Math.ceil(m.it.w + need + 8);
-    const cap = canvasView === "data" ? 420 : 310;
+    const cap = m.card.querySelector(".dfports") ? 420 : 310;
     const w = Math.max(180, Math.min(cap, want));
     if (want > cap) {
       // a name cut short says itself in full on hover
@@ -1212,6 +1221,7 @@ function render() {
 function refreshSelection() {
   for (const [k, c] of state.cardEls) c.classList.toggle("selected", k === state.sel);
   if (canvasView === "workflow" && dfPort && dfPort.key !== state.sel) dfPort = null;
+  state.dfHover = null;
   drawDataLayer();
   for (const g of state.edgeEls) {
     const hot = !!state.sel && (g.a === state.sel || g.b === state.sel);
@@ -1220,7 +1230,9 @@ function refreshSelection() {
 }
 
 function deselect() {
+  const before = state.sel;
   state.sel = null;
+  if (canvasView === "workflow" && before) render();
   refreshSelection();
   pushView();
   renderFlowInfo();
@@ -1725,9 +1737,9 @@ function opCard(it) {
     if (det.childNodes.length) card.append(det);
   }
 
-  if (canvasView === "data" && !n.serve_role) {
-    const ports = dfPortsBlock(it);
-    if (ports) { card.append(ports); card.classList.add("dfcard"); }
+  if ((canvasView === "data" || (state.dfOpen && state.dfOpen.has(it.key) && !it.inner)) && !n.serve_role) {
+    const ports = dfPortsBlock(it, canvasView === "workflow" ? state.dfOpen.get(it.key) : null);
+    if (ports) { card.append(ports); card.classList.add("dfcard", canvasView === "data" ? "dfdata" : "dfopen"); }
   }
   // At most TWO badges: one semantic marker, plus the run chip. Density
   // is respect — everything else is one click away in the inspector.
@@ -1755,6 +1767,8 @@ function opCard(it) {
   // a router's exits are its condition rows — no anonymous base port
   if (!(n.routes && n.routes.length)) card.append(el("span", "port out"));
   card.onclick = (ev) => { ev.stopPropagation(); select(it.key); };
+  card.onmouseenter = () => dfHoverEnter(it.key);
+  card.onmouseleave = () => dfHoverLeave(it.key);
   if (n.graph) card.ondblclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
   return card;
 }
@@ -1880,7 +1894,10 @@ new ResizeObserver(() => flushCanvas()).observe($("#stage"));
  * code, prompts and source live in collapsed sections underneath, so
  * they are one click away but never in the way. */
 function select(key) {
+  const before = state.sel;
   state.sel = (state.sel === key) ? null : key;
+  // Workflow opens the selected op in place: a re-layout round the card
+  if (canvasView === "workflow" && before !== state.sel) render();
   refreshSelection();
   pushView();
   const panel = $("#inspector");
@@ -4030,7 +4047,7 @@ $("#btn-zoom-pct").onclick = () => {
 
   stage.addEventListener("click", (ev) => {
     if (ev.target.closest(".node") || ev.target.closest("#find")
-        || ev.target.closest("#legend") || ev.target.closest(".dftray")) return;
+        || ev.target.closest("#legend")) return;
     if (dfPort) { dfPort = null; drawDataLayer(); }
     deselect();
   });
