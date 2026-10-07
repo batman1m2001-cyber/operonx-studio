@@ -107,3 +107,6 @@
 :root[data-theme="dark"] .dfdrawer { box-shadow: 0 14px 30px rgba(0, 0, 0, .5); }
 
 :root[data-theme="dark"] { --plate: #1b2636; --hole: #05080d; }
+
+/* the data energy beads burn near-white on the dark canvas */
+:root[data-theme="dark"] { --df-bead: color-mix(in srgb, #fff 65%, var(--df)); }

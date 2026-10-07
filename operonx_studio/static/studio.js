@@ -417,6 +417,7 @@ let flowDotsOn = recall("ox:flowdots", true) !== false;
  * Model: static/dataflow.js. Plan: docs/WORKFLOW_DATAFLOW_VIEWS_PLAN.md */
 let canvasView = recall(`canvasView:${PID}`, "workflow") === "data" ? "data" : "workflow";
 let dfPort = null;   // {key, port, dir}: the port whose lineage is shown
+let dfHoverPort = null;   // {key, port, dir}: a selected op's plug under the pointer
 
 function setCanvasView(v) {
   if (v === canvasView) return;
@@ -475,6 +476,9 @@ function dfPortsBlock(it, only) {
     const hole = el("span", "dfhole" + (mains ? ` mains ${mains}` : ""), mains === "start" ? "▶" : mains === "scratch" ? "✎" : "");
     r.append(hole, el("span", "dfname mono", port));
     r.title = tip;
+    // a selected op with many wires shows the plug under the pointer
+    r.onmouseenter = () => { if (state.sel !== it.key) return; dfHoverPort = {key: it.key, port, dir}; drawDataLayer(); };
+    r.onmouseleave = () => { if (!dfHoverPort) return; dfHoverPort = null; drawDataLayer(); };
     r.onclick = (ev) => {
       ev.stopPropagation();
       dfPort = dfPort && dfPort.key === it.key && dfPort.port === port && dfPort.dir === dir ? null : {key: it.key, port, dir};
@@ -509,7 +513,7 @@ function drawDataLayer() {
     : state.dfTerm === "scratch" ? b.from.kind === "scratch" : !!b.to.end).map(b => b.id) : null;
   const lv = dfPort ? DataFlow.lineage(B, dfPort) : termIds ? new Map(termIds.map(id => [id, 1])) : null;
   world.classList.toggle("dfsel", !!lv);
-  world.classList.remove("dfpin", "dfpeek");
+  world.classList.remove("dfpin", "dfpeek", "dftpick");
   for (const c of state.cardEls.values()) c.classList.remove("dfpeer");
   for (const r of document.querySelectorAll(".dfport.lit, .dfport.lit2, .dfport.picked, .dfport.remote")) r.classList.remove("lit", "lit2", "picked", "remote");
   // wires ride above the cards: they end in holes on the plates
@@ -527,8 +531,8 @@ function drawDataLayer() {
     .map(it2 => { const c = state.cardEls.get(it2.key);
       return {key: it2.key, l: it2.x - 16, t: it2.y - 16, r: it2.x + c.offsetWidth + 16, b: it2.y + c.offsetHeight + 16}; });
   const usedV = [], usedH = [];
-  // a run may lie on a run of its OWN group (wires out of one hole are one
-  // trunk); any other run keeps 7px away
+  // a run keeps 7px from every run of another wire; only the wires of one
+  // source share anything, and only the line from the source to its hub
   let grp = null, relaxed = false;
   const clearV = (x, y0, y1) => {
     const lo = Math.min(y0, y1), hi = Math.max(y0, y1);
@@ -541,48 +545,7 @@ function drawDataLayer() {
     if (obst.some(o => o.key !== own && y > o.t && y < o.b && hi > o.l && lo < o.r)) return false;
     return relaxed || !usedH.some(u => u.g !== grp && Math.abs(u.y - y) < 7 && hi > u.lo - 4 && lo < u.hi + 4);
   };
-  const trunk = new Map();   // group → the first wire's column and channel
   let lastRoute = null;
-  const routed = [];
-  // where a branch leaves its trunk: the furthest point along it that still
-  // lies on an earlier wire of the same hole — a junction dot goes there
-  const onPoly = (P, x, y) => P.some((q, i) => i > 0 && (() => {
-    const [ax, ay] = P[i - 1], [bx, by] = q;
-    return x >= Math.min(ax, bx) - .6 && x <= Math.max(ax, bx) + .6 && y >= Math.min(ay, by) - .6 && y <= Math.max(ay, by) + .6
-      && Math.abs((bx - ax) * (y - ay) - (by - ay) * (x - ax)) < .6 * Math.hypot(bx - ax, by - ay);
-  })());
-  const drawJunctions = (layer) => {
-    // where a wire JOINS its trunk and where it LEAVES it: a dot at each
-    const groups = new Map();
-    for (const w of routed) { if (!groups.has(w.grp)) groups.set(w.grp, []); groups.get(w.grp).push(w); }
-    const seen = new Set();
-    const dot = (x, y, cls) => {
-      const key = `${Math.round(x / 2)},${Math.round(y / 2)}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      const c = document.createElementNS(SVGNS, "circle");
-      c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", 3);
-      c.setAttribute("class", "dfjunction" + (cls || ""));
-      layer.append(c);
-    };
-    for (const ws of groups.values()) {
-      if (ws.length < 2) continue;
-      for (let j = 1; j < ws.length; j++) {
-        const P = ws[j].pts, others = ws.slice(0, j);
-        let on = false, prev = null;
-        for (let i = 1; i < P.length; i++) {
-          const [ax, ay] = P[i - 1], [bx, by] = P[i], n = Math.max(1, Math.hypot(bx - ax, by - ay) / 2);
-          for (let k = 0; k <= n; k++) {
-            const x = ax + (bx - ax) * k / n, y = ay + (by - ay) * k / n;
-            const now = others.some(w => onPoly(w.pts, x, y));
-            if (now && !on && prev) dot(x, y, ws[j].cls);          // joins the trunk
-            if (!now && on && prev) dot(prev[0], prev[1], ws[j].cls);   // leaves it
-            on = now; prev = [x, y];
-          }
-        }
-      }
-    }
-  };
 
   const boxOf = (pt) => {
     const it2 = pt && pt.key && !pt.plate && R(pt.key);
@@ -606,56 +569,43 @@ function drawDataLayer() {
     const v = twice(() => { for (let i = 0; i < n; i++) for (const t of i ? [from - i * step, from + i * step] : [from]) if (ok(t)) return t; return null; });
     return v === null ? from : v;
   };
-  /* Lanes are dealt from both ends before anything is routed, so a bundle
-   * never tangles: leaving a card, the LOWEST hole takes the innermost
-   * column and the nearest channel; arriving, the HIGHEST hole takes the
-   * innermost column. (A bundle that turns twice keeps its order.) */
-  const laneOut = new Map(), laneIn = new Map();
+  /* ONE split point per variable. A variable read by one op is a plain
+   * wire. A variable read by several runs as ONE line from its hole to its
+   * HUB — a small ring placed among its readers — and splits there, once:
+   * each reader gets a short spoke of its own that never meets its
+   * siblings again. Variables never share a hub. Lanes are dealt before
+   * anything is routed: a card side's lowest hole takes the innermost
+   * lanes; arriving, the highest hole takes the innermost column. */
+  const hubs = new Map();       // hole → {n, off, a, targets, hx, hy, cls}
+  const branchOf = new Map();   // target hole → {g, k}
+  const laneIn = new Map();
   const side2 = (pt, dir) => `${pt.key}|${dir}|${Math.round(pt.x)}`;
+  const hubKey = (a) => `${a.own || a.key}|${Math.round(a.x)}|${Math.round(a.y)}`;
+  let solo = 0;
   const prepLanes = (pairs) => {
-    const outs = new Map(), ins = new Map();
+    const groups = new Map(), ins = new Map();
     for (const [a, b] of pairs) {
-      const ko = side2(a, "o"), ki = side2(b, "i");
-      if (!outs.has(ko)) outs.set(ko, new Set()); outs.get(ko).add(Math.round(a.y));
+      const g = hubKey(a);
+      if (!groups.has(g)) groups.set(g, {g, a, side: side2(a, "o"), list: []});
+      groups.get(g).list.push(b);
+      const ki = side2(b, "i");
       if (!ins.has(ki)) ins.set(ki, new Set()); ins.get(ki).add(Math.round(b.y));
     }
-    for (const [k, ys] of outs) [...ys].sort((p, q) => q - p).forEach((y, i) => laneOut.set(`${k}|${y}`, i));
+    const bySide = new Map();
+    for (const G of groups.values()) { if (!bySide.has(G.side)) bySide.set(G.side, []); bySide.get(G.side).push(G); }
+    for (const list of bySide.values()) {
+      list.sort((p, q) => q.a.y - p.a.y);
+      list.forEach((G, off) => {
+        G.list.forEach((b, k) => branchOf.set(b, {g: G.g, k}));
+        hubs.set(G.g, {n: G.list.length, off, a: G.a, targets: G.list});
+      });
+    }
     for (const [k, ys] of ins) [...ys].sort((p, q) => p - q).forEach((y, i) => laneIn.set(`${k}|${y}`, i));
   };
-  const route = (a, b) => {
-    // wires out of one hole are one trunk; so are all wires out of one
-    // terminal (START, SCRATCH): one cable that branches to its readers
-    grp = a.own && a.own.startsWith("term:") ? a.own : `${Math.round(a.x)}|${Math.round(a.y)}`;
-    const A = boxOf(a), Bx = boxOf(b);
-    const lo = laneOut.get(`${side2(a, "o")}|${Math.round(a.y)}`) || 0;
-    const li = laneIn.get(`${side2(b, "i")}|${Math.round(b.y)}`) || 0;
-    const yA0 = A.bottom + 22 + 8 * lo, yB0 = Bx.top - 22;
-    const T = trunk.get(grp);
-    const ownA = a.own || (a.plate ? null : a.key), ownB = b.own || (b.plate ? null : b.key);
-    const x1 = T ? T.x1 : scan(Math.max(a.x, A.right) + 20 + 8 * lo, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownA));
-    const x2 = scan(Math.min(b.x, Bx.left) - 20 - 8 * li, -4, x => clearV(x, yB0, b.y) && clearH(b.y, x, b.x, ownB));
-    // a trunk's wires reuse a descent the trunk already laid when it is clear
-    // for this run, rather than each finding its own column a few px over
-    const reuse = T && (T.cols || []).filter(x => clearV(x, yA0, yB0)).sort((p, q) => Math.abs(p - x2) - Math.abs(q - x2))[0];
-    let xc = reuse !== undefined && reuse !== null ? reuse : scan2(x2, x => clearV(x, yA0, yB0));
-    const ymA = T && clearH(T.ymA, x1, xc) ? T.ymA : scan(yA0, 4, y => clearH(y, x1, xc) && clearV(x1, a.y, y) && clearV(xc, y, yB0), 200);
-    if (!T) trunk.set(grp, {x1, ymA, cols: []});
-    if (!trunk.get(grp).cols.includes(xc)) trunk.get(grp).cols.push(xc);
-    const ymB = scan(yB0, -4, y => clearH(y, xc, x2) && clearV(x2, y, b.y), 200);
-    if (!clearV(xc, ymA, ymB)) xc = scan2(xc, x => clearV(x, ymA, ymB));
-    let pts = [[a.x, a.y], [x1, a.y], [x1, ymA], [xc, ymA], [xc, ymB], [x2, ymB], [x2, b.y], [b.x, b.y]];
-    // drop repeats and straight-through corners
-    pts = pts.filter((q, i) => i === 0 || Math.abs(q[0] - pts[i - 1][0]) + Math.abs(q[1] - pts[i - 1][1]) > 0.5);
-    pts = pts.filter((q, i) => i === 0 || i === pts.length - 1
-      || !((q[0] === pts[i - 1][0] && q[0] === pts[i + 1][0]) || (q[1] === pts[i - 1][1] && q[1] === pts[i + 1][1])));
-    for (let i = 1; i < pts.length; i++) {
-      const [px, py] = pts[i - 1], [cx, cy] = pts[i];
-      if (px === cx) usedV.push({x: cx, lo: Math.min(py, cy), hi: Math.max(py, cy), g: grp});
-      else usedH.push({y: cy, lo: Math.min(px, cx), hi: Math.max(px, cx), g: grp});
-    }
-    lastRoute = {grp, pts};
+  // a polyline with rounded corners, from its first point on
+  const rounded = (pts) => {
     const r = 7, sx = (u, v) => (v > u ? 1 : -1);
-    let d = `M ${pts[0][0]} ${pts[0][1]}`;
+    let d = "";
     for (let i = 1; i < pts.length - 1; i++) {
       const [px, py] = pts[i - 1], [cx, cy] = pts[i], [nx, ny] = pts[i + 1];
       const r1 = Math.min(r, Math.abs(cx - px) / 2 + Math.abs(cy - py) / 2, Math.abs(nx - cx) / 2 + Math.abs(ny - cy) / 2);
@@ -665,31 +615,216 @@ function drawDataLayer() {
     }
     return d + ` L ${pts[pts.length - 1][0]} ${pts[pts.length - 1][1]}`;
   };
+  const clean = (pts) => {
+    pts = pts.filter((q, i) => i === 0 || Math.abs(q[0] - pts[i - 1][0]) + Math.abs(q[1] - pts[i - 1][1]) > 0.5);
+    return pts.filter((q, i) => i === 0 || i === pts.length - 1
+      || !((q[0] === pts[i - 1][0] && q[0] === pts[i + 1][0]) || (q[1] === pts[i - 1][1] && q[1] === pts[i + 1][1])));
+  };
+  const keep = (pts) => {
+    for (let i = 1; i < pts.length; i++) {
+      const [px, py] = pts[i - 1], [cx, cy] = pts[i];
+      if (px === cx) usedV.push({x: cx, lo: Math.min(py, cy), hi: Math.max(py, cy), g: grp});
+      else usedH.push({y: cy, lo: Math.min(px, cx), hi: Math.max(px, cx), g: grp});
+    }
+    return pts;
+  };
+  const ownOf = (h) => h.own || (h.plate ? null : h.key);
+  const entryX = (b) => Math.min(b.x, boxOf(b).left) - 20;
+  // the reader's own gutter: the column it is plugged in from
+  const gutter = (b) => {
+    if (b.fromTop) return {yB0: b.y - 26, x2: b.x};
+    const Bx = boxOf(b), yB0 = Bx.top - 22;
+    const li = laneIn.get(`${side2(b, "i")}|${Math.round(b.y)}`) || 0;
+    return {yB0, x2: scan(entryX(b) - 8 * li, -4, x => clearV(x, yB0, b.y) && clearH(b.y, x, b.x, ownOf(b)))};
+  };
+  /* A circuit trace from a to b that never crosses a card: out of a's hole
+   * → a free column beside it → the clear channel under it → a free column
+   * down (or up) → the channel above b's row → b's gutter → into the hole.
+   * `col` starts the trace already in its column (a spoke out of a hub). */
+  const ortho = (a, b, col) => {
+    const A = boxOf(a);
+    const {yB0, x2} = gutter(b);
+    const yA0 = col != null ? a.y + 8 : A.bottom + 22;
+    const x1 = col != null ? col : scan(Math.max(a.x, A.right) + 20, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownOf(a)));
+    let xc = scan2(x2, x => clearV(x, yA0, yB0));
+    const ymA = scan(yA0, 4, y => clearH(y, x1, xc) && clearV(x1, a.y, y) && clearV(xc, y, yB0), 200);
+    const ymB = scan(yB0, -4, y => clearH(y, xc, x2) && clearV(x2, y, b.y), 200);
+    if (!clearV(xc, ymA, ymB)) xc = scan2(xc, x => clearV(x, ymA, ymB));
+    return keep(clean([[a.x, a.y], [x1, a.y], [x1, ymA], [xc, ymA], [xc, ymB], [x2, ymB], [x2, b.y], [b.x, b.y]]));
+  };
+  const SPOKE = 16;   // how far a spoke curves out of its hub before it runs straight
+  const LANE = 9;     // the gap between two spokes of one fan
+  const median = (v) => { const s = [...v].sort((p, q) => p - q); return s[Math.floor((s.length - 1) / 2)]; };
+  /* A hub stands where its readers begin: in the channel above the first
+   * of them (so no spoke climbs back past the line that brought it),
+   * across from the middle of them, nudged to the nearest spot clear of
+   * every card and every other hub. The line arrives from above; the
+   * spokes leave left, right and down:
+   *   - left: one lane each, the farthest reader on the top lane, so a lane
+   *     that turns off early never crosses one that runs on;
+   *   - right: the same, mirrored;
+   *   - down: side by side, in reader order. */
+  // where the control edges run: a hub never sits on one
+  let ctrlCells = null;
+  const onCtrl = (x, y) => {
+    if (!ctrlCells) {
+      ctrlCells = new Set();
+      for (const p of document.querySelectorAll("#edges path, #edgetop path")) {
+        let n = 0;
+        try { n = p.getTotalLength(); } catch { continue; }
+        for (let t = 0; t <= n; t += 6) { const q = p.getPointAtLength(t); ctrlCells.add(`${Math.floor(q.x / 12)},${Math.floor(q.y / 12)}`); }
+      }
+    }
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) if (ctrlCells.has(`${Math.floor(x / 12) + i},${Math.floor(y / 12) + j}`)) return true;
+    return false;
+  };
+  const placeHub = (H, g) => {
+    const a = H.a, A = boxOf(a);
+    const xs = H.targets.map(entryX), ys = H.targets.map(b => boxOf(b).top - 22);
+    const x0 = median([Math.max(a.x, A.right) + 20, ...xs]);
+    const below = ys.filter(y => y >= A.bottom + 22);
+    const y0 = below.length ? Math.min(...below) : A.bottom + 22;
+    const side0 = (b) => { const x = entryX(b); return x < x0 - 30 ? "L" : x > x0 + 30 ? "R" : "D"; };
+    const nL = H.targets.filter(b => side0(b) === "L").length, nR = H.targets.filter(b => side0(b) === "R").length;
+    const hh = LANE * Math.max(nL, nR, 1) / 2 + 6, hw = LANE * H.targets.filter(b => side0(b) === "D").length / 2 + 8;
+    grp = g;
+    // every lane of the fan must run clear for a good stretch, not just leave
+    const lanes = (n) => [...Array(n).keys()].map(k => LANE * (k - (n - 1) / 2));
+    const ok = (x, y) => !onCtrl(x, y) && clearV(x, y - hh - 26, y + hh)
+      && lanes(nL).every(d => clearH(y + d, x - SPOKE - 120, x - 4))
+      && lanes(nR).every(d => clearH(y + d, x + 4, x + SPOKE + 120))
+      && clearH(y + SPOKE, x - hw, x + hw);
+    let best = null;
+    for (let r = 0; r <= 60 && !best; r++) {
+      for (let i = -r; i <= r && !best; i++) for (const [dx, dy] of [[i, -r], [i, r], [-r, i], [r, i]]) {
+        if (ok(x0 + dx * 6, y0 + dy * 6)) { best = [x0 + dx * 6, y0 + dy * 6]; break; }
+      }
+    }
+    [H.hx, H.hy] = best || [x0, y0];
+    // the variable runs as one line to its hub, in from above
+    const pts = ortho(a, {x: H.hx, y: H.hy, fromTop: true});
+    H.trunk = `M ${a.x} ${a.y}` + rounded(pts);
+    obst.push({key: `hub:${g}`, l: H.hx - 6, t: H.hy - 6, r: H.hx + 6, b: H.hy + 6});
+    // sides again, from where the hub really stands: a reader below whose
+    // column is blocked leaves sideways instead
+    const side2b = (b) => {
+      const x = entryX(b);
+      if (x < H.hx - 30) return "L";
+      if (x > H.hx + 30) return "R";
+      grp = g;
+      return clearV(x, H.hy + SPOKE, boxOf(b).top - 22) ? "D" : x <= H.hx ? "L" : "R";
+    };
+    const sides = new Map(H.targets.map(b => [b, side2b(b)]));
+    const side = (b) => sides.get(b);
+    H.spoke = new Map();
+    const L = H.targets.filter(b => side(b) === "L").sort((p, q) => entryX(p) - entryX(q));
+    const Rt = H.targets.filter(b => side(b) === "R").sort((p, q) => entryX(q) - entryX(p));
+    const D = H.targets.filter(b => side(b) === "D").sort((p, q) => entryX(p) - entryX(q));
+    L.forEach((b, k) => H.spoke.set(b, {dir: -1, y: H.hy + LANE * (k - (L.length - 1) / 2)}));
+    Rt.forEach((b, k) => H.spoke.set(b, {dir: 1, y: H.hy + LANE * (k - (Rt.length - 1) / 2)}));
+    D.forEach((b, k) => H.spoke.set(b, {dir: 0, x: H.hx + LANE * (k - (D.length - 1) / 2)}));
+  };
+  const route = (a, b) => {
+    const Bi = branchOf.get(b);
+    const g = Bi ? Bi.g : null;
+    const H = g ? hubs.get(g) : null;
+    if (!H || H.n < 2) {
+      grp = `solo${++solo}`;
+      lastRoute = {grp, hub: null};
+      return `M ${a.x} ${a.y}` + rounded(ortho(a, b));
+    }
+    if (H.hx == null) placeHub(H, g);
+    grp = `${g}#${Bi.k}`;
+    const sp = H.spoke.get(b);
+    const {yB0, x2} = gutter(b);
+    lastRoute = {grp, hub: g};
+    let head, pts;
+    if (sp.dir) {
+      // out sideways on its own lane, then down the first free column that
+      // reaches the channel above its reader
+      const sx = H.hx + sp.dir * SPOKE, ly = sp.y;
+      head = `M ${H.hx} ${H.hy} C ${H.hx + sp.dir * SPOKE * .5} ${H.hy} ${H.hx + sp.dir * SPOKE * .5} ${ly} ${sx} ${ly}`;
+      const xc = scan2(x2, x => clearV(x, ly, yB0) && clearH(ly, sx, x));
+      const ymB = scan(yB0, -4, y => clearH(y, xc, x2) && clearV(x2, y, b.y), 200);
+      if (clearH(ly, sx, xc) && clearV(xc, ly, ymB)) {
+        pts = keep(clean([[sx, ly], [xc, ly], [xc, ymB], [x2, ymB], [x2, b.y], [b.x, b.y]]));
+        return head + rounded(pts);
+      }
+      pts = ortho({x: sx, y: ly}, b, sx);
+      return head + rounded(pts);
+    }
+    // straight down in its own column
+    const sy = H.hy + SPOKE, xk = sp.x;
+    head = `M ${H.hx} ${H.hy} C ${H.hx} ${H.hy + SPOKE * .5} ${xk} ${H.hy + SPOKE * .5} ${xk} ${sy}`;
+    const ym = scan(yB0, -4, y => clearV(xk, sy, y) && clearH(y, xk, x2) && clearV(x2, y, b.y), Math.max(4, Math.abs(yB0 - sy) / 4));
+    if (clearV(xk, sy, ym) && clearH(ym, xk, x2) && clearV(x2, ym, b.y)) pts = keep(clean([[xk, sy], [xk, ym], [x2, ym], [x2, b.y], [b.x, b.y]]));
+    else pts = ortho({x: xk, y: sy}, b, xk);
+    return head + rounded(pts);
+  };
+  // the hubs and the lines into them, under their fans
+  const drawHubs = (layer) => {
+    for (const H of hubs.values()) {
+      if (!H.cls || H.hx == null) continue;
+      const p = document.createElementNS(SVGNS, "path");
+      p.setAttribute("d", H.trunk);
+      p.setAttribute("class", `${H.cls} trunk`);
+      layer.prepend(p);
+      H.trunkEl = p;
+      const flow = document.createElementNS(SVGNS, "path");
+      flow.setAttribute("d", H.trunk);
+      flow.setAttribute("class", "dfflow" + (/\b(focus|lit)\b/.test(H.cls) && !/\b(peek|dim|far)\b/.test(H.cls) ? " on" : "")
+        + (/\blit\b/.test(H.cls) ? " lit" : ""));
+      p.after(flow);
+      const c = document.createElementNS(SVGNS, "circle");
+      c.setAttribute("cx", H.hx); c.setAttribute("cy", H.hy); c.setAttribute("r", 5);
+      c.setAttribute("class", "dfhub" + (/\blit\b/.test(H.cls) ? " lit" : "") + (/\bpeek\b/.test(H.cls) ? " peek" : ""));
+      c.append(Object.assign(document.createElementNS(SVGNS, "title"), {textContent: `one value → ${H.n} readers`}));
+      layer.append(c);
+      H.el = c;
+    }
+  };
   const wire = (a, b, cls, under, label) => {
     if (!a || !b) return null;
     const p = document.createElementNS(SVGNS, "path");
     const d = route(a, b);
     p.setAttribute("d", d);
-    if (!/\bfar\b/.test(cls)) routed.push({...lastRoute, cls: /\bpeek\b/.test(cls) ? " peek" : ""});
+    // a hub wears its brightest branch: lit if any is, dim only if all are
+    const route0 = lastRoute;
+    if (route0.hub) {
+      const H = hubs.get(route0.hub);
+      if (!H.cls || (/\bdim\b/.test(H.cls) && !/\bdim\b/.test(cls)) || (/\blit\b/.test(cls) && !/\blit\b/.test(H.cls))) H.cls = cls.replace(/\bfar\b/, "");
+    }
     // hovering a wire singles it out: just it, its two plugs, its name
     const hit = document.createElementNS(SVGNS, "path");
     hit.setAttribute("d", d);
     hit.setAttribute("class", "dfhit");
     hit.addEventListener("mouseenter", (ev) => {
       world.classList.add("dfwirehot");
-      p.classList.add("hot");
+      p.classList.add("hot"); flow.classList.add("hot");
+      // its line from the source and its hub light with it
+      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.add("hot"); H.el?.classList.add("hot"); }
       for (const h of [a, b]) if (h.row) h.row.classList.add("hot");
       if (label) { const t = dfWireLabel(); t.textContent = label; t.hidden = false; dfWireLabelMove(ev); }
     });
     hit.addEventListener("mousemove", dfWireLabelMove);
     hit.addEventListener("mouseleave", () => {
       world.classList.remove("dfwirehot");
-      p.classList.remove("hot");
+      p.classList.remove("hot"); flow.classList.remove("hot");
+      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.remove("hot"); H.el?.classList.remove("hot"); }
       for (const h of [a, b]) if (h.row) h.row.classList.remove("hot");
       const t = dfWireLabel(); t.hidden = true;
     });
     queueMicrotask(() => { if (p.parentNode && !p.classList.contains("far")) p.parentNode.append(hit); });
     p.setAttribute("class", cls);
+    p.dfRoute = route0;
+    // the energy pulse: tiny bright beads running from source to reader
+    const flow = document.createElementNS(SVGNS, "path");
+    flow.setAttribute("d", d);
+    // beads only run where the wire itself shows
+    flow.setAttribute("class", "dfflow" + (/\b(focus|lit)\b/.test(cls) && !/\b(peek|dim|far)\b/.test(cls) ? " on" : "")
+      + (/\blit\b/.test(cls) ? " lit" : ""));
+    p.dfFlow = flow;
+    queueMicrotask(() => { if (p.parentNode) p.after(flow); });
     // Data Flow's many wires run UNDER the cards and surface into their
     // holes; a focused op's few wires ride above
     (under ? svg : wsvg).append(p);
@@ -787,6 +922,15 @@ function drawDataLayer() {
         const hole = el("span", "dfhole");
         if (kind === "end") r.append(hole, el("span", "dfname mono", port2));
         else r.append(el("span", "dfname mono", port2), hole);
+        // one variable's wiring: hover shows it, a click pins it
+        r.onmouseenter = () => { if (state.dfTerm !== kind || state.dfTermHover === port2) return; state.dfTermHover = port2; drawDataLayer(); };
+        r.onmouseleave = () => { if (state.dfTermHover == null) return; state.dfTermHover = null; drawDataLayer(); };
+        r.onclick = (ev) => {
+          if (state.dfTerm !== kind) return;
+          ev.stopPropagation();
+          state.dfTermPort = state.dfTermPort === port2 ? null : port2;
+          drawDataLayer();
+        };
         panel.append(r);
       }
       if (kind === "start") panel.append(label);
@@ -896,10 +1040,17 @@ function drawDataLayer() {
       addTo(a.row, p); addTo(z.row, p);
     }
     for (const [row, ps] of byRow) {
-      row.onmouseenter = () => { for (const p of ps) p.classList.add("hot"); };
-      row.onmouseleave = () => { for (const p of ps) p.classList.remove("hot"); };
+      // a hovered variable lights its wires, with the line to their hub
+      const parts = (on) => { for (const p of ps) {
+        p.classList.toggle("hot", on);
+        p.dfFlow?.classList.toggle("hot", on);
+        const r0 = p.dfRoute;
+        if (r0 && r0.hub) { const H = hubs.get(r0.hub); H.trunkEl?.classList.toggle("hot", on); H.el?.classList.toggle("hot", on); }
+      } };
+      row.onmouseenter = () => parts(true);
+      row.onmouseleave = () => parts(false);
     }
-    drawJunctions(svg);
+    drawHubs(svg);
     markRows();
     return;
   }
@@ -908,18 +1059,33 @@ function drawDataLayer() {
   // flow laid out again round it) and every partner shows a plug tag with
   // its own hole on the matching side; the rest steps back. A hover only
   // peeks: faint wires to the op's sides, nothing moves.
+  /* An open terminal lights every op its values reach and their holes,
+   * but wires ONE variable at a time: the one under the pointer, or the
+   * one clicked (pinned) — a whole terminal wired at once is a hairball. */
   if (canvasView === "workflow" && !state.sel && state.dfTerm && termIds) {
     world.classList.add("dfpin");
+    const pick = state.dfTermHover ?? state.dfTermPort ?? null;
+    const portOf = (b) => state.dfTerm === "end" ? b.to.port : b.from.port;
     const pairs = [];
     for (const id of termIds) {
       const b = B[id], a = srcHole(b), z = dstHole(b);
       for (const k of [b.from.key, b.to.key]) if (k) state.cardEls.get(k)?.classList.add("dfpeer");
-      if (a && z) pairs.push([a, z, "dfconn focus lit", `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
+      const on = pick != null && portOf(b) === pick;
+      // the far end of every value lights; the picked value's ends glow
+      const far = state.dfTerm === "end" ? a : z;
+      if (far && far.row) far.row.classList.add(on ? "picked" : "lit");
+      if (on && a && z) pairs.push([a, z, "dfconn focus lit", `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
+    }
+    over.querySelector(`.dfterm.${state.dfTerm}`)?.classList.toggle("haspick", pick != null);
+    world.classList.toggle("dftpick", pick != null);
+    for (const r of over.querySelectorAll(`.dfterm.${state.dfTerm} .dftermrow`)) {
+      r.classList.toggle("picked", r.dataset.port === pick);
+      r.classList.toggle("pinned", r.dataset.port === state.dfTermPort);
     }
     pairs.sort((p, q) => (q[0].y - p[0].y) || (q[1].y - p[1].y));
     prepLanes(pairs);
     for (const [a, z, cls, label] of pairs) wire(a, z, cls, false, label);
-    drawJunctions(wsvg);
+    drawHubs(wsvg);
     over.querySelector(`.dfterm.${state.dfTerm}`)?.classList.add("picked");
     return;
   }
@@ -941,7 +1107,7 @@ function drawDataLayer() {
     pairs.sort((p, q) => (q[0].y - p[0].y) || (q[1].y - p[1].y));
     prepLanes(pairs);
     for (const [a, z, cls, label] of pairs) wire(a, z, cls, false, label);
-    drawJunctions(wsvg);
+    drawHubs(wsvg);
     markRows();
     return;
   }
@@ -1011,21 +1177,36 @@ function drawDataLayer() {
     for (const [a, z, cls, label] of jobs2) wire(a, z, cls, false, label);
     return;
   }
-  const jobs = [];
+  let jobs = [];
   for (const b of nb.ins) {
     const a = b.from.kind === "op" ? plug(b.from.key, "out", b.from.port) : srcHole(b);
     const end = pinned ? cardHole(it.key, "in", b.to.port) : side("in");
-    if (a && end) jobs.push([a, end, cls0 + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
+    if (a && end) jobs.push([a, end, cls0 + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`, {dir: "in", port: b.to.port}]);
   }
   for (const b of nb.outs) {
     const start = pinned ? cardHole(it.key, "out", b.from.port) : side("out");
     const z = b.to.end || b.to.export ? dstHole(b) : plug(b.to.key, "in", b.to.port);
-    if (start && z) jobs.push([start, z, cls0 + " feed" + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
+    if (start && z) jobs.push([start, z, cls0 + " feed" + litCls(b), `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`, {dir: "out", port: b.from.port}]);
+  }
+  /* An op with many wires wires ONE plug at a time, like a terminal: the
+   * plug under the pointer, or the one clicked. Every partner's hole stays
+   * lit, so what it touches is still plain. */
+  const many = pinned && jobs.length > 5;
+  card?.classList.toggle("dfpicker", many);
+  if (many && !dfPort) {
+    const hp = dfHoverPort && dfHoverPort.key === it.key ? dfHoverPort : null;
+    world.classList.toggle("dftpick", !!hp);
+    for (const j of jobs) {
+      const far = j[4].dir === "in" ? j[0] : j[1];
+      const on = hp && j[4].dir === hp.dir && j[4].port === hp.port;
+      if (far && far.row) far.row.classList.add(on ? "picked" : "lit");
+    }
+    jobs = hp ? jobs.filter(j => j[4].dir === hp.dir && j[4].port === hp.port) : [];
   }
   jobs.sort((p, q) => (q[0].y - p[0].y) || (q[1].y - p[1].y));
   prepLanes(jobs);
   for (const [a, z, cls, label] of jobs) wire(a, z, cls, false, label);
-  drawJunctions(wsvg);
+  drawHubs(wsvg);
   markRows();
 }
 
@@ -1878,8 +2059,24 @@ function boundaryCard(it) {
 
 /* START, END and the SCRATCH pad open on a click: every op their values
  * reach opens with just those plugs, the wires drawn, the rest dimmed. */
+// a redraw replaces the row under the pointer, so its own leave never
+// fires: the hovered variable clears once the pointer is off every row of it
+document.addEventListener("pointermove", (ev) => {
+  if (state.dfTermHover != null) {
+    const r = ev.target.closest && ev.target.closest(".dfterm .dftermrow");
+    if (!(r && r.dataset.port === state.dfTermHover)) { state.dfTermHover = null; drawDataLayer(); }
+  }
+  if (dfHoverPort) {
+    const r = ev.target.closest && ev.target.closest(".dfport");
+    if (!(r && r.dataset.port === dfHoverPort.port && r.dataset.dir === dfHoverPort.dir && r.closest(".node") === state.cardEls.get(dfHoverPort.key))) {
+      dfHoverPort = null; drawDataLayer();
+    }
+  }
+});
+
 function toggleTerm(kind) {
   state.dfTerm = state.dfTerm === kind ? null : kind;
+  state.dfTermPort = state.dfTermHover = null;
   dfPort = null;
   if (state.sel) { state.sel = null; renderFlowInfo(); }
   render();
@@ -2281,6 +2478,7 @@ new ResizeObserver(() => flushCanvas()).observe($("#stage"));
  * they are one click away but never in the way. */
 function select(key) {
   state.dfTerm = null;
+  state.dfTermPort = state.dfTermHover = null;
   const before = state.sel;
   state.sel = (state.sel === key) ? null : key;
   // Workflow opens the selected op in place: a re-layout round the card
@@ -4336,7 +4534,7 @@ for (const b of document.querySelectorAll(".viewseg button")) b.onclick = () => 
 showViewSeg();
 {
   const b = $("#btn-flowdots");
-  const show = () => { b.setAttribute("aria-pressed", String(flowDotsOn)); b.classList.toggle("on", flowDotsOn); };
+  const show = () => { b.setAttribute("aria-pressed", String(flowDotsOn)); b.classList.toggle("on", flowDotsOn); document.body.classList.toggle("nodots", !flowDotsOn); };
   show();
   b.onclick = () => {
     flowDotsOn = !flowDotsOn;
@@ -4398,6 +4596,7 @@ $("#btn-zoom-pct").onclick = () => {
     if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA") return;
     if (ev.key === "Escape") {
       if (dfPort) { dfPort = null; drawDataLayer(); return; }
+      if (state.dfTermPort != null) { state.dfTermPort = null; drawDataLayer(); return; }
       if (state.dfTerm) { toggleTerm(state.dfTerm); return; }
       if (!$("#find").hidden) closeFind();
       else if (!$("#legend").hidden) $("#legend").hidden = true;

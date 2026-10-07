@@ -3343,6 +3343,8 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 
   .canvasbar { left: 12px; bottom: 12px; }
   .canvasbar #btn-expand, .canvasbar .tsep:first-of-type { display: none; }
+  /* a phone pinches to zoom: the − / + buttons give their room to the view switch */
+  .canvasbar #btn-zoom-in, .canvasbar #btn-zoom-out { display: none; }
   .findbox, #legend { left: 12px; bottom: 64px; }
 
   #traces, #jobs, #resources, .pane { padding: 16px 14px 88px; }
@@ -3812,9 +3814,13 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dfport, .dfdrow { min-height: 0 !important; }
 
 /* a trunk's junction: where one value branches to another reader */
-.wires.dflinks circle.dfjunction { fill: var(--df); stroke: var(--df-panel); stroke-width: 1.5; }
-.wires.dflinks circle.dfjunction.peek { opacity: .35; }
-#world.dfsel .wires.dflinks circle.dfjunction, #world.dfwirehot .wires.dflinks circle.dfjunction { opacity: .15; }
+/* a source's hub: the one place its value splits */
+.wires.dflinks circle.dfhub { fill: var(--df-panel); stroke: var(--df); stroke-width: 2.2; opacity: 1;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--df) 70%, transparent)); }
+.wires.dflinks circle.dfhub.peek { opacity: .35; }
+.wires.dflinks circle.dfhub.lit { fill: var(--df); stroke: var(--df-panel); stroke-width: 1.5; opacity: 1; }
+#world.dfwirehot .wires.dflinks circle.dfhub:not(.hot) { opacity: .15; }
+.wires.dflinks circle.dfhub.hot { fill: var(--df); opacity: 1; }
 /* a wire's wide invisible twin takes the hover */
 .wires.dflinks path.dfhit { fill: none; stroke: transparent; stroke-width: 10px; pointer-events: stroke; cursor: help; }
 .dfwires { pointer-events: none; }
@@ -3882,7 +3888,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dfterm .dftermrow .dfhole { position: static; margin: 0; }
 /* a lineage is one chain: the other wires step out entirely */
 #world.dfsel .wires.dflinks path.dfconn:not(.lit):not(.lit2) { opacity: 0 !important; }
-#world.dfsel .wires.dflinks circle.dfjunction { opacity: 0; }
+#world.dfsel .wires.dflinks circle.dfhub:not(.lit) { opacity: 0; }
 
 /* a terminal is clickable; picked, it glows brighter */
 .dfterm { cursor: pointer; transition: box-shadow .2s; }
@@ -3892,3 +3898,28 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 
 /* a lit wire in a focus keeps the normal weight: brightness, not bulk */
 .wires.dflinks path.dfconn.focus.lit { stroke-width: 1.7; }
+
+/* an open terminal wires one variable at a time: its rows are the picker */
+.dfterm .dftermrow { cursor: pointer; transition: opacity .15s, box-shadow .15s; }
+.dfterm.haspick .dftermrow:not(.picked) { opacity: .5; }
+.dfterm .dftermrow.picked { border-color: var(--term); box-shadow: 0 0 12px color-mix(in srgb, var(--term) 55%, transparent); }
+.dfterm .dftermrow.pinned .dfhole { background: var(--term); box-shadow: 0 0 6px var(--term); }
+
+/* a picker is open: the readers not picked step back */
+#world.dftpick .dfport.lit:not(.picked) { opacity: .45; }
+.node.dfpicker .dfports .dfport { cursor: pointer; }
+.dfport.picked { background: var(--df-soft); box-shadow: 0 0 0 1.5px var(--df), 0 0 10px color-mix(in srgb, var(--df) 45%, transparent); }
+
+/* data energy: tiny bright beads running source → reader, quicker and
+   finer than the control flow's sparks */
+.wires.dflinks path.dfflow { fill: none; stroke: var(--df-bead, var(--df)); stroke-width: 2.6;
+  stroke-linecap: round; stroke-dasharray: 0.1 46; opacity: 0; pointer-events: none;
+  animation: dfflow .25s linear infinite; }
+.wires.dflinks path.dfflow.on, .wires.dflinks path.dfflow.hot { opacity: .95;
+  filter: drop-shadow(0 0 2px var(--df)); }
+#world.dfwirehot .wires.dflinks path.dfflow:not(.hot) { opacity: 0; }
+@keyframes dfflow { to { stroke-dashoffset: -46.1; } }
+@media (prefers-reduced-motion: reduce) { .wires.dflinks path.dfflow { animation: none; opacity: 0 !important; } }
+#world.dfsel .wires.dflinks path.dfflow:not(.lit):not(.hot) { opacity: 0; }
+/* the toolbar's Direction toggle stills the beads too */
+body.nodots .wires.dflinks path.dfflow { display: none; }

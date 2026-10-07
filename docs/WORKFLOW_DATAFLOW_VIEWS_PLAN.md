@@ -102,12 +102,18 @@ states): 470 clean — only shared lanes left, mostly qc_flow.
 
 **Next, in order:**
 
-1. **One split point per source (decided direction, user 2026-10-07).** A
-   value read by N ops must not split in 3–4 staggered places. Design to
-   confirm: each source (an output hole, or a terminal) gets ONE hub — a
-   small ring just outside the source, in the clear channel. Source → hub is
-   one line; hub → each reader is its own line, never merging again. A
-   terminal's holes comb into its hub. The hub is the only junction drawn.
+1. ~~One split point per source~~ — **done (2026-10-07).** A variable
+   read by one op is a plain wire. A variable read by several runs as ONE
+   line to its hub — a ring in the channel above its first reader, off every
+   card, control edge and other hub — and splits there once: lanes left
+   (farthest reader on top), right (mirrored) and down; siblings never meet
+   again. Variables never share a hub.
+   **One variable at a time** (decided after the all-at-once START view
+   proved a hairball): an open START/SCRATCH/END lights every reader's hole
+   and wires only the variable under the pointer, or the one clicked; a
+   selected op with more than 5 wires does the same with its plugs. Wires
+   carry tiny fast "energy" beads, source → reader (off under
+   reduced-motion).
 2. INGRESS/EGRESS door frames count as obstacles (wires currently hug the
    dashed frame round `audio_in`).
 3. **Generator ops as a 3D stack** (user request): an op that yields
