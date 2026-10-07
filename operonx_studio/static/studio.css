@@ -3905,9 +3905,9 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dfterm .dftermrow.pinned .dfhole { background: var(--term); box-shadow: 0 0 6px var(--term); }
 
 /* a picker is open: the readers not picked step back */
-#world.dftpick .dfport.lit:not(.picked) { opacity: .45; }
-.node.dfpicker .dfports .dfport { cursor: pointer; }
-.dfport.picked { background: var(--df-soft); box-shadow: 0 0 0 1.5px var(--df), 0 0 10px color-mix(in srgb, var(--df) 45%, transparent); }
+#world.dftpick .dfport.lit:not(.picked):not(.hot) { opacity: .45; }
+.dfplate.pickable { cursor: pointer; }
+.dfport.picked, #world.dftpick .dfport.hot { background: var(--df-soft); box-shadow: 0 0 0 1.5px var(--df), 0 0 10px color-mix(in srgb, var(--df) 45%, transparent); }
 
 /* data energy: one electric spark per wire — crackle dashes into a bright
    head, sliding source -> reader and flickering */
