@@ -499,51 +499,32 @@ function dfPortsBlock(it, only) {
   return box;
 }
 
-/* A wire's energy: ONE comet — a bright head with a soft glowing tail —
- * racing source → reader, about 2.6x the control dots' speed. Two paths
- * over the wire, dashed so each carries one dash, the head riding the
- * tail's front. Returns both, placed right after `wire`. */
+/* A wire's energy: ONE electric spark racing source -> reader, about
+ * 2.6x the control dots' speed. A single dashed copy of the wire: a few
+ * short crackle dashes growing into a bright head at the front, sliding
+ * along with CSS and flickering. One element per wire. */
 const DF_SPEED = 190;   // px per second
+// the spark, back to front: crackle, crackle, crackle, head (dash, gap)…
+const DF_SPARK = [1, 3.5, 1.6, 3, 2.4, 2.4, 6];
+const DF_SPARK_LEN = DF_SPARK.reduce((p, q) => p + q, 0);
 function dfComet(wire, d, cls) {
-  const mk = (part) => {
-    const q = document.createElementNS(SVGNS, "path");
-    q.setAttribute("d", d);
-    q.setAttribute("class", `dfflow ${part} ${cls}`.trim());
-    return q;
-  };
-  const tail = mk("tail"), head = mk("head");
-  wire.after(tail, head);
-  let len = 0;
-  try { len = tail.getTotalLength(); } catch { len = 0; }
-  if (len < 30) { tail.remove(); head.remove(); return []; }
-  const T = 26, Hd = 6;
-  const dur = `${Math.max(.35, len / DF_SPEED).toFixed(2)}s`;
-  const delay = `${(-Math.random() * 2).toFixed(2)}s`;
-  for (const [q, dash, a, b] of [[tail, T, T, -len], [head, Hd, Hd, -len - (T - Hd)]]) {
-    q.style.strokeDasharray = `${dash} ${len + T + 40}`;
-    q.style.setProperty("--a", a);
-    q.style.setProperty("--b", b);
-    q.style.animationDuration = dur;
-    q.style.animationDelay = delay;
-  }
-  return [tail, head];
-}
-
-/* A data wire is SILK: the run between two ops is a hairline, barely there,
- * and only its two ends — where it leaves a hole and where it plugs into
- * one — glow at full strength. One extra path over the wire, dashed so it
- * draws just those two ends. */
-const DF_END = 18;
-function dfEnds(wire, d, cls) {
   const q = document.createElementNS(SVGNS, "path");
   q.setAttribute("d", d);
-  q.setAttribute("class", cls.replace(/\bdfconn\b/, "dfends"));
+  q.setAttribute("class", `dfflow spark ${cls}`.trim());
   wire.after(q);
   let len = 0;
   try { len = q.getTotalLength(); } catch { len = 0; }
-  if (len > 2 * DF_END + 8) q.style.strokeDasharray = `${DF_END} ${len - 2 * DF_END} ${DF_END} 0`;
-  return q;
+  if (len < 30) { q.remove(); return []; }
+  q.style.strokeDasharray = `${DF_SPARK.join(" ")} ${len + 40}`;
+  q.style.setProperty("--a", DF_SPARK_LEN);
+  q.style.setProperty("--b", -len);
+  q.style.animationDuration = `${Math.max(.35, len / DF_SPEED).toFixed(2)}s, .16s`;
+  q.style.animationDelay = `${(-Math.random() * 2).toFixed(2)}s, ${(-Math.random() * .16).toFixed(2)}s`;
+  return [q];
 }
+
+/* A data wire is SILK: a faint hairline between two holes; the spark
+ * running along it says where the data goes. */
 
 /* The data layer, drawn after the cards are placed. Every wire runs from
  * an output hole to an input hole: out of a right-hand plate, into a
@@ -560,6 +541,10 @@ function drawDataLayer() {
     : state.dfTerm === "scratch" ? b.from.kind === "scratch" : !!b.to.end).map(b => b.id) : null;
   const lv = dfPort ? DataFlow.lineage(B, dfPort) : termIds ? new Map(termIds.map(id => [id, 1])) : null;
   world.classList.toggle("dfsel", !!lv);
+  // a redraw replaces the wire under the pointer, whose leave never fires:
+  // its hover state and label go with it
+  world.classList.remove("dfwirehot");
+  { const t = document.getElementById("dfwirelabel"); if (t) t.hidden = true; }
   world.classList.remove("dfpin", "dfpeek", "dftpick");
   for (const c of state.cardEls.values()) c.classList.remove("dfpeer");
   for (const r of document.querySelectorAll(".dfport.lit, .dfport.lit2, .dfport.picked, .dfport.remote")) r.classList.remove("lit", "lit2", "picked", "remote");
@@ -992,7 +977,6 @@ function drawDataLayer() {
       p.setAttribute("class", `${H.cls} trunk`);
       layer.prepend(p);
       H.trunkEl = p;
-      H.trunkEnds = dfEnds(p, H.trunk, `${H.cls} trunk`);
       H.flow = dfComet(p, H.trunk, (/\b(focus|lit)\b/.test(H.cls) && !/\b(peek|dim|far)\b/.test(H.cls) ? "on" : "")
         + (/\blit\b/.test(H.cls) ? " lit" : ""));
       const c = document.createElementNS(SVGNS, "circle");
@@ -1020,25 +1004,23 @@ function drawDataLayer() {
     hit.setAttribute("class", "dfhit");
     hit.addEventListener("mouseenter", (ev) => {
       world.classList.add("dfwirehot");
-      p.dfFlowMake(); p.classList.add("hot"); p.dfEnds?.classList.add("hot"); for (const f of flow) f.classList.add("hot");
+      p.dfFlowMake(); p.classList.add("hot"); for (const f of flow) f.classList.add("hot");
       // its line from the source and its hub light with it
-      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.add("hot"); H.trunkEnds?.classList.add("hot"); H.el?.classList.add("hot"); }
+      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.add("hot"); H.el?.classList.add("hot"); }
       for (const h of [a, b]) if (h.row) h.row.classList.add("hot");
       if (label) { const t = dfWireLabel(); t.textContent = label; t.hidden = false; dfWireLabelMove(ev); }
     });
     hit.addEventListener("mousemove", dfWireLabelMove);
     hit.addEventListener("mouseleave", () => {
       world.classList.remove("dfwirehot");
-      p.classList.remove("hot"); p.dfEnds?.classList.remove("hot"); for (const f of flow) f.classList.remove("hot");
-      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.remove("hot"); H.trunkEnds?.classList.remove("hot"); H.el?.classList.remove("hot"); }
+      p.classList.remove("hot"); for (const f of flow) f.classList.remove("hot");
+      if (route0.hub) { const H = hubs.get(route0.hub); H.trunkEl?.classList.remove("hot"); H.el?.classList.remove("hot"); }
       for (const h of [a, b]) if (h.row) h.row.classList.remove("hot");
       const t = dfWireLabel(); t.hidden = true;
     });
     queueMicrotask(() => { if (p.parentNode && !p.classList.contains("far")) p.parentNode.append(hit); });
     p.setAttribute("class", cls);
     p.dfRoute = route0;
-    // its two glowing ends, laid with it (after it's in the page)
-    queueMicrotask(() => { if (p.parentNode) p.dfEnds = dfEnds(p, d, cls); });
     // the energy pulse: tiny bright beads running from source to reader
     // beads only run where the wire itself shows
     const flowCls = (/\b(focus|lit)\b/.test(cls) && !/\b(peek|dim|far)\b/.test(cls) ? "on" : "") + (/\blit\b/.test(cls) ? " lit" : "");
@@ -1296,11 +1278,10 @@ function drawDataLayer() {
       // a hovered variable lights its wires, with the line to their hub
       const parts = (on) => { for (const p of ps) {
         p.classList.toggle("hot", on);
-        p.dfEnds?.classList.toggle("hot", on);
         if (on && p.dfFlowMake) p.dfFlowMake();
         for (const f of p.dfFlow || []) f.classList.toggle("hot", on);
         const r0 = p.dfRoute;
-        if (r0 && r0.hub) { const H = hubs.get(r0.hub); H.trunkEl?.classList.toggle("hot", on); H.trunkEnds?.classList.toggle("hot", on); H.el?.classList.toggle("hot", on); }
+        if (r0 && r0.hub) { const H = hubs.get(r0.hub); H.trunkEl?.classList.toggle("hot", on); H.el?.classList.toggle("hot", on); }
       } };
       row.onmouseenter = () => {
         for (const x of later.get(row) || []) {

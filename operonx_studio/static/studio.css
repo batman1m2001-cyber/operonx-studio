@@ -3909,18 +3909,17 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .node.dfpicker .dfports .dfport { cursor: pointer; }
 .dfport.picked { background: var(--df-soft); box-shadow: 0 0 0 1.5px var(--df), 0 0 10px color-mix(in srgb, var(--df) 45%, transparent); }
 
-/* data energy: one comet per wire — a soft glowing tail and a bright
-   head — racing source → reader, quicker than the control flow's dots */
+/* data energy: one electric spark per wire — crackle dashes into a bright
+   head, sliding source -> reader and flickering */
 .wires.dflinks path.dfflow { fill: none; stroke-linecap: round; opacity: 0; pointer-events: none;
-  animation-name: dfcomet; animation-timing-function: linear; animation-iteration-count: infinite; }
-.wires.dflinks path.dfflow.tail { stroke: var(--df); stroke-width: 2;
-  filter: drop-shadow(0 0 1.5px color-mix(in srgb, var(--df) 70%, transparent)); }
-.wires.dflinks path.dfflow.head { stroke: var(--df-bead, var(--df)); stroke-width: 2.4;
-  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--df) 70%, transparent)); }
-.wires.dflinks path.dfflow.on, .wires.dflinks path.dfflow.hot { opacity: .75; }
-.wires.dflinks path.dfflow.head.on, .wires.dflinks path.dfflow.head.hot { opacity: 1; }
+  animation-name: dfcomet, dfflicker; animation-timing-function: linear, steps(2, jump-none);
+  animation-iteration-count: infinite, infinite; }
+.wires.dflinks path.dfflow.spark { stroke: var(--df-bead, var(--df)); stroke-width: 2;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--df) 75%, transparent)); }
+.wires.dflinks path.dfflow.on, .wires.dflinks path.dfflow.hot { opacity: 1; }
 #world.dfwirehot .wires.dflinks path.dfflow:not(.hot) { opacity: 0; }
 @keyframes dfcomet { from { stroke-dashoffset: var(--a); } to { stroke-dashoffset: var(--b); } }
+@keyframes dfflicker { from { stroke-width: 2.3; } to { stroke-width: 1.5; } }
 @media (prefers-reduced-motion: reduce) { .wires.dflinks path.dfflow { animation: none; opacity: 0 !important; } }
 #world.dfsel .wires.dflinks path.dfflow:not(.lit):not(.hot) { opacity: 0; }
 /* the toolbar's Direction toggle stills the beads too */
@@ -3952,21 +3951,10 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .brcond .brchip.ghost { padding: 0 7px; border-style: dashed; opacity: .85; }
 .brcond .dfport.brchip .dfhole { position: static; margin: 0; flex: none; }
 
-/* SILK: the data wire's run is a hairline; its two ends glow (.dfends,
-   drawn over it). Hovered or lit, the whole wire comes up. Last in the
-   sheet: these win over the older weights above. */
+/* SILK: the data wire is a hairline; hovered or lit it comes up whole.
+   Last in the sheet: these win over the older weights above. */
 /* the thread's faintness lives in its colour, so the older opacity rules
    (dim, peek, far, a selection) still step it further back */
 .wires.dflinks path.dfconn { stroke-width: .5 !important; stroke: color-mix(in srgb, var(--df) 45%, transparent) !important; }
 .wires.dflinks path.dfconn.lit, .wires.dflinks path.dfconn.focus.lit { stroke-width: .7 !important; stroke: color-mix(in srgb, var(--df) 65%, transparent) !important; }
 .wires.dflinks path.dfconn.hot { stroke-width: 1.4 !important; stroke: var(--df) !important; opacity: 1 !important; }
-.wires.dflinks path.dfends { fill: none; stroke: var(--df); stroke-width: 2; stroke-linecap: round;
-  opacity: .95; pointer-events: none; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--df) 65%, transparent)); }
-.wires.dflinks path.dfends.peek { opacity: .35; }
-.wires.dflinks path.dfends.dim { opacity: .12; }
-.wires.dflinks path.dfends.far:not(.lit):not(.hot) { opacity: 0; }
-.wires.dflinks path.dfends.lit { opacity: 1; stroke-width: 1.8; }
-.wires.dflinks path.dfends.hot { opacity: 1; stroke-width: 1.9; }
-#world.dfsel .wires.dflinks path.dfends:not(.lit):not(.lit2):not(.hot) { opacity: 0; }
-#world.dfwirehot .wires.dflinks path.dfends:not(.hot) { opacity: .1; }
-.wires.dflinks path.dfconn.trunk.hot + path.dfends, .wires.dflinks path.dfends.trunk.hot { opacity: 1; }
