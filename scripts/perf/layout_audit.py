@@ -128,9 +128,31 @@ AUDIT_JS = r"""
       if (backRow && dot.left)
         add('side', `${b.name}: the row to ${t} is the loop's return, but its dot is on the left`, {key: b.key});
       else if (tgt && !backRow) {
-        const tcx = tgt.x + tgt.w / 2, bcx = b.x + b.w / 2;
-        if (Math.abs(tcx - bcx) > 20 && (tcx < bcx) !== dot.left)
-          add('side', `${b.name}: the row to ${t} has its dot on the ${dot.left ? 'left' : 'right'}, its target lies ${tcx < bcx ? 'left' : 'right'}`, {key: b.key});
+        // the row's wire must LEAVE outward from its dot. The layout points a
+        // dot at where the wire goes first — its first lane, which may lie on
+        // the far side from the target (round a card below) — so the check is
+        // the drawn wire's first stretch, not the target's side: a wire that
+        // heads back across its own card is the real fault.
+        // this row's own wire: by its route id when it has one
+        const route = rrow.dataset.route;
+        const mine = state.edgeEls.filter(E => E.a === b.key && E.b === tgt.key
+          && (route == null || E.id == null || String(E.id).endsWith(`#${route}`)));
+        let starts = 0, any = 0;
+        for (const E of mine) for (const el of E.els || []) {
+          if (!el || el.tagName !== 'path' || !el.getTotalLength) continue;
+          const n = el.getTotalLength();
+          if (n < 20) continue;
+          any++;
+          const p0 = el.getPointAtLength(0);
+          if (Math.hypot(p0.x - dot.x, p0.y - dot.y) > 4) continue;
+          starts++;
+          const q = el.getPointAtLength(14);
+          if (dot.left ? q.x > dot.x + 2 : q.x < dot.x - 2)
+            add('side', `${b.name}: the row to ${t} has its dot on the ${dot.left ? 'left' : 'right'}, but its wire heads back across the card`, {key: b.key});
+        }
+        // a dot no wire leaves from is a fault too (silence is not a pass)
+        if (any && !starts && route != null)
+          add('side', `${b.name}: the row to ${t}: its wire does not start at its dot`, {key: b.key});
       }
       const p = (it.condPorts || {})[t];
       const fr = firstRow.get(`${b.key}|${t}`);
@@ -485,6 +507,9 @@ async def project_desktop(b, pid):
     if has_runs and not QUICK:
         try:
             await tab(pg, "flow")
+            # the Flow tab's view settles a frame or two after the switch: the
+            # one to compare against is the settled one
+            await pg.evaluate(FRAMES)
             VIEW = "(() => { const st = document.querySelector('#stage'); return [+state.view.scale.toFixed(3), Math.round(st.scrollLeft), Math.round(st.scrollTop)]; })()"
             flow_view = await pg.evaluate(VIEW)
             # a run whose graph the studio draws: one of a graph it does not

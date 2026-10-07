@@ -100,25 +100,27 @@ plates; lineage routes first and hides other wires; hover peek = faint
 edge-to-edge wires, no tags. Last full audit (scratchpad `ds/audit.py`, 502
 states): 470 clean — only shared lanes left, mostly qc_flow.
 
-**Next, in order:**
+**Shipped** in studio PR #27 (2026-10-07), with the follow-ups below on
+`fix/canvas-leftovers`:
 
-1. ~~One split point per source~~ — **done (2026-10-07).** A variable
-   read by one op is a plain wire. A variable read by several runs as ONE
-   line to its hub — a ring in the channel above its first reader, off every
-   card, control edge and other hub — and splits there once: lanes left
-   (farthest reader on top), right (mirrored) and down; siblings never meet
-   again. Variables never share a hub.
-   **One variable at a time** (decided after the all-at-once START view
-   proved a hairball): an open START/SCRATCH/END lights every reader's hole
-   and wires only the variable under the pointer, or the one clicked; a
-   selected op with more than 5 wires does the same with its plugs. Wires
-   carry one glowing comet each (bright head, soft tail), source → reader at
-   ~2.6x the control dots' speed (follows the Direction toggle and
-   reduced-motion).
-2. ~~INGRESS/EGRESS door frames count as obstacles~~ — done.
-3. ~~Generator ops as a 3D stack~~ — done: two copies of the card fanned 8px
-   to the right behind it, tinted a step deeper in the op's own kind hue.
-4. qc_flow dense fan-in: more frame spacing when plates show, so shared
-   lanes become free lanes.
-5. Gates: full `ds/audit.py` (0 card-crossings/overlaps), `layout_audit.py`,
-   JS tests + studio pytest, phone 390 + light theme screenshots → PR.
+1. ~~One split point per shared variable~~ — done (hub above the first
+   reader; one join ring per input fed by several sources; one variable at
+   a time wherever more than 5 wires would show).
+2. ~~INGRESS/EGRESS door frames as obstacles~~ — done.
+3. ~~Generator ops as a stack~~ — done (two copies of the card, stepped
+   down-right, under the wires; the door frame holds them).
+4. ~~qc_flow dense fan-in~~ — done (no wire lies on another: a 3.5px
+   fallback lane; columns that reach a free channel).
+5. ~~Gates~~ — done for #27.
+
+**Follow-ups (fix/canvas-leftovers):**
+
+- A branch's input plugs into the condition that reads it (named once);
+  the wire comes in on the side its row's branch edge does not use,
+  through the gap above the row. Data runs keep off control edges and
+  cross them with a hop.
+- Silk data wires: a faint hairline with a short glowing piece at each end;
+  softer comets and hubs; a card showing plugs drops its "→ output" lines.
+- A run of another graph borrows the canvas and gives the Flow tab back its
+  own graph and view.
+- `layout_audit.py`: the side check follows the drawn wire; 0 findings.

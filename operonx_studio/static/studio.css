@@ -3606,8 +3606,8 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 
 /* connectors: one per node pair, combed into each port row */
 .wires.dflinks path { fill: none; stroke: var(--df); stroke-linecap: round; }
-.wires.dflinks path.dfconn { opacity: .55; stroke-width: 1.4; }
-.wires.dflinks path.dfconn.comb { stroke-width: 1.1; }
+.wires.dflinks path.dfconn { opacity: .55; stroke-width: 1; }
+.wires.dflinks path.dfconn.comb { stroke-width: .9; }
 #world.dfsel .wires.dflinks path.dfconn { opacity: .08; }
 #world.dfsel .wires.dflinks path.dfconn.lit { opacity: 1; }
 #world.dfsel .wires.dflinks path.dfconn.lit2 { opacity: .5; stroke-dasharray: 4 3; }
@@ -3634,7 +3634,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dftag { position: absolute; z-index: 29; font: 600 10.5px/18px var(--mono, ui-monospace, monospace);
   padding: 0 7px; border-radius: 999px; white-space: nowrap; color: var(--df-ink);
   background: var(--df-panel); border: 1px solid color-mix(in srgb, var(--df) 55%, var(--df-line)); }
-.wires.dflinks path.dfconn.focus { opacity: .9; stroke-width: 1.3; }
+.wires.dflinks path.dfconn.focus { opacity: .85; stroke-width: 1; }
 .wires.dflinks path.dfconn.focus.dim { opacity: .12; }
 #world.dffocus .node:not(.dfpeer):not(.selected):not(.container):not(.bnode) { opacity: .55; }
 
@@ -3644,7 +3644,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dfsrc { font-size: 9px; padding: 0 4px; }
 .dfport .dfdot { margin: 0 !important; }
 .dfport.hot { background: var(--df-soft); color: var(--df-ink); }
-.wires.dflinks path.dfconn.hot { opacity: 1; stroke-width: 2.4px !important; }
+.wires.dflinks path.dfconn.hot { opacity: 1; stroke-width: 1.7px !important; }
 .wires.dflinks path.dfconn.back { stroke-dasharray: 5 4; }
 .wires.dflinks path.dfconn { pointer-events: stroke; cursor: help; }
 .wires.dflinks circle.dfattach { fill: var(--df); opacity: .8; }
@@ -3745,10 +3745,10 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 
 /* wires: hole to hole */
 .dfwires { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; z-index: 30; pointer-events: none; }
-.wires.dflinks path.dfconn { stroke: var(--df); stroke-width: 1.6; opacity: .75; fill: none; }
+.wires.dflinks path.dfconn { stroke: var(--df); stroke-width: 1.1; opacity: .75; fill: none; }
 .wires.dflinks path.dfconn.peek { opacity: .3; }
 .wires.dflinks path.dfconn.dim { opacity: .1; }
-.wires.dflinks path.dfconn.lit { opacity: 1; stroke-width: 2.2; }
+.wires.dflinks path.dfconn.lit { opacity: 1; stroke-width: 1.4; }
 .wires.dflinks path.dfconn.lit2 { opacity: .5; stroke-dasharray: 4 3; }
 #world.dfview .wires.dflinks path.dfconn { opacity: .55; }
 #world.dfsel .wires.dflinks path.dfconn:not(.lit):not(.lit2) { opacity: .08; }
@@ -3757,7 +3757,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .wires.dflinks path.dfconn.far { opacity: 0; }
 .wires.dflinks path.dfconn.far.hot, .wires.dflinks path.dfconn.far.lit { opacity: 1; }
 .wires.dflinks path.dfconn.far.lit2 { opacity: .5; }
-.wires.dflinks path.dfconn.hot { opacity: 1 !important; stroke-width: 2.2; }
+.wires.dflinks path.dfconn.hot { opacity: 1 !important; stroke-width: 1.7; }
 .dfport.remote .dfhole:not(.mains) { box-shadow: none; outline: 1.5px dashed var(--df); outline-offset: 0; }
 #world.dfview .wires.dflinks path.dfconn.far { opacity: 0; }
 #world.dfview .wires.dflinks path.dfconn.far.hot, #world.dfview .wires.dflinks path.dfconn.far.lit { opacity: 1; }
@@ -3815,8 +3815,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 
 /* a trunk's junction: where one value branches to another reader */
 /* a source's hub: the one place its value splits */
-.wires.dflinks circle.dfhub { fill: var(--df-panel); stroke: var(--df); stroke-width: 2.2; opacity: 1;
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--df) 70%, transparent)); }
+.wires.dflinks circle.dfhub { fill: var(--df-panel); stroke: var(--df); stroke-width: 1.6; opacity: 1; }
 .wires.dflinks circle.dfhub.peek { opacity: .35; }
 .wires.dflinks circle.dfhub.lit { fill: var(--df); stroke: var(--df-panel); stroke-width: 1.5; opacity: 1; }
 #world.dfwirehot .wires.dflinks circle.dfhub:not(.hot) { opacity: .15; }
@@ -3829,7 +3828,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 #dflinks path.dfhit { pointer-events: stroke; }
 /* hovering one wire: only it stays lit */
 #world.dfwirehot .wires.dflinks path.dfconn:not(.hot) { opacity: .1 !important; }
-#world.dfwirehot .wires.dflinks path.dfconn.hot { opacity: 1 !important; stroke-width: 2.6px; }
+#world.dfwirehot .wires.dflinks path.dfconn.hot { opacity: 1 !important; stroke-width: 1.8px; }
 .dfport.hot, .dfplate.hot, .dfplug.hot { border-color: var(--df) !important; background: var(--df-soft); }
 .dfwirelabel { position: fixed; z-index: 70; pointer-events: none; padding: 3px 8px; border-radius: 7px;
   background: var(--df-panel); color: var(--df-ink); border: 1px solid color-mix(in srgb, var(--df) 50%, var(--df-line));
@@ -3897,7 +3896,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .node.bnode:not(.knob) { cursor: pointer; }
 
 /* a lit wire in a focus keeps the normal weight: brightness, not bulk */
-.wires.dflinks path.dfconn.focus.lit { stroke-width: 1.7; }
+.wires.dflinks path.dfconn.focus.lit { stroke-width: 1.3; }
 
 /* an open terminal wires one variable at a time: its rows are the picker */
 .dfterm .dftermrow { cursor: pointer; transition: opacity .15s, box-shadow .15s; }
@@ -3910,18 +3909,17 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .node.dfpicker .dfports .dfport { cursor: pointer; }
 .dfport.picked { background: var(--df-soft); box-shadow: 0 0 0 1.5px var(--df), 0 0 10px color-mix(in srgb, var(--df) 45%, transparent); }
 
-/* data energy: one comet per wire — a soft glowing tail and a bright
-   head — racing source → reader, quicker than the control flow's dots */
+/* data energy: one electric spark per wire — crackle dashes into a bright
+   head, sliding source -> reader and flickering */
 .wires.dflinks path.dfflow { fill: none; stroke-linecap: round; opacity: 0; pointer-events: none;
-  animation-name: dfcomet; animation-timing-function: linear; animation-iteration-count: infinite; }
-.wires.dflinks path.dfflow.tail { stroke: var(--df); stroke-width: 3.2;
-  filter: drop-shadow(0 0 3px var(--df)) drop-shadow(0 0 6px color-mix(in srgb, var(--df) 60%, transparent)); }
-.wires.dflinks path.dfflow.head { stroke: var(--df-bead, var(--df)); stroke-width: 3.6;
-  filter: drop-shadow(0 0 4px var(--df)); }
-.wires.dflinks path.dfflow.on, .wires.dflinks path.dfflow.hot { opacity: .9; }
-.wires.dflinks path.dfflow.head.on, .wires.dflinks path.dfflow.head.hot { opacity: 1; }
+  animation-name: dfcomet, dfflicker; animation-timing-function: linear, steps(2, jump-none);
+  animation-iteration-count: infinite, infinite; }
+.wires.dflinks path.dfflow.spark { stroke: var(--df-bead, var(--df)); stroke-width: 2;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--df) 75%, transparent)); }
+.wires.dflinks path.dfflow.on, .wires.dflinks path.dfflow.hot { opacity: 1; }
 #world.dfwirehot .wires.dflinks path.dfflow:not(.hot) { opacity: 0; }
 @keyframes dfcomet { from { stroke-dashoffset: var(--a); } to { stroke-dashoffset: var(--b); } }
+@keyframes dfflicker { from { stroke-width: 2.3; } to { stroke-width: 1.5; } }
 @media (prefers-reduced-motion: reduce) { .wires.dflinks path.dfflow { animation: none; opacity: 0 !important; } }
 #world.dfsel .wires.dflinks path.dfflow:not(.lit):not(.hot) { opacity: 0; }
 /* the toolbar's Direction toggle stills the beads too */
@@ -3940,3 +3938,23 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 #world.dfsel #stacks .genghost:not(.dfpeer) { opacity: .4 !important; }
 #world.dffocus #stacks .genghost:not(.dfpeer):not(.selected) { opacity: .55 !important; }
 #world.dfpin #stacks .genghost:not(.dfpeer):not(.selected) { opacity: .28 !important; }
+
+/* a branch's input, plugged into the condition that reads it */
+.brcond .dfport.brchip, .brcond .brchip.ghost {
+  display: inline-flex; align-items: center; gap: 4px; width: auto !important; max-width: none !important;
+  height: 18px; min-height: 0 !important; margin: 0 2px; padding: 0 7px 0 3px; vertical-align: middle;
+  border-radius: 9px; border: 1px solid var(--df); background: var(--df-soft); color: var(--df-ink);
+  font: inherit; line-height: 1; box-shadow: none; }
+.brcond .dfport.brchip .dfname { overflow: visible; text-overflow: clip; }
+.brcond .dfport.brchip.holeR { padding: 0 3px 0 7px; }
+.brcond .dfport.brchip.holeR .dfhole { order: 2; }
+.brcond .brchip.ghost { padding: 0 7px; border-style: dashed; opacity: .85; }
+.brcond .dfport.brchip .dfhole { position: static; margin: 0; flex: none; }
+
+/* SILK: the data wire is a hairline; hovered or lit it comes up whole.
+   Last in the sheet: these win over the older weights above. */
+/* the thread's faintness lives in its colour, so the older opacity rules
+   (dim, peek, far, a selection) still step it further back */
+.wires.dflinks path.dfconn { stroke-width: .5 !important; stroke: color-mix(in srgb, var(--df) 45%, transparent) !important; }
+.wires.dflinks path.dfconn.lit, .wires.dflinks path.dfconn.focus.lit { stroke-width: .7 !important; stroke: color-mix(in srgb, var(--df) 65%, transparent) !important; }
+.wires.dflinks path.dfconn.hot { stroke-width: 1.4 !important; stroke: var(--df) !important; opacity: 1 !important; }
