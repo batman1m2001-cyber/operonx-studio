@@ -3883,3 +3883,12 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 /* a lineage is one chain: the other wires step out entirely */
 #world.dfsel .wires.dflinks path.dfconn:not(.lit):not(.lit2) { opacity: 0 !important; }
 #world.dfsel .wires.dflinks circle.dfjunction { opacity: 0; }
+
+/* a terminal is clickable; picked, it glows brighter */
+.dfterm { cursor: pointer; transition: box-shadow .2s; }
+.dfterm:hover { box-shadow: 0 0 0 4px color-mix(in srgb, var(--term) 20%, transparent), 0 0 28px color-mix(in srgb, var(--term) 50%, transparent), inset 0 1px 0 rgba(255,255,255,.14); }
+.dfterm.picked { box-shadow: 0 0 0 5px color-mix(in srgb, var(--term) 28%, transparent), 0 0 34px color-mix(in srgb, var(--term) 60%, transparent), inset 0 1px 0 rgba(255,255,255,.18); }
+.node.bnode:not(.knob) { cursor: pointer; }
+
+/* a lit wire in a focus keeps the normal weight: brightness, not bulk */
+.wires.dflinks path.dfconn.focus.lit { stroke-width: 1.7; }

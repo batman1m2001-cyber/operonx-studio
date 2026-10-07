@@ -88,3 +88,32 @@ inspector (its Ports section stays the full text record).
 - Screenshots after each step, desktop 1440 and phone 390, light and dark,
   on callbot `ws_callbot_pipeline` (large), qc-snatcher `qc_flow` (GraphOps)
   and meeting-prep.
+
+## 7. State and backlog (2026-10-07)
+
+**Built so far** (branch commits, latest first): START/END/SCRATCH terminals,
+clickable (click → every op its values reach opens, wires drawn, rest dimmed;
+Esc/click again closes); one trunk per terminal; routing that never crosses a
+card (shares a lane before it would); 16px wire clearance; wider layout gaps
+when data shows; GraphOp frames reserve side room for two-hole pass-through
+plates; lineage routes first and hides other wires; hover peek = faint
+edge-to-edge wires, no tags. Last full audit (scratchpad `ds/audit.py`, 502
+states): 470 clean — only shared lanes left, mostly qc_flow.
+
+**Next, in order:**
+
+1. **One split point per source (decided direction, user 2026-10-07).** A
+   value read by N ops must not split in 3–4 staggered places. Design to
+   confirm: each source (an output hole, or a terminal) gets ONE hub — a
+   small ring just outside the source, in the clear channel. Source → hub is
+   one line; hub → each reader is its own line, never merging again. A
+   terminal's holes comb into its hub. The hub is the only junction drawn.
+2. INGRESS/EGRESS door frames count as obstacles (wires currently hug the
+   dashed frame round `audio_in`).
+3. **Generator ops as a 3D stack** (user request): an op that yields
+   (`is_gen`) keeps its card with two offset copies stacked behind it, so it
+   reads as "many results".
+4. qc_flow dense fan-in: more frame spacing when plates show, so shared
+   lanes become free lanes.
+5. Gates: full `ds/audit.py` (0 card-crossings/overlaps), `layout_audit.py`,
+   JS tests + studio pytest, phone 390 + light theme screenshots → PR.

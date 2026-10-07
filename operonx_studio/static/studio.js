@@ -504,7 +504,10 @@ function drawDataLayer() {
   const world = $("#world");
   const B = state.dfB || [];
   const R = (k) => state.rendered.get(k);
-  const lv = dfPort ? DataFlow.lineage(B, dfPort) : null;
+  // a clicked terminal (START, SCRATCH, END) lights everything it touches
+  const termIds = state.dfTerm ? B.filter(b => state.dfTerm === "start" ? (b.from.kind === "input" && !b.from.key)
+    : state.dfTerm === "scratch" ? b.from.kind === "scratch" : !!b.to.end).map(b => b.id) : null;
+  const lv = dfPort ? DataFlow.lineage(B, dfPort) : termIds ? new Map(termIds.map(id => [id, 1])) : null;
   world.classList.toggle("dfsel", !!lv);
   world.classList.remove("dfpin", "dfpeek");
   for (const c of state.cardEls.values()) c.classList.remove("dfpeer");
@@ -522,7 +525,7 @@ function drawDataLayer() {
   const obst = [...state.rendered.values()]
     .filter(it2 => !it2.inner && it2.kind !== "knob" && state.cardEls.get(it2.key))
     .map(it2 => { const c = state.cardEls.get(it2.key);
-      return {key: it2.key, l: it2.x - 9, t: it2.y - 9, r: it2.x + c.offsetWidth + 9, b: it2.y + c.offsetHeight + 9}; });
+      return {key: it2.key, l: it2.x - 16, t: it2.y - 16, r: it2.x + c.offsetWidth + 16, b: it2.y + c.offsetHeight + 16}; });
   const usedV = [], usedH = [];
   // a run may lie on a run of its OWN group (wires out of one hole are one
   // trunk); any other run keeps 7px away
@@ -549,32 +552,38 @@ function drawDataLayer() {
       && Math.abs((bx - ax) * (y - ay) - (by - ay) * (x - ax)) < .6 * Math.hypot(bx - ax, by - ay);
   })());
   const drawJunctions = (layer) => {
+    // where a wire JOINS its trunk and where it LEAVES it: a dot at each
     const groups = new Map();
     for (const w of routed) { if (!groups.has(w.grp)) groups.set(w.grp, []); groups.get(w.grp).push(w); }
+    const seen = new Set();
+    const dot = (x, y, cls) => {
+      const key = `${Math.round(x / 2)},${Math.round(y / 2)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const c = document.createElementNS(SVGNS, "circle");
+      c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", 3);
+      c.setAttribute("class", "dfjunction" + (cls || ""));
+      layer.append(c);
+    };
     for (const ws of groups.values()) {
       if (ws.length < 2) continue;
-      const seen = new Set();
       for (let j = 1; j < ws.length; j++) {
-        const P = ws[j].pts;
-        let last = null;
+        const P = ws[j].pts, others = ws.slice(0, j);
+        let on = false, prev = null;
         for (let i = 1; i < P.length; i++) {
           const [ax, ay] = P[i - 1], [bx, by] = P[i], n = Math.max(1, Math.hypot(bx - ax, by - ay) / 2);
           for (let k = 0; k <= n; k++) {
             const x = ax + (bx - ax) * k / n, y = ay + (by - ay) * k / n;
-            if (ws.slice(0, j).some(w => onPoly(w.pts, x, y))) last = [x, y]; else { i = P.length; break; }
+            const now = others.some(w => onPoly(w.pts, x, y));
+            if (now && !on && prev) dot(x, y, ws[j].cls);          // joins the trunk
+            if (!now && on && prev) dot(prev[0], prev[1], ws[j].cls);   // leaves it
+            on = now; prev = [x, y];
           }
         }
-        if (!last) continue;
-        const key = `${Math.round(last[0])},${Math.round(last[1])}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const c = document.createElementNS(SVGNS, "circle");
-        c.setAttribute("cx", last[0]); c.setAttribute("cy", last[1]); c.setAttribute("r", 3);
-        c.setAttribute("class", "dfjunction" + (ws[j].cls || ""));
-        layer.append(c);
       }
     }
   };
+
   const boxOf = (pt) => {
     const it2 = pt && pt.key && !pt.plate && R(pt.key);
     if (!it2 || it2.inner) return {left: pt.x, right: pt.x, top: pt.y, bottom: pt.y};
@@ -614,18 +623,24 @@ function drawDataLayer() {
     for (const [k, ys] of ins) [...ys].sort((p, q) => p - q).forEach((y, i) => laneIn.set(`${k}|${y}`, i));
   };
   const route = (a, b) => {
-    grp = `${Math.round(a.x)}|${Math.round(a.y)}`;
+    // wires out of one hole are one trunk; so are all wires out of one
+    // terminal (START, SCRATCH): one cable that branches to its readers
+    grp = a.own && a.own.startsWith("term:") ? a.own : `${Math.round(a.x)}|${Math.round(a.y)}`;
     const A = boxOf(a), Bx = boxOf(b);
     const lo = laneOut.get(`${side2(a, "o")}|${Math.round(a.y)}`) || 0;
     const li = laneIn.get(`${side2(b, "i")}|${Math.round(b.y)}`) || 0;
-    const yA0 = A.bottom + 14 + 8 * lo, yB0 = Bx.top - 14;
+    const yA0 = A.bottom + 22 + 8 * lo, yB0 = Bx.top - 22;
     const T = trunk.get(grp);
     const ownA = a.own || (a.plate ? null : a.key), ownB = b.own || (b.plate ? null : b.key);
-    const x1 = T ? T.x1 : scan(Math.max(a.x, A.right) + 10 + 8 * lo, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownA));
-    const x2 = scan(Math.min(b.x, Bx.left) - 10 - 8 * li, -4, x => clearV(x, yB0, b.y) && clearH(b.y, x, b.x, ownB));
-    let xc = scan2(x2, x => clearV(x, yA0, yB0));
+    const x1 = T ? T.x1 : scan(Math.max(a.x, A.right) + 20 + 8 * lo, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownA));
+    const x2 = scan(Math.min(b.x, Bx.left) - 20 - 8 * li, -4, x => clearV(x, yB0, b.y) && clearH(b.y, x, b.x, ownB));
+    // a trunk's wires reuse a descent the trunk already laid when it is clear
+    // for this run, rather than each finding its own column a few px over
+    const reuse = T && (T.cols || []).filter(x => clearV(x, yA0, yB0)).sort((p, q) => Math.abs(p - x2) - Math.abs(q - x2))[0];
+    let xc = reuse !== undefined && reuse !== null ? reuse : scan2(x2, x => clearV(x, yA0, yB0));
     const ymA = T && clearH(T.ymA, x1, xc) ? T.ymA : scan(yA0, 4, y => clearH(y, x1, xc) && clearV(x1, a.y, y) && clearV(xc, y, yB0), 200);
-    if (!T) trunk.set(grp, {x1, ymA});
+    if (!T) trunk.set(grp, {x1, ymA, cols: []});
+    if (!trunk.get(grp).cols.includes(xc)) trunk.get(grp).cols.push(xc);
     const ymB = scan(yB0, -4, y => clearH(y, xc, x2) && clearV(x2, y, b.y), 200);
     if (!clearV(xc, ymA, ymB)) xc = scan2(xc, x => clearV(x, ymA, ymB));
     let pts = [[a.x, a.y], [x1, a.y], [x1, ymA], [xc, ymA], [xc, ymB], [x2, ymB], [x2, b.y], [b.x, b.y]];
@@ -734,7 +749,7 @@ function drawDataLayer() {
         // a plate is a pass-through with two faces: the hole on the frame
         // line takes the outside wire, the plate's inner end the inside one
         const own = `plate:${key}:${dir2}:${port2}`;
-        obst.push({key: own, l: tl - 4, t: y - th / 2 - 4, r: tl + tw + 4, b: y + th / 2 + 4});
+        obst.push({key: own, l: tl - 10, t: y - th / 2 - 8, r: tl + tw + 10, b: y + th / 2 + 8});
         const inner = {x: tl + hi, y, row: tagEl, key, plate: true, own};
         map.set(dir2 + "|" + port2, {x, y, row: tagEl, key, plate: true, own, inner});
       });
@@ -775,19 +790,32 @@ function drawDataLayer() {
         panel.append(r);
       }
       if (kind === "start") panel.append(label);
+      panel.title = kind === "scratch" ? "SCRATCH — click: every op that reads it" : `${kind.toUpperCase()} — click: every op its values reach`;
+      panel.onclick = (ev) => { ev.stopPropagation(); toggleTerm(kind); };
       over.append(panel);
       panel.style.minWidth = `${pw + 24}px`;
       const w = panel.offsetWidth, h = panel.offsetHeight;
       // START grows upward from its pill, END downward, both centred on it;
       // the SCRATCH pad stands to START's left
       // (the pad stands clear of START's capsule, not just of its pill)
-      const stCap = kind === "scratch" && (termHole("start", ""), over.querySelector(".dfterm.start"));
-      const left = kind === "scratch" ? (stCap ? parseFloat(stCap.style.left) : px) - 24 - w : px + pw / 2 - w / 2;
+      // the pad stands clear of where START's capsule is or would be
+      let capL = px;
+      if (kind === "scratch") {
+        const cap = over.querySelector(".dfterm.start");
+        if (cap) capL = parseFloat(cap.style.left);
+        else {
+          const names = [...new Set(B.filter(b => b.from.kind === "input" && !b.from.key).map(b => b.from.port))];
+          const longest = Math.max(0, ...names.map(n => n.length));
+          const cw = Math.max(pw + 24, longest * 7 + 58);
+          capL = px + pw / 2 - cw / 2;
+        }
+      }
+      const left = kind === "scratch" ? capL - 24 - w : px + pw / 2 - w / 2;
       const top = kind === "end" ? py - 4 : py + ph + 4 - h;
       if (kind !== "scratch") pill.classList.add("dfhosted");
       panel.style.left = `${left}px`; panel.style.top = `${top}px`;
       const own = `term:${kind}`;
-      obst.push({key: own, l: left - 4, t: top - 4, r: left + w + 4, b: top + h + 4});
+      obst.push({key: own, l: left - 16, t: top - 16, r: left + w + 16, b: top + h + 16});
       const ex = state.extent;
       if (ex) {
         const before = `${ex.minX},${ex.minY},${ex.maxX},${ex.maxY}`;
@@ -880,6 +908,21 @@ function drawDataLayer() {
   // flow laid out again round it) and every partner shows a plug tag with
   // its own hole on the matching side; the rest steps back. A hover only
   // peeks: faint wires to the op's sides, nothing moves.
+  if (canvasView === "workflow" && !state.sel && state.dfTerm && termIds) {
+    world.classList.add("dfpin");
+    const pairs = [];
+    for (const id of termIds) {
+      const b = B[id], a = srcHole(b), z = dstHole(b);
+      for (const k of [b.from.key, b.to.key]) if (k) state.cardEls.get(k)?.classList.add("dfpeer");
+      if (a && z) pairs.push([a, z, "dfconn focus lit", `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`]);
+    }
+    pairs.sort((p, q) => (q[0].y - p[0].y) || (q[1].y - p[1].y));
+    prepLanes(pairs);
+    for (const [a, z, cls, label] of pairs) wire(a, z, cls, false, label);
+    drawJunctions(wsvg);
+    over.querySelector(`.dfterm.${state.dfTerm}`)?.classList.add("picked");
+    return;
+  }
   const pinned = !!state.sel;
   const key = state.sel || state.dfHover || null;
   const it = key && R(key);
@@ -1136,6 +1179,17 @@ function render() {
   // only the variables it shares with the op — so every wire runs from a
   // hole on one open op to a hole on another
   state.dfOpen = new Map();
+  if (canvasView === "workflow" && !state.sel && state.dfTerm) {
+    for (const b of state.dfB) {
+      const hit = state.dfTerm === "start" ? (b.from.kind === "input" && !b.from.key)
+        : state.dfTerm === "scratch" ? b.from.kind === "scratch" : !!b.to.end;
+      if (!hit) continue;
+      const k = state.dfTerm === "end" ? b.from.key : b.to.key;
+      if (!k) continue;
+      if (!state.dfOpen.has(k)) state.dfOpen.set(k, new Set());
+      state.dfOpen.get(k).add(b.id);
+    }
+  }
   if (canvasView === "workflow" && state.sel) {
     // every binding touching the selection — for an opened GraphOp that is
     // what crosses its frame both ways and what its own ops read and export
@@ -1235,9 +1289,11 @@ function render() {
       if (names.length) platePad.set(k, Math.max(...names.map(n => n.length)) * 6.6 + 52);
     }
   }
+  const dataShown = canvasView === "data" || !!state.sel || !!state.dfTerm;
   const L = FlowLayout.layout(g, {
     expanded: state.expanded,
     padOf: (key) => platePad.get(key) || 0,
+    spacing: dataShown ? {H_GAP: 92, V_GAP: 110} : null,
     textWidth: zoneTextWidth,
     sizeOf: (key) => { const it = sized.get(key); return it ? {w: it.w, h: it.h, rows: it.rows || []} : null; },
   });
@@ -1812,8 +1868,21 @@ function boundaryCard(it) {
       ? "The flow's input boundary — the session starts here."
       : "The flow's output boundary — results leave here.";
   }
-  card.onclick = (ev) => { ev.stopPropagation(); select(parentKey); };
+  card.onclick = (ev) => {
+    ev.stopPropagation();
+    if (!n.knob) { toggleTerm(n.boundary); return; }   // the main flow's START / END
+    select(parentKey);
+  };
   return card;
+}
+
+/* START, END and the SCRATCH pad open on a click: every op their values
+ * reach opens with just those plugs, the wires drawn, the rest dimmed. */
+function toggleTerm(kind) {
+  state.dfTerm = state.dfTerm === kind ? null : kind;
+  dfPort = null;
+  if (state.sel) { state.sel = null; renderFlowInfo(); }
+  render();
 }
 
 // the op's kind (FUNC / LLM / GRAPH…), bound (SYNC / IO / CPU) and the
@@ -2211,6 +2280,7 @@ new ResizeObserver(() => flushCanvas()).observe($("#stage"));
  * code, prompts and source live in collapsed sections underneath, so
  * they are one click away but never in the way. */
 function select(key) {
+  state.dfTerm = null;
   const before = state.sel;
   state.sel = (state.sel === key) ? null : key;
   // Workflow opens the selected op in place: a re-layout round the card
@@ -4328,6 +4398,7 @@ $("#btn-zoom-pct").onclick = () => {
     if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA") return;
     if (ev.key === "Escape") {
       if (dfPort) { dfPort = null; drawDataLayer(); return; }
+      if (state.dfTerm) { toggleTerm(state.dfTerm); return; }
       if (!$("#find").hidden) closeFind();
       else if (!$("#legend").hidden) $("#legend").hidden = true;
       else if (state.sel) deselect();
@@ -4366,6 +4437,7 @@ $("#btn-zoom-pct").onclick = () => {
     if (ev.target.closest(".node") || ev.target.closest("#find")
         || ev.target.closest("#legend")) return;
     if (dfPort) { dfPort = null; drawDataLayer(); }
+    if (state.dfTerm) { toggleTerm(state.dfTerm); return; }
     deselect();
   });
 })();
