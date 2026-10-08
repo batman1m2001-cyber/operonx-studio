@@ -14,10 +14,12 @@ into one op (`memory` → `merge`, 9 wires).
 2. **No capacity check.** Nothing asks whether a region has enough rows and
    columns for the wires that must pass through it.
 
-What was *not* a cause: zoom. The canvas has three semantic zoom levels
-(lo ≤ 0.45, mid, hi ≥ 0.85) where cards carry different content, so the
-layout differs by level on purpose. The audit therefore checks every
-selection at 0.4, 0.7, 1.0 and 1.6 (`SELZ`), covering all three levels.
+What was *not* a cause: zoom. The canvas then had three semantic zoom
+levels (lo ≤ 0.45, mid, hi ≥ 0.85) where cards carried different content,
+so the layout differed by level on purpose; the audit checks every
+selection at 0.4, 0.7, 1.0 and 1.6 (`SELZ`). Since then (2026-10-08) there
+is one card at every zoom, and its detail shows when it is clicked: the
+layout no longer changes with zoom at all.
 
 ## Plan
 

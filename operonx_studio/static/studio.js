@@ -2775,10 +2775,10 @@ function opCard(it) {
     const tools = agentToolsLine(n);
     if (tools) card.append(tools);
     // the kind line was card noise at fit-zoom; it lives in the
-    // tooltip and the inspector — and, zoomed in close, on the card
-    // itself (the .detail block shows only at [data-zoom="hi"])
+    // tooltip and the inspector — and on the card once it is clicked
+    // (the .detail block shows on the selected card only)
     card.title = n.kind + (n.bound ? ` · ${n.bound}` : "") + (n.is_gen ? " · generator" : "");
-    // Zoomed in, the card says what the op PRODUCES, not its port
+    // Clicked, the card says what the op PRODUCES, not its port
     // list: inputs are the wires, and most outputs are plumbing every
     // op passes along. show_keys (declared on the op, its kind's
     // default, or the extractor's pick from the dataflow) name the one
@@ -2871,17 +2871,8 @@ function applyView() {
     `translate(${-ex.minX * s + VIEW_PAD}px, ${-ex.minY * s + VIEW_PAD}px) scale(${s})`;
   $("#btn-zoom-pct").textContent = `${Math.round(s * 100)}%`;
 
-  // semantic zoom: close up, cards carry more (kind, ports); far out
-  // they slim down. A level change reflows card heights, so the canvas
-  // re-renders once to re-anchor every wire to the new bottoms.
-  const level = s >= 0.85 ? "hi" : s <= 0.45 ? "lo" : "mid";
-  if (world.dataset.zoom !== level) {
-    world.dataset.zoom = level;
-    if (state.graph && !state._rezoom) {
-      state._rezoom = true;
-      requestAnimationFrame(() => { state._rezoom = false; render(); });
-    }
-  }
+  // no semantic zoom: a card is the same at every zoom (its detail shows
+  // when it is clicked), so zooming never lays the canvas out again
 }
 
 function zoomAt(mx, my, factor) {
