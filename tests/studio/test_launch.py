@@ -130,3 +130,23 @@ def test_a_dead_studios_run_file_is_not_trusted(state):
     held = claim()                                  # nobody holds the lock: the file is stale
     assert held is not None and running_info(wait=0) is None
     held.release()
+
+
+def test_a_restart_waits_for_the_old_studio_to_go(state, tmp_path, monkeypatch):
+    """Stop, then start at once: the old studio still holds the lock while
+    it exits and no longer answers. The new launch must become the studio,
+    not give up and not start beside it."""
+    import threading
+
+    import operonx_studio.app as app
+    from operonx_studio.launch import claim
+
+    root = _project(tmp_path)
+    old = claim()
+    old.announce("127.0.0.1", 1)                    # where it listened; it answers no more
+    threading.Timer(1.0, old.release).start()      # … and exits a second later
+    monkeypatch.setattr(cli, "_running", lambda host, port, wait=0.0: None)
+    served = []
+    monkeypatch.setattr(app, "serve_studio", lambda **kw: served.append(kw))
+    assert cli.main([str(root), "--no-open", "--port", "8799"]) == 0
+    assert served and served[0]["port"] == 8799

@@ -56,19 +56,29 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     held = claim()
     if held is None:
-        info = running_info()
-        if info is None:
-            print("error: a studio holds this state but has not said where it listens; "
-                  "try again in a moment")
-            return 1
-        if (str(info.get("host")), int(info["port"])) != (args.host, args.port):
-            print(f"(the studio is already running on {info['host']}:{info['port']}; using it)")
-        args.host, args.port = str(info["host"]), int(info["port"])
-        running = _running(args.host, args.port, wait=15.0)
-        if running is None:
-            print(f"error: the studio on {args.host}:{args.port} (pid {info.get('pid')}) does not answer")
-            return 1
-        return _hand_over(args, open_path, running)
+        # a studio holds the state: hand it the project once it answers.
+        # It may be starting (no answer yet) or stopping (a restart: the
+        # lock goes when it has exited), so keep asking it, and keep trying
+        # the lock, for a while
+        import time
+
+        deadline = time.time() + 20
+        while held is None:
+            info = running_info(wait=0)
+            if info is not None:
+                running = _running(str(info["host"]), int(info["port"]))
+                if running is not None:
+                    if (str(info["host"]), int(info["port"])) != (args.host, args.port):
+                        print(f"(the studio is already running on {info['host']}:{info['port']}; using it)")
+                    args.host, args.port = str(info["host"]), int(info["port"])
+                    return _hand_over(args, open_path, running)
+            held = claim()
+            if held is None and time.time() > deadline:
+                where = f" on {info['host']}:{info['port']} (pid {info.get('pid')})" if info else ""
+                print(f"error: a studio holds this state{where} but does not answer")
+                return 1
+            if held is None:
+                time.sleep(0.3)
 
     # we hold the lock; the port may still answer: a studio from before the
     # lock (same state: ours, hand it over) or one with other state
