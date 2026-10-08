@@ -50,6 +50,7 @@ READ_POSTS: Dict[Tuple[str, str], str] = {
 ACCESS: Dict[Tuple[str, str], str] = {
     # ── the way in ──
     ("GET", "/login"): "open",
+    ("GET", "/.well-known/operonx-studio"): "open",  # "is a studio here?" for `operonx studio`
     ("POST", "/api/login"): "open",
     ("GET", "/logout"): "open",
     ("GET", "/static/{name}.css"): "open",
@@ -74,6 +75,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", "/api/projects"): "read",
     ("GET", "/api/projects/health"): "read",
     ("POST", "/api/open"): "edit",           # the shared recents
+    ("GET", "/open"): "edit",                # a launch ticket from `operonx studio`: open its project
     ("POST", "/api/forget"): "edit",
     ("POST", "/api/new"): "edit",            # a directory, first-run jobs
     ("GET", "/api/templates"): "read",
@@ -222,7 +224,8 @@ def is_open_path(path: str) -> bool:
     ``open`` routes, and the static files they load. Kept a plain path test
     because the middleware runs before routing; test_access.py checks it
     agrees with the table for every route."""
-    return path in ("/login", "/api/login", "/logout") or path == "/static" or path.startswith("/static/")
+    return (path in ("/login", "/api/login", "/logout", "/.well-known/operonx-studio")
+            or path == "/static" or path.startswith("/static/"))
 
 
 class AccessDenied(Exception):

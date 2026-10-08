@@ -104,8 +104,10 @@ states): 470 clean — only shared lanes left, mostly qc_flow.
 `fix/canvas-leftovers`:
 
 1. ~~One split point per shared variable~~ — done (hub above the first
-   reader; one join ring per input fed by several sources; one variable at
-   a time wherever more than 5 wires would show).
+   reader; one join ring per input fed by several sources). The "one
+   variable at a time past 5 wires" picker shipped here was replaced in
+   #29: a click shows every wire, and pointing at a variable singles it
+   out. Dense spots: `DATA_WIRE_ROUTING_PLAN.md` (#30).
 2. ~~INGRESS/EGRESS door frames as obstacles~~ — done.
 3. ~~Generator ops as a stack~~ — done (two copies of the card, stepped
    down-right, under the wires; the door frame holds them).

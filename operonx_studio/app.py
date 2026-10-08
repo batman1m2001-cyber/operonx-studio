@@ -850,6 +850,14 @@ def build_studio_app(recents: Optional[Recents] = None):
     #: what someone who must choose a password may still reach
     _MUST_CHANGE_OK = ("/api/me", "/api/me/password", "/api/logout")
 
+    def _login_then(request: Any) -> str:
+        """The sign-in page, coming back afterwards to the page that was
+        asked for (a launch from `operonx studio` lands on its project)."""
+        from urllib.parse import quote
+
+        here = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        return "/login" if here == "/" else f"/login?next={quote(here, safe='')}"
+
     def _cookie(response: Any, request: Any, token: str) -> None:
         # Secure when the tunnel says the browser spoke https to it
         secure = (request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
@@ -926,7 +934,7 @@ def build_studio_app(recents: Optional[Recents] = None):
                 return JSONResponse({"error": "authentication required"}, status_code=401)
             from fastapi.responses import RedirectResponse
 
-            return RedirectResponse("/login", status_code=302)
+            return RedirectResponse(_login_then(request), status_code=302)
         if user is not None and user["must_change"] and not is_open_path(path) and path not in _MUST_CHANGE_OK:
             if path.startswith("/api/"):
                 _log_activity(request, 403, route=path)
@@ -934,7 +942,7 @@ def build_studio_app(recents: Optional[Recents] = None):
                                     status_code=403)
             from fastapi.responses import RedirectResponse
 
-            return RedirectResponse("/login", status_code=302)
+            return RedirectResponse(_login_then(request), status_code=302)
         response = await call_next(request)
         _log_activity(request, response.status_code)
         if touched:
@@ -1299,6 +1307,31 @@ def build_studio_app(recents: Optional[Recents] = None):
                 pass
             out[ref.id] = info
         return out
+
+    @app.get("/.well-known/operonx-studio")
+    def whoami_studio() -> JSONResponse:
+        """What `operonx studio` asks before starting one: is a studio
+        already here, and does it read the same state (launch tickets)?"""
+        from operonx_studio import __version__
+        from operonx_studio.registry import state_dir
+
+        return JSONResponse({"studio": __version__, "state_dir": str(state_dir().resolve())})
+
+    @app.get("/open")
+    def open_ticket(t: str = ""):
+        """Open the project a launch ticket names, then show it. A ticket is
+        a file `operonx studio` wrote into the studio's own state, used
+        once and good for ten minutes: a link from another site cannot make
+        the studio open (and import) a folder, because it cannot write one."""
+        from fastapi.responses import RedirectResponse
+
+        from operonx_studio.launch import take_ticket
+
+        root = take_ticket(t)
+        if root is None or not (root / MANIFEST).is_file():
+            return RedirectResponse("/", status_code=302)
+        ref = recents.touch(root)
+        return RedirectResponse(f"/p/{ref.id}", status_code=302)
 
     @app.post("/api/open")
     def open_project(body: Dict[str, Any]) -> JSONResponse:

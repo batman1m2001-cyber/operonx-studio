@@ -133,7 +133,9 @@ def test_anonymous_gets_401_or_the_login_page_everywhere_but_open(people):
         elif path.startswith("/api/"):
             assert res.status_code == 401, (method, path, res.status_code)
         else:
-            assert res.status_code == 302 and res.headers["location"] == "/login", (method, path)
+            # the sign-in page, then back to the page that was asked for
+            want = "/login" if path == "/" else "/login?next="
+            assert res.status_code == 302 and res.headers["location"].startswith(want), (method, path)
 
 
 def test_admin_routes_refuse_editors_and_viewers(people):
@@ -157,11 +159,15 @@ def test_admin_routes_refuse_editors_and_viewers(people):
 def test_edit_routes_refuse_viewers_before_the_handler_runs(people):
     team = people["team"]
     edit_routes = _by_level(team, "edit")
-    assert len(edit_routes) == 31   # + POST a knowledge-base query or eval case (K3), a run requeued (S3), a queue review (S1)
+    assert len(edit_routes) == 32   # + POST a knowledge-base query or eval case (K3), a run requeued (S3), a queue review (S1), GET /open (a launch ticket)
     team.use(people["viewer"]["token"])
     # the real project id: a handler that ran would act on it
     for method, path in edit_routes:
         res = _call(team.client, method, _url(path, people["pid"]), people["tmp"])
+        if not path.startswith("/api/"):
+            # a page refuses by sending them home, before its handler runs
+            assert res.status_code == 302 and res.headers["location"] == "/", (method, path, res.status_code)
+            continue
         assert res.status_code == 403 and "View only" in res.json()["error"], (method, path, res.status_code)
     team.use(team.admin_token)
     assert [p["id"] for p in team.client.get("/api/projects").json()["projects"]] == [people["pid"]]   # not forgotten
