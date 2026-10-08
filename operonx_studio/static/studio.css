@@ -693,8 +693,10 @@ body:not([data-stage]) .canvasbar { display: none; }
   color: var(--kind, var(--k-default));
   border-color: color-mix(in srgb, var(--kind, var(--k-default)) 35%, #fff);
   background: color-mix(in srgb, var(--kind, var(--k-default)) 7%, #fff); }
-/* specks at far zoom — the silhouette is the message out there */
-#world[data-zoom="lo"] .nchips { display: none; }
+/* the overview card is its name: the chips show on the op that is clicked
+   (in the Workflow view, where a click lays the canvas out again) */
+.node .nchips { display: none; }
+#world:not(.dfview) .node.selected .nchips { display: inline-flex; }
 .node .nkind { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .node .agtools { color: var(--muted); font-size: 10.5px; margin-top: 3px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
@@ -882,7 +884,7 @@ body:not([data-stage]) .canvasbar { display: none; }
    side insets so it stays inside the cell's curved membrane */
 .node .detail { display: none; margin-top: 5px; padding: 5px 18px 0;
   border-top: 1px dashed var(--line); text-align: center; }
-#world[data-zoom="hi"] .node .detail { display: block; }
+#world:not(.dfview) .node.selected .detail { display: block; }
 .detail .dkind { font-size: 9.5px; color: var(--muted);
   text-transform: uppercase; letter-spacing: .05em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -895,11 +897,13 @@ body:not([data-stage]) .canvasbar { display: none; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail .dshow .dkey { color: #a8642a; }
 .detail .dshow .dval { color: #3b5f86; }
-/* far out, badges are noise too */
-#world[data-zoom="lo"] .node .badges .badge:not(.run):not(.err) { display: none; }
+/* and so are badges, but a run's chip, an error, and a nested graph's
+   open button (▣ n ▸) */
+.node:not(.selected) .badges .badge:not(.run):not(.err):not(.sub),
+#world.dfview .node .badges .badge:not(.run):not(.err):not(.sub) { display: none; }
 /* close up, the cell relaxes: gentler pixel radii and more padding so
    the grown card never pushes its icon into the membrane */
-#world[data-zoom="hi"] .node.cell {
+#world:not(.dfview) .node.cell.selected:has(> .detail) {
   border-radius: 42px 54px 46px 50px / 34px 40px 36px 42px;
   padding: 13px 12px 11px 70px;
 }
@@ -943,10 +947,10 @@ body:not([data-stage]) .canvasbar { display: none; }
 #world.big .node.cell:not(.selected):not(.live-active):not(.live-done):not(.live-failed):hover {
   box-shadow: 0 0 0 6px color-mix(in srgb, var(--kind, var(--k-func)) 12%, transparent); }
 
-/* semantic zoom: further out, names grow inside their cells so they stay
-   readable on screen (15px at 70% reads as ~10.5px) */
-#world[data-zoom="mid"] .node .nname, #world[data-zoom="mid"] .node.container .chead .nname { font-size: 15px; }
-#world[data-zoom="lo"] .node .nname, #world[data-zoom="lo"] .node.container .chead .nname { font-size: 18px; }
+/* one card at every zoom (no semantic zoom: the layout never changes as
+   you zoom): a name big enough to read at a fit-the-graph zoom (16px at
+   50% reads as 8px) */
+.node .nname, .node.container .chead .nname { font-size: 16px; }
 
 /* ── a run in motion (live sessions, replays) ─────────────────────────
    The op at work carries the signal ring and one expanding outline
