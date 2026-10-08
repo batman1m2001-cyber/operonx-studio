@@ -1174,6 +1174,10 @@ function drawDataLayer() {
   const holePt = (card, it, hole) => {
     let x = hole.offsetWidth / 2, y = hole.offsetHeight / 2, e = hole;
     while (e && e !== card) { x += e.offsetLeft; y += e.offsetTop; e = e.offsetParent; }
+    // offsets inside the card start at its padding edge; the card's x/y is
+    // its outer edge: add its border (2px on an open card put every wire
+    // 2px up and left of its hole's centre)
+    if (e === card) { x += card.clientLeft; y += card.clientTop; }
     if (e !== card) {   // the card is not the hole's offset parent chain: fall back
       const cr = card.getBoundingClientRect(), hr = hole.getBoundingClientRect(), k = state.view.scale || 1;
       return {x: it.x + (hr.left + hr.width / 2 - cr.left) / k, y: it.y + (hr.top + hr.height / 2 - cr.top) / k};
@@ -1231,8 +1235,9 @@ function drawDataLayer() {
         if (dir2 === "in") tagEl.append(hole, el("span", "dfname mono", port2), inHole);
         else tagEl.append(inHole, el("span", "dfname mono", port2), hole);
         over.append(tagEl);
-        const ho = hole.offsetLeft + hole.offsetWidth / 2;
-        const hi = inHole.offsetLeft + inHole.offsetWidth / 2;
+        // from the plate's outer edge: its border too (see holePt)
+        const ho = tagEl.clientLeft + hole.offsetLeft + hole.offsetWidth / 2;
+        const hi = tagEl.clientLeft + inHole.offsetLeft + inHole.offsetWidth / 2;
         const tw = tagEl.offsetWidth, th = tagEl.offsetHeight, tl = x - ho;
         tagEl.style.top = `${y - th / 2}px`;
         tagEl.style.left = `${tl}px`;
@@ -1329,6 +1334,7 @@ function drawDataLayer() {
         const hole = r.querySelector(".dfhole");
         let hx = hole.offsetWidth / 2, hy = hole.offsetHeight / 2, e = hole;
         while (e && e !== panel) { hx += e.offsetLeft; hy += e.offsetTop; e = e.offsetParent; }
+        if (e === panel) { hx += panel.clientLeft; hy += panel.clientTop; }   // its border (see holePt)
         map.set(r.dataset.port, {x: left + hx, y: top + hy, row: r, key: own, plate: true, own});
       }
     }
@@ -4938,17 +4944,24 @@ function buildLegend() {
   row(legendSample("soft", true), "soft merge — may not fire at all");
   row(el("span", "lglyph lzone", "↺"), "a violet zone is a loop: the steps inside run again every turn; its header says where the loop exits and on what condition");
   row(el("span", "lglyph", "next turn"), "the violet return wire goes back to the start of the loop for another turn; \"exit loop\" marks the route that leaves it");
-  row(el("span", "lglyph", "⚡"), "generator: one call, many yields — consumers run per yield");
+  row(el("span", "lglyph", "⚡"), "generator (a card with a stack behind it): one call, many yields — consumers run per yield");
   row(el("span", "lglyph", "≋ ∥ ⧉"), "streaming edge · parallel fan-out · collect-into-list");
   row(el("span", "lglyph", "▣"), "a nested graph — click its badge (or double-click) to open it in place");
   row(el("span", "lglyph", "▶"), "START / END terminals are a graph's own ports — the main flow and every opened GraphOp have them; the dotted ties from START are session-start dispatch");
   row(el("span", "lglyph", "⇥"), "framed doors are the serve boundary: the ingress wears the transport's name, the reply leaves egress toward the client");
   row(el("span", "lheat"), "with a run painted: warmer border = slower average, red = errored, faded = did not run");
 
+  box.append(el("div", "ltitle lkeys", "Data"));
+  row(el("span", "lglyph ldata", "─⚡─"), "a data wire: a value going from the op that makes it to the op that reads it; its spark runs the way the data goes");
+  row(el("span", "lglyph ldata", "─◯<"), "a split point: one value read by several ops leaves its op once and splits here");
+  row(el("span", "lglyph ldata", ">◯─"), "a merge ring: several ops feed one input (alternative branches); their wires meet here, then go in as one");
+  row(el("span", "lglyph ldata", "◉ x"), "click an op to see all its data wires; point at a variable or a wire to single it out; click a variable to follow its value through the graph");
+  row(el("span", "lglyph ldata", "x ◉"), "a router's inputs plug straight into the condition that reads them");
+
   box.append(el("div", "ltitle lkeys", "Keys"));
   box.append(el("div", "lrow lkeysrow",
     "/ or Ctrl+K find · space+drag or middle-drag pan · ctrl+scroll zoom · "
-    + "0 fit · 1 = 100% · ↑ ↓ walk the wires · Esc close"));
+    + "0 fit · 1 = 100% · D Workflow ⇄ Data Flow · ↑ ↓ walk the wires · Esc close"));
 }
 
 $("#btn-legend").onclick = () => {

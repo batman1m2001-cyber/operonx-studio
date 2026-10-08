@@ -336,7 +336,7 @@ def test_the_team_page_is_for_admins(team):
     assert away.status_code == 302 and away.headers["location"] == "/"     # a page, not a JSON 403
     assert c.get("/api/admin/users").status_code == 403                    # the API still says why
     team.use(None)
-    assert c.get("/team", follow_redirects=False).headers["location"] == "/login"
+    assert c.get("/team", follow_redirects=False).headers["location"] == "/login?next=%2Fteam"
 
 
 def test_every_page_knows_who_is_signed_in(team, tmp_path):

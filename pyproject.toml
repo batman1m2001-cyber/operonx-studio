@@ -15,7 +15,7 @@
 
 [project]
 name = "operonx-studio"
-version = "0.2.1"
+version = "0.3.0"
 description = "Visual studio and project tooling for operonx — open a project, see the flow."
 requires-python = ">=3.10"
 dependencies = [

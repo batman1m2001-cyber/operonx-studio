@@ -2,6 +2,8 @@
 
     operonx-studio                open the app: pick, open or create a project
     operonx-studio PATH           open the app with PATH already opened
+                                  (a studio already running on the port gets
+                                  PATH added and shown; nothing new starts)
     operonx-studio --port 9000    a different port
     operonx-studio --reset-password NAME
                                   a temporary password for NAME (printed once),
@@ -48,6 +50,39 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"error: no operonx.toml in {open_path}")
             return 2
 
+    # one studio per state (~/.operonx): when one runs, on any port, it is
+    # handed the project instead of a second one starting
+    from operonx_studio.launch import claim, running_info
+
+    held = claim()
+    if held is None:
+        info = running_info()
+        if info is None:
+            print("error: a studio holds this state but has not said where it listens; "
+                  "try again in a moment")
+            return 1
+        if (str(info.get("host")), int(info["port"])) != (args.host, args.port):
+            print(f"(the studio is already running on {info['host']}:{info['port']}; using it)")
+        args.host, args.port = str(info["host"]), int(info["port"])
+        running = _running(args.host, args.port, wait=15.0)
+        if running is None:
+            print(f"error: the studio on {args.host}:{args.port} (pid {info.get('pid')}) does not answer")
+            return 1
+        return _hand_over(args, open_path, running)
+
+    # we hold the lock; the port may still answer: a studio from before the
+    # lock (same state: ours, hand it over) or one with other state
+    other = _running(args.host, args.port)
+    if other is not None:
+        held.release()
+        from operonx_studio.registry import state_dir
+
+        if Path(str(other.get("state_dir") or "")) == state_dir().resolve():
+            return _hand_over(args, open_path, other)
+        print(f"error: {args.host}:{args.port} is a studio with other state ({other.get('state_dir')}); "
+              "choose another --port")
+        return 1
+
     from operonx_studio.app import serve_studio
     from operonx_studio.registry import project_id
 
@@ -58,7 +93,54 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.no_open:
         threading.Timer(0.8, webbrowser.open, args=(url,)).start()
 
-    serve_studio(host=args.host, port=args.port, open_path=open_path)
+    held.announce(args.host, args.port)
+    try:
+        serve_studio(host=args.host, port=args.port, open_path=open_path)
+    finally:
+        held.release()
+    return 0
+
+
+def _running(host: str, port: int, wait: float = 0.0) -> dict | None:
+    """What answers on host:port, if it is a studio (its version and the
+    state it reads); ``None`` when nothing does, or something else does.
+    *wait*: keep asking that long (a studio still starting)."""
+    import json
+    import time
+    import urllib.request
+
+    deadline = time.time() + wait
+    while True:
+        try:
+            with urllib.request.urlopen(f"http://{host}:{port}/.well-known/operonx-studio", timeout=3) as r:
+                data = json.loads(r.read().decode("utf-8"))
+            return data if isinstance(data, dict) and "studio" in data else None
+        except Exception:  # noqa: BLE001 — closed port, another server, a timeout
+            if time.time() >= deadline:
+                return None
+            time.sleep(0.3)
+
+
+def _hand_over(args, open_path: Path | None, running: dict) -> int:
+    """Open *open_path* in the studio already running (through a launch
+    ticket in its state), or just its home screen."""
+    from operonx_studio.registry import state_dir
+
+    base = f"http://{args.host}:{args.port}"
+    url = f"{base}/"
+    if open_path is not None:
+        if Path(str(running.get("state_dir") or "")) == state_dir().resolve():
+            from operonx_studio.launch import make_ticket
+
+            url = f"{base}/open?t={make_ticket(open_path)}"
+        else:
+            # it reads other state (another OPERONX_STUDIO_STATE_DIR): we
+            # cannot hand it a ticket; say where the project is instead
+            print(f"note: that studio keeps its state in {running.get('state_dir')}, not {state_dir()};"
+                  f" open {open_path} from its home screen")
+    print(f"operonx studio is already running · {url}")
+    if not args.no_open:
+        webbrowser.open(url)
     return 0
 
 

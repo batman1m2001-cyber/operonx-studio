@@ -279,7 +279,7 @@ def new_main(argv: Sequence[str] | None = None) -> int:
     root = Path(args.path)
     for path in written:
         print(f"  created {path}")
-    print(f"\nNext:\n  cd {root} && uv sync\n  operonx-lint --build .\n  operonx-studio . --serve")
+    print(f"\nNext:\n  cd {root} && uv sync\n  operonx-lint --build .\n  operonx-studio .")
     return 0
 
 

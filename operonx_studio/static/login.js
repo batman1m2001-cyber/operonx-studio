@@ -24,6 +24,13 @@ async function post(url, body) {
   return {res, data};
 }
 
+// where to go once signed in: the page that sent us here (a launch from
+// `operonx studio` lands on its project), never another site
+const NEXT = (() => {
+  const n = new URLSearchParams(location.search).get("next") || "/";
+  return n.startsWith("/") && !n.startsWith("//") && !n.startsWith("/\\") ? n : "/";
+})();
+
 $("login-form").onsubmit = async (ev) => {
   ev.preventDefault();
   const err = $("login-err");
@@ -36,7 +43,7 @@ $("login-form").onsubmit = async (ev) => {
     current = $("login-pass").value;
     const {res, data} = await post("/api/login", {username, password: current});
     if (res.ok && data.must_change) { passwordStep((data.user || {}).username || username); return; }
-    if (res.ok) { location.href = "/"; return; }
+    if (res.ok) { location.href = NEXT; return; }
     err.textContent = data.error || "Sign-in failed.";
   } catch {
     err.textContent = "The studio did not answer — is it still running?";
@@ -58,7 +65,7 @@ $("pw-form").onsubmit = async (ev) => {
   btn.textContent = "Saving…";
   try {
     const {res, data} = await post("/api/me/password", {current, new: next});
-    if (res.ok) { location.href = "/"; return; }
+    if (res.ok) { location.href = NEXT; return; }
     if (res.status === 401) { location.reload(); return; }
     err.textContent = data.error || "That did not work.";
   } catch {

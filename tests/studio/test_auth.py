@@ -63,7 +63,7 @@ def test_login_page_and_static_stay_open(team):
     version = page.text.split('src="/static/bundle/login.js')[1].split('"')[0]
     assert team.client.get("/static/bundle/login.js" + version).status_code == 200
     schema = team.client.get("/openapi.json", follow_redirects=False)     # no schema for the public
-    assert schema.status_code == 302 and schema.headers["location"] == "/login"
+    assert schema.status_code == 302 and schema.headers["location"] == "/login?next=%2Fopenapi.json"
     team.use(team.admin_token)
     assert team.client.get("/openapi.json").status_code == 404           # nor for anyone
 

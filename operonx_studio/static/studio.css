@@ -536,6 +536,7 @@ body:not([data-stage]) .canvasbar { display: none; }
 .lrow .lsample { width: 60px; height: 12px; flex: none; }
 .lrow svg.lsample.wires { position: static; overflow: visible; }
 .lglyph { width: 60px; text-align: center; flex: none; color: var(--text); font-weight: 600; }
+.lglyph.ldata { color: var(--df); font-family: var(--mono, monospace); letter-spacing: -1px; }
 .lheat { width: 60px; height: 10px; flex: none; border-radius: 5px;
   background: linear-gradient(90deg, #fdf6e3, #f2b53c, #cf3f36); }
 .lkeysrow { color: var(--text-3); font-size: var(--fs-sm); line-height: 1.7; }
@@ -3708,7 +3709,9 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 
 
 /* ── plug plates: every variable is a plug hole ─────────────────────── */
-:root { --plate: #e9eef5; --hole: #1c2533; }
+/* light: a hole is a pale well ringed in the data blue (a near-black one
+   was harsh on a light card); dark keeps its dark socket */
+:root { --plate: #e9eef5; --hole: color-mix(in srgb, var(--df) 12%, #fff); --hole-inset: rgba(20, 40, 80, .22); }
 .node.dfcard { padding-left: 26px !important; padding-right: 26px !important; }
 .node.cell.dfcard .nline, .node.cell.dfcard .detail, .node.cell.dfcard .badges { margin-left: 42px; }
 .node.dfcard .dfports { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; margin-top: 8px;
@@ -3724,10 +3727,10 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dfport.out .dfhole { right: 3px; }
 .dfport.out { flex-direction: row; }
 .dfport .dfdot { display: none; }
-/* a hole: dark, ringed in the data blue */
+/* a hole: a well ringed in the data blue */
 .dfhole { display: inline-flex; align-items: center; justify-content: center; flex: none;
   width: 11px; height: 11px; border-radius: 50%; background: var(--hole);
-  box-shadow: 0 0 0 1.5px var(--df), inset 0 1px 2px rgba(0, 0, 0, .55);
+  box-shadow: 0 0 0 1.5px var(--df), inset 0 1px 2px var(--hole-inset);
   font-size: 6.5px; line-height: 1; color: #fff; }
 /* fed from the mains: lit, with where the power comes from */
 .dfhole.mains.start { background: var(--df-start); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--df-start) 60%, #fff), 0 0 6px color-mix(in srgb, var(--df-start) 60%, transparent); }
@@ -3862,7 +3865,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   background: linear-gradient(180deg, color-mix(in srgb, var(--term) 14%, var(--df-panel)), var(--df-panel));
   border: 1px solid color-mix(in srgb, var(--term) 55%, var(--df-line)); }
 .dfterm.end .dftermrow { padding: 0 10px 0 4px; }
-.dfterm .dfhole { box-shadow: 0 0 0 1.5px var(--term), 0 0 7px color-mix(in srgb, var(--term) 70%, transparent), inset 0 1px 2px rgba(0,0,0,.6); }
+.dfterm .dfhole { box-shadow: 0 0 0 1.5px var(--term), 0 0 7px color-mix(in srgb, var(--term) 70%, transparent), inset 0 1px 2px var(--hole-inset); }
 .dfterm .dftermrow.hot, .dfterm .dftermrow.lit { border-color: var(--term); box-shadow: 0 0 10px color-mix(in srgb, var(--term) 45%, transparent); }
 /* SCRATCH: the run's side notes, a note sheet — a margin line, a folded corner */
 .dfterm.scratch { --term: var(--df-scratch); align-items: flex-end; padding-left: 22px; border-radius: 5px 16px 5px 5px;
