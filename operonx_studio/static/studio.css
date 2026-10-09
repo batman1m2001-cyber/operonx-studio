@@ -77,6 +77,14 @@
   --rt-ink: #243142; --rt-sub: #5b6878; --rt-bay: #f9fbfc; --rt-bay-edge: #c3ccd7;
   --rt-cond: #3a4a8c; --rt-led: #22a35a; --rt-led-off: #c9d1db; --rt-socket: #2b3442;
   --rt-wire: #4f5bd5; --rt-wire-else: #9aa4c4; --rt-zone-edge: #a9b5c3;
+  /* the agent: a hive cell — its steel edge (dark → light sheen), body,
+     glow, honeycomb, parts chips and accent */
+  --ag-e1: #c9dcf3; --ag-e2: #4a6fa5; --ag-e3: #9fc0ea; --ag-e4: #2f5182;
+  --ag-b1: #ffffff; --ag-b2: #edf2f9; --ag-ink: #1d2633; --ag-sub: #5b6878;
+  --ag-acc: #4a6fa5; --ag-acc-soft: #e6eef8; --ag-glow: rgba(74, 125, 200, .32);
+  --ag-shade: rgba(30, 50, 80, .14); --ag-comb: rgba(74, 111, 165, .10);
+  --ag-chip: #f3f6fa; --ag-chip-edge: #d6dfea; --ag-shine: rgba(255, 255, 255, .75);
+  --ag-frame: rgba(74, 111, 165, .05); --ag-bee-glow: rgba(255, 214, 102, .45);
   --k-io: #c8457f;
   --k-audio: #c8457f;
   --k-res: #0e8580;
@@ -4072,3 +4080,118 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .wires.dflinks path.dfconn { stroke-width: .5 !important; stroke: color-mix(in srgb, var(--df) 45%, transparent) !important; }
 .wires.dflinks path.dfconn.lit, .wires.dflinks path.dfconn.focus.lit { stroke-width: .7 !important; stroke: color-mix(in srgb, var(--df) 65%, transparent) !important; }
 .wires.dflinks path.dfconn.hot { stroke-width: 1.4 !important; stroke: var(--df) !important; opacity: 1 !important; }
+
+
+/* ── the agent op: a hive cell (studio.js agentCard) ─────────────────
+   Two layers under the content, both cut to the same octagon: the hull
+   (the steel edge, a gradient with a sheen a live run sweeps) and the
+   body inset 2.5px (glass light, honeycomb, the body gradient). The card
+   itself stays uncut so its drop-shadow glow is not clipped. */
+.node.agentcell {
+  --cut: 13px; width: max-content; min-width: 248px; max-width: 340px;
+  background: transparent; border: none; border-radius: 0; box-shadow: none;
+  padding: 10px 18px 10px;
+  filter: drop-shadow(0 0 8px var(--ag-glow)) drop-shadow(0 6px 10px var(--ag-shade));
+}
+.node.agentcell::before { display: none; }
+.node.agentcell:hover { transform: translateY(-2px); box-shadow: none;
+  filter: drop-shadow(0 0 13px var(--ag-glow)) drop-shadow(0 8px 12px var(--ag-shade)); }
+.node.agentcell .ahull, .node.agentcell .abody,
+.node.agentframe .ahull, .node.agentframe .abody {
+  position: absolute; pointer-events: none;
+  clip-path: polygon(var(--cut) 0, calc(100% - var(--cut)) 0, 100% var(--cut),
+    100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, var(--cut) 100%,
+    0 calc(100% - var(--cut)), 0 var(--cut));
+}
+.node.agentcell .ahull, .node.agentframe .ahull { inset: 0;
+  background: linear-gradient(115deg, var(--ag-e4) 0%, var(--ag-e2) 22%, var(--ag-e3) 38%,
+    var(--ag-e1) 46%, var(--ag-e2) 62%, var(--ag-e4) 100%);
+  background-size: 260% 100%; background-position: 0 0; }
+.node.agentcell .abody, .node.agentframe .abody { inset: 2.5px;
+  background:
+    radial-gradient(120% 60% at 30% 0%, var(--ag-shine), transparent 55%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='48.5' viewBox='0 0 28 48.5'%3E%3Cpath d='M14 0l14 8.08v16.17L14 32.33 0 24.25V8.08z M14 32.33v16.17' fill='none' stroke='%237a96bd' stroke-opacity='.22' stroke-width='1'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, var(--ag-b1), var(--ag-b2)); }
+.node.agentcell .aparts { flex-wrap: nowrap; }
+.node.agentcell > .ahead, .node.agentcell > .aparts,
+.node.agentcell > .badges, .node.agentcell > .detail { position: relative; z-index: 1; }
+.node.agentcell .port { z-index: 2; }
+.node.agentcell .ahead { display: flex; align-items: center; gap: 9px; }
+.node .abee { flex: none; width: 38px; height: 38px; position: relative;
+  background: url("/static/agent-bee.png") center / 34px 34px no-repeat; }
+.node .abee::before { content: ""; position: absolute; inset: 0; z-index: -1;
+  background: radial-gradient(circle at 50% 42%, var(--ag-bee-glow), transparent 68%); }
+:root[data-theme="dark"] .node .abee { background-image: url("/static/agent-bee-dark.png"); }
+.node.agentcell .awho { min-width: 0; flex: 1; }
+.node.agentcell .awho .nname { margin: 0; color: var(--ag-ink); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.node.agentcell .asub { display: flex; gap: 6px; margin-top: 2px; }
+.node.agentcell .amodel, .node.agentframe .amodel { font-size: 11px; font-weight: 600;
+  color: var(--ag-acc); background: var(--ag-acc-soft); border-radius: 5px; padding: 1px 6px; }
+.node .apips { display: flex; gap: 3px; align-self: flex-start; padding-top: 4px; flex: none; }
+.node .apip { width: 8px; height: 9px; background: color-mix(in srgb, var(--ag-acc) 28%, transparent);
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+.node .apip.done { background: var(--ag-acc); }
+.node .apipmore { font-size: 10px; color: var(--ag-sub); margin-left: 2px; }
+.node .aparts, .node .asetup { display: flex; gap: 5px; margin-top: 9px; justify-content: center;
+  flex-wrap: wrap; }
+.node .ahex { position: relative; display: inline-flex; align-items: center; gap: 4px; height: 22px;
+  padding: 0 11px; font: 600 11px var(--mono, ui-monospace, monospace); color: var(--ag-sub);
+  background: var(--ag-chip-edge); border: none; box-shadow: none; cursor: help;
+  clip-path: polygon(7px 0, calc(100% - 7px) 0, 100% 50%, calc(100% - 7px) 100%, 7px 100%, 0 50%); }
+.node .ahex::before { content: ""; position: absolute; inset: 1px; background: var(--ag-chip);
+  clip-path: inherit; }
+.node .ahex > * { position: relative; }
+.node .ahex b { color: var(--ag-acc); font-weight: 400; }
+.node .ahex.hot { background: var(--k-res); }
+.node .ahex.hot b { color: var(--k-res); }
+.node .ahex.aopen { cursor: pointer; color: var(--ag-acc); padding: 0 10px; }
+.node .ahex.aopen:hover { background: var(--ag-acc); }
+/* selected: the cell glows cyan, its shape kept */
+.node.agentcell.selected { background: transparent; border: none; box-shadow: none;
+  filter: drop-shadow(0 0 2px #38c4ea) drop-shadow(0 0 16px rgba(0, 208, 255, .6)); }
+/* a live run: a light sweeps the edge and the glow breathes */
+.node.agentcell.live-active { box-shadow: none; animation: agBreathe 2.2s ease-in-out infinite; }
+.node.agentcell.live-active::after { display: none; }
+.node.agentcell.live-active .ahull, .node.agentframe.live-active .ahull {
+  animation: agSweep 2.4s linear infinite; }
+@keyframes agSweep { from { background-position: 100% 0; } to { background-position: -160% 0; } }
+@keyframes agBreathe { 50% { filter: drop-shadow(0 0 16px var(--ag-glow))
+  drop-shadow(0 0 4px var(--ag-glow)) drop-shadow(0 6px 10px var(--ag-shade)); } }
+@media (prefers-reduced-motion: reduce) {
+  .node.agentcell.live-active, .node.agentcell.live-active .ahull,
+  .node.agentframe.live-active .ahull { animation: none; } }
+
+/* opened: the frame keeps the cell — a bigger cut, the bee in its title,
+   the agent's setup chips under it */
+.node.container.agentframe { --cut: 22px; background: transparent; border: none;
+  filter: drop-shadow(0 0 10px var(--ag-glow)); }
+.node.container.agentframe::before { display: none; }
+.node.agentframe .aframe { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.node.agentframe.live-active .aedge { stroke-dasharray: 60 18; animation: agMarch 1.6s linear infinite; }
+@keyframes agMarch { to { stroke-dashoffset: -78; } }
+.node.agentframe .abody { background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='48.5' viewBox='0 0 28 48.5'%3E%3Cpath d='M14 0l14 8.08v16.17L14 32.33 0 24.25V8.08z M14 32.33v16.17' fill='none' stroke='%237a96bd' stroke-opacity='.16' stroke-width='1'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, color-mix(in srgb, var(--ag-b1) 62%, transparent),
+      color-mix(in srgb, var(--ag-b2) 50%, transparent)); }
+.node.container.agentframe .chead { position: relative; z-index: 1; height: 44px;
+  align-items: center; padding: 4px 18px 0 24px; border-bottom: none; background: transparent; }
+.node.container.agentframe .chead .nname { color: var(--ag-ink); }
+.node.container.agentframe .chead .nkind { color: var(--ag-sub); }
+.node.container.agentframe .asetup { position: relative; z-index: 1; margin-top: 0;
+  justify-content: flex-start; padding: 0 24px; flex-wrap: nowrap; overflow: hidden;
+  max-width: calc(50% - 40px); }
+.node.container.agentframe .asetup .ahex { flex: 0 1 auto; min-width: 0; }
+.node.container.agentframe .asetup .ahex span { max-width: 190px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+
+/* a tool inside an opened agent: what it is, what the policy lets it do */
+.node .atool { display: flex; gap: 6px; align-items: center; margin-top: 3px;
+  font-size: 10.5px; color: var(--muted); }
+.node .atkind { font-family: var(--mono, ui-monospace, monospace); }
+.node .atpolicy { font-weight: 700; font-size: 9px; letter-spacing: .05em; padding: 1px 5px;
+  border-radius: 4px; }
+.node .atpolicy.p-allow { color: var(--ok, #1d8a4e); background: color-mix(in srgb, var(--ok, #1d8a4e) 12%, transparent); }
+.node .atpolicy.p-ask { color: var(--warn, #b7791f); background: color-mix(in srgb, var(--warn, #b7791f) 14%, transparent); }
+.node .atpolicy.p-deny { color: var(--err, #c53030); background: color-mix(in srgb, var(--err, #c53030) 12%, transparent); }
+.node .atcount { font-weight: 700; color: var(--k-res); }

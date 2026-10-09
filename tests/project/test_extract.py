@@ -496,6 +496,52 @@ def flow(question):
 """
 
 
+AGENT_TOOLS = """
+from operonx import END, START, graph, op
+from operonx.agents import Agent, AgentOp, Model, UsageLimits, tool
+
+@tool(readonly=True)
+def order_status(order_id: str) -> str:
+    \"\"\"The shipping status of an order.\"\"\"
+    return "shipped"
+
+@op
+def lookup(order_id: str) -> dict:
+    \"\"\"Look an order up.\"\"\"
+    return {"row": order_id}
+
+@op
+def fetch(url: str) -> dict:
+    return {"html": url}
+
+@op
+def visible(html: str) -> dict:
+    return {"text": html}
+
+@graph
+def read_page(url: str):
+    \"\"\"Read a page.\"\"\"
+    f = fetch(url=url)
+    v = visible(html=f["html"])
+    START >> f >> v >> END
+
+@op
+def refund_op(order_id: str) -> dict:
+    \"\"\"Refund an order.\"\"\"
+    return {"done": True}
+
+SUPPORT = Agent(name="support", model=Model("assistant"), instructions="Help.",
+                tools=[order_status, lookup, tool(read_page, readonly=True),
+                       tool(refund_op, destructive=True)],
+                limits=UsageLimits(turns=4))
+
+@graph
+def flow(question):
+    a = AgentOp.of(agent=SUPPORT, input=question)
+    START >> a >> END
+"""
+
+
 class TestAgentOp:
     """An agent op's node says which agent it runs, on which models, with which tools."""
 
@@ -506,12 +552,39 @@ class TestAgentOp:
         assert node["agent"]["name"] == "support"
         assert node["agent"]["model"] == ["assistant", "backup"]
         assert node["resource"] == ["assistant", "backup"]
-        assert node["agent"]["tools"] == [
+        keys = ("name", "description", "readonly", "destructive", "approval")
+        assert [{k: t[k] for k in keys} for t in node["agent"]["tools"]] == [
             {"name": "order_status", "description": "The shipping status of an order.",
              "readonly": True, "destructive": False, "approval": "never"},
             {"name": "refund", "description": "Refund an order.",
              "readonly": False, "destructive": True, "approval": "always"},
         ]  # fmt: skip
+        json.dumps(ir)
+
+    def test_the_agent_opens_onto_its_loop_and_a_graph_tool_onto_its_graph(self, tmp_path):
+        agents = pytest.importorskip("operonx_agents")
+        if not hasattr(agents.Agent, "describe"):
+            pytest.skip("operonx-agents < 0.2: no op or graph tools")
+        ir = extract_project(project(tmp_path, AGENT_TOOLS, LINEAR_MANIFEST))
+        (node,) = [n for n in ir["graphs"][0]["nodes"] if n.get("op_type") == "agent"]
+        a = node["agent"]
+        assert a["instructions"] == {"text": "Help.", "dynamic": False, "from": None}
+        assert a["limits"] == {"turns": 4} and a["session"] is False
+        by = {t["name"]: t for t in a["tools"]}
+        assert [by[n]["kind"] for n in ("order_status", "lookup", "read_page")] == [
+            "function", "op", "graph"]
+        assert by["refund_op"]["policy"] == "ask", "destructive asks by default"
+        loop = node["graph"]
+        names = [n["name"] for n in loop["nodes"]]
+        assert names == ["model", "order_status", "lookup", "read_page", "refund_op", "answer"]
+        assert (loop["entries"], loop["exits"]) == (["model"], ["answer"])
+        pairs = {(e["from"], e["to"]) for e in loop["edges"]}
+        assert {("model", "lookup"), ("lookup", "model"), ("model", "answer")} <= pairs
+        tools = {n["name"]: n for n in loop["nodes"]}
+        assert tools["read_page"]["tool"]["kind"] == "graph"
+        assert [m["name"] for m in tools["read_page"]["graph"]["nodes"]] == ["f", "v"]
+        assert "def lookup" in tools["lookup"]["code"]
+        assert "graph" not in tools["lookup"] and "graph" not in tools["order_status"]
         json.dumps(ir)
 
     def test_an_op_without_an_agent_has_no_agent_entry(self, tmp_path):

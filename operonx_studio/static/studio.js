@@ -161,6 +161,10 @@ const OP_VISUALS = {
   "STTOp":             {icon: "◉", color: "var(--k-audio)"},
   "TTSOp":             {icon: "♪", color: "var(--k-audio)"},
   "DenoiseClassifier": {icon: "≈", color: "var(--k-audio)"},
+  // an agent op's inside (extract.py `_agent_loop`): its model, its tools, its answer
+  "AgentModel":        {icon: "✧", color: "var(--k-llm)"},
+  "AgentTool":         {icon: "⚒", color: "var(--k-res)"},
+  "AgentAnswer":       {icon: "↵", color: "var(--k-default)"},
 };
 const OP_FAMILIES = [
   [/LLM|Chat|Completion/,                    {icon: "✧", color: "var(--k-llm)"}],
@@ -1860,6 +1864,8 @@ function render() {
     const card = cardOf.get(it.key);
     // the card's real height: the layout's 64 px is only a guess
     if (card.offsetHeight) it.h = card.offsetHeight;
+    // an agent's cell keeps its parts on one row: it is as wide as they are
+    if (card.classList.contains("agentcell") && card.offsetWidth) it.w = card.offsetWidth;
     if (it.node.routes && it.node.routes.length) {
       const down = card.classList.contains("cols");
       if (down) drawCondTrees(card);
@@ -2521,6 +2527,7 @@ function containerKind(n) {
   const k = n.subgraph_ops;
   if (n.agentSteps) return `agent · ${k} turn${k === 1 ? "" : "s"}`;
   if (n.step) return `${n.kind} · ${k} step${k === 1 ? "" : "s"}`;
+  if (n.agent_part === "tool") return `tool · ${TOOL_KIND_WORDS[(n.tool || {}).kind] || "@graph"} · ${k} ops`;
   return `${n.kind} · ${k} ops`;
 }
 
@@ -2538,11 +2545,22 @@ function containerCard(it) {
   if (state.run && !ranInRun(n)) card.classList.add("dormant");
 
   const head = el("div", "chead");
-  const promoter = el("span", "promoter", "↱");
-  promoter.title = "An operon: one promoter, the genes inside transcribed together.";
-  head.append(promoter);
-  head.append(el("span", "nname", n.name));
-  head.append(el("span", "nkind", containerKind(n)));
+  // an opened agent — its loop, or (a painted run) the turns it took
+  const agent = n.op_type === "agent" && (n.agent || n.agentSteps);
+  if (agent) {
+    // an opened agent keeps its hive cell: the same edge, the bee, its setup
+    card.classList.add("agentframe");
+    card.append(agentFrameEdge(it.w, it.h));
+    head.append(beeMark());
+    head.append(el("span", "nname", n.name));
+    head.append(el("span", "nkind", n.agentSteps ? containerKind(n) : agentSub(n)));
+  } else {
+    const promoter = el("span", "promoter", "↱");
+    promoter.title = "An operon: one promoter, the genes inside transcribed together.";
+    head.append(promoter);
+    head.append(el("span", "nname", n.name));
+    head.append(el("span", "nkind", containerKind(n)));
+  }
   // an AUTHORED loop (classic / until — not the compiler's rewrite of a
   // cycle, which is drawn as a zone) is this container: say it repeats
   const lp = authoredLoop(it);
@@ -2559,9 +2577,174 @@ function containerCard(it) {
   head.append(close);
   head.onclick = (ev) => { ev.stopPropagation(); select(it.key); };
   card.append(head);
+  // the setup on the loop; a painted run's turns fill the frame instead
+  if (agent && n.agent && !n.agentSteps) card.append(agentSetup(n));
 
   // no rim ports: the START/END pills inside are the container's ports now
   return card;
+}
+
+/* ── the agent op: a hive cell ──────────────────────────────────────
+ * An agent is the op that decides for itself, so it does not look like
+ * the others: an octagon cell with a glossy steel edge and a soft glow,
+ * a faint honeycomb inside, and the bee. Folded it is one card — the
+ * agent's name, its model, its turn budget as pips, and its parts on one
+ * row (instructions, memory, context, tools); opened it is a frame round
+ * its loop (extract.py `_agent_loop`): model → each tool → back to the
+ * model, and the answer. A tool that is a graph opens in place there.
+ * With a run painted the pips fill with the turns it took, and a live run
+ * sweeps a light along the edge. */
+const TOOL_ICONS = {function: "ƒ", op: "◈", graph: "▣", agent: "✺", mcp: "⇄"};
+const TOOL_KIND_WORDS = {function: "function", op: "@op", graph: "@graph", agent: "agent",
+                         mcp: "MCP tool"};
+
+/* An opened agent's edge: an octagon outline the size of the frame, so
+ * the wires inside stay visible (a filled layer would cover them). */
+let agentFrameSeq = 0;
+function agentFrameEdge(w, h) {
+  const NS = "http://www.w3.org/2000/svg";
+  const cut = 22, id = `agfr${++agentFrameSeq}`;
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("class", "aframe");
+  svg.setAttribute("width", w); svg.setAttribute("height", h);
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  const pts = [[cut, 1], [w - cut, 1], [w - 1, cut], [w - 1, h - cut], [w - cut, h - 1],
+               [cut, h - 1], [1, h - cut], [1, cut]].map(p => p.join(",")).join(" ");
+  svg.innerHTML = `<defs>
+      <linearGradient id="${id}e" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="var(--ag-e4)"/><stop offset=".3" stop-color="var(--ag-e2)"/>
+        <stop offset=".45" stop-color="var(--ag-e1)"/><stop offset=".6" stop-color="var(--ag-e2)"/>
+        <stop offset="1" stop-color="var(--ag-e4)"/></linearGradient>
+      <pattern id="${id}c" width="28" height="48.5" patternUnits="userSpaceOnUse">
+        <path d="M14 0l14 8.08v16.17L14 32.33 0 24.25V8.08z M14 32.33v16.17" fill="none"
+          stroke="var(--ag-e2)" stroke-opacity=".14" stroke-width="1"/></pattern></defs>
+    <polygon points="${pts}" fill="var(--ag-frame)"/>
+    <polygon points="${pts}" fill="url(#${id}c)"/>
+    <polygon class="aedge" points="${pts}" fill="none" stroke="url(#${id}e)" stroke-width="2.5"/>`;
+  return svg;
+}
+
+function beeMark() {
+  const b = el("span", "abee");
+  b.setAttribute("aria-hidden", "true");
+  return b;
+}
+
+function agentSub(n) {
+  const a = n.agent || {};
+  const model = (a.model || [])[0];
+  const tools = (a.tools || []).length;
+  return `agent${model ? " · " + model : ""} · ${tools} tool${tools === 1 ? "" : "s"}`;
+}
+
+/* How many turns this agent took in the painted run: its `turn` steps. */
+function agentTurns(n) {
+  if (!state.run) return 0;
+  const rows = state.runRows || [];
+  const mine = rows.filter(r => r.kind === "record" && r.op === "turn"
+    && typeof r.id === "string" && r.id.startsWith(n.id + ".turn#"));
+  if (mine.length) return mine.length;
+  const t = state.run.ops && state.run.ops.turn;
+  return t ? t.runs : 0;
+}
+
+function agentPips(n) {
+  const cap = ((n.agent || {}).limits || {}).turns;
+  const took = agentTurns(n);
+  const row = el("span", "apips");
+  if (!cap && !took) return row;
+  const shown = Math.min(cap || took, 8);
+  for (let i = 0; i < shown; i++) {
+    row.append(el("span", "apip" + (i < took ? " done" : "")));
+  }
+  if (cap > 8) row.append(el("span", "apipmore", `≤${cap}`));
+  row.title = cap ? `${took ? took + " of " : "at most "}${cap} turns` : `${took} turns`;
+  return row;
+}
+
+/* The agent's parts, one hex chip each: what it is told, what it starts
+ * from, how much it holds, what it can do. */
+function agentParts(n) {
+  const a = n.agent || {};
+  const ins = a.instructions || {};
+  const ctx = a.context;
+  const used = state.run && state.run.ops && state.run.ops.model;
+  return [
+    {icon: "✎", text: ins.dynamic ? "fn" : "sys", part: "instructions",
+     tip: ins.dynamic ? `instructions: built per run by ${ins.from || "a function"}`
+       : `instructions: ${(ins.text || "").slice(0, 160) || "none"}`},
+    {icon: "◈", text: a.session ? "session" : "deps", part: "memory",
+     tip: a.session ? "memory: a conversation per session_id, and the deps it is given"
+       : "memory: the deps it is given each run; no conversation is kept"},
+    {icon: "▤", text: ctx ? `${Math.round((ctx.window || 0) / 1000)}k` : "–", part: "context",
+     tip: ctx ? `context: ${ctx.window} tokens, compacted at ${Math.round(ctx.compact_at * 100)}%`
+       : "context: the whole conversation, never compacted"},
+    {icon: "⚒", text: String((a.tools || []).length), part: "tools", hot: !!used,
+     tip: "tools: " + ((a.tools || []).map(t => `${t.name} (${TOOL_KIND_WORDS[t.kind] || t.kind || "function"}, ${t.policy || "allow"})`).join(", ") || "none")},
+  ];
+}
+
+function agentCard(card, it) {
+  const n = it.node;
+  card.classList.add("agentcell");
+  card.append(el("span", "ahull"), el("span", "abody"));
+  const head = el("div", "ahead");
+  head.append(beeMark());
+  const who = el("div", "awho");
+  const name = el("div", "nname ntext", n.name);
+  who.append(name);
+  const sub = el("div", "asub");
+  const model = ((n.agent || {}).model || [])[0];
+  sub.append(el("span", "amodel mono", model || "model"));
+  who.append(sub);
+  head.append(who);
+  head.append(agentPips(n));
+  card.append(head);
+  const row = el("div", "aparts");
+  for (const p of agentParts(n)) {
+    const chip = el("span", "ahex" + (p.hot ? " hot" : ""));
+    chip.append(el("b", null, p.icon), el("span", null, p.text));
+    chip.title = p.tip;
+    row.append(chip);
+  }
+  if (n.graph) {
+    const open = el("button", "ahex aopen");
+    open.append(el("span", null, "▸"));
+    open.title = "Open the agent: its model, each tool and the answer, in place.";
+    open.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
+    row.append(open);
+  }
+  card.append(row);
+  card.title = `${n.name} — ${agentSub(n)}. Double-click to open it.`;
+}
+
+/* An opened agent's setup, across the top of its frame. */
+function agentSetup(n) {
+  const row = el("div", "asetup");
+  for (const p of agentParts(n)) {
+    if (p.part === "tools") continue;  // the tools are the nodes inside
+    const chip = el("span", "ahex");
+    chip.append(el("b", null, p.icon), el("span", null, p.tip.split(": ").slice(1).join(": ").slice(0, 70)));
+    chip.title = p.tip;
+    row.append(chip);
+  }
+  return row;
+}
+
+/* A tool inside an opened agent: what it is, and what the policy decides. */
+function toolLine(n) {
+  const t = n.tool || {};
+  const line = el("div", "atool");
+  line.append(el("span", "atkind", TOOL_KIND_WORDS[t.kind] || "function"));
+  const policy = t.policy || "allow";
+  const chip = el("span", "atpolicy p-" + policy, policy.toUpperCase());
+  chip.title = policy === "allow" ? "Runs when the model calls it."
+    : policy === "ask" ? "Waits for a human's approval before it runs."
+    : "Refused: the model is told it may not call it.";
+  line.append(chip);
+  const runs = state.run && state.run.ops && state.run.ops[n.name];
+  if (runs) line.append(el("span", "atcount", `×${runs.runs}`));
+  return line;
 }
 
 /* The pills that ARE an opened GraphOp's boundary. Clicking one selects
@@ -2911,6 +3094,8 @@ function opCard(it) {
     if (t) card.append(el("div", "nkind mono",
       t.kind + (t.path ? ` · ${t.path}` : "")));
     if (t && t.description) card.title = t.description;
+  } else if (n.op_type === "agent" && n.agent) {
+    agentCard(card, it);
   } else if (n.routes && n.routes.length) {
     // a router is a DECISION CARD: one zone per route, side by side in
     // route order, each with its own exit on the card's bottom edge — the
@@ -2977,6 +3162,12 @@ function opCard(it) {
     // an agent's tools are what it can DO: one line under its name
     const tools = agentToolsLine(n);
     if (tools) card.append(tools);
+    // a tool inside an opened agent says what it is and what the policy lets it do
+    if (n.agent_part === "tool") {
+      card.classList.add("agenttool");
+      card.querySelector(".iconband").textContent = TOOL_ICONS[(n.tool || {}).kind] || "⚒";
+      card.append(toolLine(n));
+    }
     // the kind line was card noise at fit-zoom; it lives in the
     // tooltip and the inspector — and on the card once it is clicked
     // (the .detail block shows on the selected card only)
@@ -3023,7 +3214,8 @@ function opCard(it) {
   // At most TWO badges: one semantic marker, plus the run chip. Density
   // is respect — everything else is one click away in the inspector.
   const badges = el("div", "badges");
-  if (n.graph) {
+  // an agent card opens from its own row (agentCard): no generic badge
+  if (n.graph && !card.classList.contains("agentcell")) {
     const b = el("button", "badge sub expand", `▣ ${n.subgraph_ops} ▸`);
     b.title = n.agentSteps ? "This run's turns — click to open them in place."
       : n.step ? "The steps under it — click to open them in place."
