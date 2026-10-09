@@ -153,6 +153,23 @@ def _inline_synthetic_loops(graph: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _placed_parts(parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """An agent's parts (extract.py ``_agent_parts``) as the canvas draws
+    them: a graph tool's graph laid out like any GraphOp's, an agent
+    tool's own parts in turn."""
+    out = []
+    for p in parts:
+        sub = _placed(p["graph"]) if (p.get("graph") or {}).get("nodes") else None
+        q = {k: v for k, v in p.items() if k not in ("graph", "parts")}
+        if sub is not None:
+            q["graph"] = sub
+            q["subgraph_ops"] = len(sub.get("nodes") or [])
+        if p.get("parts"):
+            q["parts"] = _placed_parts(p["parts"])
+        out.append(q)
+    return out
+
+
 def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
     """One IR graph plus its layout, as the canvas consumes it.
 
@@ -190,16 +207,17 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                 **{k: nodes_by_id.get(n.id, {}).get(k) for k in
                    ("bound", "start", "end", "outputs", "inputs", "source",
                     "loop", "is_gen", "transient", "serve_role", "code",
-                    "resource", "routes", "description", "show_keys", "op_type", "agent",
-                    "agent_part", "tool")},
+                    "resource", "routes", "description", "show_keys", "op_type", "agent")},
                 # what the card says it holds is what opening it shows: a loop's
                 # members are laid out in the container, so they are counted, not
                 # the one hidden loop graph that holds them
                 "subgraph_ops": len((sub or {}).get("nodes") or []) or None,
                 "graph": sub,
+                **({"parts": _placed_parts(parts)} if parts else {}),
             }
             for n in layout.nodes
             for sub in [_subgraph(n.id)]
+            for parts in [nodes_by_id.get(n.id, {}).get("parts")]
         ],
         "edges": [
             {"id": e.id, "src": e.src, "dst": e.dst, "type": e.type, "soft": e.soft,

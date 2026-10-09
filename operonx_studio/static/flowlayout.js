@@ -52,6 +52,8 @@
     ZHY: 8,             // … its top/bottom inset in the header band
     ZLH: 15,            // … one header line
     ZWRAP: 380,         // a header line wraps past this
+    PART_X: 112,        // an opened agent: its card's right edge to its parts column
+    PART_GAP: 18,       // … between two parts
   };
 
   // ── loops: what repeats, and where it stops ──────────────────────
@@ -158,26 +160,57 @@
     turnOut(px, py) { this.c(this.x, py, this.x, py, px, py); }
   }
 
+  // ── one node: a card, an opened container, an opened agent ─────────
+  function itemOf(n, key, depth, opts) {
+    if (n.graph && opts.expanded.has(key)) {
+      const sub = buildLevel(n.graph, key + "/", depth + 1, opts, true);
+      // opts.padOf: extra side room a container needs (the data views'
+      // plates sit there, clear of its inner cards)
+      const extra = (opts.padOf && opts.padOf(key)) || 0;
+      return {id: n.id, key, node: n, kind: "container", sub,
+              w: Math.max(C.CMIN_W, sub.w + 2 * (C.CPAD + extra)), h: sub.h};
+    }
+    if (n.parts && n.parts.length && opts.expanded.has(key)) return agentBlock(n, key, depth, opts);
+    const s = opts.sizeOf(key, n) || {};
+    return {id: n.id, key, node: n, kind: "card",
+            w: s.w || C.NODE_W, h: s.h || C.NODE_H,
+            rows: (s.rows || []).filter(r => r && r.w > 0)};
+  }
+
+  /* An opened agent: its card, and its parts (the model, its memory, each
+   * tool — extract.py `_agent_parts`) in one column to the card's right,
+   * each part the op it is (a card, an opened graph, an opened agent).
+   * The block is ONE node of its level whose axis is the CARD's centre,
+   * so the flow runs straight down through the card and the parts hang
+   * beside it. The card sits level with the middle of the column the
+   * parts make folded: opening a part grows the column down and never
+   * moves the card. */
+  function agentBlock(n, key, depth, opts) {
+    const s = opts.sizeOf(key, n) || {};
+    const card = {w: s.w || C.NODE_W, h: s.h || C.NODE_H};
+    const parts = n.parts.map((p) => {
+      const P = itemOf(p, key + "/" + p.id, depth + 1, opts);
+      P.part = p.part || "tool";
+      P.depth = depth + 1;
+      P.folded = (opts.sizeOf(P.key, p) || {}).h || C.NODE_H;
+      return P;
+    });
+    let y = 0, folded = 0;
+    for (const P of parts) { P.py = y; y += P.h + C.PART_GAP; folded += P.folded + C.PART_GAP; }
+    const colH = y - C.PART_GAP;
+    const cardY = Math.max(0, (folded - C.PART_GAP - card.h) / 2);
+    const colX = card.w + C.PART_X;
+    const colW = Math.max(0, ...parts.map(P => P.w));
+    return {id: n.id, key, node: n, kind: "agent", card, parts, cardY, colX,
+            w: colX + colW, h: Math.max(colH, cardY + card.h), axis: card.w / 2};
+  }
+
   // ── one level ──────────────────────────────────────────────────────
   function buildLevel(g, prefix, depth, opts, inner) {
     const N = [];
     const byId = new Map();
     (g.nodes || []).forEach((n, i) => {
-      const key = prefix + n.id;
-      let L;
-      if (n.graph && opts.expanded.has(key)) {
-        const sub = buildLevel(n.graph, key + "/", depth + 1, opts, true);
-        // opts.padOf: extra side room a container needs (the data views'
-        // plates sit there, clear of its inner cards)
-        const extra = (opts.padOf && opts.padOf(key)) || 0;
-        L = {id: n.id, key, node: n, kind: "container", sub,
-             w: Math.max(C.CMIN_W, sub.w + 2 * (C.CPAD + extra)), h: sub.h};
-      } else {
-        const s = opts.sizeOf(key, n) || {};
-        L = {id: n.id, key, node: n, kind: "card",
-             w: s.w || C.NODE_W, h: s.h || C.NODE_H,
-             rows: (s.rows || []).filter(r => r && r.w > 0)};
-      }
+      const L = itemOf(n, prefix + n.id, depth, opts);
       L.hint = typeof n.x === "number" ? n.x : i * 300;
       L.idx = i;
       L.depth = depth;
@@ -466,7 +499,9 @@
     for (const L of all) {
       const u = used.has(L) ? used.get(L).size : 0;
       L.margin = u ? C.ROW_OUT + C.ROW_STEP * (u - 1) + 10 : 0;
-      L.wl = L.w / 2 + L.margin; L.wr = L.w / 2 + L.margin;
+      // an opened agent's axis is its card's centre: its parts are all right of it
+      const ax = L.axis != null ? L.axis : L.w / 2;
+      L.wl = ax + L.margin; L.wr = L.w - ax + L.margin;
     }
     const gap = (a, b) => (a.dummy && b.dummy ? C.GAP_DD : a.dummy || b.dummy ? C.GAP_DC : C.H_GAP);
     const sep = (a, b) => a.wr + gap(a, b) + b.wl;
@@ -613,9 +648,23 @@
   function emit(lv, ox, oy, out) {
     const item = new Map();
     const place = (L) => {
-      const x = ox + L.cx - L.w / 2, y = oy + L.y;
+      put(L, ox + L.cx - (L.axis != null ? L.axis : L.w / 2), oy + L.y);
+    };
+    const put = (L, x, y) => {
       let it;
-      if (L.kind === "container") {
+      if (L.kind === "agent") {
+        // the card is the node the flow's wires meet; each part is placed
+        // as what it is, and remembered with the socket it hangs from
+        it = {key: L.key, node: L.node, depth: L.depth, kind: "card", inner: null,
+              x, y: y + L.cardY, w: L.card.w, h: L.card.h,
+              block: {x, y, w: L.w, h: L.h}, parts: []};
+        out.items.push(it);
+        for (const P of L.parts) {
+          const pi = put(P, x + L.colX, y + P.py);
+          it.parts.push(pi);
+          out.parts.push({agent: it, item: pi, part: P.part});
+        }
+      } else if (L.kind === "container") {
         it = {key: L.key, node: L.node, depth: L.depth, kind: "container", inner: true,
               x, y: y + C.KB / 2, w: L.w, h: L.h - C.KB, box: {x, y, w: L.w, h: L.h}};
         out.items.push(it);
@@ -626,6 +675,7 @@
         if (L.kind === "pill") out.pills.push(it); else out.items.push(it);
       }
       item.set(L, it);
+      return it;
     };
     if (lv.S) place(lv.S);
     for (const L of lv.N) place(L);
@@ -719,44 +769,80 @@
         }
         p.v(B(la));
         for (const D of w.lanes) { down(p, X(D), D.layer, T(D.layer)); p.v(B(D.layer)); }
-        down(p, Bt.x + Bt.w / 2, lb, Bt.y);
+        // an opened agent's card may sit below its row's top: the turn is
+        // made in the channel, then the wire drops straight onto the card
+        if (Bt.y > T(lb) + 0.5) { down(p, Bt.x + Bt.w / 2, lb, T(lb)); p.v(Bt.y); }
+        else down(p, Bt.x + Bt.w / 2, lb, Bt.y);
       } else {
         const la = w.a.layer, lb = w.b.layer;
         const x1 = dot ? dot.x : A.x + A.w, y1 = dot ? dot.y : A.y + A.h / 2;
         const x2 = Bt.x + Bt.w, y2 = Bt.y + Bt.h / 2;
-        p = new Path(x1, y1);
+        // an opened agent's right side is its parts column: a return leaves
+        // its card by the bottom and comes into one over the top, turning in
+        // the channel next to the row
+        const fromAg = !dot && !!A.block, toAg = !!Bt.block;
+        const ax = A.x + A.w / 2, bx = Bt.x + Bt.w / 2;
+        const hop = (r) => Math.min(lv.G[r] || C.V_GAP, C.V_GAP) * 0.6;
+        const lanes = w.lanes;
+        if (fromAg) {
+          p = new Path(ax, A.y + A.h);
+          p.v(B(la));
+        } else p = new Path(x1, y1);
         // out of a bottom exit: drop clear of the card before turning
         if (dot && w.row.down) p.v(y1 + 10);
-        const lanes = w.lanes;
+        // from the agent's foot, round under it into the lane, heading up
+        const underInto = (lx) => {
+          const h = hop(la);
+          p.c(ax, B(la) + h, lx, B(la) + h, lx, B(la));
+        };
+        // from the lane at the top of row r, round over into the agent's top
+        const overInto = (r) => {
+          const h = Math.min(lv.G[r - 1] || C.V_GAP, C.V_GAP) * 0.6;
+          p.c(p.x, T(r) - h, bx, T(r) - h, bx, T(r));
+          p.v(Bt.y);
+        };
         if (la === lb) {
           const [ds, dd] = lanes;
-          const q1 = Math.max(1, Math.min(12, y1 - T(la)));
-          p.turnInto(X(ds), -1, q1);
+          if (fromAg) underInto(X(ds));
+          else p.turnInto(X(ds), -1, Math.max(1, Math.min(12, y1 - T(la))));
           p.v(T(la));
-          const hop = Math.min(lv.G[la - 1] || C.V_GAP, C.V_GAP) * 0.6;
-          p.c(X(ds), T(la) - hop, X(dd), T(la) - hop, X(dd), T(la));
-          p.v(y2 - Math.max(1, Math.min(12, y2 - T(la))));
-          p.turnOut(x2, y2);
+          if (toAg) overInto(la);
+          else {
+            const h = Math.min(lv.G[la - 1] || C.V_GAP, C.V_GAP) * 0.6;
+            p.c(X(ds), T(la) - h, X(dd), T(la) - h, X(dd), T(la));
+            p.v(y2 - Math.max(1, Math.min(12, y2 - T(la))));
+            p.turnOut(x2, y2);
+          }
         } else if (la > lb) {
-          p.turnInto(X(lanes[0]), -1, Math.max(1, Math.min(12, y1 - T(la))));
+          if (fromAg) underInto(X(lanes[0]));
+          else p.turnInto(X(lanes[0]), -1, Math.max(1, Math.min(12, y1 - T(la))));
           p.v(T(la));
           for (let i = 1; i < lanes.length; i++) {
             const D = lanes[i];
             p.to(X(D), B(D.layer));
             if (i < lanes.length - 1) p.v(T(D.layer));
           }
-          p.v(y2 + Math.max(1, Math.min(12, B(lb) - y2)));
-          p.turnOut(x2, y2);
+          if (toAg) { p.v(T(lb)); overInto(lb); }
+          else {
+            p.v(y2 + Math.max(1, Math.min(12, B(lb) - y2)));
+            p.turnOut(x2, y2);
+          }
         } else {
-          p.turnInto(X(lanes[0]), 1, Math.max(1, Math.min(12, B(la) - y1)));
-          p.v(B(la));
-          for (let i = 1; i < lanes.length; i++) {
+          if (!fromAg) {
+            p.turnInto(X(lanes[0]), 1, Math.max(1, Math.min(12, B(la) - y1)));
+            p.v(B(la));
+          }
+          const last = toAg ? lanes.length - 1 : lanes.length;
+          for (let i = 1; i < last; i++) {
             const D = lanes[i];
             p.to(X(D), T(D.layer));
             if (i < lanes.length - 1) p.v(B(D.layer));
           }
-          p.v(y2 - Math.max(1, Math.min(12, y2 - T(lb))));
-          p.turnOut(x2, y2);
+          if (toAg) { p.to(bx, T(lb)); p.v(Bt.y); }
+          else {
+            p.v(y2 - Math.max(1, Math.min(12, y2 - T(lb))));
+            p.turnOut(x2, y2);
+          }
         }
         const LL = w.labelLane;
         label = {x: X(LL) + 18, y: (T(LL.layer) + B(LL.layer)) / 2};
@@ -791,7 +877,7 @@
     if (opts.spacing) Object.assign(C, opts.spacing);
     try {
       const lv = buildLevel(graph, "", 0, opts, false);
-      const out = {items: [], pills: [], wires: [], zones: [], rowSides: new Map(), w: lv.w, h: lv.h};
+      const out = {items: [], pills: [], wires: [], zones: [], parts: [], rowSides: new Map(), w: lv.w, h: lv.h};
       emit(lv, 0, 0, out);
       out.start = out.pills.find(p => p.node.boundary === "start") || null;
       out.end = out.pills.find(p => p.node.boundary === "end") || null;

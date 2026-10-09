@@ -542,6 +542,33 @@ def flow(question):
 """
 
 
+AGENT_NESTED = """
+from operonx import END, START, graph
+from operonx.agents import Agent, AgentOp, InMemorySession, Model, agent_tool, tool
+
+@tool(destructive=True)
+def refund(order_id: str) -> str:
+    \"\"\"Refund an order.\"\"\"
+    return "refunded"
+
+BILLING = Agent(name="billing", model=Model("assistant"), tools=[refund])
+
+SUPPORT = Agent(name="support", model=Model("assistant"),
+                tools=[agent_tool(BILLING, name="ask_billing", description="Ask billing.")])
+
+_store = {}
+
+def conversations(session_id):
+    \"\"\"Each customer's conversation, kept in memory.\"\"\"
+    return _store.setdefault(session_id, InMemorySession())
+
+@graph
+def flow(question):
+    a = AgentOp.of(agent=SUPPORT, input=question, sessions=conversations)
+    START >> a >> END
+"""
+
+
 class TestAgentOp:
     """An agent op's node says which agent it runs, on which models, with which tools."""
 
@@ -561,7 +588,7 @@ class TestAgentOp:
         ]  # fmt: skip
         json.dumps(ir)
 
-    def test_the_agent_opens_onto_its_loop_and_a_graph_tool_onto_its_graph(self, tmp_path):
+    def test_the_agents_parts_are_real_ops(self, tmp_path):
         agents = pytest.importorskip("operonx_agents")
         if not hasattr(agents.Agent, "describe"):
             pytest.skip("operonx-agents < 0.2: no op or graph tools")
@@ -574,17 +601,37 @@ class TestAgentOp:
         assert [by[n]["kind"] for n in ("order_status", "lookup", "read_page")] == [
             "function", "op", "graph"]
         assert by["refund_op"]["policy"] == "ask", "destructive asks by default"
-        loop = node["graph"]
-        names = [n["name"] for n in loop["nodes"]]
-        assert names == ["model", "order_status", "lookup", "read_page", "refund_op", "answer"]
-        assert (loop["entries"], loop["exits"]) == (["model"], ["answer"])
-        pairs = {(e["from"], e["to"]) for e in loop["edges"]}
-        assert {("model", "lookup"), ("lookup", "model"), ("model", "answer")} <= pairs
-        tools = {n["name"]: n for n in loop["nodes"]}
-        assert tools["read_page"]["tool"]["kind"] == "graph"
-        assert [m["name"] for m in tools["read_page"]["graph"]["nodes"]] == ["f", "v"]
-        assert "def lookup" in tools["lookup"]["code"]
-        assert "graph" not in tools["lookup"] and "graph" not in tools["order_status"]
+        assert "graph" not in node, "an agent opens onto its parts, not a loop"
+        parts = {p["name"]: p for p in node["parts"]}
+        # the model first, then each tool in order; no session store, no memory
+        assert [(p["part"], p["name"]) for p in node["parts"]] == [
+            ("model", "assistant"), ("tool", "order_status"), ("tool", "lookup"),
+            ("tool", "read_page"), ("tool", "refund_op")]
+        assert (parts["assistant"]["kind"], parts["assistant"]["resource"]) == ("LLMOp", ["assistant"])
+        # each tool is the op it is: a @graph opens onto its graph, an @op shows its code
+        assert [parts[n]["kind"] for n in ("order_status", "lookup", "read_page")] == [
+            "FuncOp", "FuncOp", "GraphOp"]
+        assert [m["name"] for m in parts["read_page"]["graph"]["nodes"]] == ["f", "v"]
+        assert "def lookup" in parts["lookup"]["code"]
+        assert "def order_status" in parts["order_status"]["code"]
+        assert parts["refund_op"]["tool"]["policy"] == "ask"
+        assert all(p["id"].startswith(node["id"] + ".") for p in node["parts"])
+        json.dumps(ir)
+
+    def test_an_agent_tool_brings_its_parts_and_a_session_its_memory(self, tmp_path):
+        agents = pytest.importorskip("operonx_agents")
+        if not hasattr(agents.Agent, "describe"):
+            pytest.skip("operonx-agents < 0.2: no op or graph tools")
+        ir = extract_project(project(tmp_path, AGENT_NESTED, LINEAR_MANIFEST))
+        (node,) = [n for n in ir["graphs"][0]["nodes"] if n.get("op_type") == "agent"]
+        assert [(p["part"], p["name"]) for p in node["parts"]] == [
+            ("model", "assistant"), ("memory", "conversations"), ("tool", "ask_billing")]
+        assert node["parts"][1]["description"] == "Each customer's conversation, kept in memory."
+        billing = node["parts"][2]
+        assert (billing["kind"], billing["op_type"], billing["agent"]["name"]) == (
+            "AgentOp", "agent", "billing")
+        assert [(p["part"], p["name"]) for p in billing["parts"]] == [
+            ("model", "assistant"), ("tool", "refund")]
         json.dumps(ir)
 
     def test_an_op_without_an_agent_has_no_agent_entry(self, tmp_path):

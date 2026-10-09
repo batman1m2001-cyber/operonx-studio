@@ -139,7 +139,7 @@
       nodes: (g.nodes || []).map((n) => {
         const key = prefix + n.id;
         // an agent op that recorded steps opens onto them, in place of the
-        // loop it is drawn as (its tools, extract.py `_agent_loop`)
+        // parts it is drawn with (its model and tools, extract.py `_agent_parts`)
         const agent = agents.has(n.name) && (!n.op_type || n.op_type === "agent");
         const sub = agent ? agentGraph(n.name, rows, turn) : null;
         if (!sub) return n.graph ? {...n, graph: copy(n.graph, key + "/")} : n;
