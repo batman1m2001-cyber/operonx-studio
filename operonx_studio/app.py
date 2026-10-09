@@ -190,7 +190,8 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                 **{k: nodes_by_id.get(n.id, {}).get(k) for k in
                    ("bound", "start", "end", "outputs", "inputs", "source",
                     "loop", "is_gen", "transient", "serve_role", "code",
-                    "resource", "routes", "description", "show_keys", "op_type", "agent")},
+                    "resource", "routes", "description", "show_keys", "op_type", "agent",
+                    "agent_part", "tool")},
                 # what the card says it holds is what opening it shows: a loop's
                 # members are laid out in the container, so they are counted, not
                 # the one hidden loop graph that holds them
@@ -477,6 +478,29 @@ def _ctx_tuple(ctx: Any) -> tuple:
     return tuple((ctx or "main").split("."))
 
 
+def _nested_roots(records) -> Dict[str, List[Tuple[str, ...]]]:
+    """The full names and ctxs of the nested runs' own records (op_type
+    "graph"). Empty for a run that started none, and on operonx < 1.18."""
+    out: Dict[str, List[Tuple[str, ...]]] = {}
+    for rec in records:
+        if rec.get("op_type") == "graph":
+            out.setdefault(rec.get("op_full_name") or "", []).append(_ctx_tuple(rec.get("ctx")))
+    return out
+
+
+def _is_nested(full: str, ctx: Any, nested: Dict[str, List[Tuple[str, ...]]]) -> bool:
+    """Whether a record is one of a nested run's: its full name and ctx
+    extend a nested run record's (the rule operonx's build_tree applies)."""
+    if not nested:
+        return False
+    parts, mine = full.split("."), _ctx_tuple(ctx)
+    for k in range(len(parts) - 1, 0, -1):
+        for cc in nested.get(".".join(parts[:k]), ()):
+            if len(cc) <= len(mine) and mine[: len(cc)] == cc:
+                return True
+    return False
+
+
 def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]:
     """Per-op aggregates for one recorded run.
 
@@ -494,12 +518,20 @@ def _summarise_run(records, run_name: str, limit: int = 20000) -> Dict[str, Any]
     count = 0
     t_first: Optional[float] = None
     t_last: Optional[float] = None
+    # A run an op started inside itself (operonx >= 1.18: an agent's graph
+    # tool, `invoke`) records under that op's step, its own record of type
+    # "graph" first: its ops are that step's, not the graph's own ops.
+    records = list(records)
+    nested = _nested_roots(records[:limit])
     for rec in records:
         if count >= limit:
             break
         count += 1
         name = rec.get("op_name") or rec.get("op_full_name") or "?"
-        if child_parent_id(rec.get("op_full_name") or "", _ctx_tuple(rec.get("ctx"))) is None:
+        full = rec.get("op_full_name") or ""
+        if child_parent_id(full, _ctx_tuple(rec.get("ctx"))) is None and not _is_nested(
+            full, rec.get("ctx"), nested
+        ):
             roots.setdefault(name)
         agg = per_op.setdefault(name, {
             "runs": 0, "errors": 0, "total_ms": 0.0, "max_ms": 0.0, "last_error": None,

@@ -40,9 +40,24 @@
   const segment = (ctx) => String(ctx || "").split(".").pop();
   const records = (rows) => (rows || []).filter(r => r.kind === "record");
 
-  /* The steps directly under `row`, in time order. */
+  /* The steps directly under `row`, in time order. A nested run's record
+   * (op_type "graph": a tool that is a graph, run under its call —
+   * operonx >= 1.18) has the graph's ops for steps: its records, through
+   * the containers of any subgraph inside it. */
   function stepsOf(row, byParent) {
-    return (byParent.get(row.id) || []).filter(r => r.child)
+    const kids = byParent.get(row.id) || [];
+    if (row.op_type === "graph") {
+      const out = [];
+      const walk = (id) => {
+        for (const r of byParent.get(id) || []) {
+          if (r.kind === "record") out.push(r);
+          else if (r.kind === "container") walk(r.id);
+        }
+      };
+      walk(row.id);
+      return out.sort((a, b) => a.start_ms - b.start_ms);
+    }
+    return kids.filter(r => r.child && r.kind === "record")
       .sort((a, b) => a.start_ms - b.start_ms);
   }
 
@@ -74,7 +89,9 @@
       const sub = kids.length ? levelGraph(kids, byParent, idOf) : null;
       const v = visual(s.op_type);
       return {
-        id: idOf(s), name: segment(s.ctx), kind: v ? v.label : (s.op_type || "step"),
+        // a step is named by its ctx segment (`turn[0]`); a nested run's op,
+        // which shares its run's ctx, by its own name
+        id: idOf(s), name: s.child ? segment(s.ctx) : s.op, kind: v ? v.label : (s.op_type || "step"),
         op_type: s.op_type, step: s, start: !into.has(s.id), end: !outOf.has(s.id),
         outputs: Object.keys(s.outputs || {}), inputs: [], show_keys: SHOW[s.op_type] || [],
         graph: sub, subgraph_ops: sub ? sub.nodes.length : null,
@@ -96,7 +113,7 @@
   function agentGraph(name, rows, turn) {
     const recs = records(rows);
     const byParent = new Map();
-    for (const r of recs) {
+    for (const r of rows || []) {
       if (!byParent.has(r.parent)) byParent.set(r.parent, []);
       byParent.get(r.parent).push(r);
     }
@@ -105,7 +122,7 @@
     const steps = runs.flatMap(r => stepsOf(r, byParent));
     if (!steps.length) return null;
     // ids unique across executions: the step's ctx, made a safe key part
-    const idOf = (s) => String(s.ctx).replace(/[^A-Za-z0-9_.[\]-]/g, "_");
+    const idOf = (s) => String(s.child ? s.ctx : `${s.ctx}.${s.op}`).replace(/[^A-Za-z0-9_.[\]-]/g, "_");
     return levelGraph(steps, byParent, idOf);
   }
 
@@ -121,10 +138,11 @@
       ...g,
       nodes: (g.nodes || []).map((n) => {
         const key = prefix + n.id;
-        if (n.graph) return {...n, graph: copy(n.graph, key + "/")};
-        if (!agents.has(n.name) || (n.op_type && n.op_type !== "agent")) return n;
-        const sub = agentGraph(n.name, rows, turn);
-        if (!sub) return n;
+        // an agent op that recorded steps opens onto them, in place of the
+        // loop it is drawn as (its tools, extract.py `_agent_loop`)
+        const agent = agents.has(n.name) && (!n.op_type || n.op_type === "agent");
+        const sub = agent ? agentGraph(n.name, rows, turn) : null;
+        if (!sub) return n.graph ? {...n, graph: copy(n.graph, key + "/")} : n;
         opened.push(key);
         for (const s of sub.nodes) if (s.op_type === "turn" && s.graph) opened.push(`${key}/${s.id}`);
         return {...n, op_type: "agent", graph: sub, subgraph_ops: sub.nodes.length, agentSteps: true};

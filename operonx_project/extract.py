@@ -287,7 +287,101 @@ def _agent_of(op: Any) -> Optional[Dict[str, Any]]:
             }
         )
     model = getattr(agent.model, "resources", None) or [getattr(agent.model, "resource", None)]
-    return {"name": getattr(agent, "name", None), "model": [m for m in model if m], "tools": listed}
+    out: Dict[str, Any] = {
+        "name": getattr(agent, "name", None),
+        "model": [m for m in model if m],
+        "tools": listed,
+    }
+    # operonx-agents >= 0.2 says what the agent is itself: instructions,
+    # limits, context, each tool's kind and what the policy decides for it
+    describe = getattr(agent, "describe", None)
+    if callable(describe):
+        try:
+            out.update(_json_safe(describe()))
+        except Exception:  # noqa: BLE001 - an older or odd agent keeps the duck-typed view
+            pass
+    # how the op runs it: a session per session_id, a store for approvals
+    out["session"] = _slot(op, "sessions") is not None
+    out["store"] = _slot(op, "store") is not None
+    out["stream"] = bool(_slot(op, "stream", False))
+    return out
+
+
+def _agent_loop(
+    op: Any, agent: Dict[str, Any], root: Path, anchors: Dict[str, int], module: str
+) -> Dict[str, Any]:
+    """An agent op's inside, as a graph a viewer opens like a GraphOp: the
+    model, one node per tool, and the answer. The model calls tools and
+    each comes back to it (the next turn); when it calls none, it answers.
+
+    A tool that is an operonx ``@graph`` carries its own graph, so it opens
+    in place too; an ``@op`` tool carries its code. Built from the agent's
+    own tools (``Tool.kind`` / ``Tool.target``, operonx-agents >= 0.2)."""
+    base = op.full_name
+    model = {
+        "id": f"{base}.model", "name": "model", "kind": "AgentModel", "op_type": "llm",
+        "agent_part": "model", "inputs": [], "outputs": ["content", "tool_calls"],
+        "show_keys": [], "resource": agent.get("model") or [],
+        "description": "The agent's model: reads the conversation, calls tools or answers.",
+    }
+    nodes: List[Dict[str, Any]] = [model]
+    edges: List[Dict[str, Any]] = []
+    by_name = {t.get("name"): t for t in agent.get("tools") or []}
+    tools = _slot(_slot(op, "agent"), "tools")
+    for t in (list(tools) if tools is not None else []):
+        name = getattr(t, "name", None)
+        if not name:
+            continue
+        info = dict(by_name.get(name) or {"name": name})
+        node: Dict[str, Any] = {
+            "id": f"{base}.{name}", "name": name, "kind": "AgentTool", "op_type": "tool",
+            "agent_part": "tool", "tool": info, "inputs": [], "outputs": [],
+            "show_keys": [], "description": info.get("description") or "",
+        }
+        target = getattr(t, "target", None)
+        kind = getattr(t, "kind", None) or info.get("kind")
+        fn = getattr(target, "__wrapped__", None)
+        if kind == "graph" and fn is not None:
+            sub = _tool_graph(target, fn, root, anchors)
+            if sub is not None:
+                node["graph"] = sub
+        elif kind == "op" and fn is not None:
+            try:
+                source = inspect.getsource(fn)
+                if len(source) <= 8000:
+                    node["code"] = source
+            except (OSError, TypeError):
+                pass
+        nodes.append(node)
+        edges.append({"from": "model", "to": name, "type": "agent_call", "soft": False,
+                      "origin": "agent"})
+        edges.append({"from": name, "to": "model", "type": "agent_back", "soft": False,
+                      "origin": "agent"})
+    nodes.append({
+        "id": f"{base}.answer", "name": "answer", "kind": "AgentAnswer", "op_type": "answer",
+        "agent_part": "answer", "inputs": [], "outputs": ["output"], "show_keys": [],
+        "end": True, "description": "The model called no tool: its reply is the answer.",
+    })
+    edges.append({"from": "model", "to": "answer", "type": "agent_done", "soft": False,
+                  "origin": "agent"})
+    return {"nodes": nodes, "edges": edges, "entries": ["model"], "exits": ["answer"],
+            "agent_loop": True}
+
+
+def _tool_graph(target: Any, fn: Any, root: Path, anchors: Dict[str, int]) -> Optional[Dict[str, Any]]:
+    """A ``@graph`` tool's own graph, built the way an engine would build
+    it (every parameter a runtime input). ``None`` when it cannot build."""
+    try:
+        params = list(inspect.signature(fn).parameters)
+        g = target(**{p: None for p in params})
+        try:
+            g.build()
+        except Exception:  # noqa: BLE001 - the unbuilt ops still describe it
+            pass
+        module = getattr(fn, "__module__", "") or ""
+        return _subgraph(g, root, anchors, module)
+    except Exception:  # noqa: BLE001 - a tool that cannot build is shown flat
+        return None
 
 
 def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str, Any]:
@@ -330,6 +424,7 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
     if agent is not None:
         node["agent"] = agent
         node.setdefault("resource", agent["model"])
+        node["graph"] = _agent_loop(op, agent, root, anchors, module)
     # The serve boundary is not compute: ingress hands the client's frames
     # to the run, egress hands the run's answers back. A viewer that draws
     # them as ordinary ops invites the reader to look for business logic

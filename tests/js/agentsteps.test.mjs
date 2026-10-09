@@ -98,3 +98,39 @@ test("each step looks like its type", () => {
   assert.equal(visual("tool").label, "tool call");
   assert.equal(visual("code"), null);
 });
+
+// operonx >= 1.18: a tool that is a @graph runs under its call; its run's
+// record (op_type "graph") holds the graph's ops, some inside a subgraph
+const NESTED = [
+  row("ag", null, "helper", "agent", "main", false),
+  row("tn", "ag", "turn", "turn", "main.turn[0]"),
+  row("md", "tn", "model", "llm", "main.turn[0].model[0]"),
+  row("rp", "tn", "read_page", "tool", "main.turn[0].read_page[0]"),
+  row("gr", "rp", "read_page", "graph", "main.turn[0].read_page[0].read_page[0]"),
+  row("f", "gr", "fetch", "code", "main.turn[0].read_page[0].read_page[0]", false),
+  {id: "graph:x.clean#c", parent: "gr", kind: "container", name: "clean", ctx: "c", start_ms: t++},
+  row("v", "graph:x.clean#c", "visible", "code", "main.turn[0].read_page[0].read_page[0]", false),
+];
+
+test("a graph tool's step opens onto the ops its run recorded, through subgraphs", () => {
+  const g = agentGraph("helper", NESTED, null);
+  const turn = g.nodes[0];
+  const call = turn.graph.nodes.find(n => n.name === "read_page[0]");
+  const run = call.graph.nodes[0];
+  assert.equal(run.op_type, "graph");
+  assert.deepEqual(names(run.graph), ["fetch", "visible"]);
+  assert.deepEqual(wires(run.graph), ["fetch→visible"]);
+  assert.equal(new Set(run.graph.nodes.map(n => n.id)).size, 2);
+});
+
+test("an agent drawn as its loop still opens onto the run's steps", () => {
+  const loop = {nodes: [{id: "x.model", name: "model"}], edges: [], entries: ["model"], exits: ["model"]};
+  const ir = {nodes: [{id: "x.helper", name: "helper", op_type: "agent", graph: loop}]};
+  const {graph, opened} = withSteps(ir, NESTED, null);
+  assert.equal(graph.nodes[0].agentSteps, true);
+  assert.deepEqual(names(graph.nodes[0].graph), ["turn[0]"]);
+  assert.deepEqual(opened.slice(0, 1), ["x.helper"]);
+  // with no steps recorded for it, it keeps its loop
+  const quiet = withSteps(ir, [row("o", null, "other", "agent", "main", false)], null);
+  assert.equal(quiet.graph.nodes[0].graph.nodes[0].name, "model");
+});

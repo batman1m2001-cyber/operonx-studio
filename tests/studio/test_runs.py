@@ -301,6 +301,48 @@ def test_a_run_names_the_ops_it_ran_at_its_root(client, project):
     ]
 
 
+def test_a_nested_runs_ops_are_not_the_runs_root_ops(client, project):
+    """operonx >= 1.18: a graph an op runs inside itself (an agent's graph
+    tool, ``invoke``) records under that op. Its ops are the op's steps, not
+    the graph's, so they do not decide which graph a run belongs to."""
+    import asyncio
+
+    import operonx
+    from operonx import END, START, Operon, graph, op
+
+    if not hasattr(operonx, "invoke"):
+        pytest.skip("operonx < 1.18: no nested runs")
+
+    @op
+    def fetch(url: str) -> dict:
+        return {"html": url}
+
+    @graph
+    def read_page(url):
+        f = fetch(url=url)
+        START >> f >> END
+
+    @op
+    async def a(url: str = "x") -> dict:
+        return {"y": (await operonx.invoke(read_page, url=url))["html"]}
+
+    @graph
+    def flow():
+        s = a()
+        START >> s >> END
+
+    store = FilesRunStore(root=project / ".operonx" / "runs", refresh_every=0)
+
+    async def go():
+        await Operon(flow, trace=store).start({}, trace_id="nested-roots").collect()
+
+    asyncio.run(go())
+    pid = _open(client, project)
+    data = client.get(f"/api/p/{pid}/trace/nested-roots").json()
+    assert data["root_ops"] == ["s"]
+    assert {"read_page", "f"} <= set(data["ops"])
+
+
 def test_a_running_run_is_listed_and_filtered_as_running(client, project, tmp_path):
     (project / "resources.yaml").write_text("run_store:\n  default:\n    backend: sqlite\n    path: runs.sqlite\n")
     store = SqliteRunStore(path=project / "runs.sqlite")
