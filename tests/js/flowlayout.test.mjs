@@ -331,3 +331,110 @@ test("the loop zone holds every member and nothing else, its header clear", () =
   assert.deepEqual([...problems(out), ...zoneProblems(out)], []);
   assert.equal(out.zones[0].key, "t.agent/__loop_0__");
 });
+
+// ── an opened agent: its card on the flow, its parts in a column beside it ──
+const part = (agent, name, kind, extra = {}) => ({id: `${agent}.${name}`, name, kind: "FuncOp", part: kind, ...extra});
+
+test("an opened agent: the flow runs straight through its card, its parts hang in a column right of it", () => {
+  const sub = {nodes: [card("f"), card("v")], edges: [edge("f", "v")], entries: ["f"], exits: ["v"]};
+  const agent = card("ag", {op_type: "agent", parts: [
+    part("t.ag", "assistant", "model", {kind: "LLMOp"}), part("t.ag", "sessions", "memory"),
+    part("t.ag", "search", "tool"), part("t.ag", "read", "tool", {kind: "GraphOp", graph: sub}),
+  ]});
+  const g = {nodes: [card("a"), agent, card("b")], edges: [edge("a", "ag"), edge("ag", "b")],
+             entries: ["a"], exits: ["b"]};
+  const sizeOf = (key, n) => n.op_type === "agent" ? {w: 240, h: 92} : {w: 260, h: 64};
+  for (const open of [["t.ag"], ["t.ag", "t.ag/t.ag.read"]]) {
+    const out = FL.layout(g, {expanded: new Set(open), sizeOf});
+    assert.deepEqual(problems(out), [], open.join(","));
+    const at = Object.fromEntries(out.items.map(i => [i.key, i]));
+    const A = at["t.ag"], a = at["t.a"], b = at["t.b"];
+    const mid = (i) => i.x + i.w / 2;
+    assert.ok(Math.abs(mid(a) - mid(A)) < 0.5 && Math.abs(mid(b) - mid(A)) < 0.5, "a, the agent's card and b in one column");
+    for (const w of out.wires.filter(w => w.e)) {
+      const xs = sample(w.d).map(([x]) => x);
+      assert.ok(Math.max(...xs) - Math.min(...xs) < 0.5, `${w.k} runs straight down`);
+    }
+    // the parts: socket order, top to bottom, all right of the card, none overlapping
+    assert.deepEqual(out.parts.map(p => [p.part, p.item.node.name]),
+      [["model", "assistant"], ["memory", "sessions"], ["tool", "search"], ["tool", "read"]]);
+    const ps = out.parts.map(p => p.item);
+    for (const p of ps) assert.ok(p.x >= A.x + A.w + 100, `${p.key} right of the card`);
+    for (let i = 1; i < ps.length; i++) {
+      const prev = ps[i - 1].box || ps[i - 1], cur = ps[i].box || ps[i];
+      assert.ok(cur.y >= prev.y + prev.h + 10, `${ps[i].key} below ${ps[i - 1].key}`);
+    }
+    assert.ok(b.y >= Math.max(...ps.map(p => (p.box || p).y + (p.box || p).h)) + 40, "the next op is below the whole block");
+    // the card stays put when a part opens
+    assert.equal(A.y, FL.layout(g, {expanded: new Set(["t.ag"]), sizeOf}).items.find(i => i.key === "t.ag").y);
+  }
+  // opened, the graph tool is the usual container with its ops in it
+  const out = FL.layout(g, {expanded: new Set(["t.ag", "t.ag/t.ag.read"]), sizeOf});
+  const box = out.items.find(i => i.key === "t.ag/t.ag.read");
+  assert.ok(box.inner && out.items.some(i => i.key === "t.ag/t.ag.read/t.f"));
+  // folded, the agent is one card
+  const folded = FL.layout(g, {expanded: new Set(), sizeOf});
+  assert.equal(folded.parts.length, 0);
+  assert.equal(folded.items.length, 3);
+});
+
+/* `g` with some of its plain cards made agents: a model, sometimes a
+ * memory, a few tools — a graph tool, an agent tool with its own parts. */
+function withAgents(R, g, depth = 0) {
+  for (const n of g.nodes) {
+    if (n.graph) { withAgents(R, n.graph, depth); continue; }
+    if (n.routes || R() > 0.3) continue;
+    n.op_type = "agent";
+    const parts = [part(n.id, "model", "model", {kind: "LLMOp"})];
+    if (R() < 0.5) parts.push(part(n.id, "memory", "memory"));
+    const k = 1 + Math.floor(R() * 4);
+    for (let i = 0; i < k; i++) {
+      const roll = R();
+      const p = part(n.id, `tool${i}`, "tool");
+      if (roll < 0.3) p.graph = randomGraph(R, `${p.id}.`, 0, 4);
+      else if (roll < 0.45 && depth < 1) { const inner = {nodes: [p]}; withAgents(() => 0, inner, depth + 1); }
+      parts.push(p);
+    }
+    n.parts = parts;
+  }
+  return g;
+}
+const openable = (g, prefix = "", out = []) => {
+  for (const n of g.nodes) {
+    const key = prefix + n.id;
+    if (n.graph) { out.push(key); openable(n.graph, key + "/", out); }
+    else if (n.parts) { out.push(key); openable({nodes: n.parts}, key + "/", out); }
+  }
+  return out;
+};
+
+test("random workflows with agents, random open sets: no wire through a card, no overlap", () => {
+  let agents = 0, partsSeen = 0;
+  for (let seed = 1; seed <= 160; seed++) {
+    const R = rng(seed * 104729);
+    const g = withAgents(R, randomGraph(R, "g.", 1 + (seed % 2), 9));
+    const sizeOf = sizer(R);
+    const all = openable(g);
+    const open = new Set(all.filter(() => R() < 0.7));
+    for (const k of [...open]) {
+      const bits = k.split("/");
+      for (let i = 1; i < bits.length; i++) if (!open.has(bits.slice(0, i).join("/"))) open.delete(k);
+    }
+    const out = FL.layout(g, {expanded: open, sizeOf});
+    assert.deepEqual([...problems(out), ...zoneProblems(out)], [], `seed ${seed}`);
+    // no part lands on another level's card
+    const cards = out.items.filter(i => !i.inner);
+    for (const p of out.parts) {
+      const b = p.item.box || p.item;
+      for (const c of cards) {
+        if (c === p.item || c.key.startsWith(p.item.key + "/")) continue;
+        const hit = c.x < b.x + b.w && b.x < c.x + c.w && c.y < b.y + b.h && b.y < c.y + c.h;
+        assert.ok(!hit, `seed ${seed}: ${p.item.key} on ${c.key}`);
+      }
+    }
+    assert.deepEqual(pos(FL.layout(g, {expanded: open, sizeOf})), pos(out), `seed ${seed}: not deterministic`);
+    agents += out.items.filter(i => i.parts).length;
+    partsSeen += out.parts.length;
+  }
+  assert.ok(agents > 60 && partsSeen > 200, `${agents} agents, ${partsSeen} parts`);
+});

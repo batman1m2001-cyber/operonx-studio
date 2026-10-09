@@ -63,6 +63,7 @@
   --ag-shade: rgba(0, 0, 0, .5); --ag-comb: rgba(143, 182, 236, .08);
   --ag-chip: #1b2533; --ag-chip-edge: #2c3a4d; --ag-shine: rgba(160, 200, 255, .10);
   --ag-frame: rgba(143, 182, 236, .04); --ag-bee-glow: rgba(255, 214, 102, .22);
+  --ap-model: #a98be6; --ap-mem: #6b9cf0; --ap-tool: #3fb8b0; --ap-bg: var(--bg);
   --k-io: #ee518a;
   --k-audio: #ee518a;
   --k-res: #0ba7b6;

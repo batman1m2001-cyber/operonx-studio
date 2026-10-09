@@ -161,10 +161,9 @@ const OP_VISUALS = {
   "STTOp":             {icon: "◉", color: "var(--k-audio)"},
   "TTSOp":             {icon: "♪", color: "var(--k-audio)"},
   "DenoiseClassifier": {icon: "≈", color: "var(--k-audio)"},
-  // an agent op's inside (extract.py `_agent_loop`): its model, its tools, its answer
-  "AgentModel":        {icon: "✧", color: "var(--k-llm)"},
-  "AgentTool":         {icon: "⚒", color: "var(--k-res)"},
-  "AgentAnswer":       {icon: "↵", color: "var(--k-default)"},
+  // an agent's parts (extract.py `_agent_parts`): an MCP server's tool, its memory
+  "MCPTool":           {icon: "⇄", color: "var(--k-io)"},
+  "Session":           {icon: "⛁", color: "var(--ap-mem)"},
 };
 const OP_FAMILIES = [
   [/LLM|Chat|Completion/,                    {icon: "✧", color: "var(--k-llm)"}],
@@ -1811,13 +1810,16 @@ function render() {
   // wire around exactly those boxes. Nothing moves after it: an opened
   // GraphOp is laid out with its siblings, not shifted into them.
   const leaves = [];
-  (function walk(gr, prefix, depth) {
-    for (const n of gr.nodes || []) {
-      const key = prefix + n.id;
-      if (n.graph && state.expanded.has(key)) walk(n.graph, key + "/", depth + 1);
-      else leaves.push({key, node: n, depth, inner: null, x: 0, y: 0, w: NODE_W, h: NODE_H});
-    }
-  })(g, "", 0);
+  // an opened agent is its card AND its parts (each the op it is)
+  const visit = (n, key, depth) => {
+    if (n.graph && state.expanded.has(key)) { walk(n.graph, key + "/", depth + 1); return; }
+    leaves.push({key, node: n, depth, inner: null, x: 0, y: 0, w: NODE_W, h: NODE_H});
+    if (n.parts && state.expanded.has(key)) for (const p of n.parts) visit(p, key + "/" + p.id, depth + 1);
+  };
+  function walk(gr, prefix, depth) {
+    for (const n of gr.nodes || []) visit(n, prefix + n.id, depth);
+  }
+  walk(g, "", 0);
   const cardOf = new Map();
   for (const it of leaves) {
     const card = opCard(it);
@@ -1845,6 +1847,8 @@ function render() {
   const laidOut = measured.map(m => ({shown: !!m.card.offsetHeight, widths: m.els.map(e => e.clientWidth)}));
   measured.forEach((m, i) => {
     if (!laidOut[i].shown || !m.els.length) return;
+    // an agent's cell is as wide as its own content (max-content, capped)
+    if (m.card.classList.contains("agentcell")) return;
     // a port row sits in one of two equal columns: the card must grow by
     // twice its deficit for that column to gain it
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
@@ -2195,6 +2199,8 @@ function render() {
       }
     }
   }
+  // an opened agent's sockets, wired to its parts
+  drawAgentParts(svg, L.parts);
   for (const [x, y, text, cls, tip] of glyphJobs) edgeGlyph(svg, x, y, text, cls, tip);
 
   // serve transport cards (only when no declared ingress wears it)
@@ -2527,7 +2533,8 @@ function containerKind(n) {
   const k = n.subgraph_ops;
   if (n.agentSteps) return `agent · ${k} turn${k === 1 ? "" : "s"}`;
   if (n.step) return `${n.kind} · ${k} step${k === 1 ? "" : "s"}`;
-  if (n.agent_part === "tool") return `tool · ${TOOL_KIND_WORDS[(n.tool || {}).kind] || "@graph"} · ${k} ops`;
+  // an agent's tool: the rack it hangs on already says it is one
+  if (n.part === "tool") return `${TOOL_KIND_WORDS[(n.tool || {}).kind] || "@graph"} · ${k} ops`;
   return `${n.kind} · ${k} ops`;
 }
 
@@ -2545,15 +2552,14 @@ function containerCard(it) {
   if (state.run && !ranInRun(n)) card.classList.add("dormant");
 
   const head = el("div", "chead");
-  // an opened agent — its loop, or (a painted run) the turns it took
-  const agent = n.op_type === "agent" && (n.agent || n.agentSteps);
-  if (agent) {
-    // an opened agent keeps its hive cell: the same edge, the bee, its setup
+  // an agent opened (a painted run) onto the turns it took
+  if (n.agentSteps) {
+    // it keeps its hive cell: the same edge, the bee
     card.classList.add("agentframe");
     card.append(agentFrameEdge(it.w, it.h));
     head.append(beeMark());
     head.append(el("span", "nname", n.name));
-    head.append(el("span", "nkind", n.agentSteps ? containerKind(n) : agentSub(n)));
+    head.append(el("span", "nkind", containerKind(n)));
   } else {
     const promoter = el("span", "promoter", "↱");
     promoter.title = "An operon: one promoter, the genes inside transcribed together.";
@@ -2577,8 +2583,6 @@ function containerCard(it) {
   head.append(close);
   head.onclick = (ev) => { ev.stopPropagation(); select(it.key); };
   card.append(head);
-  // the setup on the loop; a painted run's turns fill the frame instead
-  if (agent && n.agent && !n.agentSteps) card.append(agentSetup(n));
 
   // no rim ports: the START/END pills inside are the container's ports now
   return card;
@@ -2587,13 +2591,17 @@ function containerCard(it) {
 /* ── the agent op: a hive cell ──────────────────────────────────────
  * An agent is the op that decides for itself, so it does not look like
  * the others: an octagon cell with a glossy steel edge and a soft glow,
- * a faint honeycomb inside, and the bee. Folded it is one card — the
- * agent's name, its model, its turn budget as pips, and its parts on one
- * row (instructions, memory, context, tools); opened it is a frame round
- * its loop (extract.py `_agent_loop`): model → each tool → back to the
- * model, and the answer. A tool that is a graph opens in place there.
- * With a run painted the pips fill with the turns it took, and a live run
- * sweeps a light along the edge. */
+ * a faint honeycomb inside, and the bee. On its right edge, three round
+ * sockets: ✧ the model it thinks with, the database of its memory, ⚒ its
+ * tools. Opened, each socket is wired to the real op behind it, drawn as
+ * the card that op is anywhere else (extract.py `_agent_parts`): the
+ * model's LLM cell, its session store, each tool — an @op's cell, a
+ * @graph's card that opens like any GraphOp, another agent's cell that
+ * opens like this one. The wires are the agent's own, never the flow's:
+ * the model's a nerve with one spike, memory's three lanes of bandwidth,
+ * the tools' a rack — one trunk to a bus, a straight branch to each.
+ * With a run painted the pips fill with the turns it took; a live run
+ * sweeps a light along the edge and sets the wires moving. */
 const TOOL_ICONS = {function: "ƒ", op: "◈", graph: "▣", agent: "✺", mcp: "⇄"};
 const TOOL_KIND_WORDS = {function: "function", op: "@op", graph: "@graph", agent: "agent",
                          mcp: "MCP tool"};
@@ -2662,28 +2670,6 @@ function agentPips(n) {
   return row;
 }
 
-/* The agent's parts, one hex chip each: what it is told, what it starts
- * from, how much it holds, what it can do. */
-function agentParts(n) {
-  const a = n.agent || {};
-  const ins = a.instructions || {};
-  const ctx = a.context;
-  const used = state.run && state.run.ops && state.run.ops.model;
-  return [
-    {icon: "✎", text: ins.dynamic ? "fn" : "sys", part: "instructions",
-     tip: ins.dynamic ? `instructions: built per run by ${ins.from || "a function"}`
-       : `instructions: ${(ins.text || "").slice(0, 160) || "none"}`},
-    {icon: "◈", text: a.session ? "session" : "deps", part: "memory",
-     tip: a.session ? "memory: a conversation per session_id, and the deps it is given"
-       : "memory: the deps it is given each run; no conversation is kept"},
-    {icon: "▤", text: ctx ? `${Math.round((ctx.window || 0) / 1000)}k` : "–", part: "context",
-     tip: ctx ? `context: ${ctx.window} tokens, compacted at ${Math.round(ctx.compact_at * 100)}%`
-       : "context: the whole conversation, never compacted"},
-    {icon: "⚒", text: String((a.tools || []).length), part: "tools", hot: !!used,
-     tip: "tools: " + ((a.tools || []).map(t => `${t.name} (${TOOL_KIND_WORDS[t.kind] || t.kind || "function"}, ${t.policy || "allow"})`).join(", ") || "none")},
-  ];
-}
-
 function agentCard(card, it) {
   const n = it.node;
   card.classList.add("agentcell");
@@ -2691,47 +2677,164 @@ function agentCard(card, it) {
   const head = el("div", "ahead");
   head.append(beeMark());
   const who = el("div", "awho");
-  const name = el("div", "nname ntext", n.name);
-  who.append(name);
-  const sub = el("div", "asub");
-  const model = ((n.agent || {}).model || [])[0];
-  sub.append(el("span", "amodel mono", model || "model"));
-  who.append(sub);
+  who.append(el("div", "nname ntext", n.name));
+  who.append(el("div", "asub", agentSub(n)));
   head.append(who);
   head.append(agentPips(n));
   card.append(head);
-  const row = el("div", "aparts");
-  for (const p of agentParts(n)) {
-    const chip = el("span", "ahex" + (p.hot ? " hot" : ""));
-    chip.append(el("b", null, p.icon), el("span", null, p.text));
-    chip.title = p.tip;
-    row.append(chip);
+  const open = state.expanded.has(it.key);
+  if (n.parts && n.parts.length) {
+    card.append(agentSockets(n, it.key));
+    const b = el("button", "aopen", open ? "▾" : "▸");
+    b.title = open ? "Fold its parts back into the agent."
+      : "Open the agent: its model, its memory and each tool, as the ops they are.";
+    b.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
+    head.append(b);
   }
-  if (n.graph) {
-    const open = el("button", "ahex aopen");
-    open.append(el("span", null, "▸"));
-    open.title = "Open the agent: its model, each tool and the answer, in place.";
-    open.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
-    row.append(open);
-  }
-  card.append(row);
-  card.title = `${n.name} — ${agentSub(n)}. Double-click to open it.`;
+  card.title = `${n.name} — ${agentSub(n)}. Double-click to ${open ? "fold" : "open"} it.`;
 }
 
-/* An opened agent's setup, across the top of its frame. */
-function agentSetup(n) {
-  const row = el("div", "asetup");
-  for (const p of agentParts(n)) {
-    if (p.part === "tools") continue;  // the tools are the nodes inside
-    const chip = el("span", "ahex");
-    chip.append(el("b", null, p.icon), el("span", null, p.tip.split(": ").slice(1).join(": ").slice(0, 70)));
-    chip.title = p.tip;
-    row.append(chip);
-  }
-  return row;
+/* The agent's three sockets, top to bottom: model, memory, tools. A
+ * socket with nothing behind it (no session store: each run starts
+ * fresh) is shown empty; clicking one opens the agent. */
+const SOCK_DY = {model: -26, memory: 0, tool: 26};
+function agentSockets(n, key) {
+  const a = n.agent || {};
+  const have = new Set((n.parts || []).map(p => p.part));
+  const tools = (a.tools || []).length;
+  const box = el("span", "asocks");
+  const sock = (part, icon, tip) => {
+    const s = el("span", `asock s-${part}` + (have.has(part) ? "" : " empty"));
+    s.style.top = `calc(50% + ${SOCK_DY[part]}px)`;
+    if (typeof icon === "string") s.textContent = icon; else s.append(icon);
+    s.title = tip;
+    s.onclick = (ev) => { ev.stopPropagation(); toggleExpand(key); };
+    box.append(s);
+  };
+  sock("model", "✧", `model: ${(a.model || []).join(" → ") || "?"}`);
+  sock("memory", dbIcon(), have.has("memory")
+    ? "memory: a conversation kept per session_id"
+    : "memory: none — each run starts fresh (sessions= gives it one)");
+  sock("tool", "⚒", `tools: ${tools ? (a.tools || []).map(t => t.name).join(", ") : "none — it only answers"}`);
+  return box;
 }
 
-/* A tool inside an opened agent: what it is, and what the policy decides. */
+/* A database, the memory's icon: on its socket and on its card. */
+function dbIcon() {
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("class", "dbicon");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = '<ellipse cx="8" cy="3.6" rx="5.6" ry="2.2"/>'
+    + '<path d="M2.4 3.6v8.6c0 1.2 2.5 2.2 5.6 2.2s5.6-1 5.6-2.2V3.6M2.4 7.9c0 1.2 2.5 2.2 5.6 2.2s5.6-1 5.6-2.2"/>';
+  return svg;
+}
+
+/* The wires from an opened agent's sockets to its parts. Thin, in the
+ * socket's colour, each ending in a ring on the part's card: the model's
+ * a nerve (one spike mid-way; impulses run to the LLM), memory's three
+ * lanes of bandwidth (data blocks stream into the store), the tools' a
+ * rack (a trunk into a bus beside the tools, a straight branch with a
+ * joint to each; a call runs out to a tool and back). What moves sits in
+ * `.apw-anim`, shown only while a run is live (liveCanvas). */
+let apwSeq = 0;
+function drawAgentParts(svg, parts) {
+  state.partWires = new Map();
+  const byAgent = new Map();
+  for (const P of parts || []) {
+    if (!byAgent.has(P.agent)) byAgent.set(P.agent, []);
+    byAgent.get(P.agent).push(P);
+  }
+  const mk = (tag, attrs, parent) => {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (parent) parent.append(e);
+    return e;
+  };
+  const f = (v) => v.toFixed(1);
+  const bez = (e, t) => {
+    const [x0, y0, c1x, c1y, c2x, c2y, x1, y1] = e, u = 1 - t;
+    return [u*u*u*x0 + 3*u*u*t*c1x + 3*u*t*t*c2x + t*t*t*x1, u*u*u*y0 + 3*u*u*t*c1y + 3*u*t*t*c2y + t*t*t*y1];
+  };
+  const angle = (e, t) => {
+    const p = bez(e, Math.max(0, t - 0.01)), q = bez(e, Math.min(1, t + 0.01));
+    return Math.atan2(q[1] - p[1], q[0] - p[0]);
+  };
+  const offset = (e, off) => {
+    const pts = [];
+    for (let i = 0; i <= 40; i++) {
+      const t = i / 40, q = bez(e, t), r = angle(e, t);
+      pts.push(`${f(q[0] - Math.sin(r) * off)} ${f(q[1] + Math.cos(r) * off)}`);
+    }
+    return "M" + pts.join(" L");
+  };
+  const ride = (g, shape, attrs, id, dur, begin, extra = {}) => {
+    const m = mk(shape, attrs, g);
+    const an = mk("animateMotion", {dur, begin, repeatCount: "indefinite", ...extra}, m);
+    mk("mpath", {href: `#${id}`}, an);
+  };
+  const anchor = (it) => ({x: it.x, y: it.inner ? it.y + 17 : it.y + Math.min(it.h / 2, 32)});
+  for (const [A, mine] of byAgent) {
+    const g = mk("g", {class: "apw", "data-agent": A.key}, svg);
+    const anim = mk("g", {class: "apw-anim"});
+    state.partWires.set(A.key, g);
+    const sx = A.x + A.w + 11, sy = (part) => A.y + A.h / 2 + SOCK_DY[part];
+    for (const P of mine.filter(q => q.part !== "tool")) {
+      const to = anchor(P.item), y0 = sy(P.part), x1 = to.x - 6;
+      const e = [sx, y0, sx + 52, y0, x1 - 52, to.y, x1, to.y];
+      const d = `M${f(sx)} ${f(y0)} C${f(e[2])} ${f(e[3])} ${f(e[4])} ${f(e[5])} ${f(x1)} ${f(to.y)}`;
+      const id = `apw${++apwSeq}`;
+      const cls = `apw-${P.part}`;
+      if (P.part === "model") {
+        mk("path", {id, d, class: `apw-line ${cls}`}, g);
+        const [mx, my] = bez(e, 0.5), r = angle(e, 0.5) * 180 / Math.PI;
+        const spike = mk("g", {transform: `translate(${f(mx)} ${f(my)}) rotate(${f(r)})`}, g);
+        mk("rect", {x: -9, y: -7, width: 18, height: 12, class: "apw-gap"}, spike);
+        mk("path", {d: "M-9 0 H-4 L-2 -6 L1 5 L3 -2 L4.5 0 H9", class: `apw-spike ${cls}`}, spike);
+        for (const begin of ["0s", "0.8s"]) ride(anim, "circle", {r: 2.3, class: `apw-dot ${cls}`}, id, "1.6s", begin);
+      } else {
+        mk("path", {id, d, class: "apw-track"}, g);
+        for (const [o, k] of [[-2.6, " side"], [0, ""], [2.6, " side"]])
+          mk("path", {d: offset(e, o), class: `apw-lane ${cls}${k}`}, g);
+        for (const begin of ["0s", "0.55s", "1.1s", "1.65s"])
+          ride(anim, "rect", {x: -3.5, y: -1.6, width: 7, height: 3.2, rx: 1, class: `apw-dot ${cls}`},
+               id, "2.2s", begin, {rotate: "auto"});
+      }
+      mk("circle", {cx: f(x1), cy: f(to.y), r: 3.6, class: `apw-ring ${cls}`}, g);
+    }
+    // the tools' rack
+    const tools = mine.filter(q => q.part === "tool");
+    if (tools.length) {
+      const y0 = sy("tool");
+      const ys = tools.map(P => anchor(P.item).y);
+      const px = Math.min(...tools.map(P => P.item.x));
+      const bx = px - 34;
+      const cls = "apw-tool";
+      mk("path", {d: `M${f(sx)} ${f(y0)} H${f(bx)}`, class: `apw-line ${cls}`}, g);
+      mk("path", {d: `M${f(bx)} ${f(Math.min(y0, ...ys))} V${f(Math.max(y0, ...ys))}`, class: `apw-line ${cls}`}, g);
+      mk("circle", {cx: f(bx), cy: f(y0), r: 3, class: `apw-joint ${cls}`}, g);
+      tools.forEach((P, i) => {
+        const x1 = P.item.x - 6;
+        mk("path", {d: `M${f(bx)} ${f(ys[i])} H${f(x1)}`, class: `apw-line ${cls}`}, g);
+        mk("circle", {cx: f(bx), cy: f(ys[i]), r: 2.4, class: `apw-ring ${cls}`}, g);
+        mk("circle", {cx: f(x1), cy: f(ys[i]), r: 3.6, class: `apw-ring ${cls}`}, g);
+      });
+      // a call: out along the rack to a tool and its answer back, each tool in turn
+      tools.forEach((P, i) => {
+        const id = `apw${++apwSeq}`;
+        mk("path", {id, d: `M${f(sx)} ${f(y0)} H${f(bx)} V${f(ys[i])} H${f(P.item.x - 6)}`, class: "apw-track"}, anim);
+        const dur = 2.6 * tools.length;
+        const a0 = i / tools.length, a1 = (i + 0.4) / tools.length, a2 = (i + 0.5) / tools.length, a3 = (i + 0.9) / tools.length;
+        const times = [0, a0, a1, a2, a3, 1].map(v => v.toFixed(3)).join(";");
+        ride(anim, "circle", {r: 2.6, class: `apw-dot ${cls}`}, id, `${dur}s`, "0s",
+             {keyPoints: "0;0;1;1;0;0", keyTimes: times, calcMode: "linear"});
+      });
+    }
+    g.append(anim);
+  }
+}
+
+/* An agent's tool: what it is, and what the policy decides. */
 function toolLine(n) {
   const t = n.tool || {};
   const line = el("div", "atool");
@@ -3162,12 +3265,13 @@ function opCard(it) {
     // an agent's tools are what it can DO: one line under its name
     const tools = agentToolsLine(n);
     if (tools) card.append(tools);
-    // a tool inside an opened agent says what it is and what the policy lets it do
-    if (n.agent_part === "tool") {
+    // an agent's tool says what it is and what the policy lets it do
+    if (n.part === "tool") {
       card.classList.add("agenttool");
-      card.querySelector(".iconband").textContent = TOOL_ICONS[(n.tool || {}).kind] || "⚒";
       card.append(toolLine(n));
     }
+    // an agent's memory wears the database it is
+    if (n.part === "memory") card.querySelector(".iconband").replaceChildren(dbIcon());
     // the kind line was card noise at fit-zoom; it lives in the
     // tooltip and the inspector — and on the card once it is clicked
     // (the .detail block shows on the selected card only)
@@ -3234,13 +3338,16 @@ function opCard(it) {
     badges.append(b);
   }
   card.append(badges);
-  card.append(el("span", "port in"));
-  // a router's exits are its condition rows — no anonymous base port
-  if (!(n.routes && n.routes.length)) card.append(el("span", "port out"));
+  // an agent's part is wired from its socket, never into the flow: no ports
+  if (!n.part) {
+    card.append(el("span", "port in"));
+    // a router's exits are its condition rows — no anonymous base port
+    if (!(n.routes && n.routes.length)) card.append(el("span", "port out"));
+  }
   card.onclick = (ev) => { ev.stopPropagation(); select(it.key); };
   card.onmouseenter = () => dfHoverEnter(it.key);
   card.onmouseleave = () => dfHoverLeave(it.key);
-  if (n.graph) card.ondblclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
+  if (n.graph || n.parts) card.ondblclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
   return card;
 }
 
@@ -3684,6 +3791,21 @@ function agentToolsLine(n) {
 }
 
 function toolsSection(n) {
+  // an agent's tool: what it is, and what the agent's policy lets it do
+  if (n.part === "tool" && n.tool) {
+    const tl = n.tool, policy = tl.policy || "allow";
+    const sec = el("section");
+    sec.append(el("div", "stitle", `Tool of ${(n.id || "").split(".").slice(-2, -1)[0] || "the agent"}`));
+    const head = el("div", "toolname mono");
+    head.append(el("span", null, TOOL_KIND_WORDS[tl.kind] || "function"));
+    head.append(el("span", "atpolicy p-" + policy, policy.toUpperCase()));
+    for (const [label, cls] of toolFlags(tl)) head.append(el("span", cls, label));
+    sec.append(head);
+    sec.append(el("div", "tooldesc", policy === "allow" ? "Runs when the model calls it."
+      : policy === "ask" ? "Waits for a human's approval before it runs."
+      : "Refused: the model is told it may not call it."));
+    return sec;
+  }
   const tools = (n.agent && n.agent.tools) || [];
   if (!n.agent) return null;
   const sec = el("section");
@@ -3703,7 +3825,8 @@ function toolsSection(n) {
 }
 
 function llmSection(n, execP) {
-  if (!(n.kind || "").includes("LLM")) return null;
+  // an agent's model is no LLMOp of the graph: the agent writes its conversation
+  if (!(n.kind || "").includes("LLM") || n.part === "model") return null;
   const byName = {};
   for (const inp of n.inputs || []) byName[inp.name] = inp.binding || {};
   const sec = el("section");
@@ -5100,6 +5223,8 @@ function expandAll(open) {
   (function walk(g, prefix) {
     for (const n of g.nodes || []) {
       if (n.graph) { all.push(prefix + n.id); walk(n.graph, prefix + n.id + "/"); }
+      // an agent and its parts open too: a graph tool, an agent tool
+      else if (n.parts) { all.push(prefix + n.id); walk({nodes: n.parts}, prefix + n.id + "/"); }
     }
   })(state.graph, "");
   state.expanded = open ? new Set(all) : new Set();
@@ -5898,6 +6023,7 @@ liveCanvas = (() => {
       n.classList.remove("live-active", "live-done", "live-failed");
     for (const p of document.querySelectorAll("#edges path.flowing, #edgetop path.flowing")) p.classList.remove("flowing");
     for (const p of document.querySelectorAll("#edges path.particle")) p.remove();
+    for (const g of document.querySelectorAll("#edges .apw.on")) g.classList.remove("on");
     particles = 0;
     $("#world").classList.remove("live");
     run = null;
@@ -5927,9 +6053,12 @@ liveCanvas = (() => {
 
   function start(op) {
     if (!run) return;
-    for (const [, card] of cardsOf(op)) {
+    for (const [key, card] of cardsOf(op)) {
       card.classList.remove("live-done", "live-failed");
       card.classList.add("live-active");
+      // an opened agent at work: its wires move
+      const wires = state.partWires && state.partWires.get(key);
+      if (wires) wires.classList.add("on");
     }
   }
 
@@ -5941,6 +6070,8 @@ liveCanvas = (() => {
     for (const [key, card] of cardsOf(op)) {
       card.classList.remove("live-active");
       card.classList.add(bad ? "live-failed" : "live-done");
+      const wires = state.partWires && state.partWires.get(key);
+      if (wires) wires.classList.remove("on");
       for (const w of run.out.get(key) || []) {
         particle(w.path, bad, dur, w.glow);
         // the consumer lights as the data reaches it, until it finishes

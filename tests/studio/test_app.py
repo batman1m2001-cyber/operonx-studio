@@ -1163,3 +1163,52 @@ def test_run_starts_operonx_run_under_the_projects_interpreter(client, jobs_proj
     assert runs[0]["counts"]["ok"] == 2
 
     assert client.post(f"/api/p/{pid}/jobs/nope/run", json={}).status_code == 404
+
+
+AGENT_PARTS_MAIN = '''
+from operonx import END, START, graph, op
+from operonx.agents import Agent, AgentOp, Model, tool
+
+@op
+def fetch(url: str) -> dict:
+    return {"html": url}
+
+@op
+def visible(html: str) -> dict:
+    return {"text": html}
+
+@graph
+def read_page(url: str):
+    """Read a page."""
+    f = fetch(url=url)
+    v = visible(html=f["html"])
+    START >> f >> v >> END
+
+HELPER = Agent(name="helper", model=Model("assistant"), tools=[tool(read_page, readonly=True)])
+
+@graph
+def flow(question):
+    a = AgentOp.of(agent=HELPER, input=question)
+    START >> a >> END
+'''
+
+
+def test_an_agent_ships_its_parts_a_graph_tool_laid_out(client, tmp_path):
+    """An opened agent shows its parts as the ops they are: a graph tool
+    opens like any GraphOp, so its graph arrives laid out too."""
+    agents = pytest.importorskip("operonx_agents")
+    if not hasattr(agents.Agent, "describe"):
+        pytest.skip("operonx-agents < 0.2: no graph tools")
+    root = tmp_path / "parts"
+    root.mkdir()
+    (root / "main.py").write_text(AGENT_PARTS_MAIN, encoding="utf-8")
+    (root / "operonx.toml").write_text(MANIFEST.replace("scratch-demo", "parts"), encoding="utf-8")
+    pid = _open(client, root)
+    data = client.get(f"/api/p/{pid}/ir").json()
+    assert data.get("error") is None, data
+    (node,) = [n for n in data["graphs"][0]["nodes"] if n.get("op_type") == "agent"]
+    assert node.get("graph") is None, "an agent opens onto its parts, not a graph"
+    assert [(p["part"], p["name"]) for p in node["parts"]] == [("model", "assistant"), ("tool", "read_page")]
+    tool_part = node["parts"][1]
+    assert tool_part["subgraph_ops"] == 2
+    assert all(isinstance(m.get("x"), (int, float)) for m in tool_part["graph"]["nodes"])
