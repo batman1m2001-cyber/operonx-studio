@@ -71,6 +71,12 @@
   --k-llm: #7c4dcc;
   --k-graph: #148a62;
   --k-branch: #b0620f;
+  /* the router: a patch panel — its body, ears, port bays, sockets, the
+     light on the port a run took, and the route wires out of it */
+  --rt-body1: #eef1f5; --rt-body2: #dde3ea; --rt-edge: #8d9aab; --rt-ear: #d3dae3;
+  --rt-ink: #243142; --rt-sub: #5b6878; --rt-bay: #f9fbfc; --rt-bay-edge: #c3ccd7;
+  --rt-cond: #3a4a8c; --rt-led: #22a35a; --rt-led-off: #c9d1db; --rt-socket: #2b3442;
+  --rt-wire: #4f5bd5; --rt-wire-else: #9aa4c4;
   --k-io: #c8457f;
   --k-audio: #c8457f;
   --k-res: #0e8580;
@@ -756,18 +762,19 @@ body:not([data-stage]) .canvasbar { display: none; }
 /* direction dots: small, faint, slow — a hint of flow, not a light show */
 .wires circle.eflow { fill: #fff; stroke: var(--wire); stroke-width: 1.4; opacity: .9;
   filter: drop-shadow(0 0 2px rgba(31, 111, 224, .55)); pointer-events: none; }
-.wires circle.eflow.cond { stroke: #b3661a; filter: drop-shadow(0 0 2px rgba(179, 102, 26, .5)); }
+.wires circle.eflow.cond { stroke: var(--rt-wire); filter: drop-shadow(0 0 2px color-mix(in srgb, var(--rt-wire) 50%, transparent)); }
 .wires circle.eflow.back { fill: var(--loop); stroke: #fff; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--loop) 60%, transparent)); }
 @media (prefers-reduced-motion: reduce) { .wires circle.eflow { display: none; } }
-/* if/else routes: the beam in branch amber; the ELSE fallback dashed,
-   laserless — a path that exists but is not flowing */
-.wires path.eglow.cond { stroke: rgba(179, 102, 26, .13); }
-.wires path.ecore.cond { stroke: #b3661a; }
+/* if/else routes: the beam in the router's wire colour; the ELSE
+   fallback dashed, quieter, laserless — a path that exists but is not flowing */
+.wires path.eglow.cond { stroke: color-mix(in srgb, var(--rt-wire) 13%, transparent); }
+.wires path.ecore.cond { stroke: var(--rt-wire); }
+.wires path.ecore.cond.relse { stroke: var(--rt-wire-else); }
 .wires path.eray.cond { stroke-width: 1.2; opacity: .85; }
 .wires path.ecore.cond.relse { stroke-dasharray: 9 7; opacity: .75; }
 .wires path.eglow.cond.relse { opacity: .5; }
 .wires path.eray.cond.relse { display: none; }
-.wires circle.espark.cond { stroke: #b3661a; }
+.wires circle.espark.cond { stroke: var(--rt-wire); }
 /* soft merge edges: the same family, a quieter voice — never gray */
 .wires path.soft { stroke: #a3b9d2; opacity: .8; }
 .node.serve-node { background: linear-gradient(180deg, #fdf6dd, #fbf0cb);
@@ -934,10 +941,67 @@ body:not([data-stage]) .canvasbar { display: none; }
 /* a row whose target lies left carries its port on the left */
 .brrow.left { padding: 2px 8px 2px 16px; }
 .brrow.left .brport { left: -6px; right: auto; }
+/* the flow runs down, so a router's conditions stand side by side as
+   columns, in route order, each with its exit bead on the card's bottom
+   edge (studio.js sets its `top` once the card is measured). The text
+   reads top to bottom; the hover tip and the decision table say it flat. */
+/* … drawn as a patch panel: a rack unit with screw ears, a label strip
+   with its power light, a bay per route, and a socket per route on the
+   bottom edge whose light is on when the painted run took that route */
+.node.branch.cols { padding: 9px 30px 14px; border-radius: 6px; border: 2px solid var(--rt-edge);
+  background: linear-gradient(180deg, var(--rt-body1), var(--rt-body2)); }
+.node.branch.cols::before, .node.branch.cols::after { content: ""; display: block; position: absolute;
+  top: 0; bottom: 0; width: 18px; pointer-events: none; background-color: var(--rt-ear);
+  background-image:
+    radial-gradient(circle at 50% 16px, var(--rt-body2) 0 3px, var(--rt-edge) 3.2px 4.2px, transparent 4.6px),
+    radial-gradient(circle at 50% calc(100% - 16px), var(--rt-body2) 0 3px, var(--rt-edge) 3.2px 4.2px, transparent 4.6px); }
+.node.branch.cols::before { left: 0; border-right: 1px solid var(--rt-edge); border-radius: 4px 0 0 4px; }
+.node.branch.cols::after { right: 0; left: auto; border-left: 1px solid var(--rt-edge); border-radius: 0 4px 4px 0; }
+.node.branch.cols > .nline { position: relative; padding: 3px 22px 3px 8px; border-radius: 3px;
+  background: var(--rt-bay); border: 1px solid var(--rt-bay-edge); }
+.node.branch.cols > .nline::after { content: ""; position: absolute; right: 8px; top: 50%; width: 7px; height: 7px;
+  margin-top: -3.5px; border-radius: 50%; background: var(--rt-led);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--rt-led) 70%, transparent); }
+.node.branch.cols > .nline .nicon { display: none; }
+.node.branch.cols > .nline .ntext { color: var(--rt-ink); font-family: var(--mono, ui-monospace, monospace); }
+.node.branch.cols .brlist { flex-direction: row; justify-content: space-evenly;
+  align-items: stretch; gap: 6px; margin-top: 12px; }
+.node.branch.cols .brrow { flex: 0 0 auto; width: 26px; min-height: 40px;
+  flex-direction: column; justify-content: flex-start; padding: 7px 0 5px;
+  border-radius: 3px; background: var(--rt-bay); border-color: var(--rt-bay-edge);
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, .06);
+  cursor: pointer; transition: border-color .12s, background-color .12s; }
+.node.branch.cols .brcond { writing-mode: vertical-rl; max-height: 120px; line-height: 1; color: var(--rt-cond); }
+.node.branch.cols .brrow.relse .brcond { color: var(--rt-sub); }
+.node.branch.cols .brrow:hover, .node.branch.cols .brrow.picked {
+  border-color: var(--rt-wire); background: color-mix(in srgb, var(--rt-wire) 8%, var(--rt-bay)); }
+.node.branch.cols .brrow.picked { box-shadow: 0 0 0 2px color-mix(in srgb, var(--rt-wire) 35%, transparent); }
+/* the port's light, at the foot of its bay */
+.node.branch.cols .brled { flex: none; width: 6px; height: 6px; margin-top: auto; border-radius: 50%;
+  background: var(--rt-led-off); }
+.node.branch.cols .brcond + .brled { margin-top: auto; }
+.node.branch.cols .brled.on { background: var(--rt-led);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--rt-led) 25%, transparent), 0 0 7px var(--rt-led); }
+/* the socket, centred on the bottom edge (studio.js sets its top) */
+.node.branch.cols .brport, .node.branch.cols .brrow.relse .brport { right: auto; left: 50%; margin-top: 0;
+  top: calc(100% + 13px); transform: translate(-50%, -50%);
+  width: 16px; height: 11px; border-radius: 2px; background: var(--rt-socket);
+  border: 1.2px solid var(--rt-edge); box-shadow: none; }
+#nodes.measuring .node.branch.cols .brlist { width: max-content !important; }
+/* the condition, flat, at the pointer */
+.routetip { position: fixed; z-index: 70; pointer-events: none; display: flex; gap: 7px;
+  align-items: baseline; padding: 4px 9px; border-radius: 7px; font-size: 12px;
+  background: var(--surface); color: var(--text); white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--rt-wire) 45%, var(--border));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .18); }
+.routetip .rtcond { color: var(--rt-cond); }
+.routetip.relse .rtcond { color: var(--text-3); font-style: italic; }
+.routetip .rtarr { color: var(--text-3); }
+.routetip .rttgt { font-weight: 600; }
 
-.wires text.condglyph { fill: #b25e00; font-size: 11px; font-weight: 700;
+.wires text.condglyph { fill: var(--rt-wire); font-size: 11px; font-weight: 700;
   paint-order: stroke; stroke: #fffaf0; stroke-width: 3px; cursor: help; }
-.wires text.condglyph.relse { fill: #c9a052; }
+.wires text.condglyph.relse { fill: var(--rt-wire-else); }
 
 /* a very big graph (studio.js BIG_GRAPH_CELLS): the membranes keep their
    ring and their light, not the soft blurred shadows, which every zoom
@@ -1280,6 +1344,9 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .drow.relse { border-style: dashed; }
 .drow.dnever { opacity: .5; }
 .drow.dlatest { border-color: #d89a4c; background: #fdf8ef; }
+/* the route picked on the canvas */
+.drow.dpicked { border-color: var(--rt-wire); background: var(--sel);
+  box-shadow: inset 3px 0 0 var(--rt-wire); }
 .dmeta { display: flex; gap: 4px; }
 
 /* LLM conversation */
@@ -3957,6 +4024,34 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .brcond .dfport.brchip.holeR .dfhole { order: 2; }
 .brcond .brchip.ghost { padding: 0 7px; border-style: dashed; opacity: .85; }
 .brcond .dfport.brchip .dfhole { position: static; margin: 0; flex: none; }
+/* … in a column the chip turns with its text: sized by its logical
+   sides, so its length runs along the column, its 18px across it */
+.node.branch.cols .brcond .dfport.brchip, .node.branch.cols .brcond .brchip.ghost {
+  width: 18px !important; height: auto; justify-content: flex-start;
+  margin: 0; margin-inline: 0 3px; padding: 0; padding-inline: 3px 7px; }
+/* a plug and its copies: one size, the name in the condition's own type */
+.brcond .brchip .dfname { font-size: inherit; line-height: 1; }
+.node.branch.cols .brcond .brchip.ghost { padding-inline: 3px 7px; }
+.brcond .brchip.ghost { gap: 4px; }
+.brcond .brchip.ghost .ghosthole { flex: none; width: 11px; height: 11px; border-radius: 50%;
+  box-sizing: border-box; border: 1.5px dashed var(--vc, var(--df)); opacity: .8; }
+/* one colour per variable on a router: its plug and every mention of it
+   (studio.js numbers them, data-vi); pointing at or following any one
+   lights them all */
+.brcond .brchip[data-vi="0"] { --vc: var(--df); }
+.brcond .brchip[data-vi="1"] { --vc: #0f8f7a; }
+.brcond .brchip[data-vi="2"] { --vc: #8458d0; }
+.brcond .brchip[data-vi="3"] { --vc: #c2477a; }
+.brcond .brchip[data-vi="4"] { --vc: #7d8a1c; }
+.node.branch .brcond .brchip[data-vi] { border-color: var(--vc);
+  background: color-mix(in srgb, var(--vc) 13%, var(--surface));
+  color: color-mix(in srgb, var(--vc) 80%, var(--text)); cursor: pointer;
+  transition: background-color .12s, box-shadow .12s; }
+.node.branch .brcond .brchip[data-vi] .dfhole { border-color: var(--vc); }
+.node.branch .brcond .brchip[data-vi]:is(.hot, .vhot, .lit, .lit2, .picked) {
+  background: color-mix(in srgb, var(--vc) 30%, var(--surface)); opacity: 1;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vc) 40%, transparent),
+              0 0 12px color-mix(in srgb, var(--vc) 60%, transparent); }
 
 /* SILK: the data wire is a hairline; hovered or lit it comes up whole.
    Last in the sheet: these win over the older weights above. */

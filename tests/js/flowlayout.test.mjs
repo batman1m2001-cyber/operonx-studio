@@ -87,7 +87,13 @@ function sizer(R) {
   return (key, n) => {
     if (!memo.has(key)) {
       const w = 180 + Math.floor(R() * 130);
-      if (n.routes) {
+      if (n.routes && R() < 0.5) {
+        // the canvas's columns: exits along the bottom edge
+        const k = n.routes.length;
+        const rows = n.routes.map((r, i) => ({target: r.target, route: i, left: 12 + 32 * i, top: 30, w: 26, h: 60,
+                                             down: true, cx: (w * (i + 0.5)) / k}));
+        memo.set(key, {w, h: 104, rows});
+      } else if (n.routes) {
         const rows = n.routes.map((r, i) => ({target: r.target, route: i, left: 12, top: 30 + 21 * i, w: w - 24, h: 18}));
         memo.set(key, {w, h: 40 + 21 * rows.length, rows});
       } else memo.set(key, {w, h: 48 + Math.floor(R() * 50)});
@@ -183,6 +189,43 @@ test("routes of one branch into one target: one lane each, upper rows outside", 
   const lanes = out.wires.filter(w => w.e).sort((p, q) => p.e.route - q.e.route).map(w => Math.max(...sample(w.d).map(([x]) => x)));
   assert.equal(new Set(lanes.map(Math.round)).size, 3, `three lanes, got ${lanes}`);
   assert.deepEqual([...lanes].sort((p, q) => q - p), lanes, "the first route runs outermost");
+});
+
+test("bottom exits: each target hangs under its own exit, in route order, and no two routes cross", () => {
+  const names = ["d", "c", "b", "a"];   // the server's order is the reverse of the routes'
+  const routes = ["a", "b", "c", "d"].map((t, i) => ({condition: i < 3 ? `x >= ${i}` : "else", target: t}));
+  const g = {nodes: [card("r", {kind: "BranchOp", routes}), ...names.map((t, i) => ({...card(t), x: i * 300}))],
+             edges: routes.map((r, k) => edge("r", r.target, {id: `r->${r.target}`, type: "condition", route: k})),
+             entries: ["r"], exits: names};
+  const W = 200;
+  const sizeOf = (key, n) => n.routes
+    ? {w: W, h: 120, rows: routes.map((r, i) => ({target: r.target, route: i, left: 10 + 34 * i, top: 30, w: 26, h: 70,
+                                                  down: true, cx: (W * (i + 0.5)) / 4}))}
+    : {w: 220, h: 64};
+  const out = FL.layout(g, {expanded: new Set(), sizeOf});
+  assert.deepEqual(problems(out), []);
+  const at = Object.fromEntries(out.items.map(i => [i.node.name, i]));
+  const xs = ["a", "b", "c", "d"].map(t => at[t].x);
+  assert.deepEqual([...xs].sort((p, q) => p - q), xs, `targets in route order, got ${xs}`);
+  const R = at.r;
+  const wires = out.wires.filter(w => w.e).sort((p, q) => p.e.route - q.e.route);
+  wires.forEach((w, i) => {
+    const [x0, y0] = sample(w.d)[0];
+    assert.ok(Math.abs(x0 - (R.x + (W * (i + 0.5)) / 4)) < 0.5 && Math.abs(y0 - (R.y + R.h)) < 0.5, `route ${i} leaves its exit`);
+  });
+  // every wire keeps its rank all the way down: none crosses another
+  for (let y = R.y + R.h + 1; y < at.a.y; y += 4) {
+    const cut = wires.map(w => { const pts = sample(w.d); let best = pts[0];
+      for (const p of pts) if (Math.abs(p[1] - y) < Math.abs(best[1] - y)) best = p; return best[0]; });
+    assert.deepEqual([...cut].sort((p, q) => p - q), cut, `crossing at y=${y}: ${cut}`);
+  }
+  // no side lanes: each wire stays between its exit and its target, never
+  // out beside the card
+  wires.forEach((w, i) => {
+    const pts = sample(w.d), x0 = pts[0][0], x1 = pts[pts.length - 1][0];
+    const lo = Math.min(x0, x1) - 0.5, hi = Math.max(x0, x1) + 0.5;
+    assert.ok(pts.every(([x]) => x >= lo && x <= hi), `route ${i} detours sideways`);
+  });
 });
 
 test("a loop's return runs in its own lane right of everything it passes, opened subgraph included", () => {
