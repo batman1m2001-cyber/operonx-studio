@@ -40,7 +40,12 @@ __all__ = ["ProjectWatcher", "build_app", "serve"]
 # own modules, so it must run under the interpreter that has the project's
 # dependencies — callbot needs scipy, which the studio's environment has no
 # reason to carry.
-VENV_PYTHON = (".venv/bin/python", "venv/bin/python", ".venv/Scripts/python.exe")
+VENV_PYTHON = (
+    ".venv/bin/python",
+    "venv/bin/python",
+    ".venv/Scripts/python.exe",
+    "venv/Scripts/python.exe",
+)
 
 WATCH_SUFFIXES = {".py", ".toml", ".yaml", ".yml"}
 WATCH_NAMES = {".env", ".env.example"}
