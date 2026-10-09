@@ -13,8 +13,10 @@
  *    return gets a lane chain pinned just right of its two cards, rows are
  *    ordered by barycentre sweeps (starting from the server's order, so a
  *    graph keeps its look), and x is assigned by order-preserving
- *    alignment. A decision card reserves room beside it for the lanes its
- *    condition rows leave by.
+ *    alignment. A decision card's routes leave by exits along its bottom
+ *    edge, in route order: each target is ordered and placed under its
+ *    own exit, so the wires drop straight down and never cross. (A card
+ *    whose rows leave by its sides reserves room beside it for their lanes.)
  * 3. A row is as tall as its tallest card and cards are top-aligned, so the
  *    channel between two rows holds no card at all. A wire is vertical runs
  *    through its own reserved slots plus y-monotone curves inside channels:
@@ -321,6 +323,18 @@
       if (!down.get(p).includes(q)) down.get(p).push(q);
       if (!up.get(q).includes(p)) up.get(q).push(p);
     };
+    // a decision card's bottom exits: where on the card each route's wire
+    // leaves (px from its centre, and as a fraction of its width), so its
+    // targets are ordered, and hang, under their own exits
+    const portPx = new Map(), portFr = new Map();
+    const setPort = (p, q, row) => {
+      if (!portPx.has(p)) { portPx.set(p, new Map()); portFr.set(p, new Map()); }
+      if (portPx.get(p).has(q)) return;
+      portPx.get(p).set(q, row.cx - p.w / 2);
+      portFr.get(p).set(q, 0.9 * (row.cx / p.w - 0.5));
+    };
+    const pxOf = (p, q) => (portPx.has(p) && portPx.get(p).get(q)) || 0;
+    const frOf = (p, q) => (portFr.has(p) && portFr.get(p).get(q)) || 0;
     const pinned = [];   // [dummy, anchor]
     let did = 0;
     const dummy = (r, wire, hint) => {
@@ -337,8 +351,10 @@
           const t = (r - la) / (lb - la);
           const D = dummy(r, w, w.a.hint + (w.b.hint - w.a.hint) * t);
           w.lanes.push(D);
+          if (prev === w.a && w.row && w.row.down) setPort(w.a, D, w.row);
           link(prev, D); prev = D;
         }
+        if (prev === w.a && w.row && w.row.down) setPort(w.a, w.b, w.row);
         link(prev, w.b);
       } else if (la === lb) {
         const ds = dummy(la, w, w.a.hint), dd = dummy(la, w, w.b.hint);
@@ -407,7 +423,7 @@
       for (let r = 0; r + 1 < nrows; r++) {
         const pos = new Map(rows[r + 1].map((x, i) => [x, i]));
         const es = [];
-        rows[r].forEach((u, i) => { for (const v of down.get(u) || []) if (pos.has(v)) es.push([i, pos.get(v)]); });
+        rows[r].forEach((u, i) => { for (const v of down.get(u) || []) if (pos.has(v)) es.push([i + frOf(u, v), pos.get(v)]); });
         for (let a = 0; a < es.length; a++) for (let b = a + 1; b < es.length; b++)
           if ((es[a][0] - es[b][0]) * (es[a][1] - es[b][1]) < 0) total++;
       }
@@ -426,7 +442,8 @@
           const nb = downward ? up : down;
           const cur = new Map(rows[r].map((x, i) => [x, i]));
           const key = new Map(rows[r].map(x => {
-            const ps = (nb.get(x) || []).filter(p => pos.has(p)).map(p => pos.get(p));
+            const ps = (nb.get(x) || []).filter(p => pos.has(p))
+              .map(p => pos.get(p) + (downward ? frOf(p, x) : -frOf(x, p)));
             return [x, ps.length ? ps.reduce((s, v) => s + v, 0) / ps.length : cur.get(x)];
           }));
           rows[r].sort((p, q) => key.get(p) - key.get(q) || cur.get(p) - cur.get(q));
@@ -442,7 +459,7 @@
 
     // ── extents ──
     const used = new Map();   // card → rows its wires leave by
-    for (const w of W) if (w.row) {
+    for (const w of W) if (w.row && !w.row.down) {
       if (!used.has(w.a)) used.set(w.a, new Set());
       used.get(w.a).add(w.row);
     }
@@ -489,7 +506,9 @@
         const row = rows[r];
         const want = row.map(x => {
           const ps = (nb.get(x) || []).filter(p => cx.has(p));
-          return ps.length ? ps.reduce((s, p) => s + cx.get(p), 0) / ps.length : cx.get(x);
+          // under a bottom exit: under the exit, not the card's centre
+          const at = (p) => cx.get(p) + (nb === up ? pxOf(p, x) : -pxOf(x, p));
+          return ps.length ? ps.reduce((s, p) => s + at(p), 0) / ps.length : cx.get(x);
         });
         spread(row, want).forEach((v, i) => cx.set(row[i], v));
       }
@@ -626,6 +645,7 @@
       const mid = it.x + it.w / 2;
       const backTo = new Set(lv.W.filter(w => w.a === L && w.back).map(w => w.b.node.name));
       const sides = L.rows.map(r => {
+        if (r.down) return 0;   // a bottom exit: straight down
         if (backTo.has(r.target)) return 1;
         const w = rowWire.get(r);
         const next = w && w.lanes.length ? w.lanes[0] : w ? w.b : lv.N.find(o => o.node.name === r.target && o !== L);
@@ -638,7 +658,7 @@
     const laneOf = new Map();
     {
       const rowsUsed = new Map();
-      for (const w of lv.W) if (w.row && !w.back) {
+      for (const w of lv.W) if (w.row && !w.back && !w.row.down) {
         if (!rowsUsed.has(w.a)) rowsUsed.set(w.a, []);
         if (!rowsUsed.get(w.a).includes(w.row)) rowsUsed.get(w.a).push(w.row);
       }
@@ -679,14 +699,16 @@
       const A = portOut(w.a), Bt = w.back ? portIn(w.b) : portIn(w.b);
       let p;
       const fromRow = w.row && !(item.get(w.a).bOut);
-      const dot = fromRow ? {
+      const dot = !fromRow ? null : w.row.down ? {x: A.x + w.row.cx, y: A.y + A.h} : {
         x: A.x + (sideOf.get(w.row) < 0 ? w.row.left - 1 : w.row.left + w.row.w + 1),
         y: A.y + w.row.top + w.row.h / 2,
-      } : null;
+      };
       let label = null;
       if (!w.back) {
         const la = w.a.layer, lb = w.b.layer;
-        if (dot) {
+        if (dot && w.row.down) {
+          p = new Path(dot.x, dot.y);
+        } else if (dot) {
           const side = sideOf.get(w.row);
           const lx = side < 0 ? A.x - C.ROW_OUT - C.ROW_STEP * laneOf.get(w.row)
             : A.x + A.w + C.ROW_OUT + C.ROW_STEP * laneOf.get(w.row);
@@ -703,6 +725,8 @@
         const x1 = dot ? dot.x : A.x + A.w, y1 = dot ? dot.y : A.y + A.h / 2;
         const x2 = Bt.x + Bt.w, y2 = Bt.y + Bt.h / 2;
         p = new Path(x1, y1);
+        // out of a bottom exit: drop clear of the card before turning
+        if (dot && w.row.down) p.v(y1 + 10);
         const lanes = w.lanes;
         if (la === lb) {
           const [ds, dd] = lanes;
@@ -755,7 +779,9 @@
   }
 
   /* graph: an IR graph; opts.expanded: Set of opened container keys;
-   * opts.sizeOf(key, node) → {w, h, rows: [{target, route, left, top, w, h}]}.
+   * opts.sizeOf(key, node) → {w, h, rows: [{target, route, left, top, w, h}]};
+   * a row with `down` (and `cx`, its exit's x on the card) leaves by the
+   * card's bottom edge instead of its side, and its target hangs under it.
    * Returns absolute items (cards, containers, knobs), the main flow's
    * pills, every wire with its path, and each decision card's row sides. */
   function layout(graph, opts) {

@@ -6,7 +6,8 @@ The checks run in the page, on the DOM as the user sees it (not on the
 layout's own model, so a model that drifted from its cards is caught):
 
   ports       a decision row's wire port at the card's corner, or not at its row's dot
-  side        a row's dot on the side away from its target
+              (a column's dot: its socket, on the card's bottom edge under it)
+  side        a row's dot on the side away from its target; a column's wire not heading down
   model       a card's box differs from the box its wires were drawn from
   hidden      a card that is not laid out (zero size)
   overlap     two cards that are not nested overlap (tight: closer than 8 px)
@@ -104,6 +105,9 @@ AUDIT_JS = r"""
 
   // decision rows: the port each wire leaves from
   const rowDot = (b, rrow) => {
+    // a column (the patch panel): its socket, on the bottom edge under it
+    if (rrow.closest('.cols'))
+      return {x: b.x + b.el.clientLeft + rrow.offsetLeft + rrow.offsetWidth / 2, y: b.y + b.h, down: true};
     const left = rrow.classList.contains('left');
     return {x: b.x + (left ? rrow.offsetLeft - 1 : rrow.offsetLeft + rrow.offsetWidth + 1),
             y: b.y + rrow.offsetTop + rrow.offsetHeight / 2, left};
@@ -128,7 +132,19 @@ AUDIT_JS = r"""
       // where returns bow (render: backTo)
       const backRow = tgt && state.edgeEls.some(E => E.a === b.key && E.b === tgt.key
         && E.els[0] && E.els[0].classList.contains('back'));
-      if (backRow && dot.left)
+      if (dot.down) {
+        // a column's wire leaves its socket downward (a loop's return too:
+        // it drops clear of the card before it turns)
+        const route = rrow.dataset.route;
+        for (const E of state.edgeEls.filter(E => E.a === b.key && (route == null || E.route == null || String(E.route) === route)))
+          for (const el of E.els || []) {
+            if (!el || el.tagName !== 'path' || !el.getTotalLength || el.getTotalLength() < 20) continue;
+            const p0 = el.getPointAtLength(0);
+            if (Math.hypot(p0.x - dot.x, p0.y - dot.y) > 4) continue;
+            if (el.getPointAtLength(8).y < dot.y + 2)
+              add('side', `${b.name}: the column to ${t}: its wire does not head down out of its socket`, {key: b.key});
+          }
+      } else if (backRow && dot.left)
         add('side', `${b.name}: the row to ${t} is the loop's return, but its dot is on the left`, {key: b.key});
       else if (tgt && !backRow) {
         // the row's wire must LEAVE outward from its dot. The layout points a

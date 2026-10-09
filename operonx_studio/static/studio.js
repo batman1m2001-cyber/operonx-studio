@@ -45,6 +45,8 @@ const state = {
   jobsView: null,     // token: the latest showJobs() owns the pane
   cardEls: new Map(), // render key -> card element (selection without re-render)
   edgeEls: [],        // [{a, b, els}] every drawn edge's paths, for hot/arrow nav
+  route: null,        // {key, ri}: a router's route picked on the canvas
+  routePeek: null,    // {key, ri}: the route under the pointer
   errIdx: 0,          // cycling cursor for the "error →" jump
 };
 
@@ -896,8 +898,9 @@ function drawDataLayer() {
    * edge does NOT leave by: from the right, the wire runs in through the
    * gap above its row and drops into the chip's hole. */
   const entryX = (b) => b.entry === "right" ? Math.max(b.x, boxOf(b).right) + 20 : Math.min(b.x, boxOf(b).left) - 20;
-  const by = (b) => b.entry === "right" ? b.gapY : b.y;
-  const tailOf = (b, x2) => b.entry === "right" ? [[x2, b.gapY], [b.x, b.gapY], [b.x, b.y]] : [[x2, b.y], [b.x, b.y]];
+  const viaGap = (b) => b.entry === "right" || b.entry === "over";
+  const by = (b) => viaGap(b) ? b.gapY : b.y;
+  const tailOf = (b, x2) => viaGap(b) ? [[x2, b.gapY], [b.x, b.gapY], [b.x, b.y]] : [[x2, b.y], [b.x, b.y]];
   // the reader's own gutter: the column it is plugged in from
   const gutter = (b) => {
     if (b.fromTop) return {yB0: b.y - 26, x2: b.x};
@@ -946,7 +949,7 @@ function drawDataLayer() {
    * into the hole. Columns are taken left to right, and wires are laid
    * from the lowest source up, so a jog never crosses its neighbours'. */
   const zig = (a, b) => {
-    if (b.entry === "right" || b.fromTop) return null;
+    if (viaGap(b) || b.fromTop) return null;
     const lim = Math.min(b.x, boxOf(b).left) - 6;
     // a free column, else one close beside another (still apart)
     const x = twice(() => {
@@ -1202,8 +1205,18 @@ function drawDataLayer() {
       // a chip in a condition: in from the side its row's edge does not use
       let top = 0, e = brow;
       while (e && e !== card) { top += e.offsetTop; e = e.offsetParent; }
-      h.entry = brow.classList.contains("left") ? "right" : "left";
-      h.gapY = it.y + top - 5;
+      if (brow.closest(".cols")) {
+        // a column's chip: in from the left along the strip over the
+        // columns, then down into the hole (the text starts at the column's
+        // head, so the chip does). A chip further right takes a higher lane:
+        // no run passes over another's turn.
+        const k = [...card.querySelectorAll(".brrow")].filter(c => c.querySelector(".dfport.brchip")).indexOf(brow);
+        h.entry = "over";
+        h.gapY = it.y + card.clientTop + top - 3 - 3 * Math.max(0, k);
+      } else {
+        h.entry = brow.classList.contains("left") ? "right" : "left";
+        h.gapY = it.y + top - 5;
+      }
     }
     return h;
   };
@@ -1816,7 +1829,8 @@ function render() {
   const measured = [];
   for (const it of leaves) {
     const card = cardOf.get(it.key);
-    let els = [...card.querySelectorAll(".ntext, .brcond, .dfports")];
+    // a decision card's columns side by side are one line to fit
+    let els = [...card.querySelectorAll(card.classList.contains("cols") ? ".ntext, .brlist, .dfports" : ".ntext, .brcond, .dfports")];
     // gates: plain name line, plus the transport line below it
     if (!els.length) els = [".nname", ".nkind"].map(sel => card.querySelector(sel)).filter(Boolean);
     measured.push({it, card, els});
@@ -1846,10 +1860,13 @@ function render() {
     // the card's real height: the layout's 64 px is only a guess
     if (card.offsetHeight) it.h = card.offsetHeight;
     if (it.node.routes && it.node.routes.length) {
+      const down = card.classList.contains("cols");
       it.rows = [...card.querySelectorAll(".brrow")].map(rrow => ({
         el: rrow, target: rrow.dataset.target,
         route: rrow.dataset.route != null ? Number(rrow.dataset.route) : null,
         left: rrow.offsetLeft, top: rrow.offsetTop, w: rrow.offsetWidth, h: rrow.offsetHeight,
+        // a column's exit: on the card's bottom edge, under its centre
+        down, cx: card.clientLeft + rrow.offsetLeft + rrow.offsetWidth / 2,
       }));
     }
   }
@@ -1940,6 +1957,18 @@ function render() {
     it.condPorts = {};
     it.condDots = [];
     for (const {row, side} of sides) {
+      if (row.down) {
+        // the exit bead sits on the card's bottom edge (card-relative: the
+        // column's box starts one border in, the card's two)
+        const card = state.cardEls.get(key);
+        const port = row.el.querySelector(".brport");
+        if (port && card) port.style.top = `${it.h - card.clientTop - row.top - row.el.clientTop}px`;
+        const dot = {x: row.cx, y: it.h};
+        it.condDots.push(dot);
+        if (!(row.target in it.condPorts)) it.condPorts[row.target] = {...dot, side: 0};
+        if (row.route != null) it.condPorts["#" + row.route] = {...dot, side: 0};
+        continue;
+      }
       row.el.classList.toggle("left", side < 0);
       // its chip's hole faces the side the data comes in by: the other one
       for (const ch of row.el.querySelectorAll(".dfport.brchip")) ch.classList.toggle("holeR", side < 0);
@@ -2109,7 +2138,7 @@ function render() {
     if (faded) for (const el2 of made) el2.classList.add("dorm");
     // selection highlights and ←/→ walking work off this ledger, so a
     // click never needs to redraw the whole canvas
-    state.edgeEls.push({a: a.key, b: b.key, id: e.id, els: made});
+    state.edgeEls.push({a: a.key, b: b.key, id: e.id, route: e.route, els: made});
     // the node's own port bead is the terminal; an extra circle on top of
     // it was clutter. Only a loop's flank, which has no port, gets one.
     if (W.back) {
@@ -2212,10 +2241,65 @@ function refreshSelection() {
   if (canvasView === "workflow" && dfPort && dfPort.key !== state.sel) dfPort = null;
   state.dfHover = null;
   drawDataLayer();
+  paintEdges();
+}
+
+/* Which wires are lit: the selected op's. A picked route lights only its
+ * own wire out of the router; a hovered route lights its wire too. */
+function paintEdges() {
+  const pick = state.route, peek = state.routePeek;
   for (const g of state.edgeEls) {
-    const hot = !!state.sel && (g.a === state.sel || g.b === state.sel);
+    let hot = !!state.sel && (g.a === state.sel || g.b === state.sel);
+    if (hot && pick && g.a === pick.key && g.route != null) hot = g.route === pick.ri;
+    if (peek && g.a === peek.key && g.route === peek.ri) hot = true;
     for (const e of g.els) e.classList.toggle("hot", hot);
   }
+}
+
+/* A router's route, picked on the canvas: the router is selected, its
+ * row in the decision table is marked, and only that route's wire lights.
+ * Clicking the same route again lets it go. */
+function pickRoute(key, ri) {
+  const again = state.sel === key && state.route && state.route.key === key && state.route.ri === ri;
+  if (state.sel !== key) select(key);
+  state.route = again ? null : {key, ri};
+  paintRoute();
+}
+function paintRoute() {
+  for (const c of document.querySelectorAll(".brrow.picked, #inspector .drow.dpicked")) c.classList.remove("picked", "dpicked");
+  const pick = state.route;
+  if (pick && pick.key === state.sel) {
+    const card = state.cardEls.get(pick.key);
+    const col = card && card.querySelector(`.brrow[data-route="${pick.ri}"]`);
+    if (col) col.classList.add("picked");
+    const row = document.querySelector(`#inspector .drow[data-route="${pick.ri}"]`);
+    if (row) { row.classList.add("dpicked"); row.scrollIntoView({block: "nearest"}); }
+  }
+  paintEdges();
+}
+
+/* A rotated condition, said in full the moment the pointer is on it. */
+function routeTip(ev, key, ri, r) {
+  let t = document.getElementById("routetip");
+  if (!t) { t = el("div", "routetip"); t.id = "routetip"; t.hidden = true; document.body.append(t); }
+  if (!ev) {
+    t.hidden = true;
+    if (state.routePeek) { state.routePeek = null; paintEdges(); }
+    return;
+  }
+  t.textContent = "";
+  t.append(el("span", "rtcond mono", r.condition), el("span", "rtarr", "→"), el("span", "rttgt mono", r.target));
+  t.classList.toggle("relse", r.condition === "else");
+  t.hidden = false;
+  routeTipMove(ev);
+  state.routePeek = {key, ri};
+  paintEdges();
+}
+function routeTipMove(ev) {
+  const t = document.getElementById("routetip");
+  if (!t || t.hidden) return;
+  t.style.left = `${ev.clientX + 14}px`;
+  t.style.top = `${ev.clientY - 34}px`;
 }
 
 /* Opening or closing an op lays the flow out again (its plugs need room).
@@ -2239,6 +2323,7 @@ function renderKeeping(key) {
 
 function deselect() {
   dfPlatePin = null;
+  state.route = null;
   const before = state.sel;
   state.sel = null;
   if (canvasView === "workflow" && before) renderKeeping(before);
@@ -2683,8 +2768,11 @@ function lensBadge(card, badges, n) {
 function inlineBranchPlugs(card, ports) {
   const conds = [...card.querySelectorAll(".brrow .brcond")];
   const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  for (const plug of [...ports.querySelectorAll(".dfcol.in .dfport.in")]) {
+  [...ports.querySelectorAll(".dfcol.in .dfport.in")].forEach((plug, vi) => {
     const name = plug.dataset.port;
+    // one colour per variable: its plug and every later mention wear it
+    plug.dataset.vi = String(vi % 5);
+    const copies = [];
     const re = new RegExp(`(^|[^\\w.])(${esc(name)})(?![\\w])`);
     let placed = false;
     for (const c of conds) {
@@ -2700,14 +2788,33 @@ function inlineBranchPlugs(card, ports) {
           c.insertBefore(plug, after);
           placed = true;
         } else {
-          const ghost = el("span", "brchip ghost mono", name);
-          ghost.title = `${name} — plugged in above`;
+          // the same size as the plug: a ring where its hole is, no socket
+          const ghost = el("span", "brchip ghost mono");
+          ghost.append(el("span", "ghosthole"), el("span", "dfname", name));
+          ghost.title = `${name} — the same value as its plug`;
+          ghost.dataset.vi = plug.dataset.vi;
+          // a mention is the plug's: pointing at it or clicking it does
+          // what the plug does (as events: the data layer adds its own
+          // listeners to the plug, and replaces its handlers)
+          ghost.onmouseenter = () => plug.dispatchEvent(new MouseEvent("mouseenter"));
+          ghost.onmouseleave = () => plug.dispatchEvent(new MouseEvent("mouseleave"));
+          ghost.onclick = (ev) => { ev.stopPropagation(); plug.click(); };
+          copies.push(ghost);
           c.insertBefore(ghost, after);
         }
         break;
       }
     }
-  }
+    // … and shines when the plug does: followed (its classes), or pointed
+    // at (listeners, not handlers — the data layer replaces those)
+    if (placed && copies.length) {
+      const mirror = () => { for (const g of copies) for (const k of ["hot", "lit", "lit2", "picked"]) g.classList.toggle(k, plug.classList.contains(k)); };
+      new MutationObserver(mirror).observe(plug, {attributes: true, attributeFilter: ["class"]});
+      const all = [plug, ...copies];
+      plug.addEventListener("mouseenter", () => { for (const c of all) c.classList.add("vhot"); });
+      plug.addEventListener("mouseleave", () => { for (const c of all) c.classList.remove("vhot"); });
+    }
+  });
   const cin = ports.querySelector(".dfcol.in");
   if (cin && !cin.children.length) cin.remove();
   if (!ports.querySelector(".dfport")) ports.remove();
@@ -2737,10 +2844,12 @@ function opCard(it) {
       t.kind + (t.path ? ` · ${t.path}` : "")));
     if (t && t.description) card.title = t.description;
   } else if (n.routes && n.routes.length) {
-    // a router is a DECISION CARD: one row per condition, each row
-    // owning its own exit — the wire leaves the row that fires it,
-    // n8n-style, so the choice is readable on the canvas itself
-    card.classList.add("branch");
+    // a router is a DECISION CARD: one column per condition, side by side
+    // in route order, each with its own exit on the card's bottom edge —
+    // the flow runs down, so each wire drops straight to its target. The
+    // condition reads top to bottom; hovering a column says it in full,
+    // clicking one picks it in the decision table.
+    card.classList.add("branch", "cols");
     const line = el("div", "nname nline");
     line.append(el("span", "nicon", kindIcon(n)));
     line.append(el("span", "ntext", n.name));
@@ -2749,13 +2858,24 @@ function opCard(it) {
     card.append(line);
     card.title = n.kind + (n.bound ? ` · ${n.bound}` : "");
     const list = el("div", "brlist");
+    // which route the painted run took last: its port's light is on
+    const lastOut = state.run && state.run.ops && state.run.ops[n.name] && state.run.ops[n.name].last;
+    const took = lastOut && lastOut.target != null ? n.routes.findIndex(r => r.target === lastOut.target) : -1;
     n.routes.forEach((r, ri) => {
-      const rrow = el("div", "brrow" + (r.condition === "else" ? " relse" : ""));
+      const picked = state.route && state.route.key === it.key && state.route.ri === ri;
+      const rrow = el("div", "brrow" + (r.condition === "else" ? " relse" : "") + (picked ? " picked" : ""));
       rrow.dataset.target = r.target;
       rrow.dataset.route = String(ri);
       rrow.append(el("span", "brcond mono", r.condition));
+      const led = el("span", "brled" + (ri === took ? " on" : ""));
+      if (ri === took) led.title = "the run took this route";
+      rrow.append(led);
       rrow.append(el("span", "brport"));
-      rrow.title = `${r.condition} → ${r.target}`;
+      rrow.setAttribute("aria-label", `${r.condition} → ${r.target}`);
+      rrow.onpointerenter = (ev) => routeTip(ev, it.key, ri, r);
+      rrow.onpointermove = (ev) => routeTipMove(ev);
+      rrow.onpointerleave = () => routeTip(null);
+      rrow.onclick = (ev) => { ev.stopPropagation(); routeTip(null); pickRoute(it.key, ri); };
       list.append(rrow);
     });
     card.append(list);
@@ -2962,6 +3082,7 @@ new ResizeObserver(() => flushCanvas()).observe($("#stage"));
  * they are one click away but never in the way. */
 function select(key) {
   dfPlatePin = null;
+  state.route = null;
   state.dfTerm = null;
   state.dfTermPort = state.dfTermHover = null;
   const before = state.sel;
@@ -3162,8 +3283,9 @@ function routeSection(it, execP) {
   const sec = el("section");
   sec.append(el("div", "stitle", "Decision table"));
   const byTarget = new Map();
-  for (const r of n.routes) {
+  n.routes.forEach((r, ri) => {
     const row = el("div", "drow" + (r.condition === "else" ? " relse" : ""));
+    row.dataset.route = String(ri);
     const cond = el("div", "dcond mono", r.condition);
     cond.title = r.condition;
     row.append(cond);
@@ -3176,7 +3298,7 @@ function routeSection(it, execP) {
     if (!byTarget.has(r.target)) byTarget.set(r.target, []);
     byTarget.get(r.target).push({row, meta});
     sec.append(row);
-  }
+  });
   if (execP) execP.then(data => {
     if (!data.executions.length) return;
     const fired = {};
@@ -4930,7 +5052,7 @@ function buildLegend() {
     box.append(r);
   };
   row(legendSample(""), "data flows this way — the output feeds the next op");
-  row(legendSample("cond"), "if/else route — the condition sits in its own row on the router card, and the wire leaves that row");
+  row(legendSample("cond"), "if/else route — a router is a patch panel: each condition is a port, read top to bottom, and its wire leaves that port's socket; the socket's light is on for the route a run took. Point at a port for its condition, click it to find it in the decision table");
   row(legendSample("ecore cond relse", true), "else — fires only when no condition matched");
   row(legendSample("soft", true), "soft merge — may not fire at all");
   row(el("span", "lglyph lzone", "↺"), "a violet zone is a loop: the steps inside run again every turn; its header says where the loop exits and on what condition");
@@ -4947,7 +5069,7 @@ function buildLegend() {
   row(el("span", "lglyph ldata", "─◯<"), "a split point: one value read by several ops leaves its op once and splits here");
   row(el("span", "lglyph ldata", ">◯─"), "a merge ring: several ops feed one input (alternative branches); their wires meet here, then go in as one");
   row(el("span", "lglyph ldata", "◉ x"), "click an op to see all its data wires; point at a variable or a wire to single it out; click a variable to follow its value through the graph");
-  row(el("span", "lglyph ldata", "x ◉"), "a router's inputs plug straight into the condition that reads them");
+  row(el("span", "lglyph ldata", "x ◉"), "a router's inputs plug straight into the condition that reads them; the same variable in other conditions wears the same colour, and lights with it");
 
   box.append(el("div", "ltitle lkeys", "Keys"));
   box.append(el("div", "lrow lkeysrow",

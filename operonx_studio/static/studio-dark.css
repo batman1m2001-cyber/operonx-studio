@@ -51,6 +51,11 @@
   --k-llm: #a665d2;
   --k-graph: #00964a;
   --k-branch: #d45f06;
+  /* the router's patch panel, in graphite with cyan wires */
+  --rt-body1: #232b36; --rt-body2: #1a212a; --rt-edge: #3d4a5c; --rt-ear: #2b3440;
+  --rt-ink: #e6ebf2; --rt-sub: #93a0b1; --rt-bay: #141a21; --rt-bay-edge: #344052;
+  --rt-cond: #8fb4ff; --rt-led: #3ee08a; --rt-led-off: #2f3a48; --rt-socket: #0b0f14;
+  --rt-wire: #5cc8ff; --rt-wire-else: #4c6a80;
   --k-io: #ee518a;
   --k-audio: #ee518a;
   --k-res: #0ba7b6;
