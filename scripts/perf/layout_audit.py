@@ -6,7 +6,7 @@ The checks run in the page, on the DOM as the user sees it (not on the
 layout's own model, so a model that drifted from its cards is caught):
 
   ports       a decision row's wire port at the card's corner, or not at its row's dot
-              (a column's dot: its socket, on the card's bottom edge under it)
+              (a route zone's dot: its socket, on the card's bottom edge under its tree's stem)
   side        a row's dot on the side away from its target; a column's wire not heading down
   model       a card's box differs from the box its wires were drawn from
   hidden      a card that is not laid out (zero size)
@@ -107,7 +107,8 @@ AUDIT_JS = r"""
   const rowDot = (b, rrow) => {
     // a column (the patch panel): its socket, on the bottom edge under it
     if (rrow.closest('.cols'))
-      return {x: b.x + b.el.clientLeft + rrow.offsetLeft + rrow.offsetWidth / 2, y: b.y + b.h, down: true};
+      return {x: b.x + b.el.clientLeft + rrow.offsetLeft + rrow.clientLeft + Number(rrow.dataset.stem || rrow.clientWidth / 2),
+              y: b.y + b.h, down: true};
     const left = rrow.classList.contains('left');
     return {x: b.x + (left ? rrow.offsetLeft - 1 : rrow.offsetLeft + rrow.offsetWidth + 1),
             y: b.y + rrow.offsetTop + rrow.offsetHeight / 2, left};

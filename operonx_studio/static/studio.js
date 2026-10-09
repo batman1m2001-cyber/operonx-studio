@@ -1845,7 +1845,8 @@ function render() {
     // twice its deficit for that column to gain it
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
     const want = Math.ceil(m.it.w + need + 8);
-    const cap = m.card.querySelector(".dfports") ? 420 : 310;
+    // a router is as wide as its zones: they never fold or cut
+    const cap = m.card.classList.contains("cols") ? 2000 : m.card.querySelector(".dfports") ? 420 : 310;
     const w = Math.max(180, Math.min(cap, want));
     if (want > cap) {
       // a name cut short says itself in full on hover
@@ -1861,12 +1862,13 @@ function render() {
     if (card.offsetHeight) it.h = card.offsetHeight;
     if (it.node.routes && it.node.routes.length) {
       const down = card.classList.contains("cols");
+      if (down) drawCondTrees(card);
       it.rows = [...card.querySelectorAll(".brrow")].map(rrow => ({
         el: rrow, target: rrow.dataset.target,
         route: rrow.dataset.route != null ? Number(rrow.dataset.route) : null,
         left: rrow.offsetLeft, top: rrow.offsetTop, w: rrow.offsetWidth, h: rrow.offsetHeight,
-        // a column's exit: on the card's bottom edge, under its centre
-        down, cx: card.clientLeft + rrow.offsetLeft + rrow.offsetWidth / 2,
+        // a zone's exit: on the card's bottom edge, under its tree's stem
+        down, cx: card.clientLeft + rrow.offsetLeft + rrow.clientLeft + Number(rrow.dataset.stem || rrow.clientWidth / 2),
       }));
     }
   }
@@ -2761,6 +2763,72 @@ function lensBadge(card, badges, n) {
   }
 }
 
+/* Each zone's brackets: under the books, one per `and` / `or`, joined at
+ * its books' feet (or its inner brackets' joints), a level deeper per
+ * nesting; the root's stem drops to the zone's foot, where its socket
+ * sits. `and` is solid, `or` dashed; each carries its operator in a small
+ * square, turned with the text. The run's light rides the stem. Reads the
+ * laid-out books, then writes one svg per zone (absolute: no re-layout). */
+function drawCondTrees(card) {
+  const zones = [...card.querySelectorAll(".brrow")].filter(z => z._tree);
+  const plans = zones.map(zone => {
+    const books = zone.querySelector(".brbooks");
+    const foot = Math.max(...[...books.children].map(b => b.offsetTop + b.offsetHeight));
+    const lines = [], marks = [];
+    const at = (n) => {
+      if (!n.op) return {x: n.el.offsetLeft + n.el.offsetWidth / 2, y: foot};
+      const ks = n.kids.map(at), y = foot + 9 + (CondTree.depth(n) - 1) * 14;
+      const x1 = Math.min(...ks.map(k => k.x)), x2 = Math.max(...ks.map(k => k.x));
+      const cls = n.op === "&" ? "cand" : "cor";
+      for (const k of ks) lines.push([`M ${k.x} ${k.y} V ${y}`, cls]);
+      lines.push([`M ${x1} ${y} H ${x2}`, cls]);
+      const x = (x1 + x2) / 2;
+      marks.push({x, y, op: n.op});
+      return {x, y};
+    };
+    const root = at(zone._tree);
+    // the stem runs on past the zone to the socket on the card's edge
+    const end = card.offsetHeight - card.clientTop - zone.offsetTop - zone.clientTop;
+    return {zone, root, lines, marks, h: zone.clientHeight, w: zone.clientWidth, end};
+  });
+  for (const {zone, root, lines, marks, h, w, end} of plans) {
+    zone.querySelector("svg.ctree")?.remove();
+    const svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("class", "ctree");
+    svg.setAttribute("width", w); svg.setAttribute("height", h);
+    const path = (d, cls) => { const p = document.createElementNS(SVGNS, "path"); p.setAttribute("d", d); p.setAttribute("class", cls); svg.append(p); };
+    for (const [d, cls] of lines) path(d, cls);
+    path(`M ${root.x} ${root.y} V ${end}`, "cstem");
+    for (const m of marks) {
+      const g = document.createElementNS(SVGNS, "g");
+      g.setAttribute("class", "cmark " + (m.op === "&" ? "cand" : "cor"));
+      const r = document.createElementNS(SVGNS, "rect");
+      r.setAttribute("x", m.x - 5.5); r.setAttribute("y", m.y - 5.5);
+      r.setAttribute("width", 11); r.setAttribute("height", 11); r.setAttribute("rx", 2.5);
+      const t = document.createElementNS(SVGNS, "text");
+      t.setAttribute("x", m.x); t.setAttribute("y", m.y + 0.5);
+      t.setAttribute("transform", `rotate(90 ${m.x} ${m.y})`);
+      t.textContent = m.op;
+      const tip = document.createElementNS(SVGNS, "title");
+      tip.textContent = m.op === "&" ? "and: every clause must hold" : "or: any one clause";
+      g.append(r, t, tip);
+      svg.append(g);
+    }
+    if (zone.dataset.took) {
+      const led = document.createElementNS(SVGNS, "circle");
+      led.setAttribute("class", "cled"); led.setAttribute("cx", root.x); led.setAttribute("cy", h - 8); led.setAttribute("r", 3);
+      const tip = document.createElementNS(SVGNS, "title");
+      tip.textContent = "the run took this route";
+      led.append(tip);
+      svg.append(led);
+    }
+    zone.prepend(svg);
+    zone.dataset.stem = String(root.x);
+    const port = zone.querySelector(".brport");
+    if (port) port.style.left = `${root.x}px`;
+  }
+}
+
 /* A branch reads its inputs IN its conditions: each input's plug moves
  * into the first condition that names it (the wire plugs into the name),
  * later mentions wear the same chip, hole-less; nothing is listed twice.
@@ -2844,11 +2912,14 @@ function opCard(it) {
       t.kind + (t.path ? ` · ${t.path}` : "")));
     if (t && t.description) card.title = t.description;
   } else if (n.routes && n.routes.length) {
-    // a router is a DECISION CARD: one column per condition, side by side
-    // in route order, each with its own exit on the card's bottom edge —
-    // the flow runs down, so each wire drops straight to its target. The
-    // condition reads top to bottom; hovering a column says it in full,
-    // clicking one picks it in the decision table.
+    // a router is a DECISION CARD: one zone per route, side by side in
+    // route order, each with its own exit on the card's bottom edge — the
+    // flow runs down, so each wire drops straight to its target. In a zone
+    // each clause of the condition is a book (its text top to bottom), and
+    // each `and` / `or` a bracket under the books it joins, the brackets
+    // nesting as the condition does; the last one's stem runs into the
+    // socket (drawCondTrees, once the card is measured). Hovering a zone
+    // says the condition flat; clicking one picks it in the decision table.
     card.classList.add("branch", "cols");
     const line = el("div", "nname nline");
     line.append(el("span", "nicon", kindIcon(n)));
@@ -2861,15 +2932,27 @@ function opCard(it) {
     // which route the painted run took last: its port's light is on
     const lastOut = state.run && state.run.ops && state.run.ops[n.name] && state.run.ops[n.name].last;
     const took = lastOut && lastOut.target != null ? n.routes.findIndex(r => r.target === lastOut.target) : -1;
+    const trees = n.routes.map(r => (r.condition === "else" ? {text: "else"} : CondTree.parse(r.condition)));
+    // every zone keeps the same room under its books for the deepest
+    // condition's brackets, so every book in the router is one height
+    const room = Math.max(...trees.map(CondTree.depth)) * 14 + 16;
     n.routes.forEach((r, ri) => {
       const picked = state.route && state.route.key === it.key && state.route.ri === ri;
       const rrow = el("div", "brrow" + (r.condition === "else" ? " relse" : "") + (picked ? " picked" : ""));
       rrow.dataset.target = r.target;
       rrow.dataset.route = String(ri);
-      rrow.append(el("span", "brcond mono", r.condition));
-      const led = el("span", "brled" + (ri === took ? " on" : ""));
-      if (ri === took) led.title = "the run took this route";
-      rrow.append(led);
+      if (ri === took) rrow.dataset.took = "1";
+      const books = el("div", "brbooks");
+      for (const leaf of CondTree.leaves(trees[ri])) {
+        const book = el("span", "brcond book mono" + (leaf.text === "else" && r.condition === "else" ? " elsebook" : ""), leaf.text);
+        leaf.el = book;
+        books.append(book);
+      }
+      rrow.append(books);
+      const under = el("div", "brroom");
+      under.style.height = `${room}px`;
+      rrow.append(under);
+      rrow._tree = trees[ri];
       rrow.append(el("span", "brport"));
       rrow.setAttribute("aria-label", `${r.condition} → ${r.target}`);
       rrow.onpointerenter = (ev) => routeTip(ev, it.key, ri, r);
@@ -5052,7 +5135,7 @@ function buildLegend() {
     box.append(r);
   };
   row(legendSample(""), "data flows this way — the output feeds the next op");
-  row(legendSample("cond"), "if/else route — a router is a patch panel: each condition is a port, read top to bottom, and its wire leaves that port's socket; the socket's light is on for the route a run took. Point at a port for its condition, click it to find it in the decision table");
+  row(legendSample("cond"), "if/else route — a router is a patch panel with a zone per route, in route order. Each clause of a condition is a book (read top to bottom); under them, each and (&, solid) / or (|, dashed) is a bracket joining its books, nesting as the condition does, and the last one's stem runs to the route's socket. The socket's light is on for the route a run took. Point at a zone for its condition, click it to find it in the decision table");
   row(legendSample("ecore cond relse", true), "else — fires only when no condition matched");
   row(legendSample("soft", true), "soft merge — may not fire at all");
   row(el("span", "lglyph lzone", "↺"), "a violet zone is a loop: the steps inside run again every turn; its header says where the loop exits and on what condition");
