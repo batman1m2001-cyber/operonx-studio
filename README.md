@@ -2,9 +2,14 @@
 
 The visual studio and project tooling for [operonx](https://github.com/batman1m2001-cyber/Operonx).
 
+Start a project with `operonx init` first (see the
+[operonx README](https://github.com/batman1m2001-cyber/Operonx#start-a-project)),
+then open it here with `operonx studio` from inside the project.
+
 ```
 git clone https://github.com/batman1m2001-cyber/operonx-studio
 operonx-studio/install.sh           # again after a `git pull` to upgrade
+                                    # without bash (Windows): pip install ./operonx-studio
 
 operonx-studio            # open the studio — pick, open, or create a project
 operonx-studio PATH       # … with the project at PATH already open
@@ -35,7 +40,8 @@ through the graph. The **?** button on the canvas explains every mark.
 
 `install.sh` installs the commands as a uv tool, in an environment of their
 own (with plain pip when uv is missing); operonx comes from PyPI. Inside a
-project, `operonx studio` does the same as `operonx-studio .`. If a studio
+project, `operonx studio` (`uv run operonx studio` in a uv project, or in
+the activated `.venv` of a pip one) does the same as `operonx-studio .`. If a studio
 is already running, it adds the project to that studio and opens it.
 
 The first sign-in is `root` / `123` (or `OPERONX_STUDIO_USER` /
