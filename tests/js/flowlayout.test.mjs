@@ -438,3 +438,16 @@ test("random workflows with agents, random open sets: no wire through a card, no
   }
   assert.ok(agents > 60 && partsSeen > 200, `${agents} agents, ${partsSeen} parts`);
 });
+
+test("the op after END hangs below the END terminal, wired from it", () => {
+  // `END >> closed` (operonx 1.20): the runtime calls it once after the run
+  const g = {nodes: ["a", "t", "closed"].map(n => card(n)),
+             edges: [edge("a", "t")], entries: ["a"], exits: ["t"], finals: ["closed"]};
+  const out = FL.layout(g, {expanded: new Set(), sizeOf: plain});
+  assert.deepEqual(problems(out), []);
+  const end = out.end;
+  const closed = out.items.find(i => i.node.name === "closed");
+  assert.ok(end && closed, "both drawn");
+  assert.ok(closed.y > end.y + end.h, "below END");
+  assert.ok(out.wires.some(w => w.a.node.name === "END" && w.b === closed), "a wire from END to it");
+});

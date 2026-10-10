@@ -649,6 +649,9 @@ def _subgraph(g: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[
         "edges": edges,
         "entries": list(_slot(g, "entries") or []),
         "exits": list(_slot(g, "exits") or []),
+        # `END >> op` (operonx 1.20): the op the runtime calls once after the
+        # run, however it ended. Drawn after the END terminal, wired from it.
+        "finals": list(_slot(g, "_finals") or []),
     }
     # The author's `member["x"] >> PARENT["y"]` writes — the only edges
     # that genuinely OVERRIDE another op's variable. GraphOp keeps them
