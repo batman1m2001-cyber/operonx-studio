@@ -135,6 +135,7 @@ def _graph_payload(graph: Dict[str, Any]) -> Dict[str, Any]:
         "entry": graph.get("entry"),
         "entries": graph.get("entries") or [],
         "exits": graph.get("exits") or [],
+        "finals": graph.get("finals") or [],
         "width": placed.width,
         "height": placed.height,
         "nodes": nodes,
