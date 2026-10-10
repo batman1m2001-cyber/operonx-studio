@@ -354,8 +354,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     "play": {"fn": t_play,
              "description": "Drive one of the application's services like a client, in the playground: send "
                             "`messages` (strings are text; objects are JSON items) through its real door, then "
-                            "report what came back. `query` is the connection's query string (what on_session "
-                            "reads). `replay_of` replays a recorded run instead (a playground session, or a real one of a service declared with replay=True). Each session is a "
+                            "report what came back. `query` is the connection's query string (it fills the graph's "
+                            "parameters). `replay_of` replays a recorded run instead (a playground session, or a real one of a service declared with replay=True). Each session is a "
                             "recorded run.",
              "schema": _schema({"service": _S, "messages": {"type": "array"}, "query": {"type": "object"},
                                 "toy": _S, "replay_of": _S, "timeout": _N}, ["service"])},

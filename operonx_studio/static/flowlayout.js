@@ -240,10 +240,12 @@
     };
     const entries = (g.entries || []).map(nm => byName.get(nm)).filter(Boolean);
     const exits = (g.exits || []).map(nm => byName.get(nm)).filter(Boolean);
+    // `END >> op`: the op after END, called once however the run ended
+    const finals = (g.finals || []).map(nm => byName.get(nm)).filter(Boolean);
     if (inner) { S = term("start"); E = term("end"); }
     else {
       if (entries.length) S = term("start");
-      if (exits.length) E = term("end");
+      if (exits.length || finals.length) E = term("end");
     }
 
     // ── wires ──
@@ -288,6 +290,7 @@
       if (S) for (const L of entries) tie(S, L);
       if (E) for (const L of exits) tie(L, E);
     }
+    if (E) for (const L of finals) tie(E, L);
 
     // ── layering ──
     const all = [...(S ? [S] : []), ...N, ...(E ? [E] : [])];
@@ -335,8 +338,10 @@
       }
       if (E) {
         let mx = 0;
-        for (const L of all) if (L !== E) mx = Math.max(mx, layer.get(L));
+        for (const L of all) if (L !== E && !finals.includes(L)) mx = Math.max(mx, layer.get(L));
         layer.set(E, mx + 1);
+        // the op after END sits one layer below it
+        for (const L of finals) layer.set(L, mx + 2);
       }
     }
     for (const w of W) {

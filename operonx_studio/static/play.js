@@ -240,19 +240,25 @@ const PlayView = (() => {
     grid.append(main, side);
     box.append(grid);
 
-    // the connection: what on_session sees as the query string
+    // the connection: the query string, which fills the graph's parameters
+    // (operonx 1.20: on every door, without a hook)
     const conn = el("details", "playconn");
     conn.open = !(v.query && v.query[d.service] && Object.keys(v.query[d.service]).length) && !!d.inputs.length;
     conn.append(el("summary", null, d.custom_hook ? "Connection — query the service's on_session hook reads"
-                                                   : "Connection — the graph's inputs, as the query string"));
+                                                   : "Connection — the graph's parameters, as the query string"));
     const rows = el("div", "playrows");
     const saved = (v.query && v.query[d.service]) || {...(d.query || {})};
-    const keys = [...new Set([...(d.custom_hook ? [] : d.inputs), ...Object.keys(d.query || {}), ...Object.keys(saved)])];
+    const defaults = d.defaults || {};
+    const required = new Set(d.required || []);
+    const keys = [...new Set([...d.inputs, ...Object.keys(d.query || {}), ...Object.keys(saved)])];
     const rowEls = [];
     const addRow = (k = "", val = "") => {
       const r = el("div", "playrow");
       const ki = el("input", "mono"); ki.value = k; ki.placeholder = "key"; ki.setAttribute("aria-label", "Query key");
-      const vi = el("input", "mono"); vi.value = val; vi.placeholder = "value"; vi.setAttribute("aria-label", "Query value");
+      const vi = el("input", "mono"); vi.value = val;
+      // a parameter's default, or that it must be given, says what an empty box means
+      vi.placeholder = k in defaults ? `default: ${JSON.stringify(defaults[k])}` : required.has(k) ? "required" : "value";
+      vi.setAttribute("aria-label", "Query value");
       r.append(ki, vi);
       rows.append(r);
       rowEls.push([ki, vi]);

@@ -637,3 +637,33 @@ class TestAgentOp:
     def test_an_op_without_an_agent_has_no_agent_entry(self, tmp_path):
         ir = extract_project(project(tmp_path, LINEAR, LINEAR_MANIFEST))
         assert all("agent" not in n for n in ir["graphs"][0]["nodes"])
+
+
+ENDED = """
+from operonx.core import END, PARENT, START, graph, op
+
+@op
+def work(x: int):
+    return {"y": x + 1}
+
+@op
+def close(x: int = 0):
+    return {}
+
+@graph
+def flow(x):
+    w = work(x=x)
+    c = close(x=x)
+    START >> w >> END
+    END >> c
+"""
+
+
+def test_the_op_after_end_is_carried_apart_from_the_exits(tmp_path):
+    """`END >> op` (operonx 1.20): the canvas draws it after the END
+    terminal, wired from it — not as an exit, not as an entry."""
+    ir = extract_project(project(tmp_path, ENDED, LINEAR_MANIFEST))
+    g = ir["graphs"][0]
+    assert g["finals"] == ["c"]
+    assert g["exits"] == ["w"] and g["entries"] == ["w"]
+    assert "c" in {n["name"] for n in g["nodes"]}
