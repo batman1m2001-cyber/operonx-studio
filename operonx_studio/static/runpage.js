@@ -184,23 +184,26 @@ async function renderExecPanel(run, e, execs, target) {
     }
   }
   head.append(title);
-  const verdict = el("div", "execverdict");
-  verdict.append(el("span", "status " + (e.status === "error" ? "s-bad" : "s-ok"), e.status === "error" ? "failed" : "ok"));
-  verdict.append(el("span", "vsep", "·"), el("span", "strong", fmtMs(e.dur_ms)));
+  // the facts at a glance, as pills: how it went, how long, how it ranks,
+  // when (the recorder's wall clock, so a step can be matched to a log line)
+  const verdict = el("div", "execverdict pills");
+  verdict.append(el("span", "pill status " + (e.status === "error" ? "s-bad" : "s-ok"), e.status === "error" ? "failed" : "ok"));
+  verdict.append(RunView.pill(fmtMs(e.dur_ms), "Took", "p-strong"));
   const rank = RunView.rank(e, mine);
-  if (rank) verdict.append(el("span", "vsep", "·"), el("span", null, rank));
-  head.append(verdict);
-  const when = el("div", "execwhen");
-  when.append(`at +${fmtMs(e.start_ms)}`);
+  if (rank) verdict.append(RunView.pill(rank));
+  verdict.append(RunView.pill(`+${fmtMs(e.start_ms)}`, "Start"));
   if (e.wall_start) {
-    // the recorder's wall clock, so a card can be matched to a log line
     const at = new Date(e.wall_start * 1000);
-    const t = el("span", "mono", " · " + at.toLocaleTimeString([], {hour12: false}) + "." + String(at.getMilliseconds()).padStart(3, "0"));
-    t.title = at.toISOString();
-    when.append(t);
+    verdict.append(RunView.pill(at.toLocaleTimeString([], {hour12: false}) + "." + String(at.getMilliseconds()).padStart(3, "0"),
+      "At", "mono", at.toISOString()));
   }
-  if (e.ctx && e.ctx !== "main") when.append(el("span", "mono", ` · ${e.ctx}`));
-  head.append(when);
+  head.append(verdict);
+  if (e.ctx && e.ctx !== "main") {
+    const when = el("div", "execwhen");
+    when.append(el("span", "mono", e.ctx));
+    if (e.id) when.append(RunView.copyId(e.id, "Copy the step id"));
+    head.append(when);
+  }
   panel.append(head);
 
   const flags = RunView.anomalies(e, mine);

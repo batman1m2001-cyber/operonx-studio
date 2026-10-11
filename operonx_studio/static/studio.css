@@ -77,6 +77,7 @@
   --rt-ink: #243142; --rt-sub: #5b6878; --rt-bay: #f9fbfc; --rt-bay-edge: #c3ccd7;
   --rt-cond: #3a4a8c; --rt-led: #22a35a; --rt-led-off: #c9d1db; --rt-socket: #2b3442;
   --rt-wire: #4f5bd5; --rt-wire-else: #9aa4c4; --rt-zone-edge: #a9b5c3;
+  --rt-guide: #e3e7ec;
   /* the agent: a hive cell — its steel edge (dark → light sheen), body,
      glow, honeycomb, parts chips and accent */
   --ag-e1: #c9dcf3; --ag-e2: #4a6fa5; --ag-e3: #9fc0ea; --ag-e4: #2f5182;
@@ -1785,7 +1786,8 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 /* the origin line is a row of the column: its row-header flex-basis (100%)
    made it as tall as the header here, and the wrap put it in a second
    column past the right edge — every job, eval and service run lost it */
-.runhead .tlorigin { flex-basis: auto; margin-top: 0; }
+.runhead .tlorigin { flex-basis: auto; margin-top: 0; font-size: var(--fs-sm); color: var(--text-3); overflow-wrap: anywhere; }
+.runhead .tlorigin .linkbtn { font-size: var(--fs-sm); }
 .runhead-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
 .verdict { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-base);
   color: var(--text); }
@@ -1838,10 +1840,32 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .badge.cost { color: var(--ink-violet46); border-color: var(--line-violet87); background: var(--rt-bay); font-weight: 600; }
 
 /* one execution */
-.execverdict { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 6px;
-  font-size: var(--fs-md); color: var(--text-2); }
-.execverdict .strong { color: var(--text); font-weight: 600; }
-.execwhen { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.execverdict { margin-top: 8px; }
+.execwhen { display: flex; align-items: center; gap: 2px; font-size: 11.5px; color: var(--text-3); margin-top: 6px; min-width: 0; }
+.execwhen .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* facts as pills: a quiet label, then the value (the run's and a step's header) */
+.pills { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pill { display: inline-flex; align-items: center; gap: 5px; min-height: 22px; padding: 0 8px; border-radius: 999px;
+  background: var(--surface-3); color: var(--text); font-size: var(--fs-sm); font-weight: 500; line-height: 1;
+  white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pill-k { color: var(--text-3); font-weight: 400; }
+.pill.p-strong .pill-v { font-weight: 650; }
+.pill.mono .pill-v { font-family: var(--mono); font-size: 11.5px; }
+.pill.p-bad { background: var(--err-soft); color: var(--err); font-weight: 600; }
+.pill.p-bad .pill-k { color: inherit; font-weight: 500; }
+.pill.status, .verdict .pill.status { font-size: var(--fs-sm); font-weight: 600; gap: 6px; }
+.pill.status.s-ok { background: var(--ok-soft); }
+.pill.status.s-bad { background: var(--err-soft); }
+.pill.status.s-run { background: var(--accent-soft); }
+.idcopy { min-height: 24px; width: 24px; min-width: 24px; padding: 0; color: var(--text-3); flex: none; }
+.idcopy:hover { color: var(--text); }
+.idcopy .icon { width: 13px; height: 13px; }
+.highlights .hl-k { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-3); margin-right: 4px; }
+.highlights .pill + .hl-k { margin-left: 12px; }
+.highlights { gap: 6px; }
+.hl-op .linkbtn { padding: 0; min-height: 0; font-size: var(--fs-sm); }
 .errcard { background: var(--err-soft); border: 1px solid var(--line-red56-a22); border-radius: var(--r-md);
   padding: 10px 12px; margin: 4px 0 12px; }
 .errcard-head { color: var(--ink-red43); font-weight: 600; font-size: var(--fs-md); overflow-wrap: anywhere; }
@@ -4308,6 +4332,10 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .rt-spacer { position: relative; }
 .rt-rows { position: absolute; inset: 0 0 auto 0; }
 .rt-row { position: absolute; left: 0; right: 0; height: 30px; padding: 0 12px; cursor: pointer; font-size: var(--fs-md); }
+/* the tree's guide lines: one per level above the row, under each parent's fold toggle */
+.rt-row[style*="--d"]::before { content: ""; position: absolute; top: 0; bottom: 0; left: 19px; pointer-events: none;
+  width: calc(var(--d) * 14px);
+  background: repeating-linear-gradient(to right, transparent 0 6.5px, var(--rt-guide) 6.5px 7.5px, transparent 7.5px 14px); }
 .rt-row:hover { background: var(--surface-2); }
 .rt-row.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .rt-row.err .rt-n { color: var(--err); }
@@ -4315,18 +4343,26 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .rt-tog { width: 16px; flex: 0 0 16px; border: none; background: none; padding: 0; color: var(--text-3); font-size: 11px; min-height: 0; cursor: pointer; }
 .rt-ico { --kind: var(--text-3); width: 18px; height: 18px; flex: 0 0 18px; display: inline-grid; place-items: center; border-radius: 5px;
   font-size: 11px; color: var(--kind); background: color-mix(in srgb, var(--kind) 12%, transparent); }
-.rt-n { font-weight: 550; overflow: hidden; text-overflow: ellipsis; flex: 0 0 auto; max-width: 70%; }
+.rt-n { font-weight: 500; overflow: hidden; text-overflow: ellipsis; flex: 0 0 auto; max-width: 70%; }
 .rt-stand-in .rt-n, .rt-container .rt-n { color: var(--text-2); font-weight: 500; }
-.rt-key { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--signal-strong);
-  background: var(--signal-soft); border-radius: 4px; padding: 0 5px; line-height: 16px; flex: 0 0 auto; }
+.rt-row.sel .rt-n { font-weight: 600; }
+.rt-key { font-size: 9.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--signal-strong);
+  line-height: 16px; flex: 0 0 auto; }
 .rt-errtag { font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--err); background: var(--err-soft); border-radius: 4px; padding: 0 5px; line-height: 16px; }
 .rt-pv { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto; font-size: var(--fs-sm); }
 .rt-pv.bad { color: var(--err); }
 .rt-dur { text-align: right; padding-right: 12px; font-variant-numeric: tabular-nums; color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; }
-.rt-track { position: relative; height: 8px; background: var(--surface-3); border-radius: 4px; }
-.rt-track b { position: absolute; top: 0; bottom: 0; background: var(--wire); border-radius: 4px; min-width: 2px; }
+/* the time axis: no capsule per row — bars float on a faint quarter grid
+   that runs unbroken down the rows, as a trace timeline reads */
+.rt-track { position: relative; align-self: stretch;
+  background: linear-gradient(to right, var(--rt-guide) 1px, transparent 1px) 0 0 / 25% 100% repeat-x;
+  box-shadow: inset -1px 0 0 var(--rt-guide); }
+.rt-track b { position: absolute; top: 10px; bottom: 10px; border-radius: 3px; min-width: 2px;
+  background: color-mix(in srgb, var(--kind, var(--wire)) 78%, var(--surface)); }
+.rt-row:not(.err):not(.sel):hover .rt-track b { background: var(--kind, var(--wire)); }
 .rt-row.err .rt-track b { background: var(--err); }
 .rt-row.sel .rt-track b { background: var(--accent); }
+.rt-row.sel.err .rt-track b { background: var(--err); }
 .rt-grip { cursor: col-resize; background: var(--surface-2); }
 .rt-grip:hover { background: var(--border); }
 .rt-step { overflow: auto; padding: 14px 16px; min-width: 0; background: var(--surface); }
