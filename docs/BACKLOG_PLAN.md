@@ -63,3 +63,9 @@ T1 with them. T3 last. Progress is recorded in §6 as each item closes.
 | O8 `CLAUDE.md` | done | `release/1.11.0` cd729cb — no `chat()`/`ask()`/`GraphOp.loop`; wiring styles it shows re-run against 1.10.2 |
 | K4 | done | callbot 838586b — `call_store:default` + `source:call_logs` in resources.yaml, same variable names; 295 tests pass |
 | T3 plan | done | `docs/TEAM_PLAN.md` — six phases P1–P6, each with its gate; claims spot-checked against app.py, chat.py, assistant.py |
+
+## 7. Next (added 2026-10-11)
+
+| Item | State |
+|---|---|
+| **Studio experience**: traces as good as Langfuse's, node configuration and Resource Hub edits written back to the project's own files, one design system | planned: `docs/STUDIO_EXPERIENCE_PLAN.md`; P0 (two rendered visual directions) waits on you |
