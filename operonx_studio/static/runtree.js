@@ -111,6 +111,8 @@ const RunTree = (() => {
     row.setAttribute("role", "treeitem");
     row.dataset.i = String(r._i);
     if (!timeline && r.kids) row.setAttribute("aria-expanded", String(!cur.folded.has(r._i)));
+    // one guide line per level above it, so what ran for what reads down the page
+    if (!timeline && r.depth > 0) row.style.setProperty("--d", String(r.depth));
     const name = el("div", "rt-name");
     name.style.paddingLeft = `${(timeline ? 0 : r.depth) * 14 + 6}px`;
     let tog;
@@ -123,7 +125,8 @@ const RunTree = (() => {
     } else {
       tog = el("span", "rt-tog");   // keeps the column; nothing to fold
     }
-    name.append(tog, iconOf(r), el("span", "rt-n", r.name));
+    const ico = iconOf(r);
+    name.append(tog, ico, el("span", "rt-n", r.name));
     if (r.op && cur.keyOps.has(r.op)) {
       const k = el("span", "rt-key", "key");
       k.title = "A key op of this service: a latency the caller feels";
@@ -136,6 +139,9 @@ const RunTree = (() => {
     row.append(el("div", "rt-dur", r.kind === "stand-in" && !r.dur_ms ? "" : fmtMs(r.dur_ms || 0)));
     const track = el("div", "rt-track");
     const bar = el("b");
+    // the bar wears its op's kind colour: a speech step and an LLM step tell apart on the axis
+    const kind = ico.style.getPropertyValue("--kind");
+    if (kind) bar.style.setProperty("--kind", kind);
     bar.style.left = `${(r.start_ms / cur.total * 100).toFixed(3)}%`;
     bar.style.width = `${Math.max(0.3, (r.dur_ms || 0) / cur.total * 100).toFixed(3)}%`;
     track.append(bar);

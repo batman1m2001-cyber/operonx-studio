@@ -34,6 +34,26 @@ const RunView = (() => {
     return n + (["th", "st", "nd", "rd"][(v - 20) % 10] || ["th", "st", "nd", "rd"][v] || "th");
   };
 
+  /* A fact as a pill: a quiet label and its value (Langfuse's trace and
+   * observation headers read this way — latency, cost, tokens at a glance). */
+  function pill(value, label, cls, title) {
+    const p = el("span", "pill" + (cls ? " " + cls : ""));
+    if (label) p.append(el("span", "pill-k", label));
+    p.append(el("span", "pill-v", value));
+    if (title) p.title = title;
+    return p;
+  }
+
+  /* A run or step id, with one click to copy it. */
+  function copyId(text, title) {
+    const b = Icons.button("copy", undefined, "small ghost idcopy", title || "Copy the id");
+    b.onclick = async () => {
+      try { await navigator.clipboard.writeText(text); toast("Copied"); }
+      catch { toast(text); }
+    };
+    return b;
+  }
+
   /* The header: title row, the verdict, the two highlights, the origin. */
   function header(run, data, mode, extras) {
     const s = data.summary || {};
@@ -41,7 +61,7 @@ const RunView = (() => {
     const top = el("div", "runhead-top");
     const back = Icons.button("back", "Runs", "small ghost", "Back to all runs");
     back.onclick = () => showTraces();
-    top.append(back, el("span", "tltitle", run));
+    top.append(back, el("span", "tltitle", run), copyId(run, "Copy the run id"));
     const modes = el("span", "tlmodes");
     modes.setAttribute("role", "tablist");
     for (const [key, label, title, fn] of [["tree", "Tree", "The run as a tree: what ran for what, in order", showRunTree],
@@ -64,21 +84,28 @@ const RunView = (() => {
     // a run can fail with no failed execution: a structured LLM step that
     // returned `error`, a subgraph failing around its children
     const failed = !!errs || records.length > 0 || s.status === "error";
-    const line = el("div", "verdict");
+    const line = el("div", "verdict pills");
     // a run still going (or whose process died) has no verdict yet
     const running = s.status === "running";
-    const status = el("span", "status " + (running ? "s-run" : failed ? "s-bad" : "s-ok"),
+    const status = el("span", "pill status " + (running ? "s-run" : failed ? "s-bad" : "s-ok"),
       running ? "running" : failed ? "failed" : "ok");
     line.append(status);
-    const bits = [fmtMs(s.duration_ms || data.total_ms || 0)];
+    line.append(pill(fmtMs(s.duration_ms || data.total_ms || 0), "Took"));
     const cost = money(s.cost_usd, s.unpriced);
-    if (cost) bits.push(cost);
-    if (s.llm_calls) bits.push(`${s.llm_calls} LLM call${s.llm_calls > 1 ? "s" : ""}`);
-    if (s.tokens_in || s.tokens_out) bits.push(`${compact((s.tokens_in || 0) + (s.tokens_out || 0))} tokens`);
-    bits.push(`${recs.length} execution${recs.length === 1 ? "" : "s"}`);
-    for (const b of bits) { line.append(el("span", "vsep", "·"), el("span", null, b)); }
+    if (cost) line.append(pill(cost, "Cost", "p-cost"));
+    if (s.llm_calls) line.append(pill(`${s.llm_calls} LLM call${s.llm_calls > 1 ? "s" : ""}`));
+    if (s.tokens_in || s.tokens_out) {
+      line.append(pill(`${compact(s.tokens_in || 0)} → ${compact(s.tokens_out || 0)}`, "Tokens", null,
+        `${s.tokens_in || 0} in, ${s.tokens_out || 0} out${s.tokens_cached ? `, ${s.tokens_cached} cached` : ""}`));
+    }
+    line.append(pill(`${recs.length} step${recs.length === 1 ? "" : "s"}`));
+    if (s.started_at) {
+      const at = new Date(s.started_at * 1000);
+      line.append(pill(at.toLocaleString([], {hour12: false, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit"}),
+        "Started", null, at.toISOString()));
+    }
     if (errs) {
-      line.append(el("span", "vsep", "·"), el("span", "bad", `${errs} error${errs > 1 ? "s" : ""}`));
+      line.append(pill(`${errs} error${errs > 1 ? "s" : ""}`, null, "p-bad"));
       const next = Icons.button("right", "Next error", "small danger", "Select the failed ops one by one");
       next.classList.add("verdict-next");
       next.onclick = () => (mode === "workflow" ? walkErrors() : nextTreeError());
@@ -99,28 +126,26 @@ const RunView = (() => {
     const dear = rolls.filter(r => r.cost_usd).sort((a, b) => b.cost_usd - a.cost_usd)[0];
     if (keyOps.length) {
       const hl = el("div", "highlights");
-      hl.append("Key ops: ");
-      keyOps.forEach((r, i) => {
-        if (i) hl.append(el("span", "vsep", "·"));
-        hl.append(opLink(r.op));
+      hl.append(el("span", "hl-k", "Key ops"));
+      keyOps.forEach((r) => {
         const per = r.count ? r.total_ms / r.count : 0;
-        hl.append(` ${fmtMs(per)}${r.count > 1 ? ` avg of ${r.count}, max ${fmtMs(r.max_ms)}` : ""}`);
+        const p = el("span", "pill hl-op");
+        p.append(opLink(r.op), el("span", "pill-v", fmtMs(per)));
+        if (r.count > 1) p.append(el("span", "pill-k", `avg of ${r.count} · max ${fmtMs(r.max_ms)}`));
+        hl.append(p);
       });
       head.append(hl);
     }
     if (slow || dear) {
       const hl = el("div", "highlights");
-      if (slow) {
-        hl.append("Slowest: ");
-        hl.append(opLink(slow.op));
-        hl.append(` ${fmtMs(slow.total_ms)} (${Math.round(100 * slow.total_ms / total)}%)`);
-      }
-      if (dear) {
-        if (slow) hl.append(el("span", "vsep", "·"));
-        hl.append("Most expensive: ");
-        hl.append(opLink(dear.op));
-        hl.append(` ${money(dear.cost_usd, 0)}`);
-      }
+      const fact = (label, op, value) => {
+        hl.append(el("span", "hl-k", label));
+        const p = el("span", "pill hl-op");
+        p.append(opLink(op), el("span", "pill-v", value));
+        hl.append(p);
+      };
+      if (slow) fact("Slowest", slow.op, `${fmtMs(slow.total_ms)} (${Math.round(100 * slow.total_ms / total)}%)`);
+      if (dear) fact("Most expensive", dear.op, money(dear.cost_usd, 0));
       head.append(hl);
     }
     const origin = originLine(s);
@@ -415,5 +440,5 @@ const RunView = (() => {
   }
 
   state.lens = recall("lens", "path");
-  return {header, lensBar, timeline, anomalies, rank, dots, compare, money, focusOp, focusExec, background, LENSES};
+  return {header, pill, copyId, lensBar, timeline, anomalies, rank, dots, compare, money, focusOp, focusExec, background, LENSES};
 })();
