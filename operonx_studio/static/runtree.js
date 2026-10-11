@@ -113,12 +113,15 @@ const RunTree = (() => {
     if (!timeline && r.kids) row.setAttribute("aria-expanded", String(!cur.folded.has(r._i)));
     const name = el("div", "rt-name");
     name.style.paddingLeft = `${(timeline ? 0 : r.depth) * 14 + 6}px`;
-    const tog = el("button", "rt-tog", !timeline && r.kids ? (cur.folded.has(r._i) ? "▸" : "▾") : "");
-    tog.type = "button";
-    tog.tabIndex = -1;
+    let tog;
     if (!timeline && r.kids) {
-      tog.setAttribute("aria-label", cur.folded.has(r._i) ? "Open" : "Fold");
+      tog = el("button", "rt-tog", cur.folded.has(r._i) ? "▸" : "▾");
+      tog.type = "button";
+      tog.tabIndex = -1;
+      tog.setAttribute("aria-label", cur.folded.has(r._i) ? `Open ${r.name}` : `Fold ${r.name}`);
       tog.onclick = (ev) => { ev.stopPropagation(); fold(r); };
+    } else {
+      tog = el("span", "rt-tog");   // keeps the column; nothing to fold
     }
     name.append(tog, iconOf(r), el("span", "rt-n", r.name));
     if (r.op && cur.keyOps.has(r.op)) {

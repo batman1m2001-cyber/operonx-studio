@@ -176,6 +176,7 @@ function resourceDetail(body, cat, r, hub) {
         ed.onclick = () => YamlView.open(v);
         f.append(ed);
       }
+      c.setAttribute("aria-label", `${r.name} ${k}`);
       const read = () => (c.type === "checkbox" ? c.checked : c.type === "number" ? Number(c.value) : c.value);
       Configure.review(f, (apply, base) => hubEdit(hub, "set", [cat.name, r.name, k], {value: read()})(apply, base), `${r.name}.${k} saved`);
     }

@@ -49,6 +49,8 @@ const RunView = (() => {
       const b = el("button", mode === key ? "on" : "", label);
       b.type = "button";
       b.title = title;
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", String(mode === key));
       b.onclick = () => fn(run);
       modes.append(b);
     }
