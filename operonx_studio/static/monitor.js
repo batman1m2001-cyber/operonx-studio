@@ -86,7 +86,9 @@
   // 10.5px on a phone too (a fixed viewBox shrank them to 5px there)
   let chartW = 640;
   function frame(series, height) {
-    const W = chartW, H = height, L = 44, R = 8, T = 10, B = 22;
+    // T: a row above the plot for the code-version labels, so they never
+    // sit on the newest bars
+    const W = chartW, H = height, L = 44, R = 8, T = 22, B = 22;
     return {W, H, L, R, T, B, pw: W - L - R, ph: H - T - B,
       x: (i) => L + (i + 0.5) * (W - L - R) / series.length, bw: (W - L - R) / series.length};
   }
@@ -103,14 +105,16 @@
   }
 
   function xLabels(svg, f, series) {
-    const every = Math.ceil(series.length / Math.max(2, Math.floor(f.pw / 90)));
+    const span = series.length ? series[series.length - 1].t1 - series[0].t0 : 0;
+    const every = Math.ceil(series.length / Math.max(2, Math.floor(f.pw / (span > 86400 ? 110 : 90))));
     series.forEach((b, i) => {
       if (i % every) return;
       const tx = svgEl("text", {x: f.x(i), y: f.H - 6, "text-anchor": "middle", class: "vizaxis"});
       const d = new Date(b.t0 * 1000);
-      tx.textContent = (b.t1 - b.t0) < 86400
-        ? d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", hour12: false})
-        : d.toLocaleDateString([], {month: "short", day: "numeric"});
+      const time = d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", hour12: false});
+      const day = d.toLocaleDateString([], {month: "short", day: "numeric"});
+      // a range of days names the day: "22:53 10:53 22:53" said nothing
+      tx.textContent = (b.t1 - b.t0) >= 86400 ? day : span > 86400 ? `${day} ${time}` : time;
       svg.append(tx);
     });
   }
@@ -120,24 +124,38 @@
     const t0 = series[0].t0, t1 = series[series.length - 1].t1;
     // a label goes where it fits; marks too close to the last label keep
     // their line, and every line names its version on hover
-    const LABEL_W = 58;
-    let free = -Infinity, hidden = 0;
-    for (const ver of versions.slice(1)) {
-      const x = f.L + f.pw * (ver.first_started - t0) / (t1 - t0);
-      const name = `@${String(ver.version).slice(0, 7)}${ver.dirty ? "*" : ""}`;
-      const line = svgEl("line", {x1: x, x2: x, y1: f.T, y2: f.T + f.ph, stroke: C.ink2, "stroke-width": 1, "stroke-dasharray": "3 3"});
+    const LABEL_W = 58, MORE_W = 116;
+    const marks = versions.slice(1).map(ver => ({
+      x: f.L + f.pw * (ver.first_started - t0) / (t1 - t0),
+      name: `@${String(ver.version).slice(0, 7)}${ver.dirty ? "*" : ""}`, ver}));
+    // which labels fit on the row above the plot; when some do not, the
+    // row keeps room at its end to say how many
+    const fit = (limit) => {
+      let free = -Infinity;
+      const shown = new Set();
+      for (const m of marks) {
+        if (m.x < free || m.x + LABEL_W > limit) continue;
+        shown.add(m);
+        free = m.x + LABEL_W;
+      }
+      return shown;
+    };
+    let shown = fit(f.L + f.pw + 6);
+    if (shown.size < marks.length) shown = fit(f.L + f.pw - MORE_W);
+    for (const m of marks) {
+      const line = svgEl("line", {x1: m.x, x2: m.x, y1: f.T - 4, y2: f.T + f.ph, stroke: C.ink2, "stroke-width": 1, "stroke-dasharray": "3 3"});
       const title = svgEl("title", {});
-      title.textContent = `code ${name} from ${new Date(ver.first_started * 1000).toLocaleString()}`;
+      title.textContent = `code ${m.name} from ${new Date(m.ver.first_started * 1000).toLocaleString()}`;
       line.append(title);
       svg.append(line);
-      if (x < free || x + LABEL_W > f.L + f.pw + 6) { hidden += 1; continue; }
-      const tx = svgEl("text", {x: x + 3, y: f.T + 9, class: "vizver"});
-      tx.textContent = name;
+      if (!shown.has(m)) continue;
+      const tx = svgEl("text", {x: m.x + 3, y: f.T - 8, class: "vizver"});
+      tx.textContent = m.name;
       svg.append(tx);
-      free = x + LABEL_W;
     }
+    const hidden = marks.length - shown.size;
     if (hidden) {
-      const more = svgEl("text", {x: f.L + f.pw, y: f.T + 21, "text-anchor": "end", class: "vizver"});
+      const more = svgEl("text", {x: f.L + f.pw, y: f.T - 8, "text-anchor": "end", class: "vizver"});
       more.textContent = `+${hidden} more (hover a line)`;
       svg.append(more);
     }

@@ -234,12 +234,32 @@ const RunsView = (() => {
       if (keys.length === 1) v = v[keys[0]];
     }
     if (typeof v === "string") return v;
-    // a flat record reads as its fields: `id p2 · name alan turing`
-    if (v && typeof v === "object" && !Array.isArray(v)
-        && Object.values(v).every(x => x === null || typeof x !== "object")) {
-      return Object.entries(v).map(([k, x]) => `${k} ${typeof x === "string" ? x : JSON.stringify(x)}`).join(" · ");
+    // a record reads as its fields, each briefly: `id p2 · name alan turing`,
+    // a chat history as its last words `“Dạ vâng…” (6 messages)` — never as raw JSON
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      // a chat history first: its last message says the most in a line
+      const chat = (x) => Array.isArray(x) && x.length && typeof (x[x.length - 1] || {}).content === "string";
+      return Object.entries(v).sort(([, a], [, b]) => chat(b) - chat(a))
+        .map(([k, x]) => (chat(x) ? brief(x) : `${k} ${brief(x)}`)).join(" · ");
     }
-    return JSON.stringify(v);
+    return Array.isArray(v) ? brief(v) : JSON.stringify(v);
+  }
+
+  /* One value in a few words: a chat history by its last message. */
+  function brief(x) {
+    if (x === null || typeof x !== "object") {
+      const t = typeof x === "string" ? x : JSON.stringify(x);
+      return t.length > 120 ? `${t.slice(0, 120)}…` : t;
+    }
+    if (Array.isArray(x)) {
+      const last = x[x.length - 1];
+      if (last && typeof last === "object" && typeof last.content === "string") {
+        return `“${brief(last.content)}” (${x.length} message${x.length === 1 ? "" : "s"})`;
+      }
+      return `${x.length} item${x.length === 1 ? "" : "s"}`;
+    }
+    const keys = Object.keys(x);
+    return `{${keys.slice(0, 4).join(", ")}${keys.length > 4 ? ", …" : ""}}`;
   }
 
   function row(r) {
