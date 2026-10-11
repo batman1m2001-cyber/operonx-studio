@@ -229,6 +229,12 @@ def span_scope(start: int, end: int) -> Scope:
 
 
 def _yaml_paths(a: Any, b: Any, path: Tuple = ()) -> List[Tuple]:
+    # an empty value and an empty mapping are the same thing here: a block
+    # whose last key was deleted reads back as `llm:` (null)
+    if isinstance(a, dict) and b is None:
+        b = {}
+    if isinstance(b, dict) and a is None:
+        a = {}
     if isinstance(a, dict) and isinstance(b, dict):
         out: List[Tuple] = []
         for k in set(a) | set(b):

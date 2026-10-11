@@ -58,8 +58,11 @@ def tree(text: str, max_items: int = 2000) -> Dict[str, Any]:
         if isinstance(node, yaml.MappingNode):
             out["kind"] = "map"
             out["flow"] = bool(node.flow_style)
-            out["items"] = [[_scalar_value(k) if isinstance(k, yaml.ScalarNode) else str(k.value), walk(v)]
-                            for k, v in node.value]
+            out["items"] = []
+            for k, v in node.value:
+                child = walk(v)
+                child["key_line"] = k.start_mark.line + 1   # where `key:` is written
+                out["items"].append([_scalar_value(k) if isinstance(k, yaml.ScalarNode) else str(k.value), child])
         elif isinstance(node, yaml.SequenceNode):
             out["kind"] = "list"
             out["flow"] = bool(node.flow_style)

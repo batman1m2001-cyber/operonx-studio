@@ -323,7 +323,7 @@ const Configure = (() => {
     return box;
   }
 
-  return {section, kindOf};
+  return {section, kindOf, review: reviewFlow};
 })();
 
 if (typeof module !== "undefined") module.exports = Configure;

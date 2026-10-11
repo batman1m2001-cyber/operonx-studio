@@ -127,7 +127,7 @@ const MOBILE = window.matchMedia("(max-width: 760px)");
 // the screens that are mostly data (a run, the monitor, the evals) want the
 // width: there the panel is closed until it is opened there, and that
 // choice is remembered apart from the other screens' (docs/STUDIO_EXPERIENCE_PLAN.md T2)
-const DENSE = new Set(["traces", "monitor", "evals"]);
+const DENSE = new Set(["traces", "monitor", "evals", "resources"]);
 const panelKey = () => (MOBILE.matches ? "panelRightM" : "panelRight") + (DENSE.has(state.tab) ? ":dense" : "");
 // open by default only where it fits beside the content (a tablet gets
 // it as an overlay, opened from the Ask bar)

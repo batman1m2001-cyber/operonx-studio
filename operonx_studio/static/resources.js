@@ -1,134 +1,355 @@
 /* operonx studio — the Resources screen. Split from studio.js, same
  * bundle, same order. */
 
-/* ── the resource hub: every declared backing service, who uses it,
-   and whether the env contract is satisfied. Read-only by design —
-   the server checks variables by NAME and never returns a value. */
+/* ── the Resource Hub (docs/STUDIO_EXPERIENCE_PLAN.md §6) ─────────────
+ * Every resource the project declares, by category, from its own file
+ * ([resources] overlay, resources.yaml): what each one is set to, whether the
+ * variables it needs are set (by name; a value never leaves the server), and
+ * what uses it — an op, the project's config, or a parameter that picks it per
+ * run (with how often lately). A row opens onto its fields, each edited as
+ * what it is, written through safewrite; a secret's value goes to .env. A
+ * resource is added with a form built from its category, and deleted only
+ * when nothing uses it. */
 async function showResources() {
   const box = $("#resources");
+  let hub;
+  try { hub = await api(`/api/p/${PID}/resources/hub`); }
+  catch (e) { box.textContent = ""; box.append(loadError(e, showResources)); return; }
   box.textContent = "";
-  const res = state.ir.resources || {};
-  const details = res.details || {};
-  const head = el("div", "panehead");
-  head.append(el("h2", null, "Resources"));
-  box.append(head);
-  box.append(el("p", "panesub",
-    "The backing services this project declares, which ops use them, and whether the "
-    + "environment they need is set. Secret fields never leave the server."));
+  const page = el("div", "rh");
+  const head = el("div", "rh-head");
+  const title = el("div", "rh-title");
+  title.append(el("h2", null, "Resources"),
+    el("p", "panesub", `The models, services and stores ops call by name, in ${hub.file}. Secret values stay in .env and never leave the server.`));
+  const q = el("input", "rt-search rh-search");
+  q.type = "search";
+  q.placeholder = "Find a resource";
+  const add = Icons.button("plus", "Add a resource", "primary needs-edit", "Declare a new resource in " + hub.file);
+  head.append(title, q, add);
+  page.append(head);
+  const adder = el("div", "rh-adder");
+  adder.hidden = true;
+  page.append(adder);
+  add.onclick = () => { adder.hidden = !adder.hidden; if (!adder.hidden) addForm(adder, hub); };
 
-  // reverse index: resource name → the ops that lean on it — including
-  // ops nested inside GraphOps, which carry their graph inline
-  const uses = {};
-  const walk = (nodes, graph) => {
-    for (const n of nodes || []) {
-      const names = Array.isArray(n.resource) ? n.resource
-        : n.resource ? [n.resource] : [];
-      for (const r of names) (uses[r] = uses[r] || []).push({graph, node: n});
-      if (n.graph) walk(n.graph.nodes, graph);
+  const list = el("div", "rh-list");
+  page.append(list);
+  if (!hub.categories.length) {
+    list.append(paneNote("No resources declared",
+      `Resources are the LLMs, stores and services ops call by name. Add one, and it is written to ${hub.file}.`));
+  }
+  const draw = () => {
+    list.textContent = "";
+    const needle = q.value.trim().toLowerCase();
+    for (const cat of hub.categories) {
+      const rows = cat.resources.filter(r => !needle || `${cat.name} ${r.name} ${JSON.stringify(r.fields)}`.toLowerCase().includes(needle));
+      if (!rows.length) continue;
+      const sec = el("section", "rh-cat");
+      const ch = el("div", "rh-cathead");
+      ch.append(el("h3", null, cat.name), el("span", "rh-count", String(rows.length)));
+      if (cat.chooser) {
+        const pick = el("span", "rh-chooser", `picked per run by ${cat.chooser}`);
+        ch.append(pick);
+        api(`/api/p/${PID}/resources/usage?param=${encodeURIComponent(cat.chooser)}`).then(u => {
+          cat._usage = u.counts || {};
+          for (const n of sec.querySelectorAll("[data-usage]")) {
+            const c = cat._usage[n.dataset.usage] || 0;
+            n.textContent = c ? `${c} run${c === 1 ? "" : "s"} in ${u.days} days` : `no run in ${u.days} days`;
+          }
+        }).catch(() => {});
+      }
+      sec.append(ch);
+      for (const r of rows) sec.append(resourceRow(cat, r, hub));
+      list.append(sec);
     }
   };
-  for (const g of state.ir.graphs || []) walk(g.nodes, g);
-
-  const cats = {};
-  for (const [name, det] of Object.entries(details)) {
-    const c = det.category || "other";
-    (cats[c] = cats[c] || []).push([name, det]);
-  }
-  if (!Object.keys(cats).length && !(res.keys || []).length) {
-    box.append(paneNote("No resources declared",
-      "Resources are the LLMs, stores and services ops call by name. Declare them in a resources file next to operonx.toml."));
-  }
-  for (const cat of Object.keys(cats).sort()) {
-    box.append(el("h3", "rescat", cat));
-    const grid = el("div", "resgrid");
-    box.append(grid);
-    for (const [name, det] of cats[cat].sort((a, b) => a[0].localeCompare(b[0]))) {
-      const card = el("div", "rescard");
-      card.append(el("div", "resname", name));
-      const provider = det.category === "llm"
-        ? llmProvider({kind: "LLMOp", resource: name}) : null;
-      if (provider) {
-        const row = el("div", "resrow");
-        row.append(el("span", "reskey", "backend"));
-        row.append(el("span", "resval resbackend",
-          `${LLM_PROVIDERS[provider].icon} ${LLM_PROVIDERS[provider].label}`));
-        card.append(row);
-      }
-      if (det.category === "llm") card.append(priceRow(name, det));
-      for (const [k, v] of Object.entries(det)) {
-        if (k === "category" || k === "cost_per_input_token" || k === "cost_per_output_token") continue;
-        const row = el("div", "resrow");
-        row.append(el("span", "reskey", k));
-        row.append(envValue(v));
-        // a field that names a YAML file of the project (an agent's prompts):
-        // edited here, value by value (yamlview.js)
-        if (typeof v === "string" && /\.ya?ml$/i.test(v) && !v.includes("${")) {
-          const ed = Icons.button("prompt", "Edit", "small ghost needs-edit", `Edit ${v} in the studio`);
-          ed.onclick = () => YamlView.open(v);
-          row.append(ed);
-        }
-        card.append(row);
-      }
-      const urow = el("div", "resrow");
-      urow.append(el("span", "reskey", "used by"));
-      const val = el("span", "usedby");
-      const u = uses[name] || [];
-      if (!u.length) val.append(el("span", "note", "No op uses it"));
-      for (const use of u) {
-        const c = el("button", "pchip pref", use.node.name);
-        c.title = `${use.graph.name} · ${use.node.kind} — jump to it`;
-        c.onclick = () => jumpToOp(use.graph, use.node);
-        val.append(c);
-      }
-      urow.append(val);
-      card.append(urow);
-      grid.append(card);
-    }
-  }
-  const covered = new Set([...Object.keys(details),
-    ...Object.values(details).map(d => d.category)]);
-  const loose = (res.keys || []).filter(k => !covered.has(k));
-  if (loose.length) {
-    box.append(el("h3", "rescat", "declared, details not parsed"));
-    const card = el("div", "rescard usedby");
-    for (const k of loose) card.append(el("span", "chip", k));
-    box.append(card);
-  }
-
-  // the env contract, with a health light per variable
-  box.append(el("h3", "rescat", "Environment"));
-  const envBox = el("div", "envlist");
-  box.append(envBox);
-  try {
-    const h = await api(`/api/p/${PID}/env-health`);
-    const env = res.env || {};
-    const rows = [];
-    for (const name of env.required || [])
-      rows.push([name, h.env[name] || "missing", null]);
-    for (const [name, dflt] of Object.entries(env.optional || {}))
-      rows.push([name, h.env[name] || "default", dflt]);
-    if (!rows.length) envBox.append(el("div", "envrow note", "The project asks for no environment variables."));
-    for (const [name, stat, dflt] of rows) {
-      const row = el("div", "envrow");
-      row.append(el("span", `envdot ${stat}`));
-      row.append(el("span", "envname mono", name));
-      row.append(el("span", `envstat ${stat}`,
-        stat === "set" ? "Set" : stat === "missing"
-          ? "Missing — required, and nothing sets it" : "Not set — the default applies"));
-      if (dflt != null && stat === "default")
-        row.append(el("span", "envdflt mono", String(dflt)));
-      envBox.append(row);
-    }
-    if (!h.dotenv) envBox.append(el("div", "envrow note",
-      "No .env file in the project root — variables can only come from the process environment."));
-  } catch {
-    envBox.append(el("div", "envrow note", "Environment status is unavailable."));
-  }
+  q.oninput = draw;
+  draw();
+  box.append(page);
 }
 
-/* An LLM resource's prices, and an editor that writes them to the
- * resources file — shown as a diff first, applied on confirm. A price of
- * 0 is a declared zero (an in-house model); no price is "unpriced". */
+/* The two or three fields that say what a resource is (a model, a URL). */
+function resourceSummary(cat, r) {
+  const prefer = ["model", "base_url", "url", "host", "api_type", "backend", "path", "prompts", "database"];
+  const keys = Object.keys(r.fields);
+  const picked = [...prefer.filter(k => keys.includes(k)), ...keys.filter(k => !prefer.includes(k))]
+    .filter(k => !(cat.fields[k] || {}).secret).slice(0, 2);
+  return picked.map(k => [k, r.fields[k]]);
+}
+
+function envLight(r) {
+  const vars = Object.entries(r.env || {});
+  if (!vars.length) return null;
+  const missing = vars.filter(([, st]) => st === "missing").map(([v]) => v);
+  const chip = el("span", "rh-env " + (missing.length ? "bad" : "ok"));
+  chip.append(el("i", "rh-dot"), missing.length ? `${missing.join(", ")} not set` : "env set");
+  chip.title = vars.map(([v, st]) => `${v}: ${st}`).join("\n");
+  return chip;
+}
+
+function resourceRow(cat, r, hub) {
+  const row = el("div", "rh-row");
+  const top = el("button", "rh-top");
+  top.type = "button";
+  top.setAttribute("aria-expanded", "false");
+  top.append(el("span", "rh-name mono", r.name));
+  const sum = el("span", "rh-sum");
+  for (const [k, v] of resourceSummary(cat, r)) {
+    const it = el("span", "rh-kv");
+    it.append(el("span", "rh-k", k), el("span", "rh-v mono", typeof v === "string" ? v : JSON.stringify(v)));
+    sum.append(it);
+  }
+  top.append(sum);
+  const env = envLight(r);
+  if (env) top.append(env);
+  const used = el("span", "rh-used");
+  const ops = r.used_by.filter(u => u.op), cfg = r.used_by.filter(u => u.config);
+  if (ops.length) used.append(`used by ${ops.slice(0, 3).map(u => u.op).join(", ")}${ops.length > 3 ? ` +${ops.length - 3}` : ""}`);
+  else if (cfg.length) used.append(`named in ${cfg[0].config}`);
+  else if (cat.chooser) { const u = el("span", null, "…"); u.dataset.usage = r.name; used.append(u); }
+  else used.append(el("span", "rh-unused", "not used"));
+  top.append(used);
+  const caret = el("span", "rh-caret", "▸");
+  top.append(caret);
+  const body = el("div", "rh-body");
+  body.hidden = true;
+  top.onclick = () => {
+    body.hidden = !body.hidden;
+    caret.textContent = body.hidden ? "▸" : "▾";
+    top.setAttribute("aria-expanded", String(!body.hidden));
+    if (!body.hidden && !body.childNodes.length) resourceDetail(body, cat, r, hub);
+  };
+  row.append(top, body);
+  return row;
+}
+
+/* One edit to the project's resources file, through the YAML editor's door. */
+function hubEdit(hub, op, path, extra) {
+  return (apply, base) => ({run: () => api(`/api/p/${PID}/yaml`, {file: hub.file, op, path, ...extra, apply, base})});
+}
+
+function resourceDetail(body, cat, r, hub) {
+  if (!r.editable) {
+    body.append(el("div", "note", `Declared outside ${hub.file} (operonx's defaults or another file): shown, not edited here.`));
+  }
+  const form = el("div", "rh-form");
+  for (const [k, v] of Object.entries(r.fields)) {
+    const info = cat.fields[k] || {type: "str"};
+    const f = el("div", "cf-field");
+    const h = el("div", "cf-head");
+    h.append(el("span", "cf-name mono", k), el("span", "cf-type", info.type + (info.secret ? " · secret" : "")));
+    f.append(h);
+    const ref = typeof v === "string" ? /^\$\{([A-Za-z_][A-Za-z0-9_]*)/.exec(v) : null;
+    if (info.secret) {
+      // the file names a variable; its value goes to .env, never shown
+      f.append(el("div", "rh-ref mono", typeof v === "string" ? v : "••••"));
+      if (ref && r.editable) {
+        const line = el("div", "yv-add");
+        const val = el("input", "cf-text");
+        val.type = "password";
+        val.autocomplete = "off";
+        val.placeholder = `a new value for ${ref[1]}`;
+        const go = el("button", "small needs-edit", "Set in .env");
+        go.type = "button";
+        go.onclick = async () => {
+          if (!val.value) return;
+          try { const got = await api(`/api/p/${PID}/env`, {var: ref[1], value: val.value}); val.value = ""; wrote(got, `${ref[1]} set in .env`); }
+          catch (e) { toast(e.message, true); }
+        };
+        line.append(val, go);
+        f.append(line);
+      }
+      form.append(f);
+      continue;
+    }
+    if (!r.editable || (typeof v === "object" && v !== null)) {
+      f.append(el("div", "rh-ref mono", typeof v === "string" ? v : JSON.stringify(v)));
+    } else {
+      const c = el("input", "cf-text");
+      if (info.type === "bool") { c.type = "checkbox"; c.className = "cf-switch"; c.checked = !!v; }
+      else if (info.type === "int" || info.type === "float") { c.type = "number"; c.step = "any"; c.value = String(v); }
+      else { c.type = "text"; c.value = String(v); }
+      f.append(c);
+      // a file this project holds (an agent's prompts): open it here
+      if (typeof v === "string" && /\.ya?ml$/i.test(v) && !v.includes("${")) {
+        const ed = Icons.button("prompt", "Edit the file", "small ghost", `Edit ${v} in the studio`);
+        ed.onclick = () => YamlView.open(v);
+        f.append(ed);
+      }
+      const read = () => (c.type === "checkbox" ? c.checked : c.type === "number" ? Number(c.value) : c.value);
+      Configure.review(f, (apply, base) => hubEdit(hub, "set", [cat.name, r.name, k], {value: read()})(apply, base), `${r.name}.${k} saved`);
+    }
+    form.append(f);
+  }
+  if (cat.name === "llm" && r.editable) form.append(priceRow(r.name, r.fields));
+  body.append(form);
+  if (!r.editable) return;
+  // a field the category takes that this one does not write yet
+  const missing = Object.entries(cat.fields).filter(([k]) => !(k in r.fields));
+  const acts = el("div", "rh-acts");
+  if (missing.length) {
+    const more = el("div", "yv-add");
+    const pick = el("select");
+    for (const [k, info] of missing) { const o = el("option", null, `${k}${info.default != null ? ` (default ${info.default})` : ""}`); o.value = k; pick.append(o); }
+    const val = el("input", "cf-text");
+    val.type = "text";
+    val.placeholder = "value";
+    more.append(pick, val);
+    const f = el("div", "cf-field");
+    f.append(el("div", "cf-head", "Add a field"), more);
+    Configure.review(f, (apply, base) => {
+      const info = cat.fields[pick.value] || {};
+      let value = val.value;
+      if (info.type === "int" || info.type === "float") value = Number(value);
+      if (info.type === "bool") value = /^(true|yes|1)$/i.test(value);
+      return hubEdit(hub, "add", [cat.name, r.name], {key: pick.value, value})(apply, base);
+    }, `${r.name}: field added`);
+    acts.append(f);
+  }
+  const tools = el("div", "rh-tools");
+  const open = Icons.button("prompt", "Open in the YAML editor", "small ghost", `${hub.file}, at ${cat.name}.${r.name}`);
+  open.onclick = () => { YamlView.open(hub.file); };
+  const del = Icons.button("trash", "Delete", "small danger needs-edit", `Remove ${r.name} from ${hub.file}`);
+  const delOut = el("div", "cf-out");
+  del.onclick = async () => {
+    delOut.textContent = "";
+    try {
+      const plan = await api(`/api/p/${PID}/resources/delete`, {category: cat.name, name: r.name});
+      const box2 = el("div");
+      const diff = el("div", "diffbox");
+      for (const ln of plan.diff.split("\n")) diff.append(el("div", ln.startsWith("-") && !ln.startsWith("---") ? "del" : null, ln));
+      const yes = el("button", "small danger needs-edit", `Delete ${r.name}`);
+      yes.type = "button";
+      yes.onclick = async () => {
+        try { const got = await api(`/api/p/${PID}/resources/delete`, {category: cat.name, name: r.name, apply: true, base: plan.base}); wrote(got, `${r.name} deleted`); showResources(); }
+        catch (e) { refusal(e, delOut); }
+      };
+      box2.append(diff, yes);
+      delOut.append(box2);
+    } catch (e) { delOut.append(el("div", "cf-msg bad", e.message)); }
+  };
+  tools.append(open, del);
+  acts.append(tools, delOut);
+  body.append(acts);
+}
+
+/* A new resource: its category, its name, and the fields its category takes
+ * (the ones the project writes for others first); a secret field names a
+ * variable and its value goes to .env. */
+function addForm(box, hub) {
+  box.textContent = "";
+  const known = new Set(hub.categories.map(c => c.name));
+  const cats = [...hub.categories.map(c => c.name), ...hub.known_categories.filter(c => !known.has(c))];
+  const card = el("div", "rh-addcard");
+  card.append(el("h3", null, "Add a resource"));
+  const top = el("div", "yv-add");
+  const cat = el("select");
+  for (const c of cats) { const o = el("option", null, known.has(c) ? c : `${c} (new in this project)`); o.value = c; cat.append(o); }
+  const name = el("input", "cf-text mono");
+  name.type = "text";
+  name.placeholder = "its name (e.g. gpt-large)";
+  top.append(cat, name);
+  card.append(top);
+  const fieldsBox = el("div", "rh-form");
+  card.append(fieldsBox);
+  let readers = [];
+  const paint = () => {
+    fieldsBox.textContent = "";
+    readers = [];
+    const c = hub.categories.find(x => x.name === cat.value);
+    const fields = c ? c.fields : {};
+    const shown = Object.entries(fields).filter(([, i]) => i.written || i.required);
+    const rest = Object.entries(fields).filter(([, i]) => !(i.written || i.required));
+    const one = (k, info, into) => {
+      const f = el("div", "cf-field");
+      f.append(el("div", "cf-head"));
+      f.firstChild.append(el("span", "cf-name mono", k), el("span", "cf-type", info.type + (info.required ? " · required" : "") + (info.secret ? " · secret" : "")));
+      if (info.secret) {
+        const v = el("input", "cf-text mono rh-var");
+        v.type = "text";
+        // the variable follows the resource's name until it is typed in
+        const suggest = () => `${(name.value || cat.value).toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_${k.toUpperCase()}`;
+        v.value = suggest();
+        v.oninput = () => { v.dataset.typed = "1"; };
+        v._suggest = suggest;
+        const val = el("input", "cf-text");
+        val.type = "password";
+        val.autocomplete = "off";
+        val.placeholder = "its value (goes to .env)";
+        const line = el("div", "yv-add");
+        line.append(v, val);
+        f.append(line);
+        readers.push(() => (val.value ? {secret: [k, {var: v.value.trim(), value: val.value}]} : {}));
+      } else {
+        const c2 = el("input", "cf-text");
+        if (info.type === "bool") { c2.type = "checkbox"; c2.className = "cf-switch"; c2.checked = !!info.default; }
+        else { c2.type = info.type === "int" || info.type === "float" ? "number" : "text"; c2.placeholder = info.default != null ? `default ${info.default}` : ""; }
+        f.append(c2);
+        readers.push(() => {
+          if (c2.type === "checkbox") return c2.checked !== !!info.default ? {field: [k, c2.checked]} : {};
+          if (c2.value === "") return {};
+          return {field: [k, c2.type === "number" ? Number(c2.value) : c2.value]};
+        });
+      }
+      into.append(f);
+    };
+    for (const [k, info] of shown) one(k, info, fieldsBox);
+    if (rest.length) {
+      const more = el("details", "cf-more");
+      more.append(el("summary", null, `${rest.length} more fields this category takes`));
+      for (const [k, info] of rest) one(k, info, more);
+      fieldsBox.append(more);
+    }
+    if (!Object.keys(fields).length) fieldsBox.append(el("div", "note", "A category the project has not used: add its fields in the YAML editor once it exists."));
+  };
+  cat.onchange = paint;
+  name.oninput = () => {
+    for (const v of fieldsBox.querySelectorAll(".rh-var")) if (!v.dataset.typed) v.value = v._suggest();
+  };
+  paint();
+  const out = el("div", "cf-out");
+  const bar = el("div", "cf-bar");
+  const review = el("button", "small needs-edit", "Review");
+  review.type = "button";
+  const cancel = el("button", "small ghost", "Cancel");
+  cancel.type = "button";
+  cancel.onclick = () => { box.hidden = true; };
+  bar.append(review, cancel);
+  card.append(bar, out);
+  const body = () => {
+    const fields = {}, secrets = {};
+    for (const read of readers) {
+      const got = read();
+      if (got.field) fields[got.field[0]] = got.field[1];
+      if (got.secret) secrets[got.secret[0]] = got.secret[1];
+    }
+    return {category: cat.value, name: name.value.trim(), fields, secrets};
+  };
+  review.onclick = async () => {
+    out.textContent = "";
+    let plan;
+    try { plan = await api(`/api/p/${PID}/resources/add`, body()); }
+    catch (e) { out.append(el("div", "cf-msg bad", e.message)); return; }
+    const diff = el("div", "diffbox");
+    for (const ln of plan.diff.split("\n")) diff.append(el("div", ln.startsWith("+") && !ln.startsWith("+++") ? "add" : null, ln));
+    out.append(diff);
+    if ((plan.env_changes || []).length) out.append(el("div", "note", `.env: ${plan.env_changes.join(", ")}`));
+    const apply = el("button", "primary small needs-edit", "Add it");
+    apply.type = "button";
+    apply.onclick = async () => {
+      apply.disabled = true;
+      apply.textContent = "Writing…";
+      try {
+        const got = await api(`/api/p/${PID}/resources/add`, {...body(), apply: true, base: plan.base, env_base: plan.env_base});
+        wrote(got, `${body().name} added to ${hub.file}`);
+        showResources();
+      } catch (e) { apply.disabled = false; apply.textContent = "Add it"; refusal(e, out); }
+    };
+    out.append(apply);
+  };
+  box.append(card);
+}
+
 function priceRow(name, det) {
   const wrap = el("div", "pricerow");
   const perM = (v) => (v == null || v === "" ? null : Number(v) * 1e6);
