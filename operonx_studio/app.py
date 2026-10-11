@@ -31,6 +31,7 @@ import struct
 import subprocess
 import sys
 import time
+import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1609,6 +1610,12 @@ def build_studio_app(recents: Optional[Recents] = None):
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
+        status = _env_status(watcher)
+        return JSONResponse({"env": status, "dotenv": (watcher.root / ".env").is_file()})
+
+    def _env_status(watcher: Any) -> Dict[str, str]:
+        """Each variable the resource files name: ``set``, ``missing`` or
+        ``default`` — by NAME, against the project's .env and this process."""
         result = watcher.refresh_swr()
         ir = result.ir if result.ok else {}
         contract = ((ir or {}).get("resources") or {}).get("env") or {}
@@ -1629,7 +1636,304 @@ def build_studio_app(recents: Optional[Recents] = None):
             status[name] = "set" if (name in defined or name in os.environ) else "missing"
         for name in (contract.get("optional") or {}):
             status[name] = "set" if (name in defined or name in os.environ) else "default"
-        return JSONResponse({"env": status, "dotenv": env_path.is_file()})
+        return status
+
+    # ── the Resource Hub (§6): browse, add, edit, delete, in the project's file ──
+
+    # a credential's name ends like one (api_key, password, access_token);
+    # cost_per_input_token and api_key_header do not
+    _SECRETISH = re.compile(r"^(token|key|secret|password|passwd)$|(api_?key|secret_key|private_key|password|passwd|"
+                            r"credentials?|(access|auth|api|bearer|refresh)_token)$", re.I)
+    _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::[^}]*)?\}")
+
+    def _overlay(watcher: Any) -> Tuple[str, Path]:
+        rel = str(((_studio_manifest(watcher.root).get("resources") or {}).get("overlay")) or "resources.yaml")
+        return rel, watcher.root / rel
+
+    def _field_types(category: str, entries: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """Each field a resource of *category* takes: from operonx's own config
+        class when it has one (its JSON Schema), else from the entries already
+        written (a project's own category). Each ``{type, default, required,
+        secret}``."""
+        out: Dict[str, Dict[str, Any]] = {}
+        for det in entries:      # the fields this project writes, in its order
+            for k, v in det.items():
+                if k == "category" or k in out:
+                    continue
+                out[k] = {"type": "bool" if isinstance(v, bool) else "int" if isinstance(v, int)
+                          else "float" if isinstance(v, float) else "list" if isinstance(v, list)
+                          else "dict" if isinstance(v, dict) else "str", "required": False, "written": True}
+        try:
+            from operonx.core.registry.config_registry import REGISTRY
+            from operonx.core.registry.resource_hub import _load_builtin_categories
+
+            _load_builtin_categories()
+            entry = REGISTRY.get_entry(category)
+            schema = entry.config_class.model_json_schema() if entry else {}
+        except Exception:  # noqa: BLE001 — a category operonx does not know
+            schema = {}
+        required = set(schema.get("required") or [])
+        for name, prop in (schema.get("properties") or {}).items():
+            if name == "extra_fields":
+                continue
+            types = [prop.get("type")] + [a.get("type") for a in prop.get("anyOf") or []]
+            t = next((x for x in types if x and x != "null"), "string")
+            info = out.get(name) or {"type": {"integer": "int", "number": "float", "boolean": "bool", "array": "list",
+                                              "object": "dict"}.get(t, "str"), "written": False}
+            info["required"] = name in required
+            if prop.get("enum"):
+                info.update(type="choice", choices=prop["enum"])
+            if prop.get("default") is not None:
+                info["default"] = prop["default"]
+            out[name] = info
+        for k, info in out.items():
+            info["secret"] = bool(_SECRETISH.search(k))
+        return out
+
+    def _config_refs(watcher: Any) -> Dict[str, List[Dict[str, str]]]:
+        """Resources the project's own files name as ``category:name`` (a
+        ``[tracing]`` sink, a run store): uses no op shows."""
+        refs: Dict[str, List[Dict[str, str]]] = {}
+        try:
+            text = (watcher.root / MANIFEST).read_text(encoding="utf-8")
+        except OSError:
+            return refs
+        for m in re.finditer(r"([A-Za-z_][\w]*):([A-Za-z0-9_][\w.-]*)", text):
+            refs.setdefault(m.group(2), []).append({"config": MANIFEST, "as": m.group(0)})
+        return refs
+
+    @app.get("/api/p/{pid}/resources/hub")
+    def resources_hub(pid: str) -> JSONResponse:
+        """Every resource the project declares, by category: its fields (secret
+        ones as written — a ``${VAR}`` — never a value), which ops use it, the
+        variables it needs and whether they are set, and whether it is in the
+        file the studio edits (``[resources] overlay``)."""
+        from operonx_studio import yamldoc
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        ir = (watcher.last.ir or watcher.refresh_swr().ir) or {}
+        details = (ir.get("resources") or {}).get("details") or {}
+        rel, path = _overlay(watcher)
+        lines: Dict[Tuple[str, str], int] = {}
+        if path.is_file():
+            try:
+                doc = yamldoc.tree(path.read_text(encoding="utf-8"))
+                for cat, node in doc.get("items") or []:
+                    for name, child in (node.get("items") or []) if node.get("kind") == "map" else []:
+                        lines[(str(cat), str(name))] = child.get("key_line") or child.get("line")
+            except yamldoc.YamlDocError:
+                pass
+        uses: Dict[str, List[Dict[str, str]]] = {}
+        inputs_named: set = set()
+
+        def walk(nodes, graph):
+            for n in nodes or []:
+                for r in (n.get("resource") if isinstance(n.get("resource"), list) else [n.get("resource")]):
+                    if r:
+                        uses.setdefault(r, []).append({"graph": graph, "op": n.get("name")})
+                for i in n.get("inputs") or []:
+                    inputs_named.add(i.get("name"))
+                if n.get("graph"):
+                    walk(n["graph"].get("nodes"), graph)
+
+        for g in ir.get("graphs") or []:
+            walk(g.get("nodes"), g.get("name"))
+        env = _env_status(watcher)
+        config_refs = _config_refs(watcher)
+        cats: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
+        for name, det in details.items():
+            cats.setdefault(det.get("category") or "other", []).append((name, det))
+        out = []
+        for cat in sorted(cats):
+            items = sorted(cats[cat])
+            fields = _field_types(cat, [d for _, d in items])
+            # a category no op names, picked per run by a parameter (agent_type)
+            chooser = next((p for p in (f"{cat}_type", f"{cat}_name", cat) if p in inputs_named), None)
+            rows = []
+            for name, det in items:
+                values = {k: v for k, v in det.items() if k != "category"}
+                for k, v in list(values.items()):
+                    if fields.get(k, {}).get("secret") and isinstance(v, str) and not _VAR.search(v):
+                        values[k] = "••••"   # a literal secret in the file never leaves the server
+                vars_ = sorted({m.group(1) for v in values.values() if isinstance(v, str) for m in _VAR.finditer(v)})
+                cfg = [r for r in config_refs.get(name, []) if r["as"] == f"{cat}:{name}"]
+                rows.append({
+                    "name": name, "fields": values, "used_by": uses.get(name, []) + cfg,
+                    "env": {v: env.get(v, "set") for v in vars_},
+                    "line": lines.get((cat, name)), "editable": (cat, name) in lines,
+                })
+            out.append({"name": cat, "fields": fields, "chooser": chooser, "resources": rows})
+        return JSONResponse({"file": rel, "exists": path.is_file(), "categories": out,
+                             "known_categories": _known_categories()})
+
+    def _known_categories() -> List[str]:
+        try:
+            from operonx.core.registry.config_registry import REGISTRY
+            from operonx.core.registry.resource_hub import _load_builtin_categories
+
+            _load_builtin_categories()
+            return sorted(REGISTRY.categories())
+        except Exception:  # noqa: BLE001
+            return []
+
+    @app.get("/api/p/{pid}/resources/usage")
+    def resources_usage(pid: str, param: str, days: float = 7.0) -> JSONResponse:
+        """How many recent runs picked each value of *param* (``agent_type``):
+        the use of a resource looked up by name at run time, from each run's
+        input (operonx 1.22)."""
+        pr = _runs(pid)
+        if pr is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        counts: Dict[str, int] = {}
+        try:
+            page = pr.store.list_runs(RunFilter(since=time.time() - days * 86400), limit=1000)
+        except Exception as exc:  # noqa: BLE001 — the store may be away
+            return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=502)
+        seen = 0
+        for s in page.items:
+            try:
+                value = (json.loads(s.input) if s.input else {}).get(param)
+            except (ValueError, AttributeError):
+                continue
+            if value is not None:
+                seen += 1
+                counts[str(value)] = counts.get(str(value), 0) + 1
+        return JSONResponse({"param": param, "days": days, "runs": seen, "counts": counts})
+
+    @app.post("/api/p/{pid}/resources/add")
+    def resources_add(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        """A new resource at the end of its category in the project's file (a
+        new category at the end of the file). A secret field is written as
+        ``${VAR}`` and its value goes to ``.env`` — never into the YAML, never
+        back in a response. ``apply`` false: the diffs (the .env one masked)."""
+        from operonx_project.edit import set_env_var
+        from operonx_studio import yamldoc
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        cat, name = str(body.get("category") or "").strip(), str(body.get("name") or "").strip()
+        if not re.fullmatch(r"[A-Za-z_][\w-]*", cat) or not re.fullmatch(r"[A-Za-z0-9_][\w.-]*", name):
+            return JSONResponse({"error": "a category and a name of letters, digits, - and _"}, status_code=400)
+        fields = {k: v for k, v in (body.get("fields") or {}).items() if v not in ("", None)}
+        secrets = body.get("secrets") or {}
+        for field, sec in secrets.items():
+            var = str((sec or {}).get("var") or "").strip()
+            if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", var):
+                return JSONResponse({"error": f"{field}: a variable name like LLM_API_KEY"}, status_code=400)
+            fields[field] = "${" + var + "}"
+        rel, path = _overlay(watcher)
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        try:
+            data = yaml.safe_load(text) if text.strip() else {}
+            if isinstance(data, dict) and cat in data and isinstance(data[cat], dict):
+                if name in data[cat]:
+                    return JSONResponse({"error": f"{cat} already has {name!r}"}, status_code=409)
+                after, paths = yamldoc.edit(text, "add", [cat], fields, key=name)
+            elif text.strip():
+                after, paths = yamldoc.edit(text, "add", [], {name: fields}, key=cat)
+            else:
+                after, paths = yaml.safe_dump({cat: {name: fields}}, allow_unicode=True, sort_keys=False), [(cat,)]
+        except yamldoc.YamlDocError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        env_path = watcher.root / ".env"
+        env_text = env_path.read_text(encoding="utf-8") if env_path.is_file() else ""
+        # a new resource's secret never overwrites a variable already set:
+        # another resource may be reading it
+        have = set(safewrite._env_pairs(env_text))
+        taken = [str(sec["var"]).strip() for sec in secrets.values() if str(sec["var"]).strip() in have]
+        if taken:
+            return JSONResponse({"error": f"{', '.join(taken)} is already set in .env (another resource may use it): "
+                                          "name a new variable"}, status_code=409)
+        env_after = env_text
+        for sec in secrets.values():
+            env_after = set_env_var(env_after, str(sec["var"]).strip(), str(sec.get("value") or ""))
+        out = {**safewrite.preview(watcher.root, path, text, after), "env_base": safewrite.sha(env_text),
+               "env_changes": [str(s["var"]).strip() + "=••••" for s in secrets.values()]}
+        if not body.get("apply"):
+            return JSONResponse({**out, "applied": False})
+        try:
+            env_w = None
+            if env_after != env_text:
+                env_w = safewrite.commit(watcher.root, env_path, env_after, body.get("env_base") or out["env_base"],
+                                         before=env_text, scope=safewrite.env_scope([str(s["var"]).strip() for s in secrets.values()]),
+                                         what=f"secrets of {cat}.{name}", who=_who(request))
+            w = safewrite.commit(watcher.root, path, after, body.get("base") or out["base"], before=text,
+                                 scope=safewrite.yaml_scope(paths), watcher=watcher,
+                                 what=f"add {cat}.{name}", who=_who(request))
+        except safewrite.WriteRefused as exc:
+            if env_w is not None:
+                safewrite.undo(watcher.root, env_w.id)   # the two files land together or not at all
+            return JSONResponse(exc.to_dict(), status_code=409)
+        return JSONResponse({**out, "applied": True, "write": w.id})
+
+    @app.post("/api/p/{pid}/env")
+    def env_set(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        """Set one variable in the project's ``.env`` (a secret a resource
+        names as ``${VAR}``). Written through safewrite, only that variable;
+        the value is never sent back, not even in the diff."""
+        from operonx_project.edit import set_env_var
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        var = str(body.get("var") or "").strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", var):
+            return JSONResponse({"error": "a variable name like LLM_API_KEY"}, status_code=400)
+        path = watcher.root / ".env"
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        after = set_env_var(text, var, str(body.get("value") or ""))
+        try:
+            w = safewrite.commit(watcher.root, path, after, safewrite.sha(text), before=text,
+                                 scope=safewrite.env_scope([var]), what=f"set {var} in .env", who=_who(request))
+        except safewrite.WriteRefused as exc:
+            return JSONResponse({"error": str(exc), "code": exc.code}, status_code=409)
+        return JSONResponse({"var": var, "applied": True, "write": w.id})
+
+    @app.post("/api/p/{pid}/resources/delete")
+    def resources_delete(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        """A resource out of the project's file — refused while an op names it."""
+        from operonx_studio import yamldoc
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        cat, name = str(body.get("category") or ""), str(body.get("name") or "")
+        ir = (watcher.last.ir or watcher.refresh_swr().ir) or {}
+        users = []
+
+        def walk(nodes, graph):
+            for n in nodes or []:
+                rs = n.get("resource") if isinstance(n.get("resource"), list) else [n.get("resource")]
+                if name in rs:
+                    users.append(f"{graph}.{n.get('name')}")
+                if n.get("graph"):
+                    walk(n["graph"].get("nodes"), graph)
+
+        for g in ir.get("graphs") or []:
+            walk(g.get("nodes"), g.get("name"))
+        users += [r["config"] for r in _config_refs(watcher).get(name, []) if r["as"] == f"{cat}:{name}"]
+        if users:
+            return JSONResponse({"error": f"{name} is used by {', '.join(users)}: point them elsewhere first",
+                                 "used_by": users}, status_code=409)
+        rel, path = _overlay(watcher)
+        try:
+            text = path.read_text(encoding="utf-8")
+            after, paths = yamldoc.edit(text, "delete", [cat, name])
+        except (OSError, yamldoc.YamlDocError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        out = safewrite.preview(watcher.root, path, text, after)
+        if not body.get("apply"):
+            return JSONResponse({**out, "applied": False})
+        try:
+            w = safewrite.commit(watcher.root, path, after, body.get("base") or out["base"], before=text,
+                                 scope=safewrite.yaml_scope(paths), watcher=watcher,
+                                 what=f"delete {cat}.{name}", who=_who(request))
+        except safewrite.WriteRefused as exc:
+            return JSONResponse(exc.to_dict(), status_code=409)
+        return JSONResponse({**out, "applied": True, "write": w.id})
 
     def _who(request: Any) -> Optional[str]:
         """The signed-in name of whoever is asking, for the write journal."""
