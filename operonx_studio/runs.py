@@ -337,7 +337,14 @@ def write_retention(root: Path, policy: Dict[str, Optional[float]]) -> None:
         if out and not out[-1].endswith("\n"):
             out.append("\n")
         out.append(("\n" if out else "") + table)
-    path.write_text("".join(out), encoding="utf-8")
+    after = "".join(out)
+    if after == text:
+        return
+    # atomically, and only the [studio.retention] table may change (safewrite)
+    from operonx_studio import safewrite
+
+    safewrite.commit(root, path, after, safewrite.sha(text), before=text,
+                     scope=safewrite.toml_scope([("studio", "retention")]), what="retention")
 
 
 # ── the per-project handle ───────────────────────────────────────────────

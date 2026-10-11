@@ -4557,3 +4557,8 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .iotable td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .vwave { display: block; width: 100%; max-width: 420px; height: 36px; margin: 4px 0; color: var(--wire); cursor: pointer; opacity: 0; transition: opacity var(--tr); }
 .vwave.on { opacity: 1; }
+
+/* a write: the toast's Undo; a refused write said in place */
+#toast.show:has(.toastact) { pointer-events: auto; }
+#toast .toastact { margin-left: 12px; background: none; border: none; color: inherit; font-weight: 650; text-decoration: underline; cursor: pointer; padding: 0; min-height: 0; }
+.refuse-head { font-weight: 600; color: var(--warn); margin: 6px 0 2px; }

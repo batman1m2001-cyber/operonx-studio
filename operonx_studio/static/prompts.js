@@ -185,9 +185,16 @@ const PromptsView = (() => {
     for (const ln of got.diff.split("\n")) diff.append(el("span", ln.startsWith("+") && !ln.startsWith("+++") ? "add" : ln.startsWith("-") && !ln.startsWith("---") ? "del" : "", ln + "\n"));
     const apply = el("button", "primary needs-edit", `Write ${got.file}`);
     apply.type = "button";
+    let base = got.base;
     apply.onclick = async () => {
-      try { await api(`/api/p/${PID}/prompts/save`, {original, updated, apply: true}); toast(`Saved to ${got.file}`); show(); }
-      catch (err) { toast(err.message, true); }
+      try {
+        const done = await api(`/api/p/${PID}/prompts/save`, {original, updated, apply: true, base});
+        wrote(done, `Saved to ${got.file}`);
+        show();
+      } catch (err) {
+        const fresh = refusal(err, diff);
+        if (fresh) { base = fresh; apply.textContent = `Write ${got.file} as it is now`; } else apply.remove();
+      }
     };
     slot.append(diff, apply);
   }

@@ -400,7 +400,7 @@ def build_app(root: Path):
         the page reloads itself, so there is no separate refresh path to
         keep in step.
         """
-        from operonx_project.apply import PlanError, apply_plan, plan_edit
+        from operonx_project.apply import PlanError, plan_edit
         from operonx_project.manifest import Manifest, ManifestError
         from operonx_project.pyedit import PyEditError
 
@@ -408,7 +408,7 @@ def build_app(root: Path):
         action = body.get("action")
         if not graph or not action:
             return JSONResponse({"error": "graph and action are required"}, status_code=400)
-        arguments = {k: v for k, v in body.items() if k not in {"graph", "action", "dry_run"}}
+        arguments = {k: v for k, v in body.items() if k not in {"graph", "action", "dry_run", "base"}}
         try:
             manifest = Manifest.load(watcher.root)
             plan = plan_edit(manifest, graph, action, **arguments)
@@ -417,6 +417,8 @@ def build_app(root: Path):
         except TypeError as exc:  # wrong arguments for the action
             return JSONResponse({"error": f"bad arguments for {action!r}: {exc}"}, status_code=400)
 
+        from operonx_studio import safewrite
+
         payload = {
             "graph": plan.graph,
             "action": plan.action,
@@ -424,13 +426,19 @@ def build_app(root: Path):
             "changed": plan.changed,
             "diff": plan.diff,
             "applied": False,
+            "base": safewrite.sha(plan.before),
         }
-        if body.get("dry_run", True):
+        if body.get("dry_run", True) or not plan.changed:
             return JSONResponse(payload)
         try:
-            payload["applied"] = apply_plan(plan)
-        except PlanError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=409)
+            w = safewrite.commit(
+                watcher.root, plan.file, plan.after, body.get("base") or payload["base"],
+                before=plan.before, watcher=watcher, what=f"{action} in {graph}",
+                scope=safewrite.pyedit_scope(plan.before, manifest, graph, action, arguments),
+            )
+        except safewrite.WriteRefused as exc:
+            return JSONResponse(exc.to_dict(), status_code=409)
+        payload.update(applied=True, write=w.id)
         return JSONResponse(payload)
 
     return app

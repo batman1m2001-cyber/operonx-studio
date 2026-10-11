@@ -46,6 +46,7 @@ except ImportError:  # pragma: no cover — fastapi is a dependency
 
 from operonx_studio.daemon import ProjectWatcher
 from operonx_studio.layout import layout_graph
+from operonx_studio import safewrite
 from operonx_studio.registry import MANIFEST, ProjectRef, Recents
 
 __all__ = ["build_studio_app", "serve_studio"]
@@ -1630,8 +1631,37 @@ def build_studio_app(recents: Optional[Recents] = None):
             status[name] = "set" if (name in defined or name in os.environ) else "default"
         return JSONResponse({"env": status, "dotenv": env_path.is_file()})
 
+    def _who(request: Any) -> Optional[str]:
+        """The signed-in name of whoever is asking, for the write journal."""
+        u = getattr(getattr(request, "state", None), "user", None)
+        return u.get("username") if u else None
+
+    @app.get("/api/p/{pid}/writes")
+    def project_writes(pid: str) -> JSONResponse:
+        """The studio's last writes to this project, newest first (for undo)."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        from operonx_studio import safewrite
+
+        return JSONResponse({"writes": [w.summary() for w in reversed(safewrite.journal(watcher.root))]})
+
+    @app.post("/api/p/{pid}/writes/{wid}/undo")
+    def project_write_undo(pid: str, wid: str, request: Request) -> JSONResponse:
+        """Put a write's file back as it was — if it is still what the write left."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        from operonx_studio import safewrite
+
+        try:
+            w = safewrite.undo(watcher.root, wid, watcher=watcher, who=_who(request))
+        except safewrite.WriteRefused as exc:
+            return JSONResponse(exc.to_dict(), status_code=409)
+        return JSONResponse({"undone": wid, "write": w.id, "file": w.file})
+
     @app.post("/api/p/{pid}/edit")
-    def project_edit(pid: str, body: Dict[str, Any]) -> JSONResponse:
+    def project_edit(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         """A typed edit — ``set_param`` from the inspector rides this.
 
         ``dry_run`` defaults to true and the response always carries the
@@ -1643,7 +1673,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
 
-        from operonx_project.apply import PlanError, apply_plan, plan_edit
+        from operonx_project.apply import PlanError, plan_edit
         from operonx_project.manifest import Manifest, ManifestError
         from operonx_project.pyedit import PyEditError
 
@@ -1651,7 +1681,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         action = body.get("action")
         if not graph or not action:
             return JSONResponse({"error": "graph and action are required"}, status_code=400)
-        arguments = {k: v for k, v in body.items() if k not in {"graph", "action", "dry_run"}}
+        arguments = {k: v for k, v in body.items() if k not in {"graph", "action", "dry_run", "base"}}
         try:
             manifest = Manifest.load(watcher.root)
             plan = plan_edit(manifest, graph, action, **arguments)
@@ -1660,21 +1690,33 @@ def build_studio_app(recents: Optional[Recents] = None):
         except TypeError as exc:
             return JSONResponse({"error": f"bad arguments for {action!r}: {exc}"}, status_code=400)
 
+        from operonx_studio import safewrite
+
         payload: Dict[str, Any] = {
             "graph": plan.graph,
             "action": plan.action,
             "file": str(plan.file),
             "changed": plan.changed,
             "diff": plan.diff,
+            "base": safewrite.sha(plan.before),
         }
-        if body.get("dry_run", True):
+        if body.get("dry_run", True) or not plan.changed:
             payload["applied"] = False
             return JSONResponse(payload)
+        # the apply names the file it was previewed against (safewrite §5):
+        # without it, a file changed in between was overwritten unseen
+        base = body.get("base") or payload["base"]
         try:
-            apply_plan(plan)
+            w = safewrite.commit(
+                watcher.root, plan.file, plan.after, base, before=plan.before,
+                scope=safewrite.pyedit_scope(plan.before, manifest, graph, action, arguments),
+                watcher=watcher, what=f"{action} in {graph}", who=_who(request),
+            )
+        except safewrite.WriteRefused as exc:
+            return JSONResponse(exc.to_dict(), status_code=409)
         except OSError as exc:
             return JSONResponse({"error": f"could not write: {exc}"}, status_code=500)
-        payload["applied"] = True
+        payload.update(applied=True, write=w.id)
         return JSONResponse(payload)
 
     # ── runs ────────────────────────────────────────────────────────────
@@ -2086,7 +2128,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     # ── resources: prices ────────────────────────────────────────────────
 
     @app.post("/api/p/{pid}/resources/price")
-    def resource_price(pid: str, body: Dict[str, Any]) -> JSONResponse:
+    def resource_price(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         """Set an LLM resource's prices (USD per 1M tokens in / out) in the
         project's resources file. ``apply`` false (the default) returns the
         diff only — the page shows it before anything is written."""
@@ -2116,14 +2158,23 @@ def build_studio_app(recents: Optional[Recents] = None):
             new = set_fields(text, "llm", name, fields)
         except YamlEditError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        from operonx_studio import safewrite
+
         diff = "".join(difflib.unified_diff(text.splitlines(keepends=True), new.splitlines(keepends=True),
                                             fromfile=str(overlay), tofile=str(overlay), n=2))
-        applied = False
+        applied, wid = False, None
         if body.get("apply") and new != text:
-            path.write_text(new, encoding="utf-8")
-            applied = True
+            try:
+                w = safewrite.commit(
+                    watcher.root, path, new, body.get("base") or safewrite.sha(text), before=text,
+                    scope=safewrite.yaml_scope([("llm", name, k) for k in fields]),
+                    watcher=watcher, what=f"price of llm {name}", who=_who(request),
+                )
+            except safewrite.WriteRefused as exc:
+                return JSONResponse(exc.to_dict(), status_code=409)
+            applied, wid = True, w.id
         return JSONResponse({"file": str(path), "diff": diff, "changed": new != text, "applied": applied,
-                             "fields": fields})
+                             "fields": fields, "base": safewrite.sha(text), "write": wid})
 
     # ── settings: retention ──────────────────────────────────────────────
 
@@ -2297,6 +2348,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         try:
             policy = {**read_retention(watcher.root), **_policy_from(body)}
             write_retention(watcher.root, policy)
+        except safewrite.WriteRefused as exc:
+            return JSONResponse(exc.to_dict(), status_code=409)
         except (TypeError, ValueError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         except OSError as exc:
@@ -2753,7 +2806,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"op": op, "samples": samples, "constant": constant, "varying": varying})
 
     @app.post("/api/p/{pid}/prompts/save")
-    def prompt_save(pid: str, body: Dict[str, Any]) -> JSONResponse:
+    def prompt_save(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         """Write an edited prompt back where the original text lives — found
         verbatim in exactly one project file; ``apply`` false (the default)
         answers with the diff."""
@@ -2789,13 +2842,27 @@ def build_studio_app(recents: Optional[Recents] = None):
             where = ", ".join(str(h[0].relative_to(watcher.root)) for h in hits) or "no file"
             return JSONResponse({"error": f"the prompt's text is not in exactly one place verbatim ({where})",
                                  "found": [str(h[0].relative_to(watcher.root)) for h in hits]}, status_code=409)
+        from operonx_studio import safewrite
+
         path, text, _ = hits[0]
-        new = text.replace(original, updated, 1)
+        at = text.find(original)
+        new = text[:at] + updated + text[at + len(original):]
         rel = str(path.relative_to(watcher.root))
         diff = "".join(difflib.unified_diff(text.splitlines(True), new.splitlines(True), f"a/{rel}", f"b/{rel}"))
+        wid = None
         if body.get("apply"):
-            path.write_text(new, encoding="utf-8")
-        return JSONResponse({"file": rel, "diff": diff, "applied": bool(body.get("apply"))})
+            try:
+                w = safewrite.commit(
+                    watcher.root, path, new, body.get("base") or safewrite.sha(text), before=text,
+                    # only the prompt's own text changes; a .py prompt must still parse
+                    scope=safewrite.span_scope(at, at + len(original)),
+                    watcher=watcher, what=f"prompt in {rel}", who=_who(request),
+                )
+            except safewrite.WriteRefused as exc:
+                return JSONResponse(exc.to_dict(), status_code=409)
+            wid = w.id
+        return JSONResponse({"file": rel, "diff": diff, "applied": bool(body.get("apply")),
+                             "base": safewrite.sha(text), "write": wid})
 
     # ── alerts: thresholds per service or job, checked in the background ──
     # The rules live in the project (.operonx/alerts.json) and their last

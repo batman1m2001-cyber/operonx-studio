@@ -76,7 +76,7 @@ function pushView() {
 
 /* One shared voice for action feedback: applied, painted, copied. */
 let _toastTimer = null;
-function toast(text, bad) {
+function toast(text, bad, action) {
   let t = $("#toast");
   if (!t) {
     t = el("div", null, "");
@@ -84,10 +84,49 @@ function toast(text, bad) {
     document.body.append(t);
   }
   t.textContent = text;
+  // one action a toast can offer: Undo, after a write
+  if (action) {
+    const b = el("button", "toastact", action.label);
+    b.type = "button";
+    b.onclick = () => { t.classList.remove("show"); action.run(); };
+    t.append(b);
+  }
   t.classList.toggle("bad", !!bad);
   t.classList.add("show");
   clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => t.classList.remove("show"), 2400);
+  _toastTimer = setTimeout(() => t.classList.remove("show"), action ? 7000 : 2400);
+}
+
+/* A write to the project landed (operonx_studio/safewrite.py): say so, and
+ * offer to put it back. */
+function wrote(got, text) {
+  toast(text, false, got && got.write ? {label: "Undo", run: () => undoWrite(got.write)} : null);
+}
+
+async function undoWrite(id) {
+  try {
+    const r = await api(`/api/p/${PID}/writes/${encodeURIComponent(id)}/undo`, {});
+    toast(`Undone — ${r.file} is as it was`);
+  } catch (e) { toast(e.message, true); }
+}
+
+/* A write the studio refused, said in place: the file moved since the
+ * preview (with the change against it now), the change reached past what
+ * it was for, or the project would not build. Returns the new base for a
+ * stale file, so the same change can be applied against it. */
+function refusal(err, box) {
+  const d = (err && err.data) || {};
+  box.textContent = "";
+  const head = {stale: "The file changed since the preview.", scope: "Not written: the change reaches past what it was for.",
+                build: "Not written: the project would not build with it."}[d.code] || "Not written.";
+  box.append(el("div", "refuse-head", head), el("div", "note", err.message));
+  if (d.diff) {
+    const diff = el("div", "diffbox");
+    for (const ln of d.diff.split("\n")) diff.append(el("div", ln.startsWith("+") && !ln.startsWith("+++") ? "add" : ln.startsWith("-") && !ln.startsWith("---") ? "del" : null, ln));
+    box.append(diff);
+  }
+  box.hidden = false;
+  return d.code === "stale" ? d.base : null;
 }
 
 function store(key, value) {
