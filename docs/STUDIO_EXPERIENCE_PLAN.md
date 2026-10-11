@@ -211,3 +211,12 @@ P3 can run beside P2 (server-side only). P4 and P5 need P3.
 - **Line-based YAML edits** can miss exotic YAML (anchors, flow style). The scope proof in §5 turns that into a refusal, never into damage.
 - **The `studio.js` split** touches every screen. P1 changes no behaviour, and the screenshot comparison is its gate.
 - **Run metadata for "used by"** depends on the trace store; when it's away, the hub shows the static references only.
+
+## 11. Progress
+
+| Phase | State | Evidence |
+|---|---|---|
+| **P1** foundations | done: studio #43 | Every screen has an address (`router.js`; a browser test covers deep link, Back, the old `?run=` link). `studio.js` is split into 9 view files, with the same bundle text in the same order. Raw colours in rules went from 348 to 8 (masks, filters, the scrollbar); 219 palette tokens plus 23 snapped to semantic ones. Every screen at desktop and phone, light and dark, pixel-compared with `main`: identical except a live latency figure. |
+| **P2** traces | done: operonx 1.22.0 (#147) and this branch | **operonx:** a run keeps its input and output: the graph's parameters and declared cells, or a door graph's first items. Every store keeps a 4 KB preview (ClickHouse schema 5), and Langfuse gets them. **Studio, runs list:** an input → output column. **Studio, run page:** the input and output cards, the turns, the steps (tree or timeline, virtualised, search, errors, key ops, keyboard) beside the selected step. The step is fetched by its id (`/trace/{run}/step`), and its panel shows what it fed, folded details, copy link and Open in Flow. **Values:** waveforms, tables, path copying. **Headers:** a service's key ops replace "slowest", and generators are no longer called slow. **Measured:** the real call (118 steps) opens in 133–175 ms including the fetch; a 5,000-step run in 0.72–0.80 s, scrolling at 23–27 ms a frame. All four tasks done in 3 clicks or fewer (the LLM-messages task had no run with an LLM call; `io.js` covers that rendering in its own tests). |
+
+**Known gap, found by the tasks:** a call's STT input (`speech_audio`, raw float32 samples) is recorded as `application/octet-stream`, so it can't be played. The TTS audio plays. Fixing it means the callbot recording speech audio as `audio/L16` at 16 kHz in its trace.

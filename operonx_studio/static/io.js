@@ -387,7 +387,13 @@
     const body = h("div", "jn-body");
     entries.forEach(([k, x], i) => {
       const row = h("div", "jn-row");
-      if (!arr) row.append(h("span", "jn-key", JSON.stringify(k)), h("span", "jn-punc", ": "));
+      row.dataset.k = String(k);
+      if (arr) row.dataset.arr = "1";
+      if (!arr) {
+        const key = h("span", "jn-key", JSON.stringify(k));
+        copiesPath(key);
+        row.append(key, h("span", "jn-punc", ": "));
+      }
       row.append(jsonNode(x, depth + 1, openDepth, i < entries.length - 1));
       body.append(row);
     });
@@ -474,14 +480,82 @@
       for (const x of v) box.append(h("span", "iochip mono", x));
       return box;
     }
-    return fields(entries.slice(0, 200), depth, entries.length > 200 ? entries.length - 200 : 0);
+    // a list of flat records with the same few fields: a table
+    const cols = tableOf(v);
+    if (cols) return tableView(v, cols);
+    return fields(entries.slice(0, 200), depth, entries.length > 200 ? entries.length - 200 : 0, null, Array.isArray(v));
   }
 
-  function fields(entries, depth, more, badges) {
+  /* The columns of a list that reads best as a table — 2 to 200 records,
+   * every value a scalar, at most 8 fields between them — else null. */
+  function tableOf(v) {
+    if (!Array.isArray(v) || v.length < 2 || v.length > 200) return null;
+    const cols = [];
+    for (const row of v) {
+      if (!row || typeof row !== "object" || Array.isArray(row) || "$media" in row) return null;
+      for (const [k, x] of Object.entries(row)) {
+        if (x !== null && typeof x === "object") return null;
+        if (!cols.includes(k)) cols.push(k);
+      }
+    }
+    return cols.length && cols.length <= 8 ? cols : null;
+  }
+
+  function tableView(v, cols) {
+    const wrap = h("div", "iotablewrap");
+    const t = h("table", "iotable");
+    const hr = h("tr");
+    for (const c of cols) hr.append(h("th", "mono", c));
+    const head = h("thead"); head.append(hr); t.append(head);
+    const body = h("tbody");
+    for (const row of v) {
+      const tr = h("tr");
+      for (const c of cols) {
+        const x = row[c];
+        tr.append(h("td", typeof x === "string" ? "" : "mono num", x === undefined ? "" : x === null ? "null" : String(x)));
+      }
+      body.append(tr);
+    }
+    t.append(body);
+    wrap.append(t);
+    return wrap;
+  }
+
+  /* A key copies its path when clicked: `.audio.mime`, `.messages[2].content`
+   * — built from the keys above it (each carries its own in `data-k`). */
+  function pathOf(keyEl) {
+    const parts = [];
+    for (let n = keyEl.closest("[data-k]"); n; n = n.parentElement && n.parentElement.closest("[data-k]")) {
+      const k = n.dataset.k;
+      parts.unshift(/^\d+$/.test(k) && n.dataset.arr === "1" ? `[${k}]` : /^[A-Za-z_]\w*$/.test(k) ? `.${k}` : `[${JSON.stringify(k)}]`);
+    }
+    return parts.join("") || ".";
+  }
+
+  function copiesPath(keyEl) {
+    keyEl.setAttribute("role", "button");
+    keyEl.tabIndex = 0;
+    keyEl.classList.add("copypath");
+    const copy = (ev) => {
+      ev.stopPropagation(); ev.preventDefault();
+      const path = pathOf(keyEl);
+      Promise.resolve().then(() => navigator.clipboard.writeText(path))
+        .then(() => { keyEl.classList.add("copied"); keyEl.title = `Copied ${path}`; }, () => {})
+        .finally(() => setTimeout(() => keyEl.classList.remove("copied"), 900));
+    };
+    keyEl.onclick = copy;
+    keyEl.onkeydown = (ev) => { if (ev.key === "Enter") copy(ev); };
+    keyEl.onmouseenter = () => { keyEl.title = `Copy the path ${pathOf(keyEl)}`; };
+  }
+
+  function fields(entries, depth, more, badges, arr) {
     const box = h("div", "iofields" + (depth ? " nested" : ""));
     for (const [k, x] of entries) {
       const row = h("div", "iofield");
+      row.dataset.k = String(k);
+      if (arr) row.dataset.arr = "1";
       const name = h("div", "iofname mono", k);
+      copiesPath(name);
       if (badges && badges[k]) {
         const b = h("span", "iobadge", badges[k][0]);
         b.title = badges[k][1] || "";
@@ -715,7 +789,7 @@
   }
 
   const api = { KNOBS, pyRepr, pyStr, pyFormat, chatOf, replyOf, toolCallOf, messageParts, jsonish, segments, contentParts,
-                lineCount, panel, valueView, jsonView, textView };
+                lineCount, panel, valueView, jsonView, textView, tableOf };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.IO = api;
 })(typeof window !== "undefined" ? window : globalThis);

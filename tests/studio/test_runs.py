@@ -566,3 +566,28 @@ def test_compare_two_runs_op_by_op(client, project):
     assert "d_cost" not in ops["reply"]  # B's call went unpriced: no change is computed from $0
     assert data["d_ms"] == pytest.approx(340.0, abs=1.0)
     assert client.get(f"/api/p/{pid}/compare", params={"a": "r-a", "b": "nope"}).status_code == 404
+
+
+# -- one step by its id (the run page's step panel) ---------------------------------
+
+
+def test_a_step_is_read_by_its_id_with_its_values(client, project):
+    _seed(project)
+    pid = _open(client, project)
+    got = client.get(f"/api/p/{pid}/trace/call-new/step", params={"id": "g.a#call-new"})
+    assert got.status_code == 200
+    step = got.json()
+    assert step["op"] == "a" and step["outputs"] == {"y": 1} and step["status"] == "ok"
+    missing = client.get(f"/api/p/{pid}/trace/call-new/step", params={"id": "g.a#nope"})
+    assert missing.status_code == 404 and "no step" in missing.json()["error"]
+
+
+def test_the_runs_list_carries_each_runs_input_and_output(client, project):
+    runs = project / ".operonx" / "runs"
+    t = _trace("asked", origin="service", service="call")
+    t.inputs, t.output = {"question": "hi"}, {"answer": "hello"}
+    FilesRunStore(root=runs, refresh_every=0).consume(t)
+    pid = _open(client, project)
+    (row,) = [r for r in client.get(f"/api/p/{pid}/runs").json()["runs"] if r["run"] == "asked"]
+    assert json.loads(row["input"]) == {"question": "hi"}
+    assert json.loads(row["output"]) == {"answer": "hello"}

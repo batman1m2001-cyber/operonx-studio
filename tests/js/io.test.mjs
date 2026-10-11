@@ -143,3 +143,10 @@ test("messageParts: empty content beside tool calls shows nothing, alone it is a
   assert.deepEqual(messageParts({ role: "assistant", content: "ok", tool_calls: call }),
     [{ t: "text", text: "ok" }]);
 });
+
+test("a list of flat records reads as a table; anything else does not", () => {
+  assert.deepEqual(require("../../operonx_studio/static/io.js").tableOf([{id: 1, name: "a"}, {id: 2, name: "b", ok: true}]), ["id", "name", "ok"]);
+  assert.equal(require("../../operonx_studio/static/io.js").tableOf([{id: 1}]), null);                       // one record is a record
+  assert.equal(require("../../operonx_studio/static/io.js").tableOf([{id: 1, tags: ["x"]}, {id: 2}]), null); // a nested value
+  assert.equal(require("../../operonx_studio/static/io.js").tableOf([1, 2, 3]), null);
+});
