@@ -696,15 +696,21 @@ function literalEditor(node, inp) {
       diffBox.style.display = "block";
       status.textContent = "";
       const confirm = el("button", "primary", "Apply");
+      let base = plan.base;
       confirm.onclick = async () => {
         try {
-          await api(`/api/p/${PID}/edit`, {
+          const got = await api(`/api/p/${PID}/edit`, {
             graph: state.graph.name, action: "set_param",
-            op_name: node.name, param: inp.name, value, dry_run: false,
+            op_name: node.name, param: inp.name, value, dry_run: false, base,
           });
           status.textContent = "applied ✓ — reloading";
-          toast(`${node.name}.${inp.name} rewritten in source`);
-        } catch (e) { status.textContent = e.message; }
+          wrote(got, `${node.name}.${inp.name} rewritten in source`);
+        } catch (e) {
+          status.textContent = "";
+          const fresh = refusal(e, diffBox);
+          if (fresh) { base = fresh; confirm.textContent = "Apply to the file as it is now"; }
+          else confirm.remove();
+        }
       };
       bar.append(confirm);
     } catch (e) { status.textContent = e.message; }

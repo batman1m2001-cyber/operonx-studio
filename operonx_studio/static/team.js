@@ -281,6 +281,7 @@
     "POST /api/p/{pid}/review/run/{run}": "Reviewed a run",
     "POST /api/p/{pid}/review/run/{run}/dataset": "Added a run to a dataset",
     "POST /api/p/{pid}/prompts/save": "Saved a prompt",
+    "POST /api/p/{pid}/writes/{wid}/undo": "Undid a change",
     "POST /api/p/{pid}/alerts": "Saved an alert",
     "DELETE /api/p/{pid}/alerts/{name}": "Deleted an alert",
     "POST /api/p/{pid}/alerts/{name}/test": "Tested an alert",

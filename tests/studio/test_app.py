@@ -1212,3 +1212,31 @@ def test_an_agent_ships_its_parts_a_graph_tool_laid_out(client, tmp_path):
     tool_part = node["parts"][1]
     assert tool_part["subgraph_ops"] == 2
     assert all(isinstance(m.get("x"), (int, float)) for m in tool_part["graph"]["nodes"])
+
+
+def test_an_edit_applies_against_the_file_it_previewed_and_can_be_undone(client, project):
+    """safewrite (§5): the preview's base is named by the apply; a file
+    changed in between is refused with the new diff; a write can be undone."""
+    pid = _open(client, project)
+    edit = {"graph": "flow", "action": "set_param", "op_name": "a", "param": "times", "value": 7}
+    preview = client.post(f"/api/p/{pid}/edit", json=edit).json()
+    main = project / "main.py"
+    original = main.read_text()
+
+    # someone else edits the file between the preview and the apply
+    main.write_text(original + "\n# an editor's note\n")
+    stale = client.post(f"/api/p/{pid}/edit", json={**edit, "dry_run": False, "base": preview["base"]})
+    assert stale.status_code == 409 and stale.json()["code"] == "stale"
+    assert "times=7" in stale.json()["diff"] and "# an editor's note" in main.read_text()
+    assert "times=7" not in main.read_text()
+
+    # previewed again, it applies — and only the op's own line changed
+    preview = client.post(f"/api/p/{pid}/edit", json=edit).json()
+    done = client.post(f"/api/p/{pid}/edit", json={**edit, "dry_run": False, "base": preview["base"]}).json()
+    assert done["applied"] and "times=7" in main.read_text() and "# an editor's note" in main.read_text()
+
+    writes = client.get(f"/api/p/{pid}/writes").json()["writes"]
+    assert writes[0]["id"] == done["write"] and writes[0]["file"] == "main.py"
+    undone = client.post(f"/api/p/{pid}/writes/{done['write']}/undo")
+    assert undone.status_code == 200
+    assert "times=7" not in main.read_text() and "times=2" in main.read_text()

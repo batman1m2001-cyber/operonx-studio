@@ -182,14 +182,19 @@ function priceRow(name, det) {
       }
       diff.hidden = false;
       apply.hidden = !r.changed;
+      base = r.base;
     } catch (e) { err.textContent = e.message; }
   };
+  let base = null;
   apply.onclick = async () => {
     try {
-      await api(`/api/p/${PID}/resources/price`, {...body(), apply: true});
-      toast("Prices saved — new calls are priced from now on");
+      const got = await api(`/api/p/${PID}/resources/price`, {...body(), apply: true, base});
+      wrote(got, "Prices saved — new calls are priced from now on");
       form.hidden = true;
-    } catch (e) { err.textContent = e.message; }
+    } catch (e) {
+      const fresh = refusal(e, diff);
+      if (fresh) base = fresh; else apply.hidden = true;
+    }
   };
   return wrap;
 }
