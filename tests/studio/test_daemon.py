@@ -356,6 +356,18 @@ class TestIRCache:
         fresh = ProjectWatcher(root=root)
         assert fresh.last.stamp == 0.0, "stale cache must not be served"
 
+    def test_a_changed_extractor_invalidates_the_cache(self, project, monkeypatch):
+        """A studio update that changes the extractor (a fix, a new field)
+        extracts again: the env contract fix for `${VAR:}` stayed invisible
+        while the cache, keyed on project files only, served the old IR."""
+        import operonx_studio.daemon as daemon
+
+        root, _mod = project
+        ProjectWatcher(root=root).refresh()
+        assert ProjectWatcher(root=root).last.ok
+        monkeypatch.setattr(daemon, "_EXTRACTOR_DIGEST", "another-extractor")
+        assert ProjectWatcher(root=root).last.stamp == 0.0, "an old extractor's IR must not be served"
+
     def test_swr_serves_stale_immediately_then_updates(self, project):
         """The canvas appears in milliseconds; the repaint follows."""
         import time as _t
