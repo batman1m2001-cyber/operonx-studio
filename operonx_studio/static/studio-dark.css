@@ -8,6 +8,7 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --float-edge: var(--border);
   /* surfaces — deep graphite, never pure black */
   --bg: #0e1115;
   --surface: #161a20;

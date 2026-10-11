@@ -106,6 +106,17 @@ const Configure = (() => {
     return {wrap, read};
   }
 
+  /* Every control in *box* named for a screen reader: the field, and the
+   * part of it (a prompt's `system`) when there are several. */
+  function labelled(box, name) {
+    for (const c of box.querySelectorAll("input, textarea, select")) {
+      const part = c.previousElementSibling && c.previousElementSibling.classList.contains("cf-part")
+        ? ` ${c.previousElementSibling.textContent}` : "";
+      if (!c.getAttribute("aria-label")) c.setAttribute("aria-label", name + part);
+    }
+    return box;
+  }
+
   function diffBox(text) {
     const box = el("div", "diffbox");
     for (const ln of (text || "").split("\n")) {
@@ -175,6 +186,7 @@ const Configure = (() => {
     row.append(head);
     if (inp.description) row.append(el("div", "cf-desc", inp.description));
     const c = control(inp, value, kind);
+    labelled(c.wrap, inp.name);
     row.append(c.wrap);
     reviewFlow(row, (apply, base) => {
       const got = c.read();
@@ -249,6 +261,7 @@ const Configure = (() => {
       if ((d.kwargs.bound && d.kwargs.bound.value) === v || (!d.kwargs.bound && n.bound === v)) o.selected = true;
       sel.append(o);
     }
+    sel.setAttribute("aria-label", "bound");
     bd.append(sel);
     reviewFlow(bd, post("bound", () => sel.value), `${n.name}: bound saved`);
     sec.append(bd);
@@ -261,6 +274,7 @@ const Configure = (() => {
     tc.type = "checkbox";
     tc.className = "cf-switch";
     tc.checked = d.kwargs.transient ? !!d.kwargs.transient.value : !!n.transient;
+    tc.setAttribute("aria-label", "transient");
     tr.append(tc);
     reviewFlow(tr, post("transient", () => tc.checked), `${n.name}: transient saved`);
     sec.append(tr);
@@ -286,6 +300,7 @@ const Configure = (() => {
     sec.append(el("div", "stitle", `Resource · ${r.category || ""}`));
     const row = el("div", "cf-field");
     const sel = el("select");
+    sel.setAttribute("aria-label", `resource for ${n.name}`);
     for (const name of r.choices) {
       const o = el("option", null, name);
       o.value = name;
@@ -323,7 +338,7 @@ const Configure = (() => {
     return box;
   }
 
-  return {section, kindOf, review: reviewFlow};
+  return {section, kindOf, review: reviewFlow, labelled};
 })();
 
 if (typeof module !== "undefined") module.exports = Configure;

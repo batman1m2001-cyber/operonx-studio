@@ -69,8 +69,12 @@
       if (Math.abs(d) < 0.005) sub.append("same as the previous period");
       else {
         const better = lowerIsBetter ? d < 0 : d > 0;
-        const arrow = el("span", "delta " + (better ? "good" : "bad"), `${d > 0 ? "▲" : "▼"} ${Math.abs(100 * d).toFixed(Math.abs(d) < 0.1 ? 1 : 0)}%`);
-        sub.append(arrow, " vs the previous period");
+        // past ten times, a percentage says nothing: the two values do
+        const text = Math.abs(d) >= 9
+          ? `${d > 0 ? "▲" : "▼"} from ${fmt(prev)}`
+          : `${d > 0 ? "▲" : "▼"} ${Math.abs(100 * d).toFixed(Math.abs(d) < 0.1 ? 1 : 0)}%`;
+        const arrow = el("span", "delta " + (better ? "good" : "bad"), text);
+        sub.append(arrow, Math.abs(d) >= 9 ? " in the previous period" : " vs the previous period");
       }
     } else if (prev === 0 || prev == null) sub.append("nothing in the previous period");
     t.append(sub);
@@ -114,12 +118,28 @@
   function versionMarks(svg, f, series, versions) {
     if (!versions || versions.length < 2) return;   // one version: nothing changed
     const t0 = series[0].t0, t1 = series[series.length - 1].t1;
+    // a label goes where it fits; marks too close to the last label keep
+    // their line, and every line names its version on hover
+    const LABEL_W = 58;
+    let free = -Infinity, hidden = 0;
     for (const ver of versions.slice(1)) {
       const x = f.L + f.pw * (ver.first_started - t0) / (t1 - t0);
-      svg.append(svgEl("line", {x1: x, x2: x, y1: f.T, y2: f.T + f.ph, stroke: C.ink2, "stroke-width": 1, "stroke-dasharray": "3 3"}));
+      const name = `@${String(ver.version).slice(0, 7)}${ver.dirty ? "*" : ""}`;
+      const line = svgEl("line", {x1: x, x2: x, y1: f.T, y2: f.T + f.ph, stroke: C.ink2, "stroke-width": 1, "stroke-dasharray": "3 3"});
+      const title = svgEl("title", {});
+      title.textContent = `code ${name} from ${new Date(ver.first_started * 1000).toLocaleString()}`;
+      line.append(title);
+      svg.append(line);
+      if (x < free || x + LABEL_W > f.L + f.pw + 6) { hidden += 1; continue; }
       const tx = svgEl("text", {x: x + 3, y: f.T + 9, class: "vizver"});
-      tx.textContent = `@${String(ver.version).slice(0, 7)}${ver.dirty ? "*" : ""}`;
+      tx.textContent = name;
       svg.append(tx);
+      free = x + LABEL_W;
+    }
+    if (hidden) {
+      const more = svgEl("text", {x: f.L + f.pw, y: f.T + 21, "text-anchor": "end", class: "vizver"});
+      more.textContent = `+${hidden} more (hover a line)`;
+      svg.append(more);
     }
   }
 

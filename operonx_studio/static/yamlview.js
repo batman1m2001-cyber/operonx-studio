@@ -82,6 +82,7 @@ const YamlView = (() => {
       input.value = s;
       if (long) input.rows = Math.min(16, Math.max(3, s.split("\n").length + 1));
     }
+    input.setAttribute("aria-label", show_(path));
     const slot = el("div", "cf-out");
     const bar = el("div", "cf-bar");
     const review = el("button", "small needs-edit", "Review");
@@ -121,6 +122,7 @@ const YamlView = (() => {
     const inp = el("input", "cf-text");
     inp.type = "text";
     inp.placeholder = "Add an item";
+    inp.setAttribute("aria-label", `a new item of ${show_(path)}`);
     const go = el("button", "small needs-edit", "Add");
     go.type = "button";
     const doAdd = () => { if (inp.value.trim()) change(slot, "append", path, {value: inp.value.trim()}, `Added to ${show_(path)}`); };
@@ -166,9 +168,11 @@ const YamlView = (() => {
     const key = el("input", "cf-text mono");
     key.type = "text";
     key.placeholder = alike ? "a new entry's key" : "new key";
+    key.setAttribute("aria-label", `a new key in ${show_(path) || "the file"}`);
     const val = el("input", "cf-text");
     val.type = "text";
     val.placeholder = "value";
+    val.setAttribute("aria-label", "its value");
     if (alike) val.hidden = true;
     const go = el("button", "small needs-edit", alike ? "Add an entry" : "Add");
     go.type = "button";
@@ -196,6 +200,7 @@ const YamlView = (() => {
     const q = el("input", "rt-search");
     q.type = "search";
     q.placeholder = "Find an entry";
+    q.setAttribute("aria-label", "Find an entry");
     q.value = cur.q || "";
     const list = el("div", "yv-nav");
     const paint = () => {
