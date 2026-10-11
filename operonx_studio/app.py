@@ -3093,18 +3093,23 @@ def build_studio_app(recents: Optional[Recents] = None):
     def _reviewer(request: Any) -> str:
         return request.state.user["username"]
 
-    def _egress_ops(watcher: ProjectWatcher) -> set:
-        names: set = set()
+    def _door_ops(watcher: ProjectWatcher) -> Dict[str, set]:
+        """The project's door ops by role: what came in, what went out."""
+        names: Dict[str, set] = {"ingress": set(), "egress": set()}
 
         def walk(g: Any) -> None:
             for n in (g or {}).get("nodes") or []:
-                if n.get("serve_role") == "egress":
-                    names.add(n.get("name"))
+                if n.get("serve_role") in names:
+                    names[n["serve_role"]].add(n.get("name"))
                 walk(n.get("graph"))
 
         for g in (watcher.refresh_swr().ir or {}).get("graphs") or []:
             walk(g)
         return names
+
+    def _turns(watcher: ProjectWatcher, rows: Any, metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+        doors = _door_ops(watcher)
+        return conversation(rows, metadata or {}, doors["egress"], doors["ingress"])
 
     @app.get("/api/p/{pid}/review/queue")
     def review_queue(pid: str, origin: str = "", name: str = "", status: str = "", verdict: str = "unreviewed",
@@ -3147,7 +3152,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             return got
         rows, rec = got
         return {"summary": _row(rec.summary),
-                "turns": conversation(rows, rec.summary.metadata or {}, _egress_ops(watcher)),
+                "turns": _turns(watcher, rows, rec.summary.metadata),
                 "review": ReviewLog(watcher.root).get(run)}
 
     # operonx [[queue]] review queues: operonx_studio/reviewqueues.py
@@ -3193,7 +3198,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         if isinstance(got, JSONResponse):
             return got
         rows, rec = got
-        said = [t["text"] for t in conversation(rows, rec.summary.metadata or {}, _egress_ops(watcher))
+        said = [t["text"] for t in _turns(watcher, rows, rec.summary.metadata)
                 if t["who"] == "user"]
         if not said:
             return JSONResponse({"error": "nothing the user said was recorded in this run"}, status_code=400)
