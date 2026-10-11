@@ -4517,3 +4517,6 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   .rh-sum, .rh-used { display: none; }
   .rh-form { grid-template-columns: 1fr; }
 }
+
+/* a playground session that could not start: the whole reason, as written */
+.playerr { white-space: pre-wrap; font-family: var(--mono); font-size: var(--fs-sm); }
