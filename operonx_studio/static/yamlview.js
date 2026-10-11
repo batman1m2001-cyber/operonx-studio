@@ -236,8 +236,11 @@ const YamlView = (() => {
     box.textContent = "";
     const page = el("div", "yv");
     const head = el("div", "yv-head");
-    const back = Icons.button("back", "Resources", "small ghost", "Back to the resources");
-    back.onclick = () => switchTab("resources");
+    // back to the screen that opened the file (the Resources, the Prompts)
+    const from = state.yamlFrom && state.yamlFrom !== "yaml" ? state.yamlFrom : "resources";
+    const fromName = {resources: "Resources", prompts: "Prompts"}[from] || "Back";
+    const back = Icons.button("back", fromName, "small ghost", `Back to ${fromName.toLowerCase()}`);
+    back.onclick = () => switchTab(from);
     head.append(back, el("h2", "mono", cur.file));
     head.append(el("div", "note", "Each change is shown as a diff before it is written; the rest of the file stays as it is."));
     page.append(head);
@@ -283,6 +286,7 @@ const YamlView = (() => {
 
   /* Open a file in the editor (a resource's prompts, a settings file). */
   function open(file) {
+    state.yamlFrom = state.tab;
     state.yamlFile = file;
     switchTab("yaml", {file});
   }

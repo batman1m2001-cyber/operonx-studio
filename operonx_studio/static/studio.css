@@ -3318,6 +3318,7 @@ button.chip.kbpagechip.on { border-color: var(--accent); color: var(--accent-str
   .pwgrid { grid-template-columns: minmax(0, 1fr); }
   .pwlist { flex-direction: row; overflow-x: auto; }
   .pwop { flex: none; }
+
   .pwpair { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -3555,6 +3556,12 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   .crumbs .sep:first-child { display: none; }
   body.onegraph .crumbs .sep:not(:first-child), body.onegraph #btn-project { display: none; }
   body.onegraph .crumbbtn.projname { max-width: 46vw; }
+  /* one picker on a phone, with room for its name (two shared ~80px and
+     read "e… / w…"): the graph on the Flow, the project elsewhere — the
+     brand leads to every project */
+  body:not([data-tab="flow"]) #btn-project, body:not([data-tab="flow"]) .crumbs .sep:not(:first-child) { display: none; }
+  body[data-tab="flow"]:not(.onegraph) #pname, body[data-tab="flow"]:not(.onegraph) .crumbs .sep { display: none; }
+  .crumbs .crumbbtn { max-width: 100%; }
   .screenbtn .icon { width: 18px; height: 18px; flex: none; color: var(--text-2); }
   .screenbtn::after { display: none; }
 
@@ -4479,9 +4486,9 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 
 /* the Resource Hub (resources.js): rows by category, each opening onto its fields */
 .rh { display: flex; flex-direction: column; gap: 16px; max-width: 1180px; }
-.rh-head { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-.rh-title { flex: 1 1 360px; }
-.rh-title h2 { margin: 0 0 2px; }
+.rh-head { flex-wrap: wrap; gap: 10px; }
+.rh-head .rh-search { flex: 0 1 260px; min-width: 160px; }
+.rh-sub { margin-top: -6px; }
 .rh-search { flex: 0 1 260px; }
 .rh-adder { }
 .rh-addcard { background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--sh-2); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -4546,3 +4553,15 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .rt-line .chat-msg.on { box-shadow: 0 0 0 2px var(--accent); }
 .rt-line-t { overflow-wrap: anywhere; }
 .rt-line-m { font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* the Prompts list: the files a project's prompts live in */
+.pwfiles { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.pwlist > .stitle { margin: 2px 0 0; }
+.pwfiles .pwop { max-width: 100%; }
+.pwfiles .pwop b, .pwfiles .pwop span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) {
+  /* one scrolling row: the files join it, the headings give way */
+  .pwlist > .stitle, .pwfiles > .stitle { display: none; }
+  .pwfiles { display: contents; }
+  .pwfiles .pwop { max-width: 70vw; }
+}
