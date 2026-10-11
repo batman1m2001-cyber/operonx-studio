@@ -290,7 +290,8 @@
       if (S) for (const L of entries) tie(S, L);
       if (E) for (const L of exits) tie(L, E);
     }
-    if (E) for (const L of finals) tie(E, L);
+    // `END >> a >> b`: a chain the runtime calls in order after the run
+    if (E) finals.forEach((L, i) => tie(i ? finals[i - 1] : E, L));
 
     // ── layering ──
     const all = [...(S ? [S] : []), ...N, ...(E ? [E] : [])];
@@ -340,8 +341,8 @@
         let mx = 0;
         for (const L of all) if (L !== E && !finals.includes(L)) mx = Math.max(mx, layer.get(L));
         layer.set(E, mx + 1);
-        // the op after END sits one layer below it
-        for (const L of finals) layer.set(L, mx + 2);
+        // the ops after END hang below it, one layer each, in chain order
+        finals.forEach((L, i) => layer.set(L, mx + 2 + i));
       }
     }
     for (const w of W) {

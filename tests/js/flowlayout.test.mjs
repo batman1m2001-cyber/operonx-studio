@@ -451,3 +451,18 @@ test("the op after END hangs below the END terminal, wired from it", () => {
   assert.ok(closed.y > end.y + end.h, "below END");
   assert.ok(out.wires.some(w => w.a.node.name === "END" && w.b === closed), "a wire from END to it");
 });
+
+test("a chain after END hangs below it in order, each wired from the one before", () => {
+  // `END >> record >> notify` (operonx 1.21)
+  const g = {nodes: ["a", "t", "record", "notify"].map(n => card(n)),
+             edges: [edge("a", "t")], entries: ["a"], exits: ["t"], finals: ["record", "notify"]};
+  const out = FL.layout(g, {expanded: new Set(), sizeOf: plain});
+  assert.deepEqual(problems(out), []);
+  const end = out.end;
+  const rec = out.items.find(i => i.node.name === "record");
+  const note = out.items.find(i => i.node.name === "notify");
+  assert.ok(rec.y > end.y + end.h && note.y > rec.y + rec.h, "END, then record, then notify");
+  assert.ok(out.wires.some(w => w.a.node.name === "END" && w.b === rec), "END → record");
+  assert.ok(out.wires.some(w => w.a === rec && w.b === note), "record → notify");
+  assert.ok(!out.wires.some(w => w.a.node.name === "END" && w.b === note), "not END → notify");
+});

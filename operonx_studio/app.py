@@ -450,10 +450,11 @@ def _turns_of(execs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         g["count"] += 1
         g["end_ms"] = max(g["end_ms"], e["start_ms"] + (e["dur_ms"] or 0.0))
         if g["label"] is None and e.get("is_yield") and e["ctx"] == key:
-            g["label"] = f"{e['op']} [{parts[1].strip('[]')}]"
+            g["label"] = f"{e['op']} [{parts[1].strip('[]').rpartition(':')[2]}]"
     for key, g in groups.items():
         if g["label"] is None:
-            idx = key.split(".")[1].strip("[]")
+            # "[3]", or "[audio_in:3]" for a stream that meets a sibling
+            idx = key.split(".")[1].strip("[]").rpartition(":")[2]
             g["label"] = f"{stream} [{idx}]" if stream else key
     return sorted(groups.values(), key=lambda g: g["start_ms"])
 
