@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import ast
 import inspect
+import inspect as _insp
+import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -423,16 +425,90 @@ def _tool_graph(target: Any, fn: Any, root: Path, anchors: Dict[str, int]) -> Op
         return None
 
 
+_SIMPLE_TYPES = {bool: "bool", int: "int", float: "float", str: "str", list: "list", dict: "dict"}
+
+
+def _type_info(annotation: Any) -> Dict[str, Any]:
+    """An annotation as the editor reads it: ``{"type": "bool"|"int"|"float"|
+    "str"|"list"|"dict"|"choice"|"any"}``, ``choices`` for a ``Literal``,
+    ``optional`` when ``None`` is allowed. A string annotation (``from
+    __future__ import annotations``) is read by name."""
+    import typing
+
+    if annotation is inspect.Parameter.empty or annotation is None:
+        return {"type": "any"}
+    if isinstance(annotation, str):
+        text = annotation.replace("typing.", "").strip()
+        optional = text.startswith("Optional[") or text.endswith("| None") or text.startswith("None |")
+        core = text.removeprefix("Optional[").removesuffix("]") if text.startswith("Optional[") else text
+        core = core.replace("| None", "").replace("None |", "").strip()
+        if core.startswith("Literal["):
+            try:
+                import ast as _ast
+
+                choices = list(_ast.literal_eval("[" + core[len("Literal["):-1] + "]"))
+                return {"type": "choice", "choices": choices, "optional": optional}
+            except (ValueError, SyntaxError):
+                return {"type": "any"}
+        base = core.split("[", 1)[0].lower()
+        for t in ("bool", "int", "float", "str", "list", "dict"):
+            if base == t:
+                return {"type": t, "optional": optional}
+        return {"type": "any", "optional": optional}
+    origin, args = typing.get_origin(annotation), typing.get_args(annotation)
+    if origin is typing.Literal:
+        return {"type": "choice", "choices": list(args)}
+    if origin is typing.Union or str(origin) == "<class 'types.UnionType'>":
+        rest = [a for a in args if a is not type(None)]
+        info = _type_info(rest[0]) if len(rest) == 1 else {"type": "any"}
+        info["optional"] = len(rest) < len(args)
+        return info
+    if origin in (list, dict):
+        return {"type": _SIMPLE_TYPES[origin]}
+    return {"type": _SIMPLE_TYPES.get(annotation, "any")}
+
+
+def _json_default(value: Any) -> Any:
+    try:
+        json.dumps(value)
+        return value
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+def _signature_of(op: Any) -> Dict[str, inspect.Parameter]:
+    """The op function's own parameters (``@op def f(x: int = 1)``)."""
+    fn = _slot(op, "core")
+    try:
+        return dict(inspect.signature(fn).parameters) if callable(fn) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
 def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str, Any]:
     inputs = []
+    sig = _signature_of(op)
     for name, param in (_slot(op, "inputs") or {}).items():
-        inputs.append(
-            {
-                "name": name,
-                "binding": _binding(_slot(param, "value")),
-                "required": bool(_slot(param, "required", False)),
-            }
-        )
+        entry: Dict[str, Any] = {
+            "name": name,
+            "binding": _binding(_slot(param, "value")),
+            "required": bool(_slot(param, "required", False)),
+        }
+        # what the Configure panel needs to edit it as what it is (§4)
+        p = sig.get(name)
+        info = _type_info(p.annotation) if p is not None else {"type": "any"}
+        if info.get("type") == "any":
+            declared = _slot(param, "type")
+            if declared in _SIMPLE_TYPES:
+                info["type"] = _SIMPLE_TYPES[declared]
+        entry.update({k: v for k, v in info.items() if v not in (None, False)})
+        default = p.default if p is not None and p.default is not _insp.Parameter.empty else _slot(param, "default")
+        if default is not None:
+            entry["default"] = _json_default(default)
+        desc = _slot(param, "description")
+        if desc:
+            entry["description"] = str(desc)
+        inputs.append(entry)
     node: Dict[str, Any] = {
         "id": op.full_name,
         "name": op.name,

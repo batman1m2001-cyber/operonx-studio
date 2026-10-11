@@ -60,6 +60,13 @@ async function showResources() {
         const row = el("div", "resrow");
         row.append(el("span", "reskey", k));
         row.append(envValue(v));
+        // a field that names a YAML file of the project (an agent's prompts):
+        // edited here, value by value (yamlview.js)
+        if (typeof v === "string" && /\.ya?ml$/i.test(v) && !v.includes("${")) {
+          const ed = Icons.button("prompt", "Edit", "small ghost needs-edit", `Edit ${v} in the studio`);
+          ed.onclick = () => YamlView.open(v);
+          row.append(ed);
+        }
         card.append(row);
       }
       const urow = el("div", "resrow");

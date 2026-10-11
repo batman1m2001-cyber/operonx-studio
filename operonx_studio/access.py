@@ -134,6 +134,10 @@ ACCESS: Dict[Tuple[str, str], str] = {
     # ── one project: changing it ──
     ("POST", f"{P}/edit"): "edit",
     ("GET", f"{P}/writes"): "read",
+    ("GET", f"{P}/op-config"): "read",
+    ("GET", f"{P}/yaml"): "read",
+    ("POST", f"{P}/yaml"): "edit",
+    ("POST", f"{P}/op-decorator"): "edit",
     ("POST", f"{P}/writes/{{wid}}/undo"): "edit",
     ("POST", f"{P}/trace/{{run}}/delete"): "edit",
     ("POST", f"{P}/resources/price"): "edit",

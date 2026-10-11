@@ -23,7 +23,7 @@ never touched.
 from __future__ import annotations
 
 import ast
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 __all__ = [
     "PyEditError",
@@ -147,6 +147,8 @@ def _render_literal(value: Any, quote: str = "'") -> str:
         return repr(value)
     if isinstance(value, (list, tuple)):
         return "[" + ", ".join(_render_literal(v, quote) for v in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{_render_literal(k, quote)}: {_render_literal(v, quote)}" for k, v in value.items()) + "}"
     raise PyEditError(f"cannot render {type(value).__name__} as a literal")
 
 
@@ -185,7 +187,7 @@ def set_op_resource(text: str, graph: str, op_name: str, resource: Any) -> str:
     raise PyEditError(f"{op_name!r} has no resource= argument")
 
 
-def set_op_param(text: str, graph: str, op_name: str, param: str, value: Any) -> str:
+def set_op_param(text: str, graph: str, op_name: str, param: str, value: Any, add: bool = False) -> str:
     """Replace one literal keyword argument in an op's construction call.
 
     The generalisation of :func:`set_op_resource`, and the write half of the
@@ -218,7 +220,96 @@ def set_op_param(text: str, graph: str, op_name: str, param: str, value: Any) ->
         quote = '"' if existing[:1] == '"' or '"' in existing else "'"
         return _apply(text, [(start, end, _render_literal(value, quote))])
 
-    raise PyEditError(f"{op_name!r} has no {param}= argument")
+    if not add:
+        raise PyEditError(f"{op_name!r} has no {param}= argument")
+    # not written yet (it takes its default): added as the call's last keyword
+    return _add_keyword(text, offsets, assign.value, param, value)
+
+
+def _add_keyword(text: str, offsets: List[int], call: ast.Call, key: str, value: Any) -> str:
+    """``f(a=1)`` -> ``f(a=1, key=value)``; ``f()`` -> ``f(key=value)``."""
+    _start, end = _span(call, offsets)
+    close = text.rindex(")", 0, end)
+    quote = '"' if '"' in text[_start:end] else "'"
+    inner = text[text.index("(", _start) + 1:close].strip()
+    sep = ", " if inner and not inner.endswith(",") else (" " if inner else "")
+    return _apply(text, [(close, close, f"{sep}{key}={_render_literal(value, quote)}")])
+
+
+def _op_function(tree: ast.Module, name: str) -> ast.AST:
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return node
+    raise PyEditError(f"no function named {name!r}")
+
+
+def _op_decorator(func: ast.AST) -> ast.AST:
+    """The ``@op`` / ``@op(...)`` on *func*."""
+    for dec in func.decorator_list:
+        target = dec.func if isinstance(dec, ast.Call) else dec
+        name = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", None)
+        if name == "op":
+            return dec
+    raise PyEditError(f"{func.name!r} has no @op decorator")
+
+
+def function_at(text: str, line: int) -> str:
+    """The name of the function a source line (its ``def`` or a decorator)
+    belongs to — an op's ``defined_at``."""
+    for node in ast.walk(_parse(text)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            first = min([node.lineno] + [d.lineno for d in node.decorator_list])
+            if first <= line <= node.lineno:
+                return node.name
+    raise PyEditError(f"no function at line {line}")
+
+
+def decorator_kwargs(text: str, func_name: str) -> Dict[str, Dict[str, Any]]:
+    """The keywords of a function's ``@op(...)``: each ``{"literal": bool,
+    "value": ..., "source": "..."}`` — a computed one (``Timeout(run=2)``)
+    is shown as its source, never rewritten."""
+    func = _op_function(_parse(text), func_name)
+    dec = _op_decorator(func)
+    out: Dict[str, Dict[str, Any]] = {}
+    for kw in getattr(dec, "keywords", []) or []:
+        if kw.arg is None:
+            continue
+        src = ast.get_source_segment(text, kw.value) or ""
+        try:
+            out[kw.arg] = {"literal": True, "value": ast.literal_eval(kw.value), "source": src}
+        except (ValueError, SyntaxError):
+            out[kw.arg] = {"literal": False, "value": None, "source": src}
+    return out
+
+
+def decorator_span(text: str, func_name: str) -> Tuple[int, int]:
+    """The 1-based lines of a function's ``@op`` decorator."""
+    dec = _op_decorator(_op_function(_parse(text), func_name))
+    return dec.lineno, dec.end_lineno or dec.lineno
+
+
+def set_decorator_kwarg(text: str, func_name: str, key: str, value: Any) -> str:
+    """Set one literal keyword of a function's ``@op(...)``: replaced in
+    place, added when absent (``@op`` becomes ``@op(key=value)``). A
+    computed value is refused, like a wired parameter."""
+    offsets = _line_offsets(text)
+    dec = _op_decorator(_op_function(_parse(text), func_name))
+    if not isinstance(dec, ast.Call):
+        _s, end = _span(dec, offsets)
+        quote = "'"
+        return _apply(text, [(end, end, f"({key}={_render_literal(value, quote)})")])
+    for kw in dec.keywords:
+        if kw.arg != key:
+            continue
+        try:
+            ast.literal_eval(kw.value)
+        except (ValueError, SyntaxError):
+            raise PyEditError(f"@op({key}=...) is computed in code — edit it there") from None
+        start, end = _span(kw.value, offsets)
+        existing = text[start:end]
+        quote = '"' if existing[:1] == '"' or '"' in existing else "'"
+        return _apply(text, [(start, end, _render_literal(value, quote))])
+    return _add_keyword(text, offsets, dec, key, value)
 
 
 def rename_op(text: str, graph: str, old: str, new: str) -> str:
