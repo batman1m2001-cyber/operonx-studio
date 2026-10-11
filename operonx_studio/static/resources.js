@@ -17,16 +17,17 @@ async function showResources() {
   catch (e) { box.textContent = ""; box.append(loadError(e, showResources)); return; }
   box.textContent = "";
   const page = el("div", "rh");
-  const head = el("div", "rh-head");
-  const title = el("div", "rh-title");
-  title.append(el("h2", null, "Resources"),
-    el("p", "panesub", `The models, services and stores ops call by name, in ${hub.file}. Secret values stay in .env and never leave the server.`));
+  // the title and its actions on one row, what the screen is beneath —
+  // as every other screen's header reads
+  const head = el("div", "panehead rh-head");
   const q = el("input", "rt-search rh-search");
   q.type = "search";
   q.placeholder = "Find a resource";
+  q.setAttribute("aria-label", "Find a resource");
   const add = Icons.button("plus", "Add a resource", "primary needs-edit", "Declare a new resource in " + hub.file);
-  head.append(title, q, add);
-  page.append(head);
+  head.append(el("h2", null, "Resources"), el("div", "spacer"), q, add);
+  page.append(head, el("p", "panesub rh-sub",
+    `The models, services and stores ops call by name, in ${hub.file}. Secret values stay in .env and never leave the server.`));
   const adder = el("div", "rh-adder");
   adder.hidden = true;
   page.append(adder);

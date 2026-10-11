@@ -7,6 +7,9 @@
  * shown beside what it answered when recorded, with tokens and cost.
  * Save writes the text back where it lives when it lives there verbatim;
  * otherwise the assistant is asked to.
+ *
+ * A project whose prompts live in files (an agent's `prompts.yaml`, named
+ * by a resource) lists those files too; one opens in the YAML editor.
  */
 
 "use strict";
@@ -36,6 +39,38 @@ const PromptsView = (() => {
   const money = (x) => (x == null ? "unpriced" : `$${x < 0.01 ? x.toFixed(5) : x.toFixed(3)}`);
   const toks = (u) => (u ? `${u.prompt_tokens ?? "?"} → ${u.completion_tokens ?? "?"} tokens` : "");
 
+  /* The prompt files the resources name: a field called like a prompt whose
+   * value is a YAML file in the project. */
+  async function promptFiles() {
+    let hub;
+    try { hub = await api(`/api/p/${PID}/resources/hub`); } catch { return []; }
+    const out = [];
+    for (const cat of hub.categories || []) {
+      for (const r of cat.resources || []) {
+        for (const [k, val] of Object.entries(r.fields || {})) {
+          if (/prompt/i.test(k) && typeof val === "string" && /\.ya?ml$/i.test(val) && !val.includes("${")) {
+            out.push({name: r.name, category: cat.name, file: val});
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  function filesSection(files) {
+    const sec = el("div", "pwfiles");
+    sec.append(el("div", "stitle", "Prompt files"));
+    for (const f of files) {
+      const b = el("button", "pwop");
+      b.type = "button";
+      b.title = `Edit ${f.file} — value by value, comments kept`;
+      b.append(el("b", "mono", f.name), el("span", "mono", f.file));
+      b.onclick = () => YamlView.open(f.file);
+      sec.append(b);
+    }
+    return sec;
+  }
+
   async function show() {
     const mine = ++token;
     box.textContent = "";
@@ -43,6 +78,17 @@ const PromptsView = (() => {
     head.append(el("h2", null, "Prompts"));
     box.append(head);
     const ops = llmOps();
+    const files = await promptFiles();
+    if (mine !== token) return;
+    if (!ops.length && files.length) {
+      box.append(el("p", "panesub", "This project's prompts live in files its resources name. Each opens in the editor; every change is a diff first."));
+      const grid = el("div", "pwgrid");
+      const list = el("div", "pwlist");
+      list.append(filesSection(files));
+      grid.append(list);
+      box.append(grid);
+      return;
+    }
     if (!ops.length) {
       box.append(paneNote("No LLM ops here", "The workbench opens an LLMOp's prompt and tries edits on the inputs it really had. This project's graphs have none yet.",
         null, {ask: {label: "Add an LLM step", prompt: "Look at this project's flow and suggest one place an LLM step would "
@@ -56,6 +102,7 @@ const PromptsView = (() => {
     const main = el("div", "pwmain");
     grid.append(list, main);
     box.append(grid);
+    if (files.length) list.append(el("div", "stitle", "LLM ops"));
     for (const o of ops) {
       const b = el("button", "pwop" + (o.name === v.op ? " sel" : ""));
       b.type = "button";
@@ -63,6 +110,7 @@ const PromptsView = (() => {
       b.onclick = () => { v.op = o.name; save(); show(); };
       list.append(b);
     }
+    if (files.length) list.append(filesSection(files));
     main.append(el("div", "note", "Reading this op's recorded executions…"));
     let got;
     try { got = await api(`/api/p/${PID}/prompts/${encodeURIComponent(v.op)}/samples?limit=20`); }
