@@ -1636,6 +1636,163 @@ def build_studio_app(recents: Optional[Recents] = None):
         u = getattr(getattr(request, "state", None), "user", None)
         return u.get("username") if u else None
 
+    def _op_node(watcher: Any, graph_name: str, op_name: str) -> Optional[Dict[str, Any]]:
+        # a project not extracted yet is extracted now (the cold path blocks)
+        ir = (watcher.last.ir or watcher.refresh_swr().ir) or {}
+        for g in ir.get("graphs") or []:
+            if g.get("name") != graph_name:
+                continue
+            for n in g.get("nodes") or []:
+                if n.get("name") == op_name:
+                    return n
+        return None
+
+    #: The decorator keywords the Configure panel edits; the rest it shows.
+    DECORATOR_EDITABLE = {"show_keys", "bound", "transient"}
+
+    @app.get("/api/p/{pid}/op-config")
+    def op_config(pid: str, graph: str, op: str) -> JSONResponse:
+        """What the Configure panel edits for one op, read from the source
+        (nothing is imported): its decorator's keywords (a ``@op`` function)
+        and whether its ``resource=`` is a literal it can repoint, with the
+        resources of the same category to choose from. The call's literal
+        arguments, typed, are in the IR."""
+        import ast
+
+        from operonx_project import pyedit
+        from operonx_project.manifest import Manifest
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        node = _op_node(watcher, graph, op)
+        if node is None:
+            return JSONResponse({"error": f"no op {op!r} in graph {graph!r}"}, status_code=404)
+        out: Dict[str, Any] = {"op": op, "graph": graph, "kind": node.get("kind"), "decorator": None, "resource": None}
+        src = (node.get("source") or {}).get("defined_at")
+        if src and src.get("file"):
+            path = (watcher.root / src["file"]).resolve()
+            try:
+                text = path.read_text(encoding="utf-8")
+                func = pyedit.function_at(text, int(src.get("line") or 0))
+                kwargs = pyedit.decorator_kwargs(text, func)
+                out["decorator"] = {
+                    "file": src["file"], "func": func, "base": safewrite.sha(text),
+                    "kwargs": {k: {**v, "editable": k in DECORATOR_EDITABLE and v["literal"]} for k, v in kwargs.items()},
+                    "editable": sorted(DECORATOR_EDITABLE),
+                }
+            except (OSError, pyedit.PyEditError, SyntaxError):
+                pass
+        res = node.get("resource")
+        if res:
+            details = ((watcher.last.ir or {}).get("resources") or {}).get("details") or {}
+            category = (details.get(res) or {}).get("category")
+            literal = False
+            try:
+                manifest = Manifest.load(watcher.root)
+                from operonx_project.apply import _module_file
+
+                module, attr = manifest.graph(graph).entry.split(":")
+                tree = ast.parse(_module_file(manifest, module).read_text(encoding="utf-8"))
+                call = pyedit._assignment_for(pyedit.find_graph(tree, attr), op).value
+                literal = any(k.arg == "resource" and isinstance(k.value, ast.Constant) for k in getattr(call, "keywords", []))
+            except Exception:  # noqa: BLE001 — not repointable here; shown, not edited
+                literal = False
+            out["resource"] = {
+                "current": res, "category": category, "literal": literal,
+                "choices": sorted(n for n, d in details.items() if d.get("category") == category) if category else [res],
+            }
+        return JSONResponse(out)
+
+    @app.post("/api/p/{pid}/op-decorator")
+    def op_decorator(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        """Set one literal keyword of an op function's ``@op(...)``: the diff
+        first; ``apply`` writes it (safewrite: the base, only the decorator's
+        lines, still parses, still builds)."""
+        import ast
+
+        from operonx_project import pyedit
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        key = str(body.get("key") or "")
+        if key not in DECORATOR_EDITABLE:
+            return JSONResponse({"error": f"@op({key}=...) is not edited here; edit it in the code"}, status_code=400)
+        rel = str(body.get("file") or "")
+        path = (watcher.root / rel).resolve()
+        if watcher.root.resolve() not in path.parents:
+            return JSONResponse({"error": "that file is not in the project"}, status_code=400)
+        try:
+            text = path.read_text(encoding="utf-8")
+            after = pyedit.set_decorator_kwarg(text, str(body.get("func") or ""), key, body.get("value"))
+            start, end = pyedit.decorator_span(text, str(body.get("func") or ""))
+        except (OSError, pyedit.PyEditError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        out = safewrite.preview(watcher.root, path, text, after)
+        if not body.get("apply") or not out["changed"]:
+            return JSONResponse({**out, "applied": False})
+        try:
+            w = safewrite.commit(watcher.root, path, after, body.get("base") or out["base"], before=text,
+                                 scope=safewrite.lines_scope(start, end, parse=ast.parse),
+                                 watcher=watcher, what=f"@op({key}=...) of {body.get('func')}", who=_who(request))
+        except safewrite.WriteRefused as exc:
+            return JSONResponse(exc.to_dict(), status_code=409)
+        return JSONResponse({**out, "applied": True, "write": w.id})
+
+    def _yaml_path(watcher: Any, rel: str) -> Path:
+        """A YAML file of the project, never one outside it."""
+        path = (watcher.root / rel).resolve()
+        if watcher.root.resolve() not in path.parents or path.suffix not in (".yaml", ".yml"):
+            raise ValueError("a .yaml file inside the project")
+        return path
+
+    @app.get("/api/p/{pid}/yaml")
+    def yaml_read(pid: str, file: str) -> JSONResponse:
+        """A project YAML file as the editor draws it (yamldoc.tree), with the
+        sha its edits must name."""
+        from operonx_studio import yamldoc
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        try:
+            path = _yaml_path(watcher, file)
+            text = path.read_text(encoding="utf-8")
+            return JSONResponse({"file": file, "base": safewrite.sha(text), "tree": yamldoc.tree(text)})
+        except (ValueError, OSError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @app.post("/api/p/{pid}/yaml")
+    def yaml_edit(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        """One edit to a project YAML file (yamldoc: set, append, remove, add,
+        delete): the diff first; ``apply`` writes it through safewrite, with
+        only the path it names allowed to change."""
+        from operonx_studio import yamldoc
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        rel = str(body.get("file") or "")
+        try:
+            path = _yaml_path(watcher, rel)
+            text = path.read_text(encoding="utf-8")
+            after, paths = yamldoc.edit(text, str(body.get("op") or ""), body.get("path") or [],
+                                        body.get("value"), body.get("key"))
+        except (ValueError, OSError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        out = safewrite.preview(watcher.root, path, text, after)
+        if not body.get("apply") or not out["changed"]:
+            return JSONResponse({**out, "applied": False})
+        where = ".".join(str(p) for p in (body.get("path") or [])) + (f".{body.get('key')}" if body.get("key") else "")
+        try:
+            w = safewrite.commit(watcher.root, path, after, body.get("base") or out["base"], before=text,
+                                 scope=safewrite.yaml_scope(paths), watcher=watcher,
+                                 what=f"{body.get('op')} {where} in {rel}", who=_who(request))
+        except safewrite.WriteRefused as exc:
+            return JSONResponse(exc.to_dict(), status_code=409)
+        return JSONResponse({**out, "applied": True, "write": w.id})
+
     @app.get("/api/p/{pid}/writes")
     def project_writes(pid: str) -> JSONResponse:
         """The studio's last writes to this project, newest first (for undo)."""

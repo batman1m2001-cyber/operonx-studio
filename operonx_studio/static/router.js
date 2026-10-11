@@ -35,6 +35,7 @@ const Router = (() => {
       if (v.exec_id) q.set("step", v.exec_id);
     }
     if (v.tab === "flow" && v.node) q.set("op", v.node);
+    if (v.tab === "yaml" && v.file) q.set("file", v.file);
     const qs = q.toString();
     return {path, full: qs ? `${path}?${qs}` : path};
   }
@@ -50,6 +51,7 @@ const Router = (() => {
       mode: q.get("view") === "workflow" ? "workflow" : "tree",
       step: q.get("step") || null,
       op: q.get("op") || null,
+      file: q.get("file") || null,
     };
   }
 
@@ -79,6 +81,9 @@ const Router = (() => {
         await performUi("open_run", {run: t.run, mode: t.mode, op: t.step || undefined, quiet: true});
       } else if (t.tab === "flow" && t.op) {
         await performUi("select_op", {op: t.op});
+      } else if (t.tab === "yaml" && t.file) {
+        state.yamlFile = t.file;
+        switchTab("yaml", {file: t.file});
       } else if (t.tab !== state.tab || t.tab === "traces") {
         switchTab(t.tab);
       }

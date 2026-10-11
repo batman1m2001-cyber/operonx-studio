@@ -129,6 +129,8 @@ function select(key) {
   // repeat what every execution already shows, and code lives in the
   // flow view — both stand down until the run is cleared.
   if (n.description) panel.append(el("div", "rolenote", n.description));
+  // what can be set on it, as what it is (configure.js), then its wiring
+  if (!state.run && !n.graph) panel.append(Configure.section(it));
   if (!state.run) panel.append(portsSection(it));
   const res = resourceSection(n);
   if (res) panel.append(res);
@@ -611,18 +613,10 @@ function portsSection(it) {
         "session scratch — set by the serve layer")]);
     } else if (b.kind === "literal") {
       const preview = JSON.stringify(b.value);
+      // a literal is set in Settings above (configure.js), as what it is
       const c = chip("plit", preview.length > 22 ? preview.slice(0, 20) + "…" : preview,
-        it.depth > 0 ? "literal — edit in the nested graph's own source"
-                     : "literal — click to edit", null);
-      const r = row("in", name, [c]);
-      if (it.depth === 0) {
-        c.onclick = () => {
-          if (r._editor) { r._editor.hidden = !r._editor.hidden; return; }
-          r._editor = literalEditor(n, inp);
-          r.after(r._editor);
-        };
-        c.classList.add("peditable");
-      }
+        it.depth > 0 ? "literal — edit in the nested graph's own source" : "literal — set it in Settings above", null);
+      row("in", name, [c]);
     } else {
       row("in", name, [chip("pmuted", b.kind || "unbound")]);
     }
@@ -659,63 +653,6 @@ function portsSection(it) {
     sec.append(el("div", "note", "no declared ports"));
   }
   return sec;
-}
-
-/* the one edit the studio allows, folded away until the value is clicked */
-function literalEditor(node, inp) {
-  const b = inp.binding || {};
-  const wrap = el("div", "inrow");
-  const field = el("input");
-  field.type = "text";
-  field.value = JSON.stringify(b.value);
-  const bar = el("div", "apply");
-  const btn = el("button", "needs-edit", "Preview change");
-  const status = el("span", "srcline");
-  bar.append(btn, status);
-  if (window.Account) Account.readonly(field);
-  const diffBox = el("div", "diffbox");
-  diffBox.style.display = "none";
-  wrap.append(field, bar, diffBox);
-
-  btn.onclick = async () => {
-    let value;
-    try { value = JSON.parse(field.value); }
-    catch { status.textContent = "not valid JSON"; return; }
-    status.textContent = "…";
-    try {
-      const plan = await api(`/api/p/${PID}/edit`, {
-        graph: state.graph.name, action: "set_param",
-        op_name: node.name, param: inp.name, value, dry_run: true,
-      });
-      if (!plan.changed) { status.textContent = "no change"; diffBox.style.display = "none"; return; }
-      diffBox.textContent = "";
-      for (const line of (plan.diff || "").split("\n")) {
-        const cls = line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "";
-        diffBox.append(el("div", cls, line));
-      }
-      diffBox.style.display = "block";
-      status.textContent = "";
-      const confirm = el("button", "primary", "Apply");
-      let base = plan.base;
-      confirm.onclick = async () => {
-        try {
-          const got = await api(`/api/p/${PID}/edit`, {
-            graph: state.graph.name, action: "set_param",
-            op_name: node.name, param: inp.name, value, dry_run: false, base,
-          });
-          status.textContent = "applied ✓ — reloading";
-          wrote(got, `${node.name}.${inp.name} rewritten in source`);
-        } catch (e) {
-          status.textContent = "";
-          const fresh = refusal(e, diffBox);
-          if (fresh) { base = fresh; confirm.textContent = "Apply to the file as it is now"; }
-          else confirm.remove();
-        }
-      };
-      bar.append(confirm);
-    } catch (e) { status.textContent = e.message; }
-  };
-  return wrap;
 }
 
 /* The drill-down under the aggregate: one dense line per recorded
