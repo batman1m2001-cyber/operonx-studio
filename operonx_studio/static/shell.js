@@ -124,11 +124,15 @@ function syncChrome() {
    nobody's — an inspector with nothing in it only costs width. */
 
 const MOBILE = window.matchMedia("(max-width: 760px)");
-const panelKey = () => (MOBILE.matches ? "panelRightM" : "panelRight");
+// the screens that are mostly data (a run, the monitor, the evals) want the
+// width: there the panel is closed until it is opened there, and that
+// choice is remembered apart from the other screens' (docs/STUDIO_EXPERIENCE_PLAN.md T2)
+const DENSE = new Set(["traces", "monitor", "evals"]);
+const panelKey = () => (MOBILE.matches ? "panelRightM" : "panelRight") + (DENSE.has(state.tab) ? ":dense" : "");
 // open by default only where it fits beside the content (a tablet gets
 // it as an overlay, opened from the Ask bar)
 const WIDE = window.matchMedia("(min-width: 1100px)");
-const panelWanted = () => recall(panelKey(), WIDE.matches);
+const panelWanted = () => recall(panelKey(), WIDE.matches && !DENSE.has(state.tab));
 const inspectable = () => state.tab === "flow" || state.tab === "traces";
 
 function panelState() {

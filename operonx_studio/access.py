@@ -100,6 +100,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/compare"): "read",
     ("GET", f"{P}/trace/{{run}}/timeline"): "read",
     ("GET", f"{P}/trace/{{run}}/op/{{op_name}}"): "read",
+    ("GET", f"{P}/trace/{{run}}/step"): "read",
     ("GET", f"{P}/settings"): "read",
     ("GET", f"{P}/jobs"): "read",
     ("GET", f"{P}/jobs/{{name}}/runs"): "read",

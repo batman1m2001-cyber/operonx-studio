@@ -119,7 +119,27 @@
     return n;
   }
 
-  function assemble(s, open) {
+  /* A key in the tree copies its path when clicked: `.a.b[0]` (jq's form). */
+  function keyEl(text, path) {
+    const k = elx("span", "vkey mono", text);
+    k.title = `Copy the path ${path}`;
+    k.setAttribute("role", "button");
+    k.tabIndex = 0;
+    const copy = (ev) => {
+      ev.stopPropagation(); ev.preventDefault();
+      try { navigator.clipboard.writeText(path); k.classList.add("copied"); }
+      catch { /* no clipboard */ }
+      setTimeout(() => k.classList.remove("copied"), 900);
+    };
+    k.onclick = copy;
+    k.onkeydown = (ev) => { if (ev.key === "Enter") copy(ev); };
+    return k;
+  }
+
+  const pathKey = (path, k) => (/^[A-Za-z_][\w]*$/.test(k) ? `${path}.${k}` : `${path}[${JSON.stringify(k)}]`);
+
+  function assemble(s, open, path) {
+    path = path || "";
     switch (s.t) {
       case "token": return elx("span", `vt vt-${s.cls}`, s.text);
       case "str": return elx("span", "vt vt-str", `"${s.text}"`);
@@ -140,6 +160,7 @@
           a.src = url;
           a.setAttribute("aria-label", `Recorded audio, ${s.mime}${s.duration ? `, ${s.duration}` : ""}`);
           box.append(a);
+          box.append(waveform(url, a));
         } else {
           const link = elx("a");
           link.href = url;
@@ -183,8 +204,8 @@
         const box = elx("div", "vrows");
         s.children.forEach((c, i) => {
           const row = elx("div", "vrow");
-          row.append(elx("span", "vkey mono", String(i)));
-          row.append(assemble(c));
+          row.append(keyEl(String(i), `${path}[${i}]`));
+          row.append(assemble(c, false, `${path}[${i}]`));
           box.append(row);
         });
         if (s.more) box.append(elx("div", "vkey mono", `…+${s.more} items`));
@@ -204,8 +225,8 @@
         const box = elx("div", "vrows");
         for (const [k, c] of s.children) {
           const row = elx("div", "vrow");
-          row.append(elx("span", "vkey mono", k));
-          row.append(assemble(c));
+          row.append(keyEl(k, pathKey(path, k)));
+          row.append(assemble(c, false, pathKey(path, k)));
           box.append(row);
         }
         if (s.more) box.append(elx("div", "vkey mono", `…+${s.more} keys`));
@@ -215,6 +236,60 @@
       }
     }
     return elx("span", "vt", "?");
+  }
+
+  /* The audio's shape, as peaks: fetched and decoded only once it is on
+   * screen; a click on it plays from there. Nothing when the browser cannot
+   * decode it (the player still plays what it can). */
+  const PEAKS = 140;
+  function peaksOf(samples, n) {
+    const out = new Array(n).fill(0);
+    const per = Math.max(1, Math.floor(samples.length / n));
+    for (let i = 0; i < n; i++) {
+      let m = 0;
+      for (let j = i * per, end = Math.min(samples.length, j + per); j < end; j++) {
+        const x = Math.abs(samples[j]);
+        if (x > m) m = x;
+      }
+      out[i] = m;
+    }
+    const top = Math.max(1e-6, ...out);
+    return out.map((x) => x / top);
+  }
+
+  function waveform(url, audio) {
+    const c = elx("canvas", "vwave");
+    c.width = PEAKS * 3; c.height = 36;
+    c.setAttribute("aria-hidden", "true");
+    const draw = async () => {
+      try {
+        const buf = await (await fetch(url)).arrayBuffer();
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        const ac = new Ctx();
+        const decoded = await ac.decodeAudioData(buf);
+        ac.close && ac.close();
+        const peaks = peaksOf(decoded.getChannelData(0), PEAKS);
+        const g = c.getContext("2d");
+        const ink = getComputedStyle(c).color || "#7b9ec8";
+        g.fillStyle = ink;
+        peaks.forEach((p, i) => {
+          const hgt = Math.max(1.5, p * (c.height - 4));
+          g.fillRect(i * 3, (c.height - hgt) / 2, 2, hgt);
+        });
+        c.classList.add("on");
+      } catch { c.remove(); }
+    };
+    if (typeof IntersectionObserver !== "undefined") {
+      const io = new IntersectionObserver((seen) => {
+        if (seen.some((e) => e.isIntersecting)) { io.disconnect(); draw(); }
+      });
+      requestAnimationFrame(() => io.observe(c));
+    } else draw();
+    c.onclick = (ev) => {
+      const r = c.getBoundingClientRect();
+      if (audio.duration) { audio.currentTime = audio.duration * (ev.clientX - r.left) / r.width; audio.play(); }
+    };
+    return c;
   }
 
   function copyButton(v) {
@@ -272,7 +347,7 @@
 
   // mediaUrl(sha, mime) → where the page fetches a blob; set by the page
   // (studio.js), null under node where nothing is fetched
-  const api = { spec, render, media, fmtBytes, looksPayload, brief, mediaUrl: null };
+  const api = { spec, render, media, fmtBytes, looksPayload, brief, peaksOf, mediaUrl: null };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.Values = api;
 })(typeof window !== "undefined" ? window : globalThis);

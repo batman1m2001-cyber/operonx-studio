@@ -89,8 +89,23 @@ const RunView = (() => {
     const total = Math.max(1, s.duration_ms || data.total_ms || 1);
     // an op that spans the whole session (a heartbeat, the audio source)
     // is not "slow": its wall time is the call's length, not latency
-    const slow = rolls.find(r => !background(r, total));
+    // a service that names its key ops (the latencies a caller feels) is
+    // read by them; "slowest" of a session is only its longest wait
+    const svc = (state.ir && (state.ir.services || []).find(x => x.name === s.service)) || null;
+    const keyOps = ((svc && svc.key_ops) || []).map(k => rolls.find(r => r.op === k)).filter(Boolean);
+    const slow = keyOps.length ? null : rolls.find(r => !background(r, total));
     const dear = rolls.filter(r => r.cost_usd).sort((a, b) => b.cost_usd - a.cost_usd)[0];
+    if (keyOps.length) {
+      const hl = el("div", "highlights");
+      hl.append("Key ops: ");
+      keyOps.forEach((r, i) => {
+        if (i) hl.append(el("span", "vsep", "·"));
+        hl.append(opLink(r.op));
+        const per = r.count ? r.total_ms / r.count : 0;
+        hl.append(` ${fmtMs(per)}${r.count > 1 ? ` avg of ${r.count}, max ${fmtMs(r.max_ms)}` : ""}`);
+      });
+      head.append(hl);
+    }
     if (slow || dear) {
       const hl = el("div", "highlights");
       if (slow) {
@@ -152,10 +167,7 @@ const RunView = (() => {
 
   /* an error's execution: its tree row by trace id, else its op */
   function focusExec(e, mode) {
-    if (mode !== "workflow" && e.op_id) {
-      const row = [...document.querySelectorAll("#traces .rrow.record")].find(r => r.dataset.id === e.op_id);
-      if (row) { row.scrollIntoView({block: "center", behavior: "smooth"}); row.click(); return; }
-    }
+    if (mode !== "workflow" && e.op_id && RunTree.selectId(e.op_id)) return;
     focusOp(e.name || e.op);
   }
 
@@ -175,24 +187,22 @@ const RunView = (() => {
       if (found) { select(found.key); centerOn(found); }
       return;
     }
-    const rows = [...document.querySelectorAll("#traces .rrow.record")];
-    const row = rows.find(r => r.dataset.op === op);
-    if (row) { row.scrollIntoView({block: "center", behavior: "smooth"}); row.click(); }
+    RunTree.selectOp(op);
   }
 
-  let treeErr = -1;
   function nextTreeError() {
-    const rows = [...document.querySelectorAll("#traces .rrow.record.err")];
-    if (!rows.length) return;
-    treeErr = (treeErr + 1) % rows.length;
-    rows[treeErr].scrollIntoView({block: "center", behavior: "smooth"});
-    rows[treeErr].click();
+    RunTree.nextError();
   }
 
   /* A session-long op: one or two executions spanning most of the run —
    * a heartbeat, a stream source. Its time is the session's, not work. */
   function background(roll, totalMs) {
-    return !!roll && roll.count <= 2 && totalMs > 0 && roll.total_ms >= 0.8 * totalMs;
+    if (!roll) return false;
+    // a generator's time is every yield's wait summed over the session
+    // (a prompt stream that waits for silence): not latency
+    const node = irNodeByName(roll.op);
+    if (node && node.is_gen && roll.total_ms >= 0.5 * totalMs) return true;
+    return roll.count <= 2 && totalMs > 0 && roll.total_ms >= 0.8 * totalMs;
   }
 
   /* The lens control: which one thing the cards show. */

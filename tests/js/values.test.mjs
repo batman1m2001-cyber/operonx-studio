@@ -125,3 +125,8 @@ test("brief: one card line per value, cut, never a payload", () => {
   assert.equal(brief({ intent: "busy", error: null }), "{intent, error}");
   assert.equal(brief("A".repeat(2000)), "payload · 2.0 KB");
 });
+
+test("an audio's peaks are its loudest sample per slice, scaled to 1", () => {
+  const s = new Float32Array([0, 0.5, -1, 0.25, 0.1, -0.2, 0, 0]);
+  assert.deepEqual(require("../../operonx_studio/static/values.js").peaksOf(s, 4).map(x => +x.toFixed(4)), [0.5, 1, 0.2, 0]);
+});

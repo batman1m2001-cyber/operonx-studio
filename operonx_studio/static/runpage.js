@@ -120,125 +120,69 @@ function followRun(run, mine, tree, redraw) {
   }, 2500);
 }
 
+/* TREE: the run page (runtree.js) — the steps beside the selected step. */
 async function showRunTree(run) {
-  leaveWorkflow();
-  const box = $("#traces");
-  box.textContent = "";
-  const mine = (state.tracesView = {});
-  let data;
-  state.execPanelRun = null;
-  state.execSel = null;
-  try { data = await loadRunTree(run); } catch (e) { box.append(el("div", "note", e.message)); return; }
-  if (state.tracesView !== mine) return;
-  state.runSummary = data.summary || null;
-  followRun(run, mine, data, () => showRunTree(run));
-  box.append(runHeader(run, data, "tree"));
-  const rows = data.rows, total = Math.max(1, data.total_ms), execs = execsOf(rows);
-  const tree = el("div", "rtree");
-  const hdr = el("div", "rhdr");
-  for (const h of ["Observation", "Value", "When · how long"]) hdr.append(el("span", null, h));
-  tree.append(hdr);
-  const els = [];
-  rows.forEach((r, i) => {
-    const row = el("div", "rrow" + (r.kids ? " has" : "") + (r.kind !== "record" ? " " + r.kind : "")
-      + (r.status === "error" ? " err" : ""));
-    const name = el("div", "rname");
-    const guides = el("span", "rind");
-    for (let d = 0; d < r.depth; d++) guides.append(el("i"));
-    const tog = el("span", "rtog", r.kids ? "▾" : "");
-    // a step an op recorded (turn, model, tool) is drawn by its type: an IR
-    // node of the same name is some other op
-    const node = r.op && !r.child ? irNodeByName(r.op) : null;
-    const sv = r.child ? AgentSteps.visual(r.op_type) : null;
-    const ico = el("span", "rico", node ? kindIcon(node) : sv ? sv.icon : (r.kind === "container" ? "▣" : "≋"));
-    if (node || sv) ico.style.setProperty("--kind", node ? kindColor(node) : sv.color);
-    if (sv) ico.title = sv.label;
-    name.append(guides, tog, ico, el("span", "rn", r.name));
-    if (node) { const chips = nameChips(node); if (chips) name.append(chips); }
-    row.append(name);
-    const val = el("div", "rval mono");
-    if (r.kind === "record") {
-      if (r.error) { val.textContent = r.error.trim().split("\n").pop().slice(0, 90); val.classList.add("bad"); }
-      else {
-        for (const [k, v] of execValues(node, r.outputs, 36)) {
-          if (val.childNodes.length) val.append(" · ");
-          val.append(el("span", "rk", k + " = "), el("span", "rv", v));
-        }
-      }
-    } else {
-      val.textContent = r.kind === "container" ? "graph" : "stream item — not recorded (transient)";
-    }
-    row.append(val);
-    const bar = el("div", "rbar");
-    const b = el("b");
-    b.style.left = `${(r.start_ms / total * 100).toFixed(2)}%`;
-    b.style.width = `${Math.max(0.4, r.dur_ms / total * 100).toFixed(2)}%`;
-    bar.append(b, el("s", "mono", fmtMs(r.dur_ms)));
-    row.append(bar);
-    row.title = r.ctx + (r.wall_start
-      ? " · " + new Date(r.wall_start * 1000).toLocaleTimeString([], {hour12: false}) : "");
-    tree.append(row);
-    els.push(row);
-    // fold: hide every deeper row that follows, until a row no deeper
-    tog.onclick = (ev) => {
-      ev.stopPropagation();
-      if (!r.kids) return;
-      const open = row.dataset.open !== "0";
-      row.dataset.open = open ? "0" : "1";
-      tog.textContent = open ? "▸" : "▾";
-      for (let j = i + 1; j < rows.length && rows[j].depth > r.depth; j++) {
-        els[j].hidden = open;
-        if (!open) { els[j].dataset.open = "1"; if (rows[j].kids) els[j].querySelector(".rtog").textContent = "▾"; }
-      }
-    };
-    if (r.kind === "record") {
-      r.el = row;
-      row.classList.add("record");
-      row.dataset.op = r.op || "";
-      row.dataset.id = r.id || "";
-      row.onclick = () => {
-        for (const o of els) o.classList.remove("sel");
-        row.classList.add("sel");
-        renderExecPanel(run, r, execs);
-      };
-    }
-  });
-  box.append(tree);
-  state._tlrun = run;
-  renderFlowInfo();
-  pushView();
+  return RunTree.show(run);
 }
 
 /* One execution, in the order it is read: the verdict (how it went, how
  * it ranks among this op's runs, what stands out), what it produced,
  * what it received, what it cost, its other runs, and what fed it. */
-async function renderExecPanel(run, e, execs) {
+async function renderExecPanel(run, e, execs, target) {
   state.execSel = `${e.op} @ ${e.ctx || "main"} (+${fmtMs(e.start_ms)})`;
   state.execId = e.id || null;
   state.execPanelRun = run;
   pushView();
-  const panel = $("#inspector");
-  // picking an execution is asking to read it: bring the panel forward
-  const ps = panelState();
-  if (!ps.on || ps.tab !== "inspect") showSide("inspect");
-  panel.classList.remove("off");
+  // the run page draws the step beside its steps (runtree.js); the
+  // workflow view draws it in the side panel
+  const panel = target || $("#inspector");
+  if (!target) {
+    // picking an execution is asking to read it: bring the panel forward
+    const ps = panelState();
+    if (!ps.on || ps.tab !== "inspect") showSide("inspect");
+    panel.classList.remove("off");
+  }
   panel.textContent = "";
   panel.scrollTop = 0;
   const mine = execs.filter(x => x.op === e.op);
+  const node = e.op && !e.child ? irNodeByName(e.op) : null;
 
   // ── verdict ──
   const head = el("div", "phead");
   const title = el("div", "pheadrow");
-  title.append(el("h3", null, e.op));
-  // reading a long prompt wants width: the panel widens in place
-  const wide = Icons.button($("#sidebar").classList.contains("wide") ? "collapse" : "expand", undefined,
-    "small ghost widebtn", "Widen the panel to read values");
-  wide.onclick = () => {
-    const on = $("#sidebar").classList.toggle("wide");
-    store("panelWide", on);
-    renderExecPanel(run, e, execs);
-  };
-  title.append(wide);
+  if (target) {
+    // on a phone the step covers the steps: the way back
+    const back = Icons.button("back", "Steps", "small ghost rt-back", "Back to the steps");
+    back.onclick = () => RunTree.backToSteps();
+    title.append(back);
+    const ico = el("span", "rt-ico", node ? kindIcon(node) : "≋");
+    if (node) ico.style.setProperty("--kind", kindColor(node));
+    title.append(ico);
+  }
+  title.append(el("h3", null, e.name || e.op));
+  if (!target) {
+    // reading a long prompt wants width: the panel widens in place
+    const wide = Icons.button($("#sidebar").classList.contains("wide") ? "collapse" : "expand", undefined,
+      "small ghost widebtn", "Widen the panel to read values");
+    wide.onclick = () => {
+      const on = $("#sidebar").classList.toggle("wide");
+      store("panelWide", on);
+      renderExecPanel(run, e, execs);
+    };
+    title.append(wide);
+  } else {
+    const link = Icons.button("link", undefined, "small ghost", "Copy a link to this step");
+    link.onclick = async () => {
+      try { await navigator.clipboard.writeText(location.href); toast("Link copied"); }
+      catch { toast(location.href); }
+    };
+    title.append(link);
+    if (node) {
+      const flow = Icons.button("graph", undefined, "small ghost", "Show this op in the Flow");
+      flow.onclick = () => performUi("select_op", {op: e.op});
+      title.append(flow);
+    }
+  }
   head.append(title);
   const verdict = el("div", "execverdict");
   verdict.append(el("span", "status " + (e.status === "error" ? "s-bad" : "s-ok"), e.status === "error" ? "failed" : "ok"));
@@ -318,14 +262,57 @@ async function renderExecPanel(run, e, execs) {
     panel.append(sec);
   }
 
+  // ── what it fed ── (the run page knows every step's downstream)
+  const fed = target && RunTree.current() ? (RunTree.current().feeds.get(e.id) || []) : [];
+  if (fed.length) {
+    const sec = el("section");
+    sec.append(el("div", "stitle", "Fed"));
+    for (const f of fed.slice(0, 24)) {
+      const row = el("div", "resrow");
+      row.append(el("span", "reskey mono", f.from_key || ""));
+      const chip = el("button", "pchip pref", `${f.to.name}.${f.to_key || ""}`);
+      chip.onclick = () => RunTree.selectId(f.to.id);
+      row.append(chip);
+      sec.append(row);
+    }
+    if (fed.length > 24) sec.append(el("div", "note", `and ${fed.length - 24} more`));
+    panel.append(sec);
+  }
+
+  // ── the facts a reader rarely needs, folded ──
+  if (target) {
+    const more = el("details", "rt-facts");
+    more.append(el("summary", null, "Details"));
+    const facts = el("div", "facts compact");
+    const fact = (k, v) => { if (v == null || v === "") return; const r = el("div", "factrow"); r.append(el("div", "factkey", k), el("div", "factval mono", String(v))); facts.append(r); };
+    fact("Op", node ? `${node.name} (${node.kind})` : e.op);
+    if (node) fact("Runs as", [node.bound, node.is_gen ? "generator" : null, node.transient ? "transient" : null].filter(Boolean).join(" · "));
+    fact("Context", e.ctx);
+    fact("Step id", e.id);
+    if (e.attempt && e.attempt !== 1) fact("Attempt", e.attempt);
+    const src = node && node.source && (node.source.defined_at || node.source.wired_at);
+    if (src) fact("Code", `${src.file}:${src.line}`);
+    more.append(facts);
+    panel.append(more);
+  }
+
   try {
-    const got = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`
-      + `/op/${encodeURIComponent(e.op)}?limit=200`);
-    const match = (got.executions || []).find(x =>
-      Math.abs((x.duration_ms ?? -1) - e.dur_ms) < 0.001
-      && (x.ctx == null || e.ctx == null
-          || String(Array.isArray(x.ctx) ? x.ctx.join(".") : x.ctx) === String(e.ctx)))
-      || (got.executions || [])[0];
+    // one execution by its id; an older studio's record without ids
+    // falls back to the op's executions, matched by duration
+    let match = null;
+    if (e.id) {
+      try { match = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/step?id=${encodeURIComponent(e.id)}`); }
+      catch { match = null; }
+    }
+    if (!match) {
+      const got = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`
+        + `/op/${encodeURIComponent(e.op)}?limit=200`);
+      match = (got.executions || []).find(x =>
+        Math.abs((x.duration_ms ?? -1) - e.dur_ms) < 0.001
+        && (x.ctx == null || e.ctx == null
+            || String(Array.isArray(x.ctx) ? x.ctx.join(".") : x.ctx) === String(e.ctx)))
+        || (got.executions || [])[0];
+    }
     vbox.textContent = "";
     if (!match) { vbox.append(el("div", "note", "Values were not kept for this execution.")); return; }
     // which inputs came out of SCRATCH cells — the IR knows the binding

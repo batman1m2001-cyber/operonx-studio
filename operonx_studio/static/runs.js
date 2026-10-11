@@ -224,6 +224,24 @@ const RunsView = (() => {
     }
   }
 
+  /* A run's input or output preview, as one readable line: a record with
+   * one field is its value; strings lose their quotes. */
+  function ioText(text) {
+    let v;
+    try { v = JSON.parse(text); } catch { return text; }
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const keys = Object.keys(v);
+      if (keys.length === 1) v = v[keys[0]];
+    }
+    if (typeof v === "string") return v;
+    // a flat record reads as its fields: `id p2 · name alan turing`
+    if (v && typeof v === "object" && !Array.isArray(v)
+        && Object.values(v).every(x => x === null || typeof x !== "object")) {
+      return Object.entries(v).map(([k, x]) => `${k} ${typeof x === "string" ? x : JSON.stringify(x)}`).join(" · ");
+    }
+    return JSON.stringify(v);
+  }
+
   function row(r) {
     const tr = el("tr", "clickable" + (r.status === "error" ? " failed" : ""));
     tr.dataset.key = r.run;            // a revisit marks the rows it had not seen
@@ -253,6 +271,18 @@ const RunsView = (() => {
     main.append(el("div", "runsrc", bits.join(" · ")));
     if (r.first_error) main.append(el("div", "runerr", r.first_error));
     tr.append(main);
+    // what it was asked and what it answered (operonx 1.22), one line each
+    const io = el("td", "runio hide-sm");
+    const line = (cls, label, text) => {
+      if (!text) return;
+      const d = el("div", cls);
+      d.append(el("span", "runio-k", label), el("span", "runio-v", ioText(text)));
+      d.title = text.length > 600 ? text.slice(0, 600) + "…" : text;
+      io.append(d);
+    };
+    line("runio-in", "in", r.input);
+    line("runio-out", "out", r.output);
+    tr.append(io);
     const when = el("td", "nowrap");
     if (r.mtime) {
       when.append(el("div", null, fmtAgo(r.mtime * 1000)));
@@ -427,7 +457,7 @@ const RunsView = (() => {
     const wrap = el("div", "tablewrap");
     const table = el("table", "datatable runstable");
     const hr = el("tr");
-    for (const [h, cls] of [["", "stcell"], ["Run"], ["Started"], ["Took", "num hide-sm"], ["Cost", "num hide-sm"], [""]])
+    for (const [h, cls] of [["", "stcell"], ["Run"], ["Input → output", "hide-sm"], ["Started"], ["Took", "num hide-sm"], ["Cost", "num hide-sm"], [""]])
       hr.append(el("th", cls || null, h));
     const thead = el("thead"); thead.append(hr); table.append(thead);
     const tbody = el("tbody");

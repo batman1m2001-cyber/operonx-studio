@@ -2056,6 +2056,33 @@ def build_studio_app(recents: Optional[Recents] = None):
             return got
         return JSONResponse(_op_executions(got[0], run, op_name, limit=max(1, min(limit, 200))))
 
+    @app.get("/api/p/{pid}/trace/{run}/step")
+    def trace_step(pid: str, run: str, id: str) -> JSONResponse:
+        """One execution of one run by its id (a tree row's ``id``), with its
+        recorded inputs and outputs — the step panel's values. Before this
+        the panel fetched every execution of the op and guessed which one
+        by its duration."""
+        got = _record(pid, run)
+        if isinstance(got, JSONResponse):
+            return got
+        from operonx.telemetry.runs.model import resolve_inputs
+
+        rows = resolve_inputs(list(got[0]))
+        rec = next((r for r in rows if r.get("op_id") == id), None)
+        if rec is None:
+            return JSONResponse({"error": f"no step {id!r} in run {run!r}"}, status_code=404)
+        return JSONResponse({
+            "run": run, "id": id,
+            "op": rec.get("op_name") or rec.get("op_full_name"),
+            "op_full_name": rec.get("op_full_name"),
+            "op_type": rec.get("op_type"),
+            "status": rec.get("status"), "error": rec.get("error"),
+            "ctx": rec.get("ctx"), "attempt": rec.get("attempt", 1),
+            "start_time": rec.get("start_time"), "duration_ms": rec.get("duration_ms"),
+            "wall_start": rec.get("wall_start"),
+            "inputs": rec.get("inputs"), "outputs": rec.get("outputs"), "attrs": rec.get("attrs"),
+        })
+
     # ── resources: prices ────────────────────────────────────────────────
 
     @app.post("/api/p/{pid}/resources/price")
