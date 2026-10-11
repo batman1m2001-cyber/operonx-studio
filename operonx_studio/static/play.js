@@ -559,6 +559,8 @@ const PlayView = (() => {
         } else { run = null; bubble("bot", short(e.msg.value ?? `${e.msg.size} bytes`, 400), "json"); }
       } else if (e.t === "refused") bubble("bot", `Refused: ${e.reason}`, "from-err");
       else if (e.t === "ended" && e.status === "error") bubble("bot", e.error || "the run failed", "from-err");
+      // a session that could not start (a missing variable, a broken import)
+      else if (e.t === "error") bubble("bot", e.text || "the session could not start", "from-err");
       if (e.t === "ended" || e.t === "refused" || e.t === "opened") paintSess();
     };
 
@@ -822,6 +824,14 @@ const PlayView = (() => {
       stopCapture(c); idle(c);
     } else if (e.t === "ended") {
       setStatus(c, e.status === "error" ? `The call failed — ${e.error}` : `Call ended · ${fmtMs(e.ms)}`, e.trace_id);
+      stopCapture(c); idle(c);
+    } else if (e.t === "error") {
+      // the call never started (a missing variable, a broken import): say
+      // why, and stop sending into a session that is not there
+      const text = String(e.text || "the call could not start");
+      setStatus(c, `The call could not start — ${text.split("\n")[0]}`);
+      say(c, "chat-msg from-err playerr", text);
+      c.sid = null;
       stopCapture(c); idle(c);
     }
   }
