@@ -7,18 +7,28 @@ they judge; the latest line for a run is its review. Recording the user
 from the first line is what lets a team server share them later.
 
 **A conversation** is what a reviewer reads instead of a trace tree. It is
-read out of the run's own rows, by rules that hold for any product: what a
-playground toy sent (its script) and anything recorded as a
-``transcript`` are the user's turns; what the service sent through its
-egress door, or an op answered in a text output (``reply``,
-``response``, ``answer``, ``text``, ``content``), is the bot's. Each turn
-names the op it came from, so a reviewer can go from the sentence to the
-execution.
+read out of the run's own rows, by rules that hold for any product — a
+callbot, a chatbot, anything with a door:
+
+* the **user's** turns: what came in through the ingress door (the item an
+  op downstream of it received — the door itself is transient and records
+  no item), what a playground toy sent (its script, which then stands for
+  the door), and anything recorded as a ``transcript``;
+* the **bot's**: what the service sent through its egress door or, with no
+  door that recorded it, an op's text answer (``reply``, ``response``,
+  ``answer``, ``text``, ``content``) — unless it is the user's own words
+  passing through the pipeline.
+
+The same words on the same side one after another are one turn naming
+every op that produced them. Each turn names its op (and its step, when
+the row says which execution it was), so a reader can go from the
+sentence to the execution.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -66,8 +76,9 @@ class ReviewLog:
 def _text(value: Any) -> Optional[str]:
     if isinstance(value, str):
         s = value.strip()
-        # a recorded placeholder is not something anyone said
-        if not s or (s.startswith("<") and s.endswith(">")):
+        # a recorded placeholder (`<audio …>`) or a marker word (`[Silent]`)
+        # is not something anyone said
+        if not s or (s.startswith("<") and s.endswith(">")) or re.fullmatch(r"\[[^\]\s]+\]", s):
             return None
         return s
     if isinstance(value, dict):
@@ -88,39 +99,103 @@ def sent_query(metadata: Dict[str, Any]) -> Dict[str, Any]:
     return dict(metadata.get("playground_query") or metadata.get("replay_query") or {})
 
 
-def conversation(rows: List[Dict[str, Any]], metadata: Dict[str, Any], egress: Iterable[str] = ()) -> List[Dict[str, Any]]:
-    """The run as turns: ``{"who": "user"|"bot", "text", "op", "at"}``, in order."""
-    egress = set(egress)
+def _step(row: Dict[str, Any]) -> Optional[str]:
+    """The execution a row records, as the run page names it."""
+    if row.get("op_id"):
+        return str(row["op_id"])
+    if not row.get("op_full_name"):
+        return None
+    ctx = row.get("ctx")
+    if isinstance(ctx, (list, tuple)):
+        ctx = ".".join(str(c) for c in ctx)
+    return f"{row['op_full_name']}#{ctx}"
+
+
+def _turn(who: str, text: str, row: Dict[str, Any]) -> Dict[str, Any]:
+    t = {"who": who, "text": text, "op": row.get("op_name"), "at": row.get("wall_start")}
+    step = _step(row)
+    if step:
+        t["step"] = step
+    return t
+
+
+def _merged(turns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The same words on the same side, one after another, as one turn: a
+    greeting an op wrote and the next op passed on is said once."""
+    out: List[Dict[str, Any]] = []
+    for t in turns:
+        last = out[-1] if out else None
+        if last and last["who"] == t["who"] and last["text"] == t["text"]:
+            ops = last.setdefault("ops", [last["op"]])
+            if t["op"] not in ops:
+                ops.append(t["op"])
+            continue
+        out.append(t)
+    for t in out:
+        if len(t.get("ops") or []) < 2:
+            t.pop("ops", None)
+    return out
+
+
+def conversation(rows: List[Dict[str, Any]], metadata: Dict[str, Any], egress: Iterable[str] = (),
+                 ingress: Iterable[str] = ()) -> List[Dict[str, Any]]:
+    """The run as turns: ``{"who": "user"|"bot", "text", "op", "at"}`` (and
+    ``step``, ``ops`` when known), in order."""
+    egress, ingress = set(egress), set(ingress)
     turns: List[Dict[str, Any]] = []
-    for m in sent_script(metadata):
+    script = sent_script(metadata)
+    for m in script:
         text = m.get("text") if m.get("kind") == "text" else (
             json.dumps(m.get("value"), ensure_ascii=False) if m.get("kind") == "json" else None)
         if text:
             turns.append({"who": "user", "text": text, "op": "playground" if "playground_script" in metadata else "client",
                           "at": m.get("at")})
     sent_by_door = False
+    heard: set = set()        # the ingress items already read (one turn each)
+    fed: List[Dict[str, Any]] = []   # what came in through the door, in order
     for r in rows:
-        at = r.get("wall_start")
         outs = r.get("outputs") or {}
         ins = r.get("inputs") or {}
         if r.get("op_name") in egress:
             text = _text(ins.get("item"))
             if text:
-                turns.append({"who": "bot", "text": text, "op": r.get("op_name"), "at": at})
+                turns.append(_turn("bot", text, r))
                 sent_by_door = True
             continue
+        if ingress:
+            # the door is transient: its item is what the op it fed received
+            for u in r.get("upstreams") or []:
+                src = u.get("from_op_name") or u.get("from")
+                key = u.get("from_op_id") or src
+                if src in ingress and u.get("from_key", "item") == "item" and key not in heard:
+                    heard.add(key)
+                    text = _text(ins.get(u.get("to_key")))
+                    if text:
+                        fed.append(_turn("user", text, r))
         for key in USER_KEYS:
             text = _text(outs.get(key))
             if text:
-                turns.append({"who": "user", "text": text, "op": r.get("op_name"), "at": at})
+                turns.append(_turn("user", text, r))
+    if script:
+        # the script already holds what was sent; its messages open the
+        # steps their items fed, in order
+        sent = [t for t in turns if t["who"] == "user" and t["op"] in ("playground", "client")]
+        for t, f in zip(sent, fed):
+            if t["text"] == f["text"] and f.get("step"):
+                t["step"] = f["step"]
+    else:
+        turns.extend(fed)
     if not sent_by_door:
-        # no door recorded what it sent: an op's text answer is the reply
+        # no door recorded what it sent: an op's text answer is the reply —
+        # unless it is the user's own words passing through the pipeline
+        said = {t["text"] for t in turns if t["who"] == "user"}
         for r in rows:
             outs = r.get("outputs") or {}
             for key in BOT_KEYS:
                 text = _text(outs.get(key))
                 if text:
-                    turns.append({"who": "bot", "text": text, "op": r.get("op_name"), "at": r.get("wall_start")})
+                    if text not in said:
+                        turns.append(_turn("bot", text, r))
                     break
     # a script recorded before its messages carried times: a chat
     # alternates, so message i goes just before the i-th reply
@@ -131,4 +206,4 @@ def conversation(rows: List[Dict[str, Any]], metadata: Dict[str, Any], egress: I
         for i, t in enumerate(untimed):
             t["at"] = replies[i] - 1e-3 if i < len(replies) else last + (i + 1) * 1e-3
     turns.sort(key=lambda t: (t.get("at") is None, t.get("at") or 0))
-    return turns
+    return _merged(turns)

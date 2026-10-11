@@ -76,4 +76,4 @@ its own.
 | S1 | done | operonx 1.22.1 (#148: ops events carry `said`, `at`). A fake-microphone call to the callbot: the caller's words shown as heard (`anh bận lắm gọi lại sau đi`), the bot's next line timed from them, the call hung up. `${VAR:}` no longer reported missing (both of the callbot's false alarms gone); the IR cache is keyed on the extractor's source, so a studio update re-extracts. |
 | S2 | — | — |
 | S3 | — | — |
-| S4 | — | — |
+| S4 | done | The rule reads the user's side from the ingress door (what the op it fed received — the door is transient), merges repeated lines, drops the user's words echoed as a "reply" and marker words (`[Silent]`). Callbot call `load-b122-8cd5dc59`: 4 lines (was 8+), each naming its ops. A chatbot project (`chatdemo`, not the callbot): user/bot lines from its doors, each linked to its step. Run page: **Conversation · Tree · Timeline**, offered only when both sides exist; a line opens its step beside it; desktop and phone, light and dark. |

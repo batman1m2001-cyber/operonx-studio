@@ -127,6 +127,56 @@ def test_the_queue_reads_judges_and_files_a_case(client, project):
     assert row["from"] == {"run": "c2", "origin": "service", "name": "desk"}
 
 
+def test_a_chatbot_run_reads_as_a_conversation_from_its_doors():
+    """Any product with a door, not only a callbot: the ingress door is
+    transient (it records no item), so what the user sent is what the op it
+    fed received — one turn per item, with that step. Rows as a real chat
+    session recorded them (operonx 1.22)."""
+    up = lambda i: [{"from_op_id": f"chat_flow.src#main.[{i}]", "from_op_name": "src",
+                     "from_key": "item", "to_key": "text"}]
+    rows = [
+        {"op_name": "t", "op_full_name": "chat_flow.t", "ctx": ["main", "[0]"], "wall_start": 1.0,
+         "inputs": {"text": "hello"}, "outputs": {"draft": "HELLO"}, "upstreams": up(0)},
+        {"op_name": "out", "op_full_name": "chat_flow.out", "ctx": ["main", "[0]"], "wall_start": 1.2,
+         "inputs": {"item": "you said HELLO"}},
+        {"op_name": "t", "op_full_name": "chat_flow.t", "ctx": ["main", "[1]"], "wall_start": 2.0,
+         "inputs": {"text": "how are you"}, "upstreams": up(1)},
+        {"op_name": "out", "op_full_name": "chat_flow.out", "ctx": ["main", "[1]"], "wall_start": 2.2,
+         "inputs": {"item": "you said HOW ARE YOU"}},
+        {"op_name": "src", "op_full_name": "chat_flow.src", "ctx": ["main"], "wall_start": 0.5,
+         "outputs": {"_transient_stream": True, "items": 2}},
+    ]
+    turns = conversation(rows, {}, egress={"out"}, ingress={"src"})
+    assert [(t["who"], t["text"], t["step"]) for t in turns] == [
+        ("user", "hello", "chat_flow.t#main.[0]"), ("bot", "you said HELLO", "chat_flow.out#main.[0]"),
+        ("user", "how are you", "chat_flow.t#main.[1]"), ("bot", "you said HOW ARE YOU", "chat_flow.out#main.[1]")]
+    # a playground session's script already holds what was sent: not twice
+    played = conversation(rows, {"playground_script": [{"kind": "text", "text": "hello", "at": 0.9},
+                                                       {"kind": "text", "text": "how are you", "at": 1.9}]},
+                          egress={"out"}, ingress={"src"})
+    assert [(t["text"], t.get("step")) for t in played if t["who"] == "user"] == [
+        ("hello", "chat_flow.t#main.[0]"), ("how are you", "chat_flow.t#main.[1]")]
+
+
+def test_a_voice_call_reads_each_line_once():
+    """A callbot call, as its rows read: the greeting written by one op and
+    passed on by the next is one line naming both; the caller's words
+    passing through the pipeline (`transcript` → `text`) are not a reply;
+    a marker (`[Silent]`) is not words."""
+    rows = [
+        {"op_name": "greet", "wall_start": 1.0, "outputs": {"text": "Xin chào"}},
+        {"op_name": "choose_reply", "wall_start": 1.1, "outputs": {"text": "Xin chào"}},
+        {"op_name": "stt", "wall_start": 3.0, "outputs": {"transcript": "anh bận lắm"}},
+        {"op_name": "transcript", "wall_start": 3.1, "outputs": {"text": "anh bận lắm"}},
+        {"op_name": "answer", "wall_start": 3.2, "outputs": {"answer": "anh bận lắm"}},
+        {"op_name": "transcript", "wall_start": 4.0, "outputs": {"text": "[Silent]"}},
+        {"op_name": "choose_reply", "wall_start": 5.0, "outputs": {"text": "Dạ vâng"}},
+    ]
+    turns = conversation(rows, {})
+    assert [(t["who"], t["text"], t.get("ops")) for t in turns] == [
+        ("bot", "Xin chào", ["greet", "choose_reply"]), ("user", "anh bận lắm", None), ("bot", "Dạ vâng", None)]
+
+
 def test_a_recorded_service_run_reads_as_a_conversation_too():
     turns = conversation([], {"replay_script": [{"kind": "json", "value": {"q": 1}, "at": 2.0},
                                                 {"kind": "bytes", "size": 9}]})

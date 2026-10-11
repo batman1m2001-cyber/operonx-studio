@@ -7,6 +7,10 @@
  *                  one time axis; search, errors only, key ops only
  *   the step       the selected execution beside the steps: its output,
  *                  its input, what fed it and what it fed
+ *   conversation   a run that reads as one (a user's side and the bot's,
+ *                  by review.py's rule: any product with doors, a
+ *                  transcript, a playground script) is offered as lines
+ *                  too; a line opens the step that produced it
  *
  * The steps are drawn as a window over the rows that are open (a long call
  * is thousands of rows), so a row is found by its id, never by the DOM.
@@ -154,7 +158,7 @@ const RunTree = (() => {
   // ── the window over the rows ──
 
   function paint() {
-    if (!cur) return;
+    if (!cur || cur.mode === "conversation") return;
     const list = cur.listEl;
     const vis = cur.vis;
     cur.spacer.style.height = `${vis.length * ROW_H}px`;
@@ -172,6 +176,10 @@ const RunTree = (() => {
   }
 
   function relist() {
+    cur.root.classList.toggle("rt-conv-on", cur.mode === "conversation");
+    if (cur.mode === "conversation") return drawConversation();
+    if (cur.convEl) { cur.convEl.remove(); cur.convEl = null; }
+    cur.spacer.hidden = false;
     cur.vis = visible();
     const shown = cur.vis.reduce((n, r) => n + (r.kind === "record" ? 1 : 0), 0);
     cur.count.textContent = shown === cur.records ? `${cur.records} steps` : `${shown} of ${cur.records} steps`;
@@ -210,6 +218,7 @@ const RunTree = (() => {
   function select(r, opts) {
     if (!cur || !r) return;
     cur.sel = r;
+    markLine();
     reveal(r);
     paint();
     scrollTo(r);
@@ -223,7 +232,7 @@ const RunTree = (() => {
           ? "A subgraph: the steps under it are its ops."
           : "An item of a stream that records nothing per item (a transient op): the steps under it ran for it."));
     }
-    if (!(opts && opts.quiet)) cur.listEl.focus({preventScroll: true});
+    if (!(opts && opts.quiet) && cur.mode !== "conversation") cur.listEl.focus({preventScroll: true});
   }
 
   /* Select by execution id (a link, an eval's blamed op, the address). */
@@ -253,6 +262,10 @@ const RunTree = (() => {
 
   function onKey(ev) {
     if (!cur || ev.target.closest("input, textarea")) return;
+    if (cur.mode === "conversation") {
+      if (ev.key === "/") { cur.search.focus(); ev.preventDefault(); }
+      return;
+    }
     const vis = cur.vis;
     const k = cur.sel ? vis.indexOf(cur.sel) : -1;
     if (ev.key === "ArrowDown" || ev.key === "j") { select(vis[Math.min(vis.length - 1, k + 1)]); }
@@ -342,10 +355,98 @@ const RunTree = (() => {
     return strip;
   }
 
+  // ── the conversation: the run as what was said ──
+
+  /* Both sides present: a user line and a bot line (a batch job has
+   * neither; an op's lone text answer is not a conversation). */
+  const isConversation = (turns) => turns.some(t => t.who === "user") && turns.some(t => t.who === "bot");
+
+  async function loadConversation(mine) {
+    let got;
+    try { got = await api(`/api/p/${PID}/review/run/${encodeURIComponent(cur.run)}`); } catch { return; }
+    if (cur !== mine || !isConversation(got.turns || [])) return;
+    cur.turns = got.turns;
+    const b = el("button", null, "Conversation");
+    b.type = "button"; b.dataset.mode = "conversation";
+    b.title = "What was said, in order — a line opens the step that produced it";
+    b.onclick = () => { cur.mode = "conversation"; store("runTreeMode", "conversation"); syncToolbar(); relist(); };
+    cur.modeBtns.unshift(b);
+    cur.modesEl.prepend(b);
+    if (cur.wantConversation) { cur.mode = "conversation"; syncToolbar(); relist(); }
+  }
+
+  // a conversation's times read in seconds past one
+  const fmtSpan = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
+  const sinceStart = (at) => {
+    const t0 = (cur.data.summary || {}).started_at;
+    return at && t0 ? `+${fmtSpan(Math.max(0, (at - t0) * 1000))}` : "";
+  };
+
+  function drawConversation() {
+    cur.spacer.hidden = true;
+    if (!cur.convEl) {
+      cur.convEl = el("div", "rt-conv");
+      cur.convEl.setAttribute("role", "list");
+      cur.listEl.append(cur.convEl);
+    }
+    const box = cur.convEl;
+    box.textContent = "";
+    const q = cur.filter.q.trim().toLowerCase();
+    let shown = 0, heardAt = null;
+    for (const t of cur.turns) {
+      const ops = t.ops || [t.op];
+      if (t.who === "user") heardAt = t.at;
+      if (q && !(`${t.text} ${ops.join(" ")}`).toLowerCase().includes(q)) continue;
+      shown++;
+      const line = el("div", `rt-line ${t.who === "user" ? "me" : "bot"}`);
+      line.setAttribute("role", "listitem");
+      const bubble = el("button", `chat-msg ${t.who === "user" ? "from-me" : "from-bot"}`);
+      bubble.type = "button";
+      bubble.title = "Open the step that produced it";
+      bubble.append(el("span", "rt-line-t", t.text));
+      const meta = el("span", "rt-line-m");
+      const bits = [ops.join(" · ")];
+      const at = sinceStart(t.at);
+      if (at) bits.push(at);
+      // a bot line after the user's: the time since they were heard
+      if (t.who === "bot" && heardAt != null && t.at != null) {
+        bits.push(`${fmtSpan(Math.max(0, (t.at - heardAt) * 1000))} after the user`);
+        heardAt = null;
+      }
+      meta.textContent = bits.join("  ·  ");
+      bubble.append(meta);
+      bubble.onclick = () => {
+        const ok = t.step && selectId(t.step);
+        if (!ok) selectOp(t.op);
+        cur.lineSel = t;
+        markLine();
+      };
+      t._el = bubble;
+      line.append(bubble);
+      box.append(line);
+    }
+    if (!shown) box.append(el("div", "note", "No line matches."));
+    cur.count.textContent = shown === cur.turns.length ? `${cur.turns.length} lines` : `${shown} of ${cur.turns.length} lines`;
+    markLine();
+  }
+
+  /* The line of the selected step, marked (from a click on either side). */
+  function markLine() {
+    if (!cur || !cur.turns) return;
+    const sel = cur.sel;
+    for (const t of cur.turns) {
+      if (!t._el) continue;
+      const on = (cur.lineSel === t) || (!!sel && !!t.step && t.step === sel.id && cur.lineSel == null);
+      t._el.classList.toggle("on", on);
+    }
+    cur.lineSel = null;
+  }
+
   // ── the toolbar ──
 
   function syncToolbar() {
     cur.search.value = cur.filter.q;
+    cur.search.placeholder = cur.mode === "conversation" ? "Find a line  ( / )" : "Find a step, a value, an error  ( / )";
     cur.errBtn.classList.toggle("on", cur.filter.errors);
     cur.keyBtn.classList.toggle("on", cur.filter.key);
     for (const b of cur.modeBtns) b.classList.toggle("on", b.dataset.mode === cur.mode);
@@ -354,6 +455,7 @@ const RunTree = (() => {
   function toolbar() {
     const bar = el("div", "rt-tools");
     const modes = el("span", "seg");
+    cur.modesEl = modes;
     cur.modeBtns = [];
     for (const [m, label, title] of [["tree", "Tree", "What ran for what, in order"], ["timeline", "Timeline", "Every step by when it started"]]) {
       const b = el("button", null, label);
@@ -368,6 +470,7 @@ const RunTree = (() => {
     search.setAttribute("aria-label", "Find a step");
     let t = 0;
     search.oninput = () => { clearTimeout(t); t = setTimeout(() => { cur.filter.q = search.value; relist(); }, 120); };
+    // (in the conversation, the search finds lines; the other filters are the steps')
     cur.search = search;
     const errs = cur.rows.filter(r => r.status === "error").length;
     const errBtn = el("button", "chipbtn", `Errors${errs ? ` ${errs}` : ""}`);
@@ -414,7 +517,10 @@ const RunTree = (() => {
       run, data, rows, byId, feeds, parentIdx, total: Math.max(1, data.total_ms || 1),
       execs: execsOf(rows), records: rows.filter(r => r.kind === "record").length,
       keyOps: new Set((svc && svc.key_ops) || []),
-      mode: recall("runTreeMode", "tree"),
+      // the conversation is offered once its lines arrive (loadConversation)
+      mode: recall("runTreeMode", "tree") === "conversation" ? "tree" : recall("runTreeMode", "tree"),
+      wantConversation: recall("runTreeMode", "tree") === "conversation",
+      turns: null, convEl: null, lineSel: null,
       filter: prev ? prev.filter : {q: "", errors: false, key: false},
       folded: prev ? prev.folded : new Set(), sel: null,
     };
@@ -475,6 +581,7 @@ const RunTree = (() => {
     });
     syncToolbar();
     relist();
+    loadConversation(cur);
     if (prev && prev.sel && byId.has(prev.sel.id)) select(byId.get(prev.sel.id), {quiet: true});
     state._tlrun = run;
     renderFlowInfo();

@@ -109,7 +109,7 @@ const ReviewView = (() => {
     for (const t of got.turns) {
       const b = el("div", `chat-msg ${t.who === "user" ? "from-me" : "from-bot"}`);
       b.append(el("span", null, t.text));
-      b.append(el("span", "revop mono", t.op));
+      b.append(el("span", "revop mono", (t.ops || [t.op]).join(" · ")));
       convo.append(b);
     }
     main.append(convo);
@@ -295,7 +295,7 @@ const ReviewView = (() => {
       if (!got.turns.length) convo.append(el("div", "note", "Nothing said was recorded in this run — open the trace to read it."));
       for (const t of got.turns) {
         const b = el("div", `chat-msg ${t.who === "user" ? "from-me" : "from-bot"}`);
-        b.append(el("span", null, t.text), el("span", "revop mono", t.op));
+        b.append(el("span", null, t.text), el("span", "revop mono", (t.ops || [t.op]).join(" · ")));
         convo.append(b);
       }
       main.append(convo);
