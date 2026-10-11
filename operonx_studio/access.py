@@ -83,6 +83,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
 
     # ── one project: looking ──
     ("GET", "/p/{pid}"): "read",
+    ("GET", "/p/{pid}/{screen:path}"): "read",   # the same page, opened on a screen (router.js)
     ("GET", f"{P}/ir"): "read",
     ("GET", f"{P}/stamp"): "read",
     ("GET", f"{P}/env-health"): "read",
