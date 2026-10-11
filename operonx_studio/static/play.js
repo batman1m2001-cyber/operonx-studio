@@ -470,6 +470,7 @@ const PlayView = (() => {
       } catch (err) { toast(err.message, true); }
     }
 
+    envNote(main);
     let chatView = null, formView = null;
     if (v.toy === "chat") chatView = chatToy(main, d);
     else if (v.toy === "voice") voiceToy(main, d);
@@ -484,6 +485,24 @@ const PlayView = (() => {
     }
     loadRecent();
     startPolling();
+  }
+
+  /* A session that will fail on start says so before it is opened: the
+   * variables the resource files need that neither .env nor the studio's
+   * environment sets (by name; values never leave the server). */
+  async function envNote(main) {
+    let got;
+    try { got = await api(`/api/p/${PID}/env-health`); } catch { return; }
+    const missing = Object.entries(got.env || {}).filter(([, x]) => x === "missing").map(([k]) => k);
+    if (!missing.length || !main.isConnected) return;
+    const note = el("div", "playenv");
+    note.append(el("b", null, `Not set: ${missing.join(", ")}`),
+      el("span", null, ` — a resource that reads ${missing.length > 1 ? "them" : "it"} fails when a session uses it. Add ${missing.length > 1 ? "them" : "it"} to the project's .env.`));
+    const go = el("button", "linkbtn", "Resources");
+    go.type = "button";
+    go.onclick = () => switchTab("resources");
+    note.append(" ", go);
+    main.prepend(note);
   }
 
   /* Chat: one session held open; each message is one item on the door. */
@@ -620,6 +639,47 @@ const PlayView = (() => {
   let call = null;
   let pill = null;
 
+  /* Which microphone and which output (a headset beside a laptop's own):
+   * the browser's list, the choice kept per browser. Labels appear once
+   * the page may use the microphone; until then the devices are numbered.
+   * The output is picked only where the browser can route a page's audio
+   * (AudioContext.setSinkId). */
+  const canPickOut = typeof AudioContext !== "undefined" && "setSinkId" in AudioContext.prototype;
+  function devicePickers() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return null;
+    const row = el("div", "voicedev");
+    const pick = (label, key) => {
+      const wrap = el("label", "voicepick");
+      const sel = el("select");
+      sel.setAttribute("aria-label", label);
+      sel.onchange = () => {
+        store(key, sel.value);
+        if (key === "playOut" && audioCtx && canPickOut) audioCtx.setSinkId(sel.value).catch(() => {});
+      };
+      wrap.append(el("span", null, label), sel);
+      return {wrap, sel, key};
+    };
+    const mic = pick("Microphone", "playMic");
+    const out = pick("Output", "playOut");
+    row.append(mic.wrap);
+    if (canPickOut) row.append(out.wrap);
+    async function fill() {
+      let list = [];
+      try { list = await navigator.mediaDevices.enumerateDevices(); } catch { return; }
+      for (const [p, kind, word] of [[mic, "audioinput", "Microphone"], [out, "audiooutput", "Output"]]) {
+        const want = recall(p.key, "");
+        p.sel.textContent = "";
+        p.sel.append(new Option(`Default ${word.toLowerCase()}`, ""));
+        list.filter(x => x.kind === kind && x.deviceId && x.deviceId !== "default" && x.deviceId !== "communications")
+          .forEach((x, i) => p.sel.append(new Option(x.label || `${word} ${i + 1}`, x.deviceId)));
+        p.sel.value = [...p.sel.options].some(o => o.value === want) ? want : "";
+      }
+    }
+    fill();
+    navigator.mediaDevices.addEventListener?.("devicechange", fill);
+    return {row, fill};
+  }
+
   function voiceToy(main, d) {
     const rate = (d.audio || {}).rate || 16000;
     const wrap = el("div", "playvoice");
@@ -635,6 +695,7 @@ const PlayView = (() => {
     const info = el("div", "voiceinfo");
     info.append(el("b", null, `${rate / 1000} kHz`), el("span", null, " · headphones recommended — a speaker talks into the microphone"));
     top.append(mic, meter, info);
+    const devs = devicePickers();
     const status = el("div", "voicestatus");
     // how much went each way: the loop is closed when both move
     const flow = el("div", "voiceflow");
@@ -642,11 +703,14 @@ const PlayView = (() => {
     const heardEl = el("span", null, "0.0 s heard back");
     flow.append(sentEl, el("span", "vsep", "·"), heardEl);
     const log = el("div", "playlog voicelog");
-    log.append(el("div", "note playempty", "Start the call and speak. What the service says is played and written here. "
+    log.append(el("div", "note playempty", "Start the call and speak. What you say is written as the service hears it; "
+      + "what it says back is played and written here, with the time since you were heard. "
       + "The call keeps going on other screens: watch its ops light up on the Flow."));
-    wrap.append(top, flow, status, log);
+    wrap.append(top);
+    if (devs) wrap.append(devs.row);
+    wrap.append(flow, status, log);
     main.append(wrap);
-    const ui = {wrap, label, mic, lvl, sentEl, heardEl, status, log};
+    const ui = {wrap, label, mic, lvl, sentEl, heardEl, status, log, devs};
     if (call && call.service === d.service) paintCall(call, ui);
     else if (call && call.live) {
       mic.disabled = true;
@@ -666,20 +730,44 @@ const PlayView = (() => {
     ui.wrap.dataset.played = String(c.played);
     if (c.lines.length) {
       ui.log.textContent = "";
-      for (const [cls, text] of c.lines) ui.log.append(el("div", cls, text));
+      for (const [cls, text, note] of c.lines) ui.log.append(line(cls, text, note));
       ui.log.scrollTop = ui.log.scrollHeight;
     }
     paintStatus(c);
   }
   const onScreen = (c) => !!(c && c.ui && c.ui.wrap.isConnected && !box.hidden);
 
-  function say(c, cls, text) {
-    c.lines.push([cls, text]);
+  function line(cls, text, note) {
+    const d = el("div", cls, text);
+    if (note) d.append(el("span", "voicelat", note));
+    return d;
+  }
+  function say(c, cls, text, note) {
+    c.lines.push([cls, text, note]);
     if (!c.ui) return;
     c.ui.log.querySelector(".playempty")?.remove();
-    c.ui.log.append(el("div", cls, text));
+    c.ui.log.append(line(cls, text, note));
     c.ui.log.scrollTop = c.ui.log.scrollHeight;
   }
+
+  /* What the caller said, as the service heard it: an op that heard the
+   * user carries it in the session's ops events (operonx ≥ 1.22.1); the
+   * same words again within a moment are one line. The bot's next words
+   * are timed from here. */
+  document.addEventListener("oxops", (ev) => {
+    const c = call;
+    const dt = ev.detail || {};
+    if (!c || !c.sid || dt.sid !== c.sid) return;
+    for (const o of dt.ops || []) {
+      if (!o.said) continue;
+      const at = o.at || Date.now() / 1000;
+      if (o.said === c.lastSaid && at - c.heardAt < 1.5) continue;
+      c.lastSaid = o.said;
+      c.heardAt = at;
+      c.waiting = true;
+      say(c, "chat-msg from-me", o.said);
+    }
+  });
   function paintStatus(c) {
     if (!c.ui) return;
     c.ui.status.textContent = c.status;
@@ -695,13 +783,24 @@ const PlayView = (() => {
   async function startCall(d, rate, ui) {
     const c = call = {service: d.service, rate, sid: null, live: false, starting: true, stream: null, node: null,
                       pending: [], sending: false, timer: null, sentS: 0, heardS: 0, played: 0, nextAt: 0,
-                      playing: new Set(), lines: [], status: "", run: null, t0: 0, ui: null};
+                      playing: new Set(), lines: [], status: "", run: null, t0: 0, ui: null,
+                      heardAt: 0, lastSaid: "", waiting: false};
     paintCall(c, ui);
     try {
-      c.stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true,
-                                                                    noiseSuppression: true, autoGainControl: true}});
+      const audio = {channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true};
+      const micId = recall("playMic", "");
+      try {
+        c.stream = await navigator.mediaDevices.getUserMedia({audio: micId ? {...audio, deviceId: {exact: micId}} : audio});
+      } catch (err) {
+        // the picked microphone is gone (unplugged): the default one
+        if (!micId) throw err;
+        c.stream = await navigator.mediaDevices.getUserMedia({audio});
+      }
     } catch (err) { setStatus(c, `The microphone is not available: ${err.message}`); idle(c); return; }
+    ui.devs?.fill();   // the page may use the microphone now: real names
     audioCtx = audioCtx || new AudioContext();
+    const outId = recall("playOut", "");
+    if (canPickOut && outId) await audioCtx.setSinkId(outId).catch(() => {});
     if (audioCtx.state === "suspended") await audioCtx.resume();
     if (!workletReady) {
       await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], {type: "application/javascript"})));
@@ -809,11 +908,20 @@ const PlayView = (() => {
   function onEvent(c, e) {
     if (e.t === "out") {
       const m = e.msg;
+      // the first words after the caller was heard: how long it took
+      const answered = () => {
+        if (!c.waiting || !c.heardAt || !e.at) return undefined;
+        c.waiting = false;
+        // only what was measured: the time since the caller was heard (a
+        // gate may have let the words pass, and this be a re-prompt)
+        const ms = Math.max(0, (e.at - c.heardAt) * 1000);
+        return `${ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`} after you`;
+      };
       if (m.kind === "audio") {
         play(c, m);
-        if (m.text) say(c, "chat-msg from-bot", m.text);
+        if (m.text) say(c, "chat-msg from-bot", m.text, answered());
       } else if (m.kind === "text") {
-        say(c, "chat-msg from-bot", m.text);
+        say(c, "chat-msg from-bot", m.text, answered());
       } else if (m.kind === "json" && (m.value || {}).event === "interrupt") {
         hush(c);   // the caller spoke over it: stop what is queued
         say(c, "note", "— interrupted —");

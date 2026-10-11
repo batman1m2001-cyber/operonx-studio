@@ -242,6 +242,24 @@ class TestResources:
         assert res["env"]["required"] == ["OPENAI_API_KEY"]
         assert res["env"]["optional"] == {"BASE_URL": "https://api.openai.com/v1"}
 
+    def test_an_empty_default_is_a_default(self, tmp_path):
+        """``${STT_VERSION:}`` resolves to "" when unset: optional, never
+        reported as a variable the project needs (the callbot's Services
+        screen said it was not set)."""
+        (tmp_path / "resources.yaml").write_text(
+            "http:stt:\n  api_key: ${STT_API_KEY}\n  version: ${STT_VERSION:}\n",
+            encoding="utf-8",
+        )
+        m = project(
+            tmp_path,
+            LINEAR,
+            '[project]\nname="d"\n[resources]\noverlay="resources.yaml"\n'
+            '[[graph]]\nname="flow"\nentry="wf:flow"\n',
+        )
+        env = extract_project(m)["resources"]["env"]
+        assert env["required"] == ["STT_API_KEY"]
+        assert env["optional"] == {"STT_VERSION": ""}
+
     def test_secret_values_never_enter_the_ir(self, tmp_path):
         (tmp_path / "resources.yaml").write_text(
             "llm:main:\n  api_key: sk-do-not-leak\n", encoding="utf-8"

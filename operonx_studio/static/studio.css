@@ -4520,3 +4520,12 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 
 /* a playground session that could not start: the whole reason, as written */
 .playerr { white-space: pre-wrap; font-family: var(--mono); font-size: var(--fs-sm); }
+
+/* the playground's voice call: which microphone and output; how fast it answered */
+.voicedev { display: flex; gap: 10px 16px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--border-soft); }
+.voicepick { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--text-2); min-width: 0; }
+.voicepick select { min-height: 30px; max-width: 260px; font-size: var(--fs-sm); }
+.voicelat { display: block; margin-top: 4px; font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.playenv { margin: 0 0 12px; padding: 10px 14px; border-radius: var(--r-md); background: var(--warn-soft, var(--accent-soft));
+  color: var(--text); font-size: var(--fs-sm); line-height: 1.5; }
+.playenv b { color: var(--warn, var(--text)); font-weight: 600; }

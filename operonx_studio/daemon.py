@@ -88,6 +88,26 @@ class ExtractResult:
 
 
 
+_EXTRACTOR_DIGEST: Optional[str] = None
+
+
+def _extractor_digest() -> str:
+    """A hash of the extractor's own source (``operonx_project``), once per
+    process."""
+    global _EXTRACTOR_DIGEST
+    if _EXTRACTOR_DIGEST is None:
+        import hashlib
+
+        import operonx_project
+
+        h = hashlib.sha1()
+        for path in sorted(Path(operonx_project.__file__).resolve().parent.glob("*.py")):
+            h.update(path.name.encode())
+            h.update(path.read_bytes())
+        _EXTRACTOR_DIGEST = h.hexdigest()[:10]
+    return _EXTRACTOR_DIGEST
+
+
 @dataclass
 class ProjectWatcher:
     """Tracks a project's files and re-extracts when any of them changes.
@@ -122,10 +142,11 @@ class ProjectWatcher:
         import hashlib
 
         digest = hashlib.sha1(str(self.root.resolve()).encode()).hexdigest()[:12]
-        # bump the prefix when the EXTRACTOR changes shape — the cached
-        # entry is validated by project-file fingerprints only, so a new
-        # extractor field would otherwise be masked by warm caches
-        return f"ir11:{digest}"
+        # the cached entry is validated by project-file fingerprints only, so
+        # the key names the extractor too: a studio whose extractor changed
+        # (a fix, a new field) extracts again instead of serving the old
+        # picture until someone edits the project
+        return f"ir11:{digest}:{_extractor_digest()}"
 
     def _load_cache(self) -> None:
         raw = self.cache.get_json(self._cache_key())

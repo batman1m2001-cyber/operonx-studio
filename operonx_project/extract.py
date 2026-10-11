@@ -826,11 +826,13 @@ def extract_graph(
 
 def _scan_env(text: str) -> Tuple[List[str], Dict[str, str]]:
     required, optional = set(), {}
-    for name, default in _ENV_PATTERN.findall(text):
-        if default == "":
-            # ``${VAR}`` has no colon; ``${VAR:}`` means empty default.
+    for m in _ENV_PATTERN.finditer(text):
+        name, default = m.group(1), m.group(2)
+        if default is None:
+            # ``${VAR}`` has no colon: it must be set
             required.add(name)
         else:
+            # ``${VAR:}`` has one: an empty default is still a default
             optional[name] = default
     return sorted(required), dict(sorted(optional.items()))
 
