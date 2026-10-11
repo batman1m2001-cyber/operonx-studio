@@ -1494,7 +1494,10 @@ def build_studio_app(recents: Optional[Recents] = None):
     # ── one project ─────────────────────────────────────────────────────
 
     @app.get("/p/{pid}")
-    def project_page(pid: str, request: Request) -> Any:
+    @app.get("/p/{pid}/{screen:path}")
+    def project_page(pid: str, request: Request, screen: str = "") -> Any:
+        """The project page; ``/p/<pid>/<screen>/…`` is the same page, opened
+        on that screen (static/router.js reads the rest of the address)."""
         watcher = _watcher(pid)
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
