@@ -71,7 +71,7 @@ Screenshots (desktop 1500 px, phone 390 px) are in the session scratchpad, `ux/s
    - Op fields come from the function signature (type hint, default) in the IR.
    - A raw JSON box is the fallback for a value that has no type, not the default.
    - Secrets are written as a `${VAR}` reference; the value goes to `.env` and is never shown back.
-6. **One visual direction, picked from rendered mocks** (P0) before anything is built. This is the one decision left to you.
+6. **One visual direction, decided by me** from the audit and the Langfuse reference, shown through screenshots of each phase. Nothing waits on a choice.
 
 ## 3. The trace experience (the heart of the plan)
 
@@ -191,7 +191,6 @@ One branch per phase, merged when its gate passes. Screenshots at desktop and ph
 
 | Phase | What | Gate |
 |---|---|---|
-| **P0** | Rendered mocks (a live artifact) of the runs list, the run page with a step selected, the Configure panel and a resource form, in two visual directions | **You pick a direction.** |
 | **P1** | Foundations: tokens, components, URL routing, `studio.js` split by view. No screen changes yet. | Every existing test passes; a screenshot of each screen is unchanged or improved; the hex count drops |
 | **P2** | The trace experience (§3) | §3 done-when |
 | **P3** | Safe writes (§5) | §5 done-when |

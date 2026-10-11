@@ -68,4 +68,4 @@ T1 with them. T3 last. Progress is recorded in §6 as each item closes.
 
 | Item | State |
 |---|---|
-| **Studio experience**: traces as good as Langfuse's, node configuration and Resource Hub edits written back to the project's own files, one design system | planned: `docs/STUDIO_EXPERIENCE_PLAN.md`; P0 (two rendered visual directions) waits on you |
+| **Studio experience**: traces as good as Langfuse's, node configuration and Resource Hub edits written back to the project's own files, one design system | planned: `docs/STUDIO_EXPERIENCE_PLAN.md`; phases P1–P6, nothing waits on you |
