@@ -229,4 +229,6 @@ P3 can run beside P2 (server-side only). P4 and P5 need P3.
 
 **Gate not met: `border:` under 60.** 230 visual border declarations became 206 drawn in light. Most of the rest are the canvas's own art (node cards, the router's patch panel, the agent cell), which is the visual language and stays, or the borders inputs, buttons and tables need. Getting below 60 means restyling about 130 chrome components, each needing review on desktop and phone, light and dark: a screen-by-screen design pass rather than a sweep. It is the open item of this plan.
 
+**Closed 2026-10-12 by `CHROME_SURFACES_PLAN.md`:** chrome `border` declarations 56 (the canvas's 44 counted apart, untouched). One card everywhere — a tint, never an edge — and no box inside a box on any of 104 shots.
+
 **Known gap, found by the tasks:** a call's STT input (`speech_audio`, raw float32 samples) is recorded as `application/octet-stream`, so it can't be played. The TTS audio plays. Fixing it means the callbot recording speech audio as `audio/L16` at 16 kHz in its trace.
