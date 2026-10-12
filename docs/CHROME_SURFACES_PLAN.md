@@ -47,5 +47,5 @@ and phone (390 px), light and dark, plus a DOM count of what is drawn.
 
 | Phase | State | Evidence |
 |---|---|---|
-| B1 | — | |
+| B1 | done | One card on every main screen: a tint (`--card`), never an edge; blocks inside it take `--well`, one step off. Selection is a 2 px accent ring on the accent tint (Evals, Prompts, templates); a firing alert or the branch row last taken carries an inset bar. Chips are tint only. The Resources shadow cards became tint cards, so they read in dark. DOM count over 60 shots: boxes 188 → 58, nested 2 → 0. Declarations 207 → 160. Desktop and phone, light and dark, every screen; JS 118/118, studio 473 passed. |
 | B2 | — | |
