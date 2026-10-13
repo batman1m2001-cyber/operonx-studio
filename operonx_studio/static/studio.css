@@ -3668,7 +3668,15 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   }
 /* Input / Output: a plain title over a plain table, as Langfuse reads */
 .iocardlabel { font-size: var(--fs-sm); font-weight: 650; color: var(--text); }
-.iocardhead { border-bottom: 1px solid var(--border-soft); }
+.iocardhead { border-bottom: 1px solid var(--border-soft); cursor: pointer; }
+.iocardhead:hover { background: var(--surface-2); }
+.iocardhead:focus-visible { outline: 2px solid var(--signal-ring); outline-offset: -2px; }
+.iocardlabel { position: relative; padding-left: 14px; }
+.iocardlabel::before { content: ""; position: absolute; left: 1px; top: .35em; width: 5px; height: 5px;
+  border: solid var(--text-3); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); transition: transform var(--tr); }
+.iocard.folded .iocardlabel::before { transform: rotate(-45deg); top: .45em; }
+.iocard.folded > .iocardhead { border-bottom: none; }
+.iocard.folded > :not(.iocardhead) { display: none; }
 .iocardmeta { color: var(--text-3); font-size: var(--fs-xs); flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .iocopy { min-height: 22px; padding: 0 8px; font-size: var(--fs-xs); border-radius: 6px;

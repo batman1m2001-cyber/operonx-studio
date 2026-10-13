@@ -1,6 +1,6 @@
 # Reading a step's input and output
 
-**Status:** I1 and I2 in progress (2026-10-13).
+**Status:** I1 and I2 done (2026-10-13).
 
 ## What is wrong
 
@@ -36,6 +36,16 @@ All of this is in `IO.valueView` and `IO.fields` (`static/io.js`). They draw eve
    - If nothing changed, it says `unchanged`.
 5. **Repeats fold.** An output object whose every field equals a top-level output of the same name, like `result` in `agent_turn`, is a closed, dim row: `same as response · intent · new_state · play_without_interrupt`.
 6. **The op's show keys come first.** In the output, the fields the op declares as show keys are listed first and marked, because they are what the tree row already shows.
+
+7. **Input, then Output, as Langfuse reads them.**
+   - This is time order: what came in, then what came out.
+   - Each card folds from its title and stays folded as you step from one execution to the next, and across reloads where storage allows. If you read only outputs, fold Input once.
+   - No separate scroll pane per card. A scroll box inside the scrolling side panel traps the wheel, gives each half about 350 px on a laptop, and fails on a phone. Long text is already clamped behind "Show all".
+8. **Langfuse's look.**
+   - A plain "Input" or "Output" title over a plain table.
+   - Nesting shows as indent inside that table, not as boxes inside boxes.
+   - No coloured side bars.
+   - In a narrow panel, a long value goes under its name, and names wrap only after an underscore.
 
 ## Phases
 

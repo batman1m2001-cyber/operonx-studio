@@ -952,13 +952,38 @@
 
   /* ── the cards ──────────────────────────────────────────────────────── */
 
+  /* A card folds from its title, and stays folded as you step from one
+   * execution to the next (and across reloads, where storage allows). */
+  const FOLDED = new Map();
+  const foldedKey = (cls) => `ox:iofold:${cls}`;
+  function isFolded(cls) {
+    if (FOLDED.has(cls)) return FOLDED.get(cls);
+    try { return global.localStorage && global.localStorage.getItem(foldedKey(cls)) === "1"; } catch { return false; }
+  }
+  function setFolded(cls, on) {
+    FOLDED.set(cls, on);
+    try { global.localStorage && global.localStorage.setItem(foldedKey(cls), on ? "1" : "0"); } catch { /* private window */ }
+  }
+
   function card(label, cls, raw, body, meta) {
     const c = h("section", `iocard ${cls}`);
     const head = h("div", "iocardhead");
+    head.setAttribute("role", "button");
+    head.tabIndex = 0;
+    head.title = `Fold or open the ${label.toLowerCase()}`;
     head.append(h("span", "iocardlabel", label));
     if (meta) head.append(h("span", "iocardmeta", meta));
     head.append(copyBtn(() => raw, "Copy JSON"));
+    const paint = () => {
+      const on = isFolded(cls);
+      c.classList.toggle("folded", on);
+      head.setAttribute("aria-expanded", String(!on));
+    };
+    const flip = (ev) => { ev.preventDefault(); setFolded(cls, !isFolded(cls)); paint(); };
+    head.onclick = flip;
+    head.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") flip(ev); };
     c.append(head, body);
+    paint();
     return c;
   }
 
@@ -1070,8 +1095,8 @@
       const outCard = card("Output", "ioout", outputs, outputBody((mode === "json" ? outputs : outs) || {}, mode,
         { focus: opts.focus, before: inputs }),
         outputs ? fmtSize(sizeOf(outputs)) : null);
-      // a conversation reads top-down, its reply last; elsewhere the
-      // answer comes first
+      // in time order, as Langfuse reads: what came in, then what came out
+      // (a caller can still ask for the answer first)
       if (opts.outputsFirst && !isChat) cards.append(outCard, inCard);
       else cards.append(inCard, outCard);
     };
