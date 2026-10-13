@@ -62,6 +62,8 @@ const RunView = (() => {
     const back = Icons.button("back", "Runs", "small ghost", "Back to all runs");
     back.onclick = () => showTraces();
     top.append(back, el("span", "tltitle", run), copyId(run, "Copy the run id"));
+    const statusSlot = el("span", "runhead-status");
+    top.append(statusSlot);
     const modes = el("span", "tlmodes");
     modes.setAttribute("role", "tablist");
     for (const [key, label, title, fn] of [["tree", "Tree", "The run as a tree: what ran for what, in order", showRunTree],
@@ -84,12 +86,14 @@ const RunView = (() => {
     // a run can fail with no failed execution: a structured LLM step that
     // returned `error`, a subgraph failing around its children
     const failed = !!errs || records.length > 0 || s.status === "error";
-    const line = el("div", "verdict pills");
+    // one line of facts under the title, Langfuse's way: plain text, a dot
+    // between; the status sits beside the run's name
+    const line = el("div", "verdict runfacts");
     // a run still going (or whose process died) has no verdict yet
     const running = s.status === "running";
     const status = el("span", "pill status " + (running ? "s-run" : failed ? "s-bad" : "s-ok"),
       running ? "running" : failed ? "failed" : "ok");
-    line.append(status);
+    statusSlot.append(status);
     line.append(pill(fmtMs(s.duration_ms || data.total_ms || 0), "Took"));
     const cost = money(s.cost_usd, s.unpriced);
     if (cost) line.append(pill(cost, "Cost", "p-cost"));
@@ -99,11 +103,14 @@ const RunView = (() => {
         `${s.tokens_in || 0} in, ${s.tokens_out || 0} out${s.tokens_cached ? `, ${s.tokens_cached} cached` : ""}`));
     }
     line.append(pill(`${recs.length} step${recs.length === 1 ? "" : "s"}`));
+    const origin = originLine(s);
     if (s.started_at) {
       const at = new Date(s.started_at * 1000);
       line.append(pill(at.toLocaleString([], {hour12: false, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit"}),
-        "Started", null, at.toISOString()));
+        null, null, `Started ${at.toISOString()}`));
     }
+    // where it came from (the service, its door, the session, the code) ends the line
+    if (origin) line.append(origin);
     if (errs) {
       line.append(pill(`${errs} error${errs > 1 ? "s" : ""}`, null, "p-bad"));
       const next = Icons.button("right", "Next error", "small danger", "Select the failed ops one by one");
@@ -131,7 +138,8 @@ const RunView = (() => {
         const per = r.count ? r.total_ms / r.count : 0;
         const p = el("span", "pill hl-op");
         p.append(opLink(r.op), el("span", "pill-v", fmtMs(per)));
-        if (r.count > 1) p.append(el("span", "pill-k", `avg of ${r.count} · max ${fmtMs(r.max_ms)}`));
+        // its spread on hover: the line stays one line
+        if (r.count > 1) p.title = `${r.op}: average of ${r.count} runs · max ${fmtMs(r.max_ms)}`;
         hl.append(p);
       });
       head.append(hl);
@@ -148,8 +156,6 @@ const RunView = (() => {
       if (dear) fact("Most expensive", dear.op, money(dear.cost_usd, 0));
       head.append(hl);
     }
-    const origin = originLine(s);
-    if (origin) head.append(origin);
     return head;
   }
 

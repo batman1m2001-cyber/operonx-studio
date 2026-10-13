@@ -369,6 +369,7 @@ const RunTree = (() => {
       chip.type = "button";
       chip.append(el("span", "rt-turn-n", t.label), el("span", "rt-turn-t", fmtMs(t.end_ms - t.start_ms)));
       if (said.length) chip.append(el("span", "rt-turn-s", said.join(" → ")));
+      chip.title = `${t.label} · ${fmtMs(t.end_ms - t.start_ms)}${said.length ? "\n" + said.join(" → ") : ""}`;
       chip.onclick = () => {
         const first = cur.rows.find(r => r.ctx === t.key || String(r.ctx || "").startsWith(t.key + "."));
         if (first) select(first);

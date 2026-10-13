@@ -53,7 +53,7 @@ function runHeader(run, data, mode, extras) {
  * direction of the Jobs pane's Trace links. */
 function originLine(s) {
   if (!s || !s.origin || s.origin === "adhoc") return null;
-  const line = el("div", "tlorigin");
+  const line = el("span", "tlorigin");
   const link = (text, title, onclick) => {
     const b = el("button", "linkbtn", text);
     b.type = "button";
@@ -81,7 +81,16 @@ function originLine(s) {
     line.append(link(s.service || s.name, "Every run of this service",
       () => RunsView.openFolder({kind: s.origin, name: s.service || s.name})));
     if (s.transport) line.append(` · ${s.transport}`);
-    if (s.session_id) line.append(` · session ${s.session_id}`);
+    if (s.session_id) {
+      // a session id is a uuid: its head names it, the whole one copies
+      const sid = String(s.session_id);
+      line.append(" · session ");
+      const b = el("button", "linkbtn mono tlsid", sid.length > 12 ? sid.slice(0, 8) + "…" : sid);
+      b.type = "button";
+      b.title = `Session ${sid} — click to copy`;
+      b.onclick = async () => { try { await navigator.clipboard.writeText(sid); toast("Session id copied"); } catch { toast(sid); } };
+      line.append(b);
+    }
     // a real session its service recorded, or a playground one: send it again
     const md = s.metadata || {};
     const sent = (md.replay_script || md.playground_script || []).filter(m => m.kind === "text" || m.kind === "json");
