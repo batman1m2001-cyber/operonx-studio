@@ -22,10 +22,18 @@ function select(key) {
   refreshSelection();
   pushView();
   const panel = $("#inspector");
-  if (!state.sel) { renderFlowInfo(); return; }
+  const runStep = state.workflowOn && state.run && $("#wfstep");
+  if (!state.sel) { if (runStep) renderRunStep(null); renderFlowInfo(); return; }
   const it = state.rendered.get(state.sel);
   if (!it) { state.sel = null; renderFlowInfo(); return; }
   const n = it.node;
+  // a run's Workflow: what the op did goes to the step panel beside the canvas
+  if (runStep) {
+    if (!state._autoStep) state.runPinned = true;   // picked by hand: a live run stops pulling the focus
+    renderRunStep(n);
+    syncStepper();
+    return;
+  }
   // a step the run recorded (an agent's turn, model or tool call) reads as
   // the Tree view reads it: that one execution, its inputs and outputs
   if (n.step && state.run) { renderExecPanel(state.run.run, n.step, execsOf(state.runRows || [])); return; }

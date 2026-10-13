@@ -98,6 +98,7 @@ liveCanvas = (() => {
   function finish(op, status, dur) {
     if (!run) return;
     run.seen += 1;
+    if (run.kind === "replay") document.dispatchEvent(new CustomEvent("oxreplayop", {detail: {op}}));
     const bad = status === "error";
     dur = Math.max(260, Math.min(900, dur || 500));
     for (const [key, card] of cardsOf(op)) {

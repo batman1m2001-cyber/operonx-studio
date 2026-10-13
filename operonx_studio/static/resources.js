@@ -118,7 +118,7 @@ function resourceRow(cat, r, hub) {
     body.hidden = !body.hidden;
     caret.textContent = body.hidden ? "▸" : "▾";
     top.setAttribute("aria-expanded", String(!body.hidden));
-    if (!body.hidden && !body.childNodes.length) resourceDetail(body, cat, r, hub);
+    if (!body.hidden && !body.childNodes.length) hubResourceDetail(body, cat, r, hub);
   };
   row.append(top, body);
   return row;
@@ -129,7 +129,7 @@ function hubEdit(hub, op, path, extra) {
   return (apply, base) => ({run: () => api(`/api/p/${PID}/yaml`, {file: hub.file, op, path, ...extra, apply, base})});
 }
 
-function resourceDetail(body, cat, r, hub) {
+function hubResourceDetail(body, cat, r, hub) {
   if (!r.editable) {
     body.append(el("div", "note", `Declared outside ${hub.file} (operonx's defaults or another file): shown, not edited here.`));
   }

@@ -2595,6 +2595,14 @@ function lensBadge(card, badges, n) {
     if (lens !== "path" && lens !== "values") card.classList.add("quiet");
     return;
   }
+  // a failure is shown whatever the lens: it is what a run page is opened for
+  if (runinfo.errors && lens !== "errors") {
+    const last = String(runinfo.last_error || "failed").trim().split("\n").pop();
+    const chip = el("span", "badge err errline", `${runinfo.errors}✗ ${last}`);
+    chip.title = String(runinfo.last_error || "");
+    badges.append(chip);
+    card.classList.add("errorlit");
+  }
   if (lens === "time") {
     const runMs = (state.run.wall_s || 0) * 1000;
     if (roll && RunView.background(roll, runMs)) {

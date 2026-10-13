@@ -665,7 +665,8 @@ function setLinkState(up) {
 async function performUi(kind, args) {
   if (kind === "open_run") {
     if (state.tab !== "traces") switchTab("traces", {quiet: true});
-    if (args.lens) { state.lens = args.lens; store("lens", args.lens); }
+    // errors and values are no longer lenses: failures are always marked, values are in the step panel
+    if (args.lens) { state.lens = ["time", "cost"].includes(args.lens) ? args.lens : "path"; store("lens", state.lens); }
     await (args.mode === "workflow" ? showRunWorkflow(args.run) : showRunTree(args.run));
     // an execution to select: an eval's blamed op, a deep link's `op`
     if (args.op) RunView.focusExec({op_id: args.op, op: args.op.split("#")[0].split(".").pop()},

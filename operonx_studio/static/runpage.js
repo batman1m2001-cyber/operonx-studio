@@ -152,9 +152,12 @@ async function renderExecPanel(run, e, execs, target) {
   const title = el("div", "pheadrow");
   if (target) {
     // on a phone the step covers the steps: the way back
-    const back = Icons.button("back", "Steps", "small ghost rt-back", "Back to the steps");
-    back.onclick = () => RunTree.backToSteps();
-    title.append(back);
+    // (the Workflow's sheet closes from its own bar)
+    if (!target.closest("#wfstep")) {
+      const back = Icons.button("back", "Steps", "small ghost rt-back", "Back to the steps");
+      back.onclick = () => RunTree.backToSteps();
+      title.append(back);
+    }
     const ico = el("span", "rt-ico", node ? kindIcon(node) : "≋");
     if (node) ico.style.setProperty("--kind", kindColor(node));
     title.append(ico);
@@ -458,7 +461,13 @@ async function showRunWorkflow(run) {
   state.runRows = tree.rows;
   state.stepsBase = state.graph;
   paintSteps(true);
-  const extras = [RunView.lensBar(), replayControl(run)];
+  state.runSteps = (tree.rows || []).filter(r => (r.kind === "record" || r.step) && !(r.outputs || {})._transient_stream)
+    .sort((a, b) => a.start_ms - b.start_ms);
+  if (state.runFocusRun !== run) { state.runFocus = null; state.runPinned = false; state.runFocusRun = run; }
+  // a live run redraws every few seconds: the step in focus is kept by its id
+  else if (state.runFocus) state.runFocus = state.runSteps.find(r => r.id === state.runFocus.id) || null;
+  const live = ((tree.summary || {}).status === "running");
+  const extras = [RunView.lensBar(), runStepper(), replayControl(run)];
   box.append(runHeader(run, tree, "workflow", extras));
   if (switched) {
     const note = el("div", "wfnote");
@@ -470,12 +479,21 @@ async function showRunWorkflow(run) {
   }
   box.append(RunView.timeline(state.runTurns, tree.total_ms, (key) => {
     state.runTurn = key; paintSteps(true); render(); renderFlowInfo();
+    // the panel reads the picked turn: the selected op's execution in it
+    renderRunStep(selectedNode());
   }));
   box.classList.add("workflow");
   const stage = $("#stage");
   if (!state._stageHome) state._stageHome = {parent: stage.parentNode, next: stage.nextSibling};
   stage.style.display = "";
-  box.append(stage);
+  // the canvas and, beside it, the step it is on: what an op did is never
+  // in a panel the user has to have opened (it was, at 0 px, on Runs)
+  const split = el("div", "wfsplit");
+  const side = el("aside", "wfstep");
+  side.id = "wfstep";
+  side.setAttribute("aria-label", "The selected step");
+  split.append(stage, side);
+  box.append(split);
   state.workflowOn = true;
   syncChrome();
   render();
@@ -486,7 +504,153 @@ async function showRunWorkflow(run) {
   landOnAgent();
   pushView();
   renderFlowInfo();
+  // live, and nothing picked by hand: follow the newest step as it lands
+  if (live && !state.runPinned && state.runSteps.length) focusStep(state.runSteps[state.runSteps.length - 1], true);
+  else renderRunStep(selectedNode());
 }
+
+/* ── the Workflow's step panel ──────────────────────────────────────── */
+
+function selectedNode() {
+  const it = state.sel && state.rendered.get(state.sel);
+  return it ? it.node : null;
+}
+
+/* An op's executions in this run — in the picked turn when one is. A
+ * subgraph's own record (operonx 1.22.3) is one of them. */
+function runStepRows(name) {
+  const turn = state.runTurn;
+  return (state.runSteps || []).filter(r => r.op === name
+    && (!turn || (r.ctx || "") === turn || (r.ctx || "").startsWith(turn + ".")));
+}
+
+const turnOf = (r) => (r.ctx || "").split(".").slice(0, 2).join(".");
+
+/* The panel beside the canvas: the selected op's execution, as the Tree
+ * reads a step — its output, its input, what fed it. Several executions
+ * (a turn each, a stream's items) are chips above it; the stepper's or
+ * the last one is open. */
+function renderRunStep(n, focus) {
+  const side = $("#wfstep");
+  if (!side || !state.run) return;
+  side.textContent = "";
+  side.classList.toggle("open", !!n);
+  if (!n) {
+    side.append(el("p", "note wfhint",
+      "Pick an op to read what it did in this run — its output, its input, what fed it. "
+      + "◀ ▶ (or ← →) walk the run step by step; a turn above narrows it to that turn."));
+    return;
+  }
+  // a phone's sheet closes from its own bar, clear of the step's buttons
+  const close = el("div", "wfbar");
+  const x = Icons.button("x", undefined, "small ghost wfclose", "Close");
+  x.onclick = () => { if (state.sel) select(state.sel); else renderRunStep(null); };
+  close.append(el("span", "wfgrip"), x);
+  if (n.step) {   // a step an agent recorded: that one execution
+    const body = el("div", "wfbody");
+    side.append(close, body);
+    renderExecPanel(state.run.run, n.step, execsOf(state.runRows || []), body);
+    return;
+  }
+  const rows = runStepRows(n.name);
+  if (!rows.length) {
+    side.append(close, el("h3", "rt-step-title", n.name),
+      el("p", "note", state.runTurn
+        ? "Did not run in this turn. Pick “Whole run”, or another turn, to see where it did."
+        : "Did not run in this run — the path went another way, or nothing reached it."));
+    return;
+  }
+  const pick = (focus && rows.includes(focus)) ? focus
+    : (state.runFocus && rows.includes(state.runFocus)) ? state.runFocus : rows[rows.length - 1];
+  side.append(close);
+  if (rows.length > 1) {
+    const chips = el("div", "wfexecs");
+    chips.append(el("span", "note", `${rows.length} executions`));
+    rows.slice(-40).forEach((r) => {
+      const i = rows.indexOf(r);
+      const c = el("button", "pill" + (r === pick ? " on" : "") + (r.status === "error" ? " err" : ""),
+        `#${i + 1} +${fmtMs(r.start_ms)}`);
+      c.type = "button";
+      c.title = `${r.ctx} · ${fmtMs(r.dur_ms)}`;
+      c.onclick = () => { state.runFocus = r; state.runPinned = true; renderRunStep(n, r); syncStepper(); };
+      chips.append(c);
+    });
+    side.append(chips);
+  }
+  const body = el("div", "wfbody");
+  side.append(body);
+  renderExecPanel(state.run.run, pick, execsOf(state.runRows || []), body);
+}
+
+/* ◀ step i of n ▶ — the run one execution at a time, in the order they
+ * started: the canvas selects the op, the panel opens that execution. */
+function runStepper() {
+  const box = el("span", "wfstepper");
+  const arrow = (label, title) => {
+    const b = el("button", "small ghost wfarrow", label);
+    b.type = "button";
+    b.title = title;
+    b.setAttribute("aria-label", title);
+    return b;
+  };
+  const prev = arrow("◀", "Previous step (←)");
+  const next = arrow("▶", "Next step (→)");
+  const at = el("span", "wfstepat");
+  prev.onclick = () => stepBy(-1);
+  next.onclick = () => stepBy(1);
+  box.append(prev, at, next);
+  state.stepperEl = at;
+  syncStepper();
+  return box;
+}
+
+function syncStepper() {
+  const steps = state.runSteps || [];
+  const i = state.runFocus ? steps.indexOf(state.runFocus) : -1;
+  if (state.stepperEl) state.stepperEl.textContent = steps.length ? `step ${i + 1 || "–"} of ${steps.length}` : "no steps";
+}
+
+function stepBy(d) {
+  const steps = state.runSteps || [];
+  if (!steps.length) return;
+  state.runPinned = true;   // stepping by hand: a live run stops pulling the focus
+  const i = state.runFocus ? steps.indexOf(state.runFocus) : -1;
+  focusStep(steps[Math.max(0, Math.min(steps.length - 1, i < 0 ? 0 : i + d))]);
+}
+
+function focusStep(row, auto) {
+  state.runFocus = row;
+  state._autoStep = !!auto;
+  // a step outside the picked turn: the turn follows it
+  if (state.runTurn && turnOf(row) !== state.runTurn) { state.runTurn = null; paintSteps(true); render(); }
+  let found = [...state.rendered.values()].find(x => x.node.name === row.op);
+  if (!found) { expandAll(true); found = [...state.rendered.values()].find(x => x.node.name === row.op); }
+  if (found) {
+    if (state.sel !== found.key) select(found.key); else renderRunStep(found.node, row);
+    centerOn(found);
+  } else renderRunStep({name: row.op}, row);
+  state._autoStep = false;
+  syncStepper();
+}
+
+document.addEventListener("keydown", (ev) => {
+  if (!state.workflowOn || !state.run || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const t = ev.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (ev.key !== "ArrowRight" && ev.key !== "ArrowLeft") return;
+  // first, and only: the canvas's own arrow keys walk to a neighbour card
+  ev.preventDefault();
+  ev.stopImmediatePropagation();
+  stepBy(ev.key === "ArrowRight" ? 1 : -1);
+}, true);
+
+// a replay finishing an op: the panel follows it
+document.addEventListener("oxreplayop", (ev) => {
+  if (!state.workflowOn || !state.run) return;
+  const op = (ev.detail || {}).op;
+  const rows = (state.runSteps || []).filter(r => r.op === op);
+  if (rows.length) { state.runFocus = rows[rows.length - 1]; renderRunStep({name: op}, state.runFocus); syncStepper(); }
+});
 
 /* A run whose agent op opened onto its steps lands on that agent: its
  * turns are what the run did, and they are below the fold of a tall flow. */
