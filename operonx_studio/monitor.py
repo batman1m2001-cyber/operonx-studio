@@ -183,6 +183,13 @@ def monitor(
         "cost_ops": cost_ops,
         "errors": _errors(runs),
         "truncated": len(runs) >= _MAX_RUNS,
+        # Langfuse cannot total ops over a month of runs: the table holds
+        # only the runs this machine also stores, and says so
+        "ops_note": (
+            "Per-op numbers cover the runs stored on this machine only: Langfuse cannot total "
+            "ops across runs. A ClickHouse store (trace_clickhouse in [tracing]) gives them "
+            "for every run."
+        ) if getattr(store, "primary", None) is not None else None,
         "playground_runs": playground,
         "with_playground": bool(with_playground and playground),
     }

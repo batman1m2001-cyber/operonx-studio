@@ -8,16 +8,19 @@ project. Which store, in order:
 1. ``[studio] runs = "run_store:<name>"`` in ``operonx.toml`` — the
    user's override for what the studio reads;
 2. the project's own trace sinks, when ``operonx.toml`` has ``[tracing]``
-   (``operonx.telemetry.runs.project_stores``): the best one that can be
-   read — ClickHouse, then Postgres / Mongo / SQLite, then run files;
-3. ``run_store: default`` in the project's resources file;
-4. ``[studio] traces = "<dir>"`` — a directory some local consumer
-   writes (the files store indexes it, flat or by origin);
-5. ``<project>/.operonx/runs`` — where operonx files runs by default.
+   (``operonx.telemetry.runs.project_stores``), in the order a team wants
+   its runs read: ClickHouse, then Postgres / Mongo (``run_store:``);
+3. ``run_store: default`` in the project's resources file, when it is one
+   of those;
+4. else **Langfuse** — a ``trace_langfuse:`` sink, or ``[studio.langfuse]``
+   — with the local store beside it (:class:`WithLocal`): a Playground
+   session is recorded only locally, never in a production Langfuse, and
+   is still listed and opened;
+5. else local: a SQLite or files sink, ``run_store: default``,
+   ``[studio] traces = "<dir>"``, then ``<project>/.operonx/runs``.
 
-A second, read-only source for runs that live only on Langfuse: a
-``[studio.langfuse]`` table, else a ``trace_langfuse:`` sink in
-``[tracing]``. Its ids carry an ``lf:`` prefix here.
+Beside a ClickHouse or SQL store, Langfuse is a second, read-only source
+for runs that live only there; its ids carry an ``lf:`` prefix here.
 
 A store over the network (ClickHouse, Postgres, Mongo) that does not
 answer raises :class:`StoreUnreachable`, naming it — the Runs screen
@@ -36,7 +39,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import tomllib as _toml
@@ -57,6 +60,7 @@ except ImportError:  # an older operonx: the studio reads as it always has
 __all__ = [
     "LF_PREFIX",
     "ProjectRuns",
+    "WithLocal",
     "StoreUnreachable",
     "project_runs",
     "read_retention",
@@ -150,7 +154,9 @@ def _store_choice(root: Path) -> Tuple[Dict[str, Any], str, str]:
 _DEFAULT_WHY = "the default: no [tracing] or [studio] runs in operonx.toml"
 #: Which of a project's readable sinks the studio reads, best first: the
 #: one built for many runs and many writers, then a database, then files.
-_RANK = {"clickhouse": 0, "postgres": 1, "mongo": 1, "sqlite": 1, "files": 2}
+_RANK = {"clickhouse": 0, "postgres": 1, "mongo": 1, "sqlite": 2, "files": 3}
+#: Stores on this machine: below Langfuse in the order a team reads its runs.
+_LOCAL = ("sqlite", "files")
 #: Backends reached over the network: their failures are "unreachable".
 _NETWORK = ("clickhouse", "postgres", "mongo")
 #: Seconds a page waits for a ClickHouse to accept the connection.
@@ -169,6 +175,8 @@ class _Choice:
     source: str
     info: Dict[str, Any]
     remote: Optional[Dict[str, Any]]
+    #: Langfuse is the source: the local store read beside it
+    local: Optional[Dict[str, Any]] = None
 
 
 def _choose(root: Path) -> _Choice:
@@ -214,11 +222,26 @@ def _choose(root: Path) -> _Choice:
         "remote": None,
     }
     remote = _langfuse_spec(root)
+    remote_why = "[studio.langfuse] in operonx.toml"
     if remote is not None:
-        info["remote"] = f"Langfuse at {remote['host']} — from [studio.langfuse] in operonx.toml"
+        remote_label = f"Langfuse at {remote['host']}"
     elif langfuse is not None:
         remote = dict(langfuse.spec)
-        info["remote"] = f"{langfuse.describe()} — from {langfuse.source}"
+        remote_label, remote_why = langfuse.describe(), str(langfuse.source)
+    if remote is not None and not explicit and str(spec.get("backend") or "files") in _LOCAL:
+        # no ClickHouse or SQL store: Langfuse is what the team reads, and
+        # the local store stays beside it for what only it holds
+        local_label = label
+        info.update({
+            "label": remote_label,
+            "why": f"from {remote_why} — no ClickHouse store; local runs ({local_label}) read beside it",
+            "backend": "langfuse",
+            "local": local_label,
+        })
+        return _Choice(spec=dict(remote), source=f"{remote_label} — from {remote_why}", info=info,
+                       remote=None, local=spec)
+    if remote is not None:
+        info["remote"] = f"{remote_label} — from {remote_why}"
     return _Choice(spec=spec, source=source, info=info, remote=remote)
 
 
@@ -350,6 +373,93 @@ def write_retention(root: Path, policy: Dict[str, Optional[float]]) -> None:
 # ── the per-project handle ───────────────────────────────────────────────
 
 
+class WithLocal(RunStore):
+    """Langfuse as the source, the project's local store beside it.
+
+    A Playground session is recorded only locally (``operonx.app.play``:
+    a test never lands in a production Langfuse), and a service may write
+    both. Lists merge the two newest first, by start time — one row per
+    run, the local copy when both hold it (it has every op's numbers) —
+    with a time cursor, so a page is
+    the same whichever store has more. A run opens from the local store
+    when it has it (no round trip), else from Langfuse. Writes, deletes
+    and retention reach the local store only: the studio never reaches
+    into someone else's server. When Langfuse does not answer, the local
+    runs are still listed, and :attr:`primary_error` says why the rest
+    are not.
+    """
+
+    writable = True
+
+    def __init__(self, primary: RunStore, local: RunStore):
+        self.primary, self.local = primary, local
+        self.config = dict(getattr(primary, "config", {}) or {})
+        self.primary_error: Optional[str] = None
+        self.media_dir = getattr(local, "media_dir", None)
+
+    def put_trace(self, trace: Any) -> Any:
+        return self.local.put_trace(trace)
+
+    def consume(self, trace: Any) -> Any:
+        return self.local.put_trace(trace)
+
+    def list_runs(self, where: Any = None, order: str = "started_desc", limit: int = 50,
+                  cursor: Optional[str] = None) -> Any:
+        from dataclasses import replace
+
+        from operonx.telemetry.runs.model import Page, RunFilter
+
+        where = where or RunFilter()
+        desc = order != "started_asc"
+        if cursor and cursor.startswith("t:"):
+            at = float(cursor[2:])
+            where = (replace(where, until=at if where.until is None else min(where.until, at)) if desc
+                     else replace(where, since=at if where.since is None else max(where.since, at)))
+        pages = [self.local.list_runs(where, order, limit)]
+        try:
+            pages.append(self.primary.list_runs(where, order, limit))
+            self.primary_error = None
+        except Exception as exc:  # noqa: BLE001 — someone else's server: the local runs still show
+            self.primary_error = f"{type(exc).__name__}: {exc}"
+        seen: Dict[str, Any] = {}
+        for page in pages:  # local first: its copy of a run wins
+            for s in page.items:
+                if cursor and cursor.startswith("t:") and s.started_at == float(cursor[2:]):
+                    continue  # the last row of the page before
+                seen.setdefault(s.trace_id, s)
+        items = sorted(seen.values(), key=lambda s: s.started_at or 0.0, reverse=desc)
+        more = any(p.next_cursor for p in pages) or len(items) > limit
+        items = items[:limit]
+        nxt = f"t:{items[-1].started_at}" if more and items else None
+        return Page(items=items, next_cursor=nxt, total=None)
+
+    def get_run(self, trace_id: str) -> Any:
+        rec = self.local.get_run(trace_id)
+        return rec if rec is not None else self.primary.get_run(trace_id)
+
+    def rollups(self, where: Any = None) -> List[Any]:
+        out = list(self.local.rollups(where))
+        have = {r.trace_id for r in out}
+        try:
+            out += [r for r in self.primary.rollups(where) if r.trace_id not in have]
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
+    def delete_runs(self, where: Any) -> int:
+        return self.local.delete_runs(where)
+
+    def refresh(self) -> int:
+        return self.local.refresh()
+
+    def close(self) -> None:
+        for s in (self.primary, self.local):
+            try:
+                s.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 @dataclass
 class ProjectRuns:
     """A project's stores, opened once and reused."""
@@ -417,6 +527,8 @@ def project_runs(root: Path, sweep: bool = True) -> ProjectRuns:
             store = open_run_store(spec)
             if spec.get("backend") in _NETWORK:
                 store = _Guarded(store, choice.info)
+            if choice.local is not None:
+                store = WithLocal(store, open_run_store(choice.local))
             remote = None
             if choice.remote is not None:
                 try:

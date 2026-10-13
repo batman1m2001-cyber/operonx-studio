@@ -2264,6 +2264,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": "unknown project"}, status_code=404)
         payload: Dict[str, Any] = {"configured": True, "root": pr.source}
         runs = [_row(s) for s in pr.store.list_runs(limit=200).items]
+        if getattr(pr.store, "primary_error", None):
+            payload["langfuse_error"] = pr.store.primary_error
         if pr.remote is not None and not local_only:
             payload["langfuse"] = pr.remote.config.get("host")
             try:
@@ -2308,6 +2310,9 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": str(exc)}, status_code=400)
         out: Dict[str, Any] = {"runs": [_row(s) for s in page.items], "next": page.next_cursor,
                                "total": page.total, "source": pr.source, "store": pr.info}
+        # Langfuse is the source and did not answer: the local runs are listed, and why the rest are not
+        if getattr(pr.store, "primary_error", None):
+            out["source_error"] = f"Langfuse did not answer — only this machine's runs are listed ({pr.store.primary_error})"
         if with_origins:
             got = _origins(pid, since, until)
             out["origins"] = None if isinstance(got, JSONResponse) else got

@@ -8,6 +8,7 @@ exists outside the test.
 from __future__ import annotations
 
 import json
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -412,8 +413,17 @@ LF_DETAIL = {"observations": [
 def langfuse_project(project, monkeypatch):
     """A project declaring a Langfuse source, with the API faked at the
     fetch seam — everything above `LangfuseRunStore._get` (auth, routing,
-    mapping, aggregation) runs for real."""
+    mapping, aggregation) runs for real.
+
+    Langfuse beside a store that outranks it (a ClickHouse): its runs are
+    a second source, `lf:`-prefixed. The test's local store stands in for
+    that ClickHouse — with nothing above it, Langfuse is the source
+    (`test_langfuse_is_the_source_*`)."""
     from operonx.telemetry.runs.langfuse import LangfuseRunStore
+
+    from operonx_studio import runs as runs_mod
+
+    monkeypatch.setattr(runs_mod, "_LOCAL", ())
 
     (project / "operonx.toml").write_text(
         (project / "operonx.toml").read_text()
@@ -474,6 +484,62 @@ def test_a_langfuse_outage_degrades_to_a_note(client, langfuse_project, monkeypa
     assert data["configured"] and "connection refused" in data["langfuse_error"]
     res = client.get(f"/api/p/{pid}/trace/lf:call-abc")
     assert res.status_code == 502
+
+
+@pytest.fixture()
+def langfuse_source(project, monkeypatch):
+    """No ClickHouse: Langfuse is the source, the local store beside it."""
+    from operonx.telemetry.runs.langfuse import LangfuseRunStore
+
+    (project / "operonx.toml").write_text(
+        (project / "operonx.toml").read_text()
+        + '\n[studio.langfuse]\nhost = "https://lf.example"\n'
+          'public_key = "pk"\nsecret_key = "sk"\n', encoding="utf-8")
+
+    def fake_get(self, path, **params):
+        if path == "/api/public/traces":
+            return LF_TRACES
+        if path == "/api/public/traces/call-abc":
+            return LF_DETAIL
+        if path.startswith("/api/public/traces/"):
+            raise urllib.error.HTTPError(path, 404, "not found", {}, None)
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(LangfuseRunStore, "_get", fake_get)
+    return project
+
+
+def test_langfuse_is_the_source_its_runs_list_open_and_drill_down(client, langfuse_source):
+    pid = _open(client, langfuse_source)
+    data = client.get(f"/api/p/{pid}/runs").json()
+    assert data["store"]["backend"] == "langfuse" and data["store"]["label"] == "Langfuse at https://lf.example"
+    assert [r["run"] for r in data["runs"]] == ["call-abc"]           # its own id: no prefix
+    summary = client.get(f"/api/p/{pid}/trace/call-abc").json()
+    assert summary["ops"]["stt"]["runs"] == 2 and summary["ops"]["stt"]["errors"] == 1
+    drill = client.get(f"/api/p/{pid}/trace/call-abc/op/stt").json()
+    assert drill["executions"][0]["outputs"] == {"transcript": "alo"}
+
+
+def test_langfuse_is_the_source_and_a_local_run_still_lists_and_opens(client, langfuse_source, tmp_path):
+    """A Playground session is recorded only locally: it stays reachable."""
+    _traced(langfuse_source, tmp_path, "play-1", [{"op_name": "a", "duration_ms": 1.0}])
+    pid = _open(client, langfuse_source)
+    runs = [r["run"] for r in client.get(f"/api/p/{pid}/runs").json()["runs"]]
+    assert set(runs) == {"call-abc", "play-1"}
+    assert client.get(f"/api/p/{pid}/trace/play-1").status_code == 200
+
+
+def test_langfuse_is_the_source_and_away_the_local_runs_list_with_a_note(client, langfuse_source, monkeypatch):
+    from operonx.telemetry.runs.langfuse import LangfuseRunStore
+
+    def broken(self, path, **params):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(LangfuseRunStore, "_get", broken)
+    pid = _open(client, langfuse_source)
+    data = client.get(f"/api/p/{pid}/runs").json()
+    assert data["runs"] == [] and "connection refused" in data["source_error"]
+    assert client.get(f"/api/p/{pid}/trace/call-abc").status_code == 502
 
 
 def test_langfuse_env_interpolation(tmp_path, monkeypatch):
@@ -909,6 +975,9 @@ def test_langfuse_runs_merge_into_local_rows(client, project, tmp_path, monkeypa
     wins as the data source, the Langfuse copy becomes a badge."""
     from operonx.telemetry.runs.langfuse import LangfuseRunStore
 
+    from operonx_studio import runs as runs_mod
+
+    monkeypatch.setattr(runs_mod, "_LOCAL", ())  # beside a store that outranks Langfuse
     _traced(project, tmp_path, "call-both", [{"op_name": "a", "duration_ms": 1.0}])
     manifest = (project / "operonx.toml").read_text()
     (project / "operonx.toml").write_text(
