@@ -1800,13 +1800,26 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 
 /* ── One run: the verdict, lenses, the timeline ─────────────────── */
 
-.runhead { flex-direction: column; align-items: stretch; gap: 6px; flex-wrap: nowrap; }
+.runhead { flex-direction: column; align-items: stretch; gap: 4px; flex-wrap: nowrap; margin-bottom: 4px; }
 /* the origin line is a row of the column: its row-header flex-basis (100%)
    made it as tall as the header here, and the wrap put it in a second
    column past the right edge — every job, eval and service run lost it */
 .runhead .tlorigin { flex-basis: auto; margin-top: 0; font-size: var(--fs-sm); color: var(--text-3); overflow-wrap: anywhere; }
 .runhead .tlorigin .linkbtn { font-size: var(--fs-sm); }
-.runhead-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.runhead-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+/* the views sit at the line's end; the status beside the run's name */
+.runhead-top .tlmodes { margin-left: auto; }
+.runhead-status .pill.status { min-height: 22px; padding: 0 8px; font-size: var(--fs-sm); }
+/* the facts: one quiet line of text, spaced (a wrapped line never starts on a dot) */
+.verdict.runfacts { column-gap: 16px; row-gap: 2px; font-size: var(--fs-sm); color: var(--text-3); }
+.runfacts > .pill { background: none; padding: 0; min-height: 0; border-radius: 0; font-size: var(--fs-sm);
+  color: var(--text-2); box-shadow: none; }
+.runfacts > .pill .pill-k { color: var(--text-3); margin-right: 4px; }
+.runfacts > .pill .pill-v { font-weight: 500; }
+.runfacts > .pill.p-bad { color: var(--err); font-weight: 600; }
+.runfacts .tlorigin { display: inline; flex-basis: auto; margin: 0; font-size: var(--fs-sm); color: var(--text-3); }
+.runfacts .tlorigin .linkbtn { font-size: var(--fs-sm); padding: 0 2px; min-height: 0; }
+.tlsid { font-weight: 400 !important; color: var(--text-2); }
 .verdict { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-base);
   color: var(--text); }
 .verdict .status { font-size: var(--fs-base); font-weight: 600; }
@@ -4363,19 +4376,21 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
    beside the selected step. Separation by space and surface, not lines;
    one time axis for every bar; the duration is a column of its own, so
    it is never cut. */
-.rt { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
+.rt { display: flex; flex-direction: column; gap: 10px; min-height: 100%; }
 /* the run itself, the first of the steps: its panel is its input and output */
 .rt-row.rt-run .rt-n { font-weight: 650; }
 .rt-row.rt-run { border-bottom: 1px solid var(--border-soft); }
 .rt-run-sub { font-size: var(--fs-sm); color: var(--text-3); margin-top: 2px; }
-.rt-turns { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
-.rt-turn { flex: 0 0 auto; max-width: 300px; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; text-align: left;
-  background: var(--surface-2); border: 1px solid transparent; border-radius: var(--r-md); padding: 8px 10px; cursor: pointer; }
+.rt-turns { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+/* a turn on one line: its name, its time, then what it said, cut short (whole on hover) */
+.rt-turn { flex: 0 0 auto; max-width: 320px; display: inline-flex; align-items: center; gap: 8px; text-align: left; cursor: pointer;
+  min-height: 28px; padding: 0 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid transparent;
+  box-shadow: none; color: var(--text); }
 .rt-turn:hover { border-color: var(--border); }
-.rt-turn.err { box-shadow: inset 3px 0 0 var(--err); }
+.rt-turn.err { box-shadow: inset 0 0 0 1px var(--err); }
 .rt-turn-n { font-weight: 600; font-size: var(--fs-sm); white-space: nowrap; }
-.rt-turn-t { font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
-.rt-turn-s { grid-column: 1 / -1; font-size: var(--fs-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-turn-t { font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rt-turn-s { font-size: var(--fs-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
 .rt-split { --rt-step-w: 44%; display: grid; grid-template-columns: minmax(360px, 1fr) 6px minmax(320px, var(--rt-step-w));
   flex: 0 0 auto; height: max(520px, calc(100dvh - 150px)); background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--sh-1); overflow: hidden; }
