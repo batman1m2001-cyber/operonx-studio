@@ -1443,7 +1443,19 @@ function render() {
     // a port row sits in one of two equal columns: the card must grow by
     // twice its deficit for that column to gain it
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
-    const want = Math.ceil(m.it.w + need + 8);
+    let want = Math.ceil(m.it.w + need + 8);
+    // an agent's tool: its kind-and-policy line sits low in the oval, where
+    // the curve comes in — the card is wide enough that the line's end
+    // clears the curve at that height (an ellipse: inset (w/2)(1 - √(1 - f²)))
+    const tl = m.card.querySelector(".atool");
+    const last = tl && tl.lastElementChild;
+    if (last && m.card.offsetHeight) {
+      const left = last.offsetParent === m.card ? 0 : tl.offsetLeft;
+      const right = left + last.offsetLeft + last.offsetWidth + 10;
+      const h = m.card.offsetHeight, yc = tl.offsetTop + tl.offsetHeight / 2;
+      const f = Math.min(0.95, Math.abs(yc - h / 2) / (h / 2));
+      want = Math.max(want, Math.ceil(right / ((1 + Math.sqrt(1 - f * f)) / 2)));
+    }
     // a router is as wide as its zones: they never fold or cut
     const cap = m.card.classList.contains("cols") ? 2000 : m.card.querySelector(".dfports") ? 420 : 310;
     const w = Math.max(180, Math.min(cap, want));
@@ -2263,7 +2275,7 @@ function agentTurns(n) {
 function agentCard(card, it) {
   const n = it.node;
   card.classList.add("agentcell");
-  card.append(el("span", "ahull"), el("span", "abody"));
+  card.append(el("span", "ahull"), el("span", "abody"), hexLines());
   const head = el("div", "ahead");
   // the bee and the name on one line; a long name is cut, whole on hover
   const line = el("div", "aline");
@@ -2275,64 +2287,134 @@ function agentCard(card, it) {
   head.append(line, sub);
   card.append(head);
   const open = state.expanded.has(it.key);
-  if (n.parts && n.parts.length) {
-    card.append(agentSockets(n, it.key));
-    const b = el("button", "aopen", open ? "▾" : "▸");
-    b.title = open ? "Fold its parts back into the agent."
-      : "Open the agent: its model, its memory and each tool, as the ops they are.";
-    b.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
-    sub.append(b);
-  }
-  card.title = `${n.name} — an agent: ${agentFacts(n)}. Double-click to ${open ? "fold" : "open"} it.`;
+  // it opens by a double-click or a click on a socket: its parts plug in
+  if (n.parts && n.parts.length) card.append(agentSockets(n, it.key));
+  card.title = `${n.name} — an agent: ${agentFacts(n)}. Double-click it, or click a socket, to `
+    + (open ? "unplug its parts." : "plug its model, memory and tools in.");
+}
+
+/* The cell's plating: a seam across each cap, a rivet at its left
+ * corners, three vents in the bottom cap and a sensor in the top one (it
+ * shows while the agent runs). The right wall is left clear for the
+ * sockets. Drawn in the cell's own box (a regular hexagon, so the viewBox
+ * is too: it scales, never stretches). */
+function hexLines() {
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("class", "ahex");
+  svg.setAttribute("viewBox", "0 0 86.6 100");
+  svg.setAttribute("aria-hidden", "true");
+  const k = 0.88, cx = 43.3, cy = 50;
+  const pts = [[43.3, 0], [86.6, 25], [86.6, 75], [43.3, 100], [0, 75], [0, 25]]
+    .map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]);
+  const at = (i) => pts[i].map(v => v.toFixed(2));
+  const seam = (a, b) => `<line class="ahex-seam" x1="${at(a)[0]}" y1="${at(a)[1]}" x2="${at(b)[0]}" y2="${at(b)[1]}"/>`;
+  svg.innerHTML = seam(5, 1) + seam(4, 2)
+    + [4, 5].map(i => `<circle class="ahex-rivet" cx="${at(i)[0]}" cy="${at(i)[1]}" r="1.7"/>`).join("")
+    + [81, 85, 89].map((y, i) => `<line class="ahex-vent" x1="${(35.3 + i * 1.5).toFixed(1)}" y1="${y}" x2="${(51.3 - i * 1.5).toFixed(1)}" y2="${y}"/>`).join("")
+    + `<circle class="ahex-led" cx="43.3" cy="17" r="2"/>`;
+  return svg;
 }
 
 /* The agent's three sockets, top to bottom: model, memory, tools, down the
- * cell's upright right side, 15% of its height apart (studio.css places
- * them; this says where, for the wires). A socket with nothing behind it
- * (no session store: each run starts fresh) is shown empty; clicking one
- * opens the agent. */
-const SOCK_R = 9;                                   // a socket's radius (studio.css .asock)
+ * cell's upright right wall, 15% of its height apart, each icon beside its
+ * own. A socket exists only while the agent is opened: a recess machined
+ * into the wall, open at the wall and rounded at its far end — a dark
+ * cavity, the lip's shadow along its top,
+ * no outline. A part's connector sits in it: a straight barrel most of the
+ * way in, the cavity showing round it, chamfered out of the wall down to
+ * exactly the cable's width (drawAgentParts takes the cable on from the
+ * ferrule's end). Folded, the wall is whole: only the icons show. Clicking
+ * a socket's place opens or folds the agent. */
+const SOCK_AT = {model: 0.35, memory: 0.5, tool: 0.65};
+const RECESS = {h: 3.2, run: 2.2};                  // half the mouth (also the far end's radius); the straight run
+const NOSE = {h: 1.9, depth: 4.5, r: 0.8};          // half the barrel's height; how far in it goes; its tip's corners
+const CHAMFER = {at: 2.5, len: 3};                  // where the barrel's chamfer starts outside the wall; its length
+const FERRULE = CHAMFER.at + CHAMFER.len;           // the connector out of the wall, to where the cable takes over
+const CABLE_R = 1.2;                                // half the cable's width: the chamfer ends at exactly this
 function sockAt(A, part) {
-  const dy = part === "model" ? -0.15 : part === "tool" ? 0.15 : 0;
-  return {x: A.x + A.w, y: A.y + A.h * (0.5 + dy)};
+  return {x: A.x + A.w + FERRULE, y: A.y + A.h * SOCK_AT[part]};   // where the cable takes over
+}
+/* One socket, drawn with the wall at x = 0 (inside is negative): its
+ * recess — the cavity in the darkest tone, its floor a shade lighter and
+ * set a little lower, so the lip's shadow shows along the top — and the
+ * connector in it when a part is plugged in: a straight barrel, a straight
+ * chamfer down to the cable's width, one hairline of the role's colour. */
+const SOCK_BOX = {x0: -(RECESS.run + RECESS.h) - 1, w: RECESS.run + RECESS.h + 1 + FERRULE, h: 2 * RECESS.h + 2};
+function socketSvg(plugged) {
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("class", "asockg");
+  svg.setAttribute("viewBox", `${SOCK_BOX.x0} ${-SOCK_BOX.h / 2} ${SOCK_BOX.w} ${SOCK_BOX.h}`);
+  svg.setAttribute("aria-hidden", "true");
+  const {h, run} = RECESS;
+  const pocket = (top, bot, end) => `M0 ${top} L${-run} ${top} A${end} ${(bot - top) / 2} 0 0 0 ${-run} ${bot} L0 ${bot} Z`;
+  let g = `<path class="asg-cavity" d="${pocket(-h, h, h)}"/>`
+    + `<path class="asg-floor" d="${pocket(-h + 0.9, h, h - 0.6)}"/>`;
+  if (plugged) {
+    const {h: n, depth, r} = NOSE, tip = -depth, c = CABLE_R, a = CHAMFER.at;
+    g += `<path class="asg-conn" d="M${FERRULE} ${-c} L${a} ${-n} L${tip + r} ${-n} Q${tip} ${-n} ${tip} ${-n + r}`
+      + ` L${tip} ${n - r} Q${tip} ${n} ${tip + r} ${n} L${a} ${n} L${FERRULE} ${c} Z"/>`
+      + `<line class="asg-band" x1="1.1" y1="${-n + 0.35}" x2="1.1" y2="${n - 0.35}"/>`;
+  }
+  svg.innerHTML = g;
+  return svg;
 }
 function agentSockets(n, key) {
   const a = n.agent || {};
   const have = new Set((n.parts || []).map(p => p.part));
   const tools = (a.tools || []).length;
   const box = el("span", "asocks");
+  const open = state.expanded.has(key);
   const sock = (part, icon, tip) => {
     const s = el("span", `asock s-${part}` + (have.has(part) ? "" : " empty"));
-    if (typeof icon === "string") s.textContent = icon; else s.append(icon);
-    s.title = tip;
+    s.style.top = `${SOCK_AT[part] * 100}%`;
+    Object.assign(s.style, {right: `${-FERRULE}px`, width: `${SOCK_BOX.w}px`, height: `${SOCK_BOX.h}px`});
+    const mark = el("span", "amark");
+    mark.append(icon);
+    s.append(mark);
+    if (open) s.append(socketSvg(have.has(part)));
+    s.title = `${tip} — click to ${open ? "unplug" : "plug in"} its parts`;
     s.onclick = (ev) => { ev.stopPropagation(); toggleExpand(key); };
     box.append(s);
   };
-  sock("model", "✧", `model: ${(a.model || []).join(" → ") || "?"}`);
+  sock("model", brainIcon(), `model: ${(a.model || []).join(" → ") || "?"}`);
   sock("memory", dbIcon(), have.has("memory")
     ? "memory: a conversation kept per session_id"
     : "memory: none — each run starts fresh (sessions= gives it one)");
-  sock("tool", "⚒", `tools: ${tools ? (a.tools || []).map(t => t.name).join(", ") : "none — it only answers"}`);
+  sock("tool", lucideIcon("wrench"), `tools: ${tools ? (a.tools || []).map(t => t.name).join(", ") : "none — it only answers"}`);
   return box;
 }
 
-/* A database, the memory's icon: on its socket and on its card. */
-function dbIcon() {
+/* The agent's parts' icons, from Lucide (lucide.dev, ISC licence): the
+ * model a brain, memory a database, the tools a wrench — by each socket,
+ * and the model's and memory's on their cards. */
+const LUCIDE = {
+  brain: '<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>'
+    + '<path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>'
+    + '<path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/>'
+    + '<path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/>'
+    + '<path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/>'
+    + '<path d="M19.967 17.484A4 4 0 0 1 18 18"/>',
+  database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/>'
+    + '<path d="M3 12A9 3 0 0 0 21 12"/>',
+  wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 '
+    + '6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+};
+function lucideIcon(name) {
   const svg = document.createElementNS(SVGNS, "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
-  svg.setAttribute("class", "dbicon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", `dbicon lucide-ic lucide-${name}`);
   svg.setAttribute("aria-hidden", "true");
-  svg.innerHTML = '<ellipse cx="8" cy="3.6" rx="5.6" ry="2.2"/>'
-    + '<path d="M2.4 3.6v8.6c0 1.2 2.5 2.2 5.6 2.2s5.6-1 5.6-2.2V3.6M2.4 7.9c0 1.2 2.5 2.2 5.6 2.2s5.6-1 5.6-2.2"/>';
+  svg.innerHTML = LUCIDE[name];
   return svg;
 }
+const brainIcon = () => lucideIcon("brain");
+const dbIcon = () => lucideIcon("database");
 
-/* The wires from an opened agent's sockets to its parts. Thin, in the
- * socket's colour, each ending in a ring on the part's card: the model's
- * a nerve (one spike mid-way; impulses run to the LLM), memory's three
- * lanes of bandwidth (data blocks stream into the store), the tools' a
- * rack (a trunk into a bus beside the tools, a straight branch with a
- * joint to each; a call runs out to a tool and back). What moves sits in
+/* The cables from an opened agent's connectors to its parts: one slim
+ * Bézier each, a single stroke faintly of its role's colour, leaving the
+ * ferrule level and meeting the part level, where it flares a little onto
+ * the card's edge. Several tools' cables leave their connector as one
+ * trunk and break out a third of the way across, a curve to each tool. What moves sits in
  * `.apw-anim`, shown only while a run is live (liveCanvas). */
 let apwSeq = 0;
 function drawAgentParts(svg, parts) {
@@ -2349,88 +2431,48 @@ function drawAgentParts(svg, parts) {
     return e;
   };
   const f = (v) => v.toFixed(1);
-  const bez = (e, t) => {
-    const [x0, y0, c1x, c1y, c2x, c2y, x1, y1] = e, u = 1 - t;
-    return [u*u*u*x0 + 3*u*u*t*c1x + 3*u*t*t*c2x + t*t*t*x1, u*u*u*y0 + 3*u*u*t*c1y + 3*u*t*t*c2y + t*t*t*y1];
-  };
-  const angle = (e, t) => {
-    const p = bez(e, Math.max(0, t - 0.01)), q = bez(e, Math.min(1, t + 0.01));
-    return Math.atan2(q[1] - p[1], q[0] - p[0]);
-  };
-  const offset = (e, off) => {
-    const pts = [];
-    for (let i = 0; i <= 40; i++) {
-      const t = i / 40, q = bez(e, t), r = angle(e, t);
-      pts.push(`${f(q[0] - Math.sin(r) * off)} ${f(q[1] + Math.cos(r) * off)}`);
-    }
-    return "M" + pts.join(" L");
-  };
-  const ride = (g, shape, attrs, id, dur, begin, extra = {}) => {
-    const m = mk(shape, attrs, g);
+  const ride = (g, attrs, id, dur, begin, extra = {}) => {
+    const m = mk("circle", attrs, g);
     const an = mk("animateMotion", {dur, begin, repeatCount: "indefinite", ...extra}, m);
     mk("mpath", {href: `#${id}`}, an);
   };
-  // where a wire meets its part: the left edge's middle — a card's oval is
-  // widest there (a card taller than a line, a @graph tool with its ops
-  // badge, left the wire's ring in the air when this was capped at 32 px);
-  // an opened part's title strip
-  const anchor = (it) => ({x: it.x, y: it.inner ? it.y + 17 : it.y + it.h / 2});
+  // a cable from (x0, y0) to (x1, y1), level at both ends; `id` names its
+  // body for what rides it
+  // (`lead`: a straight run first — the trunk several tools' cables share)
+  const cable = (g, x0, y0, x1, y1, cls, id, lead = 0) => {
+    const xb = x0 + lead, k = Math.max(18, Math.min(80, (x1 - xb) * 0.5));
+    const d = `M${f(x0)} ${f(y0)}` + (lead ? ` L${f(xb)} ${f(y0)}` : "")
+      + ` C${f(xb + k)} ${f(y0)} ${f(x1 - k)} ${f(y1)} ${f(x1)} ${f(y1)}`;
+    mk("path", id ? {id, d, class: `apw-cable ${cls}`} : {d, class: `apw-cable ${cls}`}, g);
+  };
+  // where it meets a part: the cable flaring a little onto the card's edge
+  const TERM = 4;
+  const terminal = (g, x, y, cls) => mk("path", {class: `apw-term ${cls}`, transform: `translate(${f(x)} ${f(y)})`,
+    d: `M${-TERM} ${-CABLE_R} L-1.5 ${-CABLE_R - 0.5} L0 ${-CABLE_R - 0.5} L0 ${CABLE_R + 0.5} L-1.5 ${CABLE_R + 0.5} L${-TERM} ${CABLE_R} Z`}, g);
+  // where a cable meets its part: the left edge's middle (an opened part's
+  // title strip)
+  const anchor = (it) => ({x: it.x - 0.5, y: it.inner ? it.y + 17 : it.y + it.h / 2});
   for (const [A, mine] of byAgent) {
     const g = mk("g", {class: "apw", "data-agent": A.key}, svg);
     const anim = mk("g", {class: "apw-anim"});
     state.partWires.set(A.key, g);
-    // each wire leaves its socket's outer side
-    const sx = (part) => sockAt(A, part).x + SOCK_R, sy = (part) => sockAt(A, part).y;
-    for (const P of mine.filter(q => q.part !== "tool")) {
-      const to = anchor(P.item), y0 = sy(P.part), x1 = to.x - 6, x0 = sx(P.part);
-      const e = [x0, y0, x0 + 52, y0, x1 - 52, to.y, x1, to.y];
-      const d = `M${f(x0)} ${f(y0)} C${f(e[2])} ${f(e[3])} ${f(e[4])} ${f(e[5])} ${f(x1)} ${f(to.y)}`;
-      const id = `apw${++apwSeq}`;
-      const cls = `apw-${P.part}`;
-      if (P.part === "model") {
-        mk("path", {id, d, class: `apw-line ${cls}`}, g);
-        const [mx, my] = bez(e, 0.5), r = angle(e, 0.5) * 180 / Math.PI;
-        const spike = mk("g", {transform: `translate(${f(mx)} ${f(my)}) rotate(${f(r)})`}, g);
-        mk("rect", {x: -9, y: -7, width: 18, height: 12, class: "apw-gap"}, spike);
-        mk("path", {d: "M-9 0 H-4 L-2 -6 L1 5 L3 -2 L4.5 0 H9", class: `apw-spike ${cls}`}, spike);
-        for (const begin of ["0s", "0.8s"]) ride(anim, "circle", {r: 2.3, class: `apw-dot ${cls}`}, id, "1.6s", begin);
-      } else {
-        mk("path", {id, d, class: "apw-track"}, g);
-        for (const [o, k] of [[-2.6, " side"], [0, ""], [2.6, " side"]])
-          mk("path", {d: offset(e, o), class: `apw-lane ${cls}${k}`}, g);
-        for (const begin of ["0s", "0.55s", "1.1s", "1.65s"])
-          ride(anim, "rect", {x: -3.5, y: -1.6, width: 7, height: 3.2, rx: 1, class: `apw-dot ${cls}`},
-               id, "2.2s", begin, {rotate: "auto"});
-      }
-      mk("circle", {cx: f(x1), cy: f(to.y), r: 3.6, class: `apw-ring ${cls}`}, g);
-    }
-    // the tools' rack
+    // several tools: their cables leave as one trunk and break out a third
+    // of the way across, each curving to its own tool
     const tools = mine.filter(q => q.part === "tool");
-    if (tools.length) {
-      const y0 = sy("tool"), x0 = sx("tool");
-      const ys = tools.map(P => anchor(P.item).y);
-      const px = Math.min(...tools.map(P => P.item.x));
-      const bx = px - 34;
-      const cls = "apw-tool";
-      mk("path", {d: `M${f(x0)} ${f(y0)} H${f(bx)}`, class: `apw-line ${cls}`}, g);
-      mk("path", {d: `M${f(bx)} ${f(Math.min(y0, ...ys))} V${f(Math.max(y0, ...ys))}`, class: `apw-line ${cls}`}, g);
-      mk("circle", {cx: f(bx), cy: f(y0), r: 3, class: `apw-joint ${cls}`}, g);
-      tools.forEach((P, i) => {
-        const x1 = P.item.x - 6;
-        mk("path", {d: `M${f(bx)} ${f(ys[i])} H${f(x1)}`, class: `apw-line ${cls}`}, g);
-        mk("circle", {cx: f(bx), cy: f(ys[i]), r: 2.4, class: `apw-ring ${cls}`}, g);
-        mk("circle", {cx: f(x1), cy: f(ys[i]), r: 3.6, class: `apw-ring ${cls}`}, g);
-      });
-      // a call: out along the rack to a tool and its answer back, each tool in turn
-      tools.forEach((P, i) => {
-        const id = `apw${++apwSeq}`;
-        mk("path", {id, d: `M${f(x0)} ${f(y0)} H${f(bx)} V${f(ys[i])} H${f(P.item.x - 6)}`, class: "apw-track"}, anim);
-        const dur = 2.6 * tools.length;
-        const a0 = i / tools.length, a1 = (i + 0.4) / tools.length, a2 = (i + 0.5) / tools.length, a3 = (i + 0.9) / tools.length;
-        const times = [0, a0, a1, a2, a3, 1].map(v => v.toFixed(3)).join(";");
-        ride(anim, "circle", {r: 2.6, class: `apw-dot ${cls}`}, id, `${dur}s`, "0s",
+    const trunk = tools.length > 1
+      ? (Math.min(...tools.map(P => P.item.x)) - TERM - sockAt(A, "tool").x) * 0.35 : 0;
+    for (const P of mine) {
+      const cls = `apw-${P.part}`, id = `apw${++apwSeq}`;
+      const {x: x0, y: y0} = sockAt(A, P.part), to = anchor(P.item);
+      cable(g, x0, y0, to.x - TERM, to.y, cls, id, P.part === "tool" ? trunk : 0);
+      terminal(g, to.x, to.y, cls);
+      if (P.part === "tool") {
+        // a call: out to the tool and its answer back, each tool in turn
+        const i = tools.indexOf(P), m = tools.length;
+        const times = [0, i / m, (i + 0.4) / m, (i + 0.5) / m, (i + 0.9) / m, 1].map(v => v.toFixed(3)).join(";");
+        ride(anim, {r: 1.6, class: `apw-dot ${cls}`}, id, `${2.6 * m}s`, "0s",
              {keyPoints: "0;0;1;1;0;0", keyTimes: times, calcMode: "linear"});
-      });
+      } else ride(anim, {r: 1.6, class: `apw-dot ${cls}`}, id, "1.6s", "0s");
     }
     g.append(anim);
   }
@@ -2882,6 +2924,8 @@ function opCard(it) {
     }
     // an agent's memory wears the database it is
     if (n.part === "memory") card.querySelector(".iconband").replaceChildren(dbIcon());
+    // and its model the brain it is
+    if (n.part === "model") card.querySelector(".iconband").replaceChildren(brainIcon());
     // the kind line was card noise at fit-zoom; it lives in the
     // tooltip and the inspector — and on the card once it is clicked
     // (the .detail block shows on the selected card only)

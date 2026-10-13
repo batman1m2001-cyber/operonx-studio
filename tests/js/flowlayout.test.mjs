@@ -466,3 +466,17 @@ test("a chain after END hangs below it in order, each wired from the one before"
   assert.ok(out.wires.some(w => w.a === rec && w.b === note), "record → notify");
   assert.ok(!out.wires.some(w => w.a.node.name === "END" && w.b === note), "not END → notify");
 });
+
+test("cards of one row sit level: their middles meet, and the wires still land on them", () => {
+  const g = {nodes: [card("a"), card("hi", {op_type: "agent"}), card("lo", {op_type: "agent"}), card("c"), card("t")],
+             edges: [edge("a", "hi"), edge("a", "lo"), edge("a", "c"), edge("hi", "t"), edge("lo", "t"), edge("c", "t")],
+             entries: ["a"], exits: ["t"]};
+  const tall = {hi: 254, lo: 139, c: 64};
+  const sizeOf = (key, n) => ({w: n.op_type === "agent" ? Math.round(tall[n.name] * 0.866) : 220, h: tall[n.name] || 64});
+  const out = FL.layout(g, {expanded: new Set(), sizeOf});
+  assert.deepEqual(problems(out), []);
+  const at = Object.fromEntries(out.items.map(i => [i.node.name, i]));
+  const mids = ["hi", "lo", "c"].map(n => at[n].y + at[n].h / 2);
+  assert.ok(Math.max(...mids) - Math.min(...mids) < 0.5, `middles level: ${mids}`);
+  assert.ok(at.hi.y < at.lo.y && at.lo.y < at.c.y, "the shorter, the lower its top");
+});
