@@ -115,7 +115,7 @@ function executionsSection(n, execP) {
       active = row; row.classList.add("active");
       detail.textContent = "";
       if (ex.error) detail.append(el("div", "srcline bad", String(ex.error)));
-      valueZones(detail, ex.inputs, ex.outputs, scratchKeyOf);
+      valueZones(detail, ex.inputs, ex.outputs, scratchKeyOf, {focus: n.show_keys || []});
       if (ex.members) {
         detail.append(el("div", "plabel", "members"));
         for (const m of ex.members) {

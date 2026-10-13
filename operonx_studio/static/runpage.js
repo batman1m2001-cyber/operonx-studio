@@ -338,7 +338,8 @@ async function renderExecPanel(run, e, execs, target) {
     const outs = match.outputs && typeof match.outputs === "object" ? match.outputs : {};
     const priced = "cost_usd" in outs || "usage" in outs;
     valueZones(vbox, match.inputs, match.outputs, scratchKeyOf,
-               {outputsFirst: true, hide: priced ? ["usage", "cost_usd", "model_used"] : []});
+               {outputsFirst: true, hide: priced ? ["usage", "cost_usd", "model_used"] : [],
+                focus: (node && node.show_keys) || []});
     // the op again, with these inputs, in the current code
     const sm = state.runSummary;
     if (typeof PlayView !== "undefined" && sm && (sm.service || sm.job) && state._tlrun === run) {
