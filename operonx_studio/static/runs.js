@@ -440,16 +440,8 @@ const RunsView = (() => {
       const o = el("option", null, label); o.value = k; o.selected = k === v.status; status.append(o);
     }
     status.onchange = () => { v.status = status.value; save(); render(); };
-    const search = el("label", "searchfield runssearch");
-    search.append(Icons.svg("search"));
-    const input = el("input");
-    input.type = "text";
-    input.placeholder = "Search ids, keys — or key:value";
-    input.value = v.q;
-    input.setAttribute("aria-label", "Search runs");
-    let t = null;
-    input.oninput = () => { clearTimeout(t); t = setTimeout(() => { v.q = input.value; render(); }, 300); };
-    search.append(input);
+    const search = searchField({placeholder: "Search ids, keys — or key:value", label: "Search runs",
+      value: v.q, wait: 300, cls: "runssearch", onInput: (q) => { v.q = q; render(); }});
     const order = el("select");
     order.setAttribute("aria-label", "Sort");
     for (const [k, label] of ORDERS) { const o = el("option", null, label); o.value = k; o.selected = k === v.order; order.append(o); }

@@ -28,6 +28,57 @@ const el = (tag, cls, text) => {
   return n;
 };
 
+/* One search field for every list: a magnifier, the input, a clear
+ * button once there is text, and a key hint ("/") while it is empty.
+ * Returns the <label>; its input is `.input`. onInput(value) runs after
+ * `wait` ms of quiet, and at once on clear. */
+function searchField({placeholder, label, value = "", onInput, wait = 150, hint = "", cls = ""}) {
+  const box = el("label", "searchfield" + (cls ? " " + cls : ""));
+  box.append(Icons.svg("search"));
+  const input = el("input");
+  input.type = "text";
+  input.placeholder = placeholder || "";
+  input.value = value;
+  input.setAttribute("aria-label", label || placeholder || "Search");
+  input.spellcheck = false;
+  const key = hint ? el("kbd", "sfkey", hint) : null;
+  if (key) key.title = `Press ${hint} to search`;
+  const clear = el("button", "sfclear");
+  clear.type = "button";
+  clear.title = "Clear";
+  clear.setAttribute("aria-label", "Clear the search");
+  clear.append(Icons.svg("x"));
+  const sync = () => {
+    const has = !!input.value;
+    clear.hidden = !has;
+    if (key) key.hidden = has;
+  };
+  let t = 0;
+  input.addEventListener("input", () => {
+    sync();
+    clearTimeout(t);
+    t = setTimeout(() => onInput && onInput(input.value), wait);
+  });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && input.value) { ev.stopPropagation(); clear.click(); }
+  });
+  clear.onclick = (ev) => {
+    ev.preventDefault();
+    input.value = "";
+    sync();
+    clearTimeout(t);
+    if (onInput) onInput("");
+    input.focus();
+  };
+  box.append(input);
+  if (key) box.append(key);
+  box.append(clear);
+  box.input = input;
+  box.sync = sync;
+  sync();
+  return box;
+}
+
 const state = {
   ir: null,          // the whole /ir payload
   graph: null,       // current graph object
