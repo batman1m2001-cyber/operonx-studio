@@ -258,7 +258,7 @@ const OP_VISUALS = {
   "DenoiseClassifier": {icon: "≈", color: "var(--k-audio)"},
   // an agent's parts (extract.py `_agent_parts`): an MCP server's tool, its memory
   "MCPTool":           {icon: "⇄", color: "var(--k-io)"},
-  "Session":           {icon: "⛁", color: "var(--ap-mem)"},
+  "Session":           {icon: "⛁", color: "var(--k-session)"},
 };
 const OP_FAMILIES = [
   [/LLM|Chat|Completion/,                    {icon: "✧", color: "var(--k-llm)"}],

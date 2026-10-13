@@ -85,13 +85,24 @@
   /* the agent: a hive cell — its steel edge (dark → light sheen), body,
      glow, honeycomb, parts chips and accent */
   --ag-e1: #c9dcf3; --ag-e2: #4a6fa5; --ag-e3: #9fc0ea; --ag-e4: #2f5182;
-  --ag-b1: #ffffff; --ag-b2: #edf2f9; --ag-ink: #1d2633; --ag-sub: #5b6878;
-  --ag-acc: #4a6fa5; --ag-acc-soft: #e6eef8; --ag-glow: rgba(74, 125, 200, .32);
-  --ag-shade: rgba(30, 50, 80, .14); --ag-comb: rgba(74, 111, 165, .10);
-  --ag-chip: #f3f6fa; --ag-chip-edge: #d6dfea; --ag-shine: rgba(255, 255, 255, .75);
+  --ag-b1: #f1f3f5; --ag-b2: #e1e5e9; --ag-ink: #1d2633; --ag-sub: #5b6878;
+  --ag-acc: #4a6fa5; --ag-acc-soft: #e6eef8; --ag-glow: rgba(40, 50, 62, .12);
+  --ag-shade: rgba(20, 28, 38, .28); --ag-comb: rgba(74, 111, 165, .10);
+  --ag-chip: #f3f6fa; --ag-chip-edge: #d6dfea; --ag-shine: rgba(255, 255, 255, .6); --ag-grain: rgba(70, 80, 95, .03);
   --ag-frame: rgba(74, 111, 165, .05); --ag-bee-glow: rgba(255, 214, 102, .45);
-  /* the agent's sockets and wires: the model, its memory, its tools */
-  --ap-model: #7c4dcc; --ap-mem: #2f6fd0; --ap-tool: #0e8580; --ap-bg: #f8f9fb;
+  /* its machine: the rim's light, mid and dark, the plate's seams, the
+     sweep a live run sends along the rim, its sensor off and on */
+  --ag-n1: #b9c0c8; --ag-n2: #8b939d; --ag-n3: #5f6772; --ag-seam: rgba(70, 78, 90, .22);
+  --ag-sweep: rgba(255, 255, 255, .55); --ag-led: #a3abb5; --ag-led-on: #3d9a8f;
+  /* a socket's recess: its floor, and the shade of its lip; the
+     connectors' metal and edge; the cables' neutral */
+  --sk-floor: #8a929c; --sk-shade: #626a75;
+  --conn: #dde1e6; --conn-edge: #a3abb4; --cable: #7b838e;
+  /* each socket's icon and the hairline on its connector: the model, its
+     memory, its tools — three hues apart for every eye (dataviz
+     validate_palette: all checks pass) */
+  --ap-model: #7c3aed; --ap-mem: #c2410c; --ap-tool: #0d9488; --ap-bg: #f8f9fb;
+  --k-session: #2f6fd0;          /* a session store (an agent's memory) as an op */
   --k-io: #c8457f;
   --k-audio: #c8457f;
   --k-res: #0e8580;
@@ -4245,25 +4256,24 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .wires.dflinks path.dfconn.hot { stroke-width: 1.4 !important; stroke: var(--df) !important; opacity: 1 !important; }
 
 /* ── the agent op: a hive cell (canvas.js agentCard) ─────────────────
-   A regular hexagon, a point at the top (its input) and at the bottom (its
-   output), its sides upright: as wide as its first line (the bee and the
-   name) needs, and as tall as a regular hexagon that wide is — it grows
-   and shrinks whole, never stretched. A name past the cap is cut. Two
-   layers under the content, both cut to it: the hull (the steel edge, a
-   gradient with a sheen a live run sweeps) and the body inset 2.5px (glass
-   light, honeycomb, the body gradient). The card itself stays uncut so its
-   drop-shadow glow is not clipped. */
+   A machine: a regular hexagon, a point at the top (its input) and at the
+   bottom (its output), its sides upright — as wide as its first line (the
+   bee and the name) needs, as tall as a regular hexagon that wide is; it
+   grows and shrinks whole, never stretched. Brushed aluminium on a
+   graphite rim, no glow. Its right wall is carved with its three sockets
+   (canvas.js hexCut). Three layers under the content: the floor (dark,
+   seen only down in the sockets), the hull (the rim, carved) and the
+   plate inset 2px (carved 2px wider, so the rim lines each socket). */
 .node.agentcell {
   width: max-content; min-width: 120px; max-width: 220px; height: auto; min-height: 0;
   aspect-ratio: 0.8660254;                       /* √3 / 2: a regular hexagon, point up */
   display: flex; flex-direction: column; justify-content: center; align-items: center;
   background: transparent; border: none; border-radius: 0; box-shadow: none;
-  padding: 0 16px 0 14px;
-  filter: drop-shadow(0 0 8px var(--ag-glow)) drop-shadow(0 6px 10px var(--ag-shade));
+  padding: 0 30px 0 14px;                        /* the right: the sockets and their marks */
+  filter: drop-shadow(0 2px 3px var(--ag-shade));
 }
 .node.agentcell::before { display: none; }
-.node.agentcell:hover { transform: translateY(-2px); box-shadow: none;
-  filter: drop-shadow(0 0 13px var(--ag-glow)) drop-shadow(0 8px 12px var(--ag-shade)); }
+.node.agentcell:hover { transform: none; box-shadow: none; filter: drop-shadow(0 3px 5px var(--ag-shade)); }
 .node.agentcell .ahull, .node.agentcell .abody,
 .node.agentframe .ahull, .node.agentframe .abody {
   position: absolute; pointer-events: none;
@@ -4271,18 +4281,34 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
     100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, var(--cut) 100%,
     0 calc(100% - var(--cut)), 0 var(--cut));
 }
-/* the cell: a hexagon (the opened frame keeps its octagon) */
 .node.agentcell .ahull, .node.agentcell .abody {
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
 .node.agentcell .ahull, .node.agentframe .ahull { inset: 0;
-  background: linear-gradient(115deg, var(--ag-e4) 0%, var(--ag-e2) 22%, var(--ag-e3) 38%,
-    var(--ag-e1) 46%, var(--ag-e2) 62%, var(--ag-e4) 100%);
-  background-size: 260% 100%; background-position: 0 0; }
-.node.agentcell .abody, .node.agentframe .abody { inset: 2.5px;
+  /* the rim: machined graphite, lit from above (a live run sweeps a light along it) */
   background:
-    radial-gradient(120% 60% at 30% 0%, var(--ag-shine), transparent 55%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='48.5' viewBox='0 0 28 48.5'%3E%3Cpath d='M14 0l14 8.08v16.17L14 32.33 0 24.25V8.08z M14 32.33v16.17' fill='none' stroke='%237a96bd' stroke-opacity='.22' stroke-width='1'/%3E%3C/svg%3E"),
+    linear-gradient(115deg, transparent 40%, var(--ag-sweep) 48%, transparent 56%),
+    linear-gradient(180deg, var(--ag-n1), var(--ag-n2) 50%, var(--ag-n3));
+  background-size: 260% 100%, 100% 100%; background-position: 0 0, 0 0; }
+.node.agentcell .abody { inset: 2px;
+  /* the plate: brushed aluminium, a soft light along its top */
+  background:
+    linear-gradient(180deg, var(--ag-shine) 0%, transparent 30%),
+    repeating-linear-gradient(0deg, transparent 0 2px, var(--ag-grain) 2px 3px),
     linear-gradient(180deg, var(--ag-b1), var(--ag-b2)); }
+.node.agentframe .abody { inset: 2.5px; }
+/* its plating (canvas.js hexLines): a seam across each cap, rivets at its
+   left corners, vents below, a sensor above */
+.node.agentcell .ahex { position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; overflow: visible; }
+.node.agentcell .ahex-seam { fill: none; stroke: var(--ag-seam); stroke-width: 1;
+  vector-effect: non-scaling-stroke; }
+.node.agentcell .ahex-rivet { fill: var(--ag-n1); stroke: var(--ag-n3); stroke-width: .8;
+  vector-effect: non-scaling-stroke; }
+.node.agentcell .ahex-vent { fill: none; stroke: var(--ag-n2); stroke-width: 2;
+  stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.node.agentcell .ahex-led { fill: var(--ag-led); }
+.node.agentcell.live-active .ahex-led { fill: var(--ag-led-on); animation: agLed 1.1s ease-in-out infinite; }
+@keyframes agLed { 50% { opacity: .35; } }
 .node.agentcell > .ahead, .node.agentcell > .badges,
 .node.agentcell > .detail { position: relative; z-index: 1; }
 .node.agentcell .port { z-index: 2; }
@@ -4300,54 +4326,56 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   overflow: hidden; text-overflow: ellipsis; }
 .node.agentcell .asub { min-width: 0; font-size: 11px; color: var(--ag-sub); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
-.node.agentcell .aopen { flex: none; align-self: center; width: 18px; height: 18px; min-height: 0; padding: 0;
-  border: 1px solid var(--ag-chip-edge); border-radius: 6px; background: var(--ag-chip);
-  color: var(--ag-acc); font-size: 11px; cursor: pointer; }
-.node.agentcell .aopen:hover { border-color: var(--ag-acc); }
-/* its sockets: round, one icon each, down its right side (canvas.js sockAt) */
+/* its sockets (canvas.js agentSockets): each icon beside its socket's
+   place; opened, the socket is a slot in the wall (hexCut) and its part's
+   connector sits in it — a nose, a ferrule easing into the cable, one
+   hairline of the role's colour */
 .node.agentcell .asocks { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
-.node.agentcell .asock { position: absolute; width: 18px; height: 18px; box-sizing: border-box;
-  pointer-events: auto;
-  transform: translate(-50%, -50%); border-radius: 50%; border: 2px solid currentColor;
-  background: var(--ag-b1); display: grid; place-items: center; font-size: 11px; line-height: 1;
-  cursor: pointer; }
-.node.agentcell .asock.s-model { color: var(--ap-model); left: 100%; top: 35%; }
-.node.agentcell .asock.s-memory { color: var(--ap-mem); left: 100%; top: 50%; }
-.node.agentcell .asock.s-tool { color: var(--ap-tool); left: 100%; top: 65%; }
-.node.agentcell .asock.empty { opacity: .4; }
+.node.agentcell .asock { position: absolute;                 /* its box: canvas.js SOCK_BOX */
+  transform: translateY(-50%); pointer-events: auto; cursor: pointer; }
+.node.agentcell .asock.s-model { color: var(--ap-model); }
+.node.agentcell .asock.s-memory { color: var(--ap-mem); }
+.node.agentcell .asock.s-tool { color: var(--ap-tool); }
+.node.agentcell .amark { position: absolute; right: calc(100% + 4px); top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; width: 11px; height: 11px; pointer-events: none; }
+.node.agentcell .amark .dbicon { width: 11px; height: 11px; }
+.node.agentcell .asock.empty .amark { opacity: .45; }
+.node.agentcell .asockg { position: absolute; inset: 0; display: block; width: 100%; height: 100%;
+  overflow: visible; }
+.node.agentcell .asg-cavity { fill: var(--sk-shade); }
+.node.agentcell .asg-floor { fill: var(--sk-floor); }
+.node.agentcell .asg-conn { fill: var(--conn); stroke: var(--conn-edge); stroke-width: .3;
+  stroke-linejoin: round; }
+.node.agentcell .asg-band { stroke: currentColor; stroke-width: .8; }
 .node .dbicon { display: block; width: 12px; height: 12px; fill: none; stroke: currentColor;
   stroke-width: 1.5; }
+.node svg.lucide-ic { stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .node .iconband .dbicon { width: 17px; height: 17px; }
-/* its wires (studio.js drawAgentParts): thin, the socket's colour, a ring
-   on the part; what moves shows only while a run is live */
+/* its cables (canvas.js drawAgentParts): one slim stroke each, faintly of
+   its role's colour, flaring a little onto the part. What moves shows only
+   while a run is live */
 .wires .apw-model { color: var(--ap-model); }
 .wires .apw-memory { color: var(--ap-mem); }
 .wires .apw-tool { color: var(--ap-tool); }
-.wires .apw-line, .wires .apw-spike, .wires .apw-lane { fill: none; stroke: currentColor; stroke-linecap: round; }
-.wires .apw-line { stroke-width: 1.3; }
-.wires .apw-spike { stroke-width: 1.4; stroke-linejoin: round; }
-.wires .apw-lane { stroke-width: .9; }
-.wires .apw-lane.side { opacity: .55; }
-.wires .apw-gap { fill: var(--ap-bg); }
+.wires .apw .apw-cable { fill: none; stroke: color-mix(in srgb, currentColor 50%, var(--cable));
+  stroke-width: 2.4; stroke-linecap: butt; }
+.wires .apw .apw-term { fill: color-mix(in srgb, currentColor 50%, var(--cable)); }
 .wires .apw-track { fill: none; stroke: none; }
-.wires .apw-dot, .wires .apw-joint { fill: currentColor; }
-.wires .apw-ring { fill: var(--ap-bg); stroke: currentColor; stroke-width: 1.4; }
+.wires .apw-dot { fill: currentColor; }
 .wires .apw-anim { display: none; }
 .wires .apw.on .apw-anim { display: inline; }
 @media (prefers-reduced-motion: reduce) { .wires .apw.on .apw-anim { display: none; } }
-/* selected: the cell glows cyan, its shape kept */
+/* selected: the cell's outline picked out, its shape kept */
 .node.agentcell.selected { background: transparent; border: none; box-shadow: none;
-  filter: drop-shadow(0 0 2px var(--glow-live)) drop-shadow(0 0 16px var(--glow-live-wide)); }
-/* a live run: a light sweeps the edge and the glow breathes */
-.node.agentcell.live-active { box-shadow: none; animation: agBreathe 2.2s ease-in-out infinite; }
+  filter: drop-shadow(0 0 1.5px var(--glow-live)) drop-shadow(0 2px 3px var(--ag-shade)); }
+/* a live run: its sensor blinks and a light sweeps the rim */
+.node.agentcell.live-active { box-shadow: none; }
 .node.agentcell.live-active::after { display: none; }
 .node.agentcell.live-active .ahull, .node.agentframe.live-active .ahull {
   animation: agSweep 2.4s linear infinite; }
-@keyframes agSweep { from { background-position: 100% 0; } to { background-position: -160% 0; } }
-@keyframes agBreathe { 50% { filter: drop-shadow(0 0 16px var(--ag-glow))
-  drop-shadow(0 0 4px var(--ag-glow)) drop-shadow(0 6px 10px var(--ag-shade)); } }
+@keyframes agSweep { from { background-position: 100% 0, 0 0; } to { background-position: -160% 0, 0 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .node.agentcell.live-active, .node.agentcell.live-active .ahull,
+  .node.agentcell.live-active .ahex-led, .node.agentcell.live-active .ahull,
   .node.agentframe.live-active .ahull { animation: none; } }
 
 /* opened: the frame keeps the cell — a bigger cut, the bee in its title,

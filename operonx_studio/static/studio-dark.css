@@ -60,12 +60,18 @@
   --rt-guide: #262d37;
   /* the agent's hive cell, steel blue on night glass */
   --ag-e1: #a9c6ee; --ag-e2: #5b82bd; --ag-e3: #dbe8fa; --ag-e4: #2c4770;
-  --ag-b1: #172131; --ag-b2: #111926; --ag-ink: #e8eef6; --ag-sub: #9fb0c4;
-  --ag-acc: #8fb6ec; --ag-acc-soft: #1b2a40; --ag-glow: rgba(110, 165, 240, .5);
+  --ag-b1: #2d3238; --ag-b2: #23272c; --ag-ink: #e8eef6; --ag-sub: #9fb0c4;
+  --ag-acc: #8fb6ec; --ag-acc-soft: #1b2a40; --ag-glow: rgba(0, 0, 0, .3);
   --ag-shade: rgba(0, 0, 0, .5); --ag-comb: rgba(143, 182, 236, .08);
-  --ag-chip: #1b2533; --ag-chip-edge: #2c3a4d; --ag-shine: rgba(160, 200, 255, .10);
+  --ag-chip: #1b2533; --ag-chip-edge: #2c3a4d; --ag-shine: rgba(255, 255, 255, .05);
   --ag-frame: rgba(143, 182, 236, .04); --ag-bee-glow: rgba(255, 214, 102, .22);
-  --ap-model: #a98be6; --ap-mem: #6b9cf0; --ap-tool: #3fb8b0; --ap-bg: var(--bg);
+  --ag-n1: #6e7681; --ag-n2: #4f5660; --ag-n3: #33383f; --ag-seam: rgba(0, 0, 0, .35);
+  --ag-sweep: rgba(255, 255, 255, .22); --ag-led: #4a5058; --ag-led-on: #5fb3a8;
+  --ag-grain: rgba(255, 255, 255, .02);
+  --sk-floor: #1b1f25; --sk-shade: #111418;
+  --conn: #a8b0b9; --conn-edge: #6b737d; --cable: #8a929c;
+  --ap-model: #9061f9; --ap-mem: #d9682a; --ap-tool: #0f9e8f; --ap-bg: var(--bg);
+  --k-session: #6b9cf0;
   --k-io: #ee518a;
   --k-audio: #ee518a;
   --k-res: #0ba7b6;

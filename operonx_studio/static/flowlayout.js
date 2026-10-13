@@ -623,8 +623,15 @@
     const width = Math.max(...[].concat(...rows).map(x => cx.get(x) + x.wr), ...zones.map(Z => Z.r))
       + (inner ? 0 : C.MARGIN);
 
-    // ── y: rows as tall as their tallest card, channels between ──
-    const H = rows.map(row => Math.max(0, ...row.map(x => x.h || 0)));
+    // ── y: a row's cards centred on one line, channels between ──
+    // Cards and agent cells of different heights sit level: their middles
+    // meet. An agent's line runs through its card, not its parts column;
+    // an opened box keeps to the top of its row.
+    const face = (x) => x.kind === "agent" ? [x.cardY, x.card.h] : [0, x.h || 0];
+    const level = (x) => !x.dummy && x.kind !== "container";
+    const mid = rows.map(row => Math.max(0, ...row.filter(level).map(x => face(x)[0] + face(x)[1] / 2)));
+    const drop = (x) => level(x) ? mid[x.layer] - face(x)[0] - face(x)[1] / 2 : 0;
+    const H = rows.map(row => Math.max(0, ...row.map(x => drop(x) + (x.h || 0))));
     const through = new Array(nrows).fill(0);   // wires in the channel below row r
     for (const w of W) {
       const lo = Math.min(w.a.layer, w.b.layer), hi = Math.max(w.a.layer, w.b.layer);
@@ -644,7 +651,7 @@
     for (let r = 0; r < nrows; r++) top[r] += oy;
     const height = top[nrows - 1] + H[nrows - 1] + (inner ? 0 : C.MARGIN);
 
-    for (const L of all) { L.cx = cx.get(L); L.y = top[L.layer]; }
+    for (const L of all) { L.cx = cx.get(L); L.y = top[L.layer] + drop(L); }
     for (const row of rows) for (const x of row) if (x.dummy) x.cx = cx.get(x);
 
     return {N, S, E, W, rows, top, H, G, band, zones, prefix, w: width, h: inner ? top[nrows - 1] + H[nrows - 1] : height, inner};
