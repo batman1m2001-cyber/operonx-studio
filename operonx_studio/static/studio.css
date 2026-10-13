@@ -4815,4 +4815,3 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   max-width: 100%; color: var(--ag-ink); }
 /* on the wall: the rows start inside the cell's 14px left padding */
 .node.agentcell.dfcard .dfport .dfhole { position: absolute; left: -19.5px; margin: 0; }
-.node.agentcell.dfcard .dfport.out .dfname::before { content: "→ "; color: var(--ag-sub); }
