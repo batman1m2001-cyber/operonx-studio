@@ -526,6 +526,18 @@ function runStepRows(name) {
 
 const turnOf = (r) => (r.ctx || "").split(".").slice(0, 2).join(".");
 
+/* The steps of the ops inside a subgraph node, in this run (and turn):
+ * by name, and by the subgraph in the step's id where it has one. */
+function innerRunRows(n) {
+  const names = new Set();
+  const walk = (g) => { for (const m of (g && g.nodes) || []) { names.add(m.name); if (m.graph) walk(m.graph); } };
+  walk(n.graph);
+  const turn = state.runTurn;
+  return (state.runSteps || []).filter(r => names.has(r.op)
+    && (!r.id || String(r.id).startsWith("graph:") || String(r.id).includes(`.${n.name}.`))
+    && (!turn || (r.ctx || "") === turn || (r.ctx || "").startsWith(turn + ".")));
+}
+
 /* The panel beside the canvas: the selected op's execution, as the Tree
  * reads a step — its output, its input, what fed it. Several executions
  * (a turn each, a stream's items) are chips above it; the stepper's or
@@ -554,6 +566,26 @@ function renderRunStep(n, focus) {
   }
   const rows = runStepRows(n.name);
   if (!rows.length) {
+    // a subgraph with no record of its own whose ops ran: a run from
+    // before operonx 1.22.3, which records a subgraph's values — it ran,
+    // and its ops' steps are the way in
+    const inner = n.graph ? innerRunRows(n) : [];
+    if (inner.length) {
+      const list = el("div", "wfexecs wfinner");
+      inner.slice(0, 60).forEach((r) => {
+        const c = el("button", "pill" + (r.status === "error" ? " err" : ""), `${r.op} +${fmtMs(r.start_ms)}`);
+        c.type = "button";
+        c.title = `${r.ctx} · ${fmtMs(r.dur_ms)}`;
+        c.onclick = () => { state.runPinned = true; focusStep(r); };
+        list.append(c);
+      });
+      side.append(close, el("h3", "rt-step-title", n.name),
+        el("p", "note", `Ran — ${inner.length} step${inner.length === 1 ? "" : "s"} of its ops`
+          + `${state.runTurn ? " in this turn" : ""}. This run was recorded before operonx 1.22.3, so the `
+          + "subgraph's own inputs and outputs were not kept: a run made since has them. Open one of its steps:"),
+        list);
+      return;
+    }
     side.append(close, el("h3", "rt-step-title", n.name),
       el("p", "note", state.runTurn
         ? "Did not run in this turn. Pick “Whole run”, or another turn, to see where it did."
