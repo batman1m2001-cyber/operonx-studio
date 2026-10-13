@@ -4360,6 +4360,13 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .wires .apw .apw-cable { fill: none; stroke: color-mix(in srgb, currentColor 50%, var(--cable));
   stroke-width: 2.4; stroke-linecap: butt; }
 .wires .apw .apw-term { fill: color-mix(in srgb, currentColor 50%, var(--cable)); }
+/* a tool's cable: thinner, one of a fan */
+.wires .apw .apw-cable.apw-tool { stroke-width: 1.6; }
+/* a part in focus (hovered or selected): its cable up, its agent's others back */
+.wires .apw.focus .apw-cable:not(.hot), .wires .apw.focus .apw-term:not(.hot) { opacity: .3; }
+.wires .apw .apw-cable.hot { stroke: currentColor; }
+.wires .apw .apw-term.hot { fill: currentColor; }
+.wires .apw .apw-cable.apw-tool.hot { stroke-width: 2; }
 .wires .apw-track { fill: none; stroke: none; }
 .wires .apw-dot { fill: currentColor; }
 .wires .apw-anim { display: none; }

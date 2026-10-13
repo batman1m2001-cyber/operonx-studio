@@ -1859,6 +1859,7 @@ function refreshSelection() {
   state.dfHover = null;
   drawDataLayer();
   paintEdges();
+  partCablesFocus();
 }
 
 /* Which wires are lit: the selected op's. A picked route lights only its
@@ -2413,9 +2414,15 @@ const dbIcon = () => lucideIcon("database");
 /* The cables from an opened agent's connectors to its parts: one slim
  * Bézier each, a single stroke faintly of its role's colour, leaving the
  * ferrule level and meeting the part level, where it flares a little onto
- * the card's edge. Several tools' cables leave their connector as one
- * trunk and break out a third of the way across, a curve to each tool. What moves sits in
- * `.apw-anim`, shown only while a run is live (liveCanvas). */
+ * the card's edge. The tools' cables are thinner and fan out from their
+ * one connector through a short junction just outside the wall (nothing
+ * drawn there): each eases off into a lane of its own, the lanes in the
+ * order of the tools they lead to, so no two cross, then curves on to its
+ * tool. Hovering or selecting a part brings its cable up and steps its
+ * agent's others back (partCablesFocus). What moves sits in `.apw-anim`,
+ * shown only while a run is live (liveCanvas). */
+const FAN = {run: 16, gap: 4.5, spread: 36, clear: 7};   // the junction's length; lane gap; most the lanes span; room kept from the memory socket
+const TOOL_R = 0.8;                                      // half a tool cable's width
 let apwSeq = 0;
 function drawAgentParts(svg, parts) {
   state.partWires = new Map();
@@ -2436,19 +2443,16 @@ function drawAgentParts(svg, parts) {
     const an = mk("animateMotion", {dur, begin, repeatCount: "indefinite", ...extra}, m);
     mk("mpath", {href: `#${id}`}, an);
   };
-  // a cable from (x0, y0) to (x1, y1), level at both ends; `id` names its
-  // body for what rides it
-  // (`lead`: a straight run first — the trunk several tools' cables share)
-  const cable = (g, x0, y0, x1, y1, cls, id, lead = 0) => {
-    const xb = x0 + lead, k = Math.max(18, Math.min(80, (x1 - xb) * 0.5));
-    const d = `M${f(x0)} ${f(y0)}` + (lead ? ` L${f(xb)} ${f(y0)}` : "")
-      + ` C${f(xb + k)} ${f(y0)} ${f(x1 - k)} ${f(y1)} ${f(x1)} ${f(y1)}`;
-    mk("path", id ? {id, d, class: `apw-cable ${cls}`} : {d, class: `apw-cable ${cls}`}, g);
+  // a curve from (x0, y0) to (x1, y1), level at both ends
+  const curve = (x0, y0, x1, y1) => {
+    const k = Math.max(18, Math.min(90, (x1 - x0) * 0.5));
+    return ` C${f(x0 + k)} ${f(y0)} ${f(x1 - k)} ${f(y1)} ${f(x1)} ${f(y1)}`;
   };
   // where it meets a part: the cable flaring a little onto the card's edge
   const TERM = 4;
-  const terminal = (g, x, y, cls) => mk("path", {class: `apw-term ${cls}`, transform: `translate(${f(x)} ${f(y)})`,
-    d: `M${-TERM} ${-CABLE_R} L-1.5 ${-CABLE_R - 0.5} L0 ${-CABLE_R - 0.5} L0 ${CABLE_R + 0.5} L-1.5 ${CABLE_R + 0.5} L${-TERM} ${CABLE_R} Z`}, g);
+  const terminal = (g, x, y, r, cls, part) => mk("path", {class: `apw-term ${cls}`, "data-part": part,
+    transform: `translate(${f(x)} ${f(y)})`,
+    d: `M${-TERM} ${-r} L-1.5 ${-r - 0.5} L0 ${-r - 0.5} L0 ${r + 0.5} L-1.5 ${r + 0.5} L${-TERM} ${r} Z`}, g);
   // where a cable meets its part: the left edge's middle (an opened part's
   // title strip)
   const anchor = (it) => ({x: it.x - 0.5, y: it.inner ? it.y + 17 : it.y + it.h / 2});
@@ -2456,26 +2460,54 @@ function drawAgentParts(svg, parts) {
     const g = mk("g", {class: "apw", "data-agent": A.key}, svg);
     const anim = mk("g", {class: "apw-anim"});
     state.partWires.set(A.key, g);
-    // several tools: their cables leave as one trunk and break out a third
-    // of the way across, each curving to its own tool
-    const tools = mine.filter(q => q.part === "tool");
-    const trunk = tools.length > 1
-      ? (Math.min(...tools.map(P => P.item.x)) - TERM - sockAt(A, "tool").x) * 0.35 : 0;
-    for (const P of mine) {
-      const cls = `apw-${P.part}`, id = `apw${++apwSeq}`;
+    const draw = (P, d, r) => {
+      const cls = `apw-${P.part}`, id = `apw${++apwSeq}`, to = anchor(P.item);
+      mk("path", {id, d, class: `apw-cable ${cls}`, "data-part": P.item.key}, g);
+      terminal(g, to.x, to.y, r, cls, P.item.key);
+      return id;
+    };
+    for (const P of mine.filter(q => q.part !== "tool")) {
       const {x: x0, y: y0} = sockAt(A, P.part), to = anchor(P.item);
-      cable(g, x0, y0, to.x - TERM, to.y, cls, id, P.part === "tool" ? trunk : 0);
-      terminal(g, to.x, to.y, cls);
-      if (P.part === "tool") {
-        // a call: out to the tool and its answer back, each tool in turn
-        const i = tools.indexOf(P), m = tools.length;
-        const times = [0, i / m, (i + 0.4) / m, (i + 0.5) / m, (i + 0.9) / m, 1].map(v => v.toFixed(3)).join(";");
-        ride(anim, {r: 1.6, class: `apw-dot ${cls}`}, id, `${2.6 * m}s`, "0s",
-             {keyPoints: "0;0;1;1;0;0", keyTimes: times, calcMode: "linear"});
-      } else ride(anim, {r: 1.6, class: `apw-dot ${cls}`}, id, "1.6s", "0s");
+      const id = draw(P, `M${f(x0)} ${f(y0)}` + curve(x0, y0, to.x - TERM, to.y), CABLE_R);
+      ride(anim, {r: 1.6, class: `apw-dot apw-${P.part}`}, id, "1.6s", "0s");
     }
+    // the tools: a lane each out of the junction, in their order down the column
+    const tools = mine.filter(q => q.part === "tool").sort((p, q) => anchor(p.item).y - anchor(q.item).y);
+    const m = tools.length;
+    if (!m) { g.append(anim); continue; }
+    const {x: x0, y: y0} = sockAt(A, "tool"), xj = x0 + FAN.run;
+    const gap = m > 1 ? Math.min(FAN.gap, FAN.spread / (m - 1)) : 0;
+    let first = -(m - 1) / 2 * gap;
+    const up = sockAt(A, "tool").y - sockAt(A, "memory").y - FAN.clear;   // never fan up into memory's cable
+    if (-first > up) first = -up;
+    tools.forEach((P, i) => {
+      const to = anchor(P.item), yl = y0 + first + i * gap;
+      const d = `M${f(x0)} ${f(y0)} C${f(x0 + FAN.run * 0.55)} ${f(y0)} ${f(xj - FAN.run * 0.55)} ${f(yl)} ${f(xj)} ${f(yl)}`
+        + curve(xj, yl, to.x - TERM, to.y);
+      const id = draw(P, d, TOOL_R);
+      // a call: out to the tool and its answer back, each tool in turn
+      const times = [0, i / m, (i + 0.4) / m, (i + 0.5) / m, (i + 0.9) / m, 1].map(v => v.toFixed(3)).join(";");
+      ride(anim, {r: 1.4, class: "apw-dot apw-tool"}, id, `${2.6 * m}s`, "0s",
+           {keyPoints: "0;0;1;1;0;0", keyTimes: times, calcMode: "linear"});
+    });
     g.append(anim);
   }
+  partCablesFocus();
+}
+/* The part in focus (hovered, else selected): its cable comes up, and its
+ * agent's other cables step back. Nothing else on the canvas changes. */
+function partCablesFocus() {
+  const key = state.partHover || state.sel;
+  for (const g of (state.partWires || new Map()).values()) {
+    const mine = !!key && !!g.querySelector(`.apw-cable[data-part="${CSS.escape(key)}"]`);
+    g.classList.toggle("focus", mine);
+    for (const e of g.querySelectorAll("[data-part]")) e.classList.toggle("hot", mine && e.dataset.part === key);
+  }
+}
+function partHover(key, on) {
+  if (on) state.partHover = key;
+  else if (state.partHover === key) state.partHover = null;
+  partCablesFocus();
 }
 
 /* An agent's tool: what it is, and what the policy decides. */
@@ -2999,8 +3031,8 @@ function opCard(it) {
     if (!(n.routes && n.routes.length)) card.append(el("span", "port out"));
   }
   card.onclick = (ev) => { ev.stopPropagation(); select(it.key); };
-  card.onmouseenter = () => dfHoverEnter(it.key);
-  card.onmouseleave = () => dfHoverLeave(it.key);
+  card.onmouseenter = () => { dfHoverEnter(it.key); if (n.part) partHover(it.key, true); };
+  card.onmouseleave = () => { dfHoverLeave(it.key); if (n.part) partHover(it.key, false); };
   if (n.graph || n.parts) card.ondblclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
   return card;
 }
