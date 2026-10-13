@@ -1,6 +1,6 @@
 # One control per job: merging what the studio shows twice
 
-**Status:** 2026-10-13. P1 (M1, M2 with B1, M3) and P2 (M4, M5, M11, M12) done; P3 not started.
+**Status:** 2026-10-13. P1–P3 done (studio #70–#72). Backlog B2 open.
 
 ## Why
 
@@ -140,7 +140,7 @@ Each phase is one PR, verified on the callbot, meeting-prep and meeting-prep-brd
 
 1. **P1, cards:** M1, M2 (with B1), M3. *Done.* The biggest space gain, on the canvas the user looks at most.
 2. **P2, canvas toolbar and header:** M4, M5, M11, M12. *Done.* M12 turned out half-done already (the panel's × showed on a phone only); the × left on desktop was the docked assistant's, which switched to Inspect, so it goes in dock mode.
-3. **P3, run page:** M6, M7, M8, M9, M10. M6 touches the router (the `view=` values); old links keep working (`view=tree` → Tree).
+3. **P3, run page:** M6, M7, M8, M9, M10. *Done.* On a phone the switch says Chat and Data for Conversation and Data Flow; `D` flips the canvas views on a run's page too. M6 touches the router (the `view=` values); old links keep working (`view=tree` → Tree).
 
 ## Backlog
 

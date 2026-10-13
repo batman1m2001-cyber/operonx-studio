@@ -40,3 +40,14 @@ test("a YAML file being edited is an address", () => {
   assert.equal(a.full, "/p/abc123/yaml?file=src%2Fagents%2Fx%2Fprompts.yaml");
   assert.equal(Router.parse(at(a.full)).file, "src/agents/x/prompts.yaml");
 });
+
+test("every way to read a run is an address; the tree is the bare one", () => {
+  for (const v of ["conversation", "timeline", "workflow", "data"]) {
+    const a = Router.addressOf({tab: "traces", run: "r", mode: v});
+    assert.equal(a.full, `/p/abc123/runs/r?view=${v}`);
+    assert.equal(Router.parse(at(a.full)).mode, v);
+  }
+  assert.equal(Router.addressOf({tab: "traces", run: "r", mode: "tree"}).full, "/p/abc123/runs/r");
+  // an unknown view (an old or mistyped link) is the tree
+  assert.equal(Router.parse(at("/p/abc123/runs/r?view=nope")).mode, "tree");
+});
