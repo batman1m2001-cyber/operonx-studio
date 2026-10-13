@@ -1,6 +1,8 @@
 /* Every screen has an address (docs/STUDIO_EXPERIENCE_PLAN.md §2.3).
  *
- *   /p/<pid>/<screen>[/<run>][?view=tree|workflow][&step=<op id>][&op=<flow op>]
+ *   /p/<pid>/<screen>[/<run>][?view=conversation|timeline|workflow|data][&step=<op id>][&op=<flow op>]
+ *
+ * (no view is the Tree)
  *
  * `pushView()` (studio.js) already says what is on screen, in one place, for
  * the assistant; the URL follows it: a new screen or run is a history entry
@@ -18,6 +20,7 @@ const Router = (() => {
   // the first picture is drawn before the address is read: until then the
   // address is what was asked for, not what is on screen
   let started = false;
+  const VIEWS = new Set(["conversation", "tree", "timeline", "workflow", "data"]);
 
   function base() {
     const parts = location.pathname.split("/");
@@ -31,7 +34,7 @@ const Router = (() => {
     const q = new URLSearchParams();
     if (v.tab === "traces" && v.run) {
       path += `/${encodeURIComponent(v.run)}`;
-      if (v.mode === "workflow") q.set("view", "workflow");
+      if (VIEWS.has(v.mode) && v.mode !== "tree") q.set("view", v.mode);
       if (v.exec_id) q.set("step", v.exec_id);
     }
     if (v.tab === "flow" && v.node) q.set("op", v.node);
@@ -48,7 +51,7 @@ const Router = (() => {
     return {
       tab: screen ? (TAB_OF_SCREEN[screen] || screen) : null,
       run: parts[1] || q.get("run") || null,
-      mode: q.get("view") === "workflow" ? "workflow" : "tree",
+      mode: VIEWS.has(q.get("view")) ? q.get("view") : "tree",
       step: q.get("step") || null,
       op: q.get("op") || null,
       file: q.get("file") || null,

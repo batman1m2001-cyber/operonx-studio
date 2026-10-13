@@ -325,7 +325,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                      "order": _S, "limit": _N})},
     "open_run": {"fn": t_open_run,
                  "description": "Open one run: its verdict, its ops by time and cost, and its failures. Also "
-                                "opens it on the user's screen (mode tree|workflow; lens path|time|cost — failures are always marked).",
+                                "opens it on the user's screen (mode conversation|tree|timeline|workflow|data; lens path|time|cost — failures are always marked).",
                  "schema": _schema({"run": _S, "mode": _S, "lens": _S}, ["run"])},
     "op_values": {"fn": t_op_values,
                   "description": "The recorded inputs and outputs of one op's executions in one run.",

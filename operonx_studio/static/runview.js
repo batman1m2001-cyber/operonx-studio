@@ -64,19 +64,7 @@ const RunView = (() => {
     top.append(back, el("span", "tltitle", run), copyId(run, "Copy the run id"));
     const statusSlot = el("span", "runhead-status");
     top.append(statusSlot);
-    const modes = el("span", "tlmodes");
-    modes.setAttribute("role", "tablist");
-    for (const [key, label, title, fn] of [["tree", "Tree", "The run as a tree: what ran for what, in order", showRunTree],
-      ["workflow", "Workflow", "The flow with this run painted on it", showRunWorkflow]]) {
-      const b = el("button", mode === key ? "on" : "", label);
-      b.type = "button";
-      b.title = title;
-      b.setAttribute("role", "tab");
-      b.setAttribute("aria-selected", String(mode === key));
-      b.onclick = () => fn(run);
-      modes.append(b);
-    }
-    top.append(modes);
+    top.append(viewSwitch(run, mode));
     for (const x of extras || []) top.append(x);
     head.append(top);
 
@@ -133,7 +121,16 @@ const RunView = (() => {
     const dear = rolls.filter(r => r.cost_usd).sort((a, b) => b.cost_usd - a.cost_usd)[0];
     if (keyOps.length) {
       const hl = el("div", "highlights");
-      hl.append(el("span", "hl-k", "Key ops"));
+      // on the steps page the label is the filter: only the key ops' steps
+      if (mode === "workflow") hl.append(el("span", "hl-k", "Key ops"));
+      else {
+        const k = el("button", "hl-k hl-keytoggle", "Key ops");
+        k.type = "button";
+        k.title = "Show only the key ops' steps (again: every step)";
+        k.setAttribute("aria-pressed", "false");
+        k.onclick = () => RunTree.toggleKey();
+        hl.append(k);
+      }
       keyOps.forEach((r) => {
         const per = r.count ? r.total_ms / r.count : 0;
         const p = el("span", "pill hl-op");
@@ -157,6 +154,90 @@ const RunView = (() => {
       head.append(hl);
     }
     return head;
+  }
+
+  /* One switch for every way to read a run: the conversation (when it was
+   * one), the tree of steps, their timeline, and the flow painted with it,
+   * as Workflow or Data Flow. The tree page's three and the canvas's two
+   * were switches of their own, nested; "Tree" and "Workflow" each said
+   * twice. */
+  const VIEWS = [
+    ["conversation", "Conversation", "Chat", "What was said, in order: a line opens the step that produced it"],
+    ["tree", "Tree", "Tree", "What ran for what, in order"],
+    ["timeline", "Timeline", "Timeline", "Every step by when it started"],
+    ["workflow", "Workflow", "Workflow", "The flow with this run painted on it  ( D )"],
+    ["data", "Data Flow", "Data", "What each op read and fed in this run  ( D )"],
+  ];
+  const TREE_VIEWS = new Set(["conversation", "tree", "timeline"]);
+  let switchEl = null;
+  const conversations = new Map();
+
+  /* The run's conversation, once per run: its lines, or null when it was
+   * not one (both sides must speak; a batch job has neither). */
+  function conversation(run) {
+    if (!conversations.has(run)) {
+      conversations.set(run, api(`/api/p/${PID}/review/run/${encodeURIComponent(run)}`).then((got) => {
+        const turns = (got && got.turns) || [];
+        return turns.some(t => t.who === "user") && turns.some(t => t.who === "bot") ? turns : null;
+      }).catch(() => null));
+    }
+    return conversations.get(run);
+  }
+
+  /* the view on screen: the canvas's when the run is painted on it, else the tree page's */
+  function currentView(mode) {
+    if (mode === "workflow") return canvasView === "data" ? "data" : "workflow";
+    const t = RunTree.current();
+    return (t && t.mode) || "tree";
+  }
+
+  function openView(run, mode, view) {
+    if (TREE_VIEWS.has(view)) {
+      if (mode !== "workflow" && RunTree.current() && RunTree.current().run === run) { RunTree.setMode(view); return; }
+      store("runTreeMode", view);
+      showRunTree(run);
+      return;
+    }
+    if (mode === "workflow") { setCanvasView(view); return; }
+    if (canvasView !== view) { canvasView = view; store(`canvasView:${PID}`, view); showViewSeg(); }
+    showRunWorkflow(run);
+  }
+
+  function viewSwitch(run, mode) {
+    const box = el("span", "tlmodes runviews");
+    box.setAttribute("role", "tablist");
+    box.setAttribute("aria-label", "Read the run as");
+    for (const [key, label, short, title] of VIEWS) {
+      // a phone's narrower words (the canvas switch's way)
+      const b = el("button");
+      b.append(el("span", "vlong", label), el("span", "vshort", short));
+      b.setAttribute("aria-label", label);
+      b.type = "button";
+      b.title = title;
+      b.dataset.view = key;
+      b.setAttribute("role", "tab");
+      b.onclick = () => openView(run, mode, key);
+      // the conversation is offered once its lines say it was one
+      if (key === "conversation") b.hidden = true;
+      box.append(b);
+    }
+    switchEl = {box, mode, run};
+    conversation(run).then((turns) => {
+      if (!turns || !box.isConnected) return;
+      box.querySelector('[data-view="conversation"]').hidden = false;
+    });
+    syncViews();
+    return box;
+  }
+
+  function syncViews() {
+    // (the header is marked while it is being built, before it is on the page)
+    if (!switchEl) return;
+    const on = currentView(switchEl.mode);
+    for (const b of switchEl.box.querySelectorAll("button[data-view]")) {
+      b.classList.toggle("on", b.dataset.view === on);
+      b.setAttribute("aria-selected", String(b.dataset.view === on));
+    }
   }
 
   /* What failed, one line per op: its type, the op (a link to the
@@ -447,5 +528,5 @@ const RunView = (() => {
 
   state.lens = recall("lens", "path");
   if (!LENSES.some(([k]) => k === state.lens)) state.lens = "path";   // a retired lens (errors, values)
-  return {header, pill, copyId, lensBar, timeline, anomalies, rank, dots, compare, money, focusOp, focusExec, background, LENSES};
+  return {header, conversation, syncViews, pill, copyId, lensBar, timeline, anomalies, rank, dots, compare, money, focusOp, focusExec, background, LENSES};
 })();

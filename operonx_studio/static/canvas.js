@@ -37,6 +37,8 @@ function setCanvasView(v) {
   store(`canvasView:${PID}`, v);
   showViewSeg();
   render();
+  // on a run's page the header's switch says it, and the address keeps it
+  if (state.workflowOn) { RunView.syncViews(); pushView(); }
 }
 function showViewSeg() {
   for (const b of document.querySelectorAll(".viewseg button")) {

@@ -107,6 +107,8 @@ function switchTab(name, opts) {
  * view) — the canvas toolbar appears only then. */
 function syncChrome() {
   document.body.dataset.tab = state.tab;
+  // a run painted on the canvas: its header's switch says Workflow or Data Flow
+  document.body.classList.toggle("runwf", !!state.workflowOn);
   const stageOn = state.tab === "flow" || !!state.workflowOn;
   if (stageOn) document.body.dataset.stage = "";
   else delete document.body.dataset.stage;
@@ -425,7 +427,7 @@ showViewSeg();
       return;
     }
     if (ev.key === "/") { ev.preventDefault(); openFind(); return; }
-    if ((ev.key === "d" || ev.key === "D") && !ev.ctrlKey && !ev.metaKey && !ev.altKey && state.tab === "flow") {
+    if ((ev.key === "d" || ev.key === "D") && !ev.ctrlKey && !ev.metaKey && !ev.altKey && (state.tab === "flow" || state.workflowOn)) {
       setCanvasView(canvasView === "data" ? "workflow" : "data"); return;
     }
     if (ev.key === " ") { spaceHeld = true; stage.classList.add("panmode"); ev.preventDefault(); return; }
@@ -700,10 +702,14 @@ async function performUi(kind, args) {
     if (state.tab !== "traces") switchTab("traces", {quiet: true});
     // errors and values are no longer lenses: failures are always marked, values are in the step panel
     if (args.lens) { state.lens = ["time", "cost"].includes(args.lens) ? args.lens : "path"; store("lens", state.lens); }
-    await (args.mode === "workflow" ? showRunWorkflow(args.run) : showRunTree(args.run));
+    // the view: conversation, tree or timeline (the steps page), workflow or data (the canvas)
+    const onCanvas = args.mode === "workflow" || args.mode === "data";
+    if (onCanvas && canvasView !== args.mode) { canvasView = args.mode; store(`canvasView:${PID}`, args.mode); showViewSeg(); }
+    if (["conversation", "tree", "timeline"].includes(args.mode)) store("runTreeMode", args.mode);
+    await (onCanvas ? showRunWorkflow(args.run) : showRunTree(args.run));
     // an execution to select: an eval's blamed op, a deep link's `op`
     if (args.op) RunView.focusExec({op_id: args.op, op: args.op.split("#")[0].split(".").pop()},
-                                   args.mode === "workflow" ? "workflow" : "tree");
+                                   onCanvas ? "workflow" : "tree");
     if (!args.quiet) toast(`Assistant opened run ${args.run}`);
   } else if (kind === "open_monitor") {
     store(`monitor:${PID}`, {target: args.target || "", range: args.days >= 30 ? "30d" : args.days <= 1 ? "24h" : "7d"});

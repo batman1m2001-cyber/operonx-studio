@@ -273,15 +273,40 @@ liveBtn.onclick = () => {
 paintLiveBtn();
 
 /* a run to replay, from the run view's header */
+/* One split button: Replay at the last speed picked, and beside it the
+ * menu of speeds (picking one replays at it, and it is remembered). */
 function replayControl(runId) {
   const box = el("span", "replayctl");
-  const go = Icons.button("play", "Replay", "small", "Replay this run on the canvas, from its recorded timings");
-  go.onclick = () => liveCanvas.replay(runId, 1);
-  const fast = el("button", "small ghost", "4×");
-  fast.type = "button";
-  fast.title = "Replay four times faster";
-  fast.onclick = () => liveCanvas.replay(runId, 4);
-  box.append(go, fast);
+  let speed = [1, 2, 4].includes(recall("replaySpeed", 1)) ? recall("replaySpeed", 1) : 1;
+  const go = Icons.button("play", `Replay ${speed}×`, "small replaygo", "Replay this run on the canvas, from its recorded timings");
+  go.onclick = () => liveCanvas.replay(runId, speed);
+  const more = Icons.button("chevron", undefined, "small replaymore", "Replay speed");
+  more.setAttribute("aria-haspopup", "menu");
+  more.setAttribute("aria-expanded", "false");
+  const menu = el("div", "popover replaymenu");
+  menu.setAttribute("role", "menu");
+  menu.hidden = true;
+  const show = (open) => { menu.hidden = !open; more.setAttribute("aria-expanded", String(open)); };
+  for (const v of [1, 2, 4]) {
+    const b = el("button", v === speed ? "on" : null, v === 1 ? "1×  as it ran" : `${v}×  faster`);
+    b.type = "button";
+    b.setAttribute("role", "menuitemradio");
+    b.setAttribute("aria-checked", String(v === speed));
+    b.onclick = (ev) => {
+      ev.stopPropagation();
+      speed = v;
+      store("replaySpeed", v);
+      go.querySelector("span").textContent = `Replay ${v}×`;
+      for (const o of menu.children) { const me = o === b; o.classList.toggle("on", me); o.setAttribute("aria-checked", String(me)); }
+      show(false);
+      liveCanvas.replay(runId, v);
+    };
+    menu.append(b);
+  }
+  more.onclick = (ev) => { ev.stopPropagation(); show(menu.hidden); };
+  menu.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); show(false); more.focus(); } });
+  document.addEventListener("click", (ev) => { if (!menu.hidden && !ev.target.closest(".replaymenu")) show(false); });
+  box.append(go, more, menu);
   return box;
 }
 

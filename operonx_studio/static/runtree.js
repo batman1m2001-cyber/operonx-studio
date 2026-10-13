@@ -181,7 +181,28 @@ const RunTree = (() => {
     cur.rowsEl.append(frag);
   }
 
+  // a step with children that is open: Fold all has something to fold
+  const anyOpen = () => cur.rows.some(r => r.kids && r.depth >= 0 && !cur.folded.has(r._i));
+
+  function syncFoldBtn() {
+    const b = cur.foldBtn;
+    if (!b) return;
+    const open = anyOpen();
+    Icons.set(b, open ? "collapse" : "expand");
+    b.title = open ? "Fold every step" : "Open every step";
+    b.setAttribute("aria-label", b.title);
+    b.hidden = cur.mode === "conversation" || !cur.rows.some(r => r.kids && r.depth >= 0);
+  }
+
+  /* The header's KEY OPS label is the filter: on, the steps are only them. */
+  function toggleKey() {
+    if (!cur || !cur.keyOps.size) return;
+    cur.filter.key = !cur.filter.key;
+    syncToolbar(); relist();
+  }
+
   function relist() {
+    syncFoldBtn();
     cur.root.classList.toggle("rt-conv-on", cur.mode === "conversation");
     if (cur.mode === "conversation") return drawConversation();
     if (cur.convEl) { cur.convEl.remove(); cur.convEl = null; }
@@ -381,22 +402,21 @@ const RunTree = (() => {
 
   // ── the conversation: the run as what was said ──
 
-  /* Both sides present: a user line and a bot line (a batch job has
-   * neither; an op's lone text answer is not a conversation). */
-  const isConversation = (turns) => turns.some(t => t.who === "user") && turns.some(t => t.who === "bot");
-
+  /* The run's lines, when it was a conversation (RunView fetches them once;
+   * the header's switch offers Conversation when they come). */
   async function loadConversation(mine) {
-    let got;
-    try { got = await api(`/api/p/${PID}/review/run/${encodeURIComponent(cur.run)}`); } catch { return; }
-    if (cur !== mine || !isConversation(got.turns || [])) return;
-    cur.turns = got.turns;
-    const b = el("button", null, "Conversation");
-    b.type = "button"; b.dataset.mode = "conversation";
-    b.title = "What was said, in order — a line opens the step that produced it";
-    b.onclick = () => { cur.mode = "conversation"; store("runTreeMode", "conversation"); syncToolbar(); relist(); };
-    cur.modeBtns.unshift(b);
-    cur.modesEl.prepend(b);
+    const turns = await RunView.conversation(mine.run);
+    if (cur !== mine || !turns) return;
+    cur.turns = turns;
     if (cur.wantConversation) { cur.mode = "conversation"; syncToolbar(); relist(); }
+  }
+
+  /* The header's switch picked a way to read the steps. */
+  function setMode(m) {
+    if (!cur || (m === "conversation" && !cur.turns)) return;
+    cur.mode = m;
+    store("runTreeMode", m);
+    syncToolbar(); relist(); pushView();
   }
 
   // a conversation's times read in seconds past one
@@ -474,22 +494,13 @@ const RunTree = (() => {
     cur.searchField.title = cur.mode === "conversation" ? "Find a line by what was said" : "Find a step by its name, a value or an error";
     cur.searchField.sync();
     cur.errBtn.classList.toggle("on", cur.filter.errors);
-    cur.keyBtn.classList.toggle("on", cur.filter.key);
-    for (const b of cur.modeBtns) b.classList.toggle("on", b.dataset.mode === cur.mode);
+    const keyBtn = cur.root && cur.root.querySelector(".hl-keytoggle");
+    if (keyBtn) { keyBtn.classList.toggle("on", cur.filter.key); keyBtn.setAttribute("aria-pressed", String(cur.filter.key)); }
+    RunView.syncViews();
   }
 
   function toolbar() {
     const bar = el("div", "rt-tools");
-    const modes = el("span", "seg");
-    cur.modesEl = modes;
-    cur.modeBtns = [];
-    for (const [m, label, title] of [["tree", "Tree", "What ran for what, in order"], ["timeline", "Timeline", "Every step by when it started"]]) {
-      const b = el("button", null, label);
-      b.type = "button"; b.dataset.mode = m; b.title = title;
-      b.onclick = () => { cur.mode = m; store("runTreeMode", m); syncToolbar(); relist(); };
-      cur.modeBtns.push(b);
-      modes.append(b);
-    }
     const field = searchField({placeholder: "Find steps", label: "Find a step by its name, a value or an error", hint: "/",
       wait: 120, cls: "rt-search", onInput: (q) => { cur.filter.q = q; relist(); }});
     // (in the conversation, the search finds lines; the other filters are the steps')
@@ -498,25 +509,24 @@ const RunTree = (() => {
     cur.search = search;
     cur.searchField = field;
     const errs = cur.rows.filter(r => r.status === "error").length;
-    const errBtn = el("button", "chipbtn", `Errors${errs ? ` ${errs}` : ""}`);
+    // a clean run has no Errors filter at all, not a dead one
+    const errBtn = el("button", "chipbtn", `Errors ${errs}`);
     errBtn.type = "button";
-    errBtn.disabled = !errs;
-    errBtn.title = errs ? "Only the steps that failed (e: the next one)" : "Nothing failed";
+    errBtn.hidden = !errs;
+    errBtn.title = "Only the steps that failed (e: the next one)";
     errBtn.onclick = () => { cur.filter.errors = !cur.filter.errors; syncToolbar(); relist(); };
     cur.errBtn = errBtn;
-    const keyBtn = el("button", "chipbtn", "Key ops");
-    keyBtn.type = "button";
-    keyBtn.hidden = !cur.keyOps.size;
-    keyBtn.title = `Only this service's key ops: ${[...cur.keyOps].join(", ")}`;
-    keyBtn.onclick = () => { cur.filter.key = !cur.filter.key; syncToolbar(); relist(); };
-    cur.keyBtn = keyBtn;
-    const foldAll = Icons.button("collapse", undefined, "small ghost", "Fold every step");
-    foldAll.onclick = () => { for (const r of cur.rows) if (r.kids && r.depth >= 0) cur.folded.add(r._i); relist(); };
-    const openAll = Icons.button("expand", undefined, "small ghost", "Open every step");
-    openAll.onclick = () => { cur.folded.clear(); relist(); };
+    // fold all and open all: one button, saying what a click does now
+    const foldBtn = Icons.button("collapse", undefined, "small ghost rt-foldall", "Fold every step");
+    foldBtn.onclick = () => {
+      if (anyOpen()) { for (const r of cur.rows) if (r.kids && r.depth >= 0) cur.folded.add(r._i); }
+      else cur.folded.clear();
+      relist();
+    };
+    cur.foldBtn = foldBtn;
     const count = el("span", "rt-count");
     cur.count = count;
-    bar.append(modes, field, errBtn, keyBtn, el("span", "spacer"), count, foldAll, openAll);
+    bar.append(field, errBtn, el("span", "spacer"), count, foldBtn);
     return bar;
   }
 
@@ -619,5 +629,5 @@ const RunTree = (() => {
     if (cur) cur.root.classList.remove("rt-has-step");
   }
 
-  return {show, selectId, selectOp, nextError, backToSteps, current: () => cur};
+  return {show, setMode, toggleKey, selectId, selectOp, nextError, backToSteps, current: () => cur};
 })();

@@ -818,7 +818,23 @@ body:not([data-stage]) .canvasbar { display: none; }
   background: none; color: var(--text-3); }
 .livebtn:hover { background: var(--surface-3); color: var(--text); border: none; }
 .livebtn .icon { width: 14px; height: 14px; }
-.replayctl { display: inline-flex; align-items: center; gap: 2px; }
+.replayctl { position: relative; display: inline-flex; align-items: center; gap: 0; }
+.replayctl .replaygo { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.replayctl .replaymore { width: 26px; min-width: 26px; padding: 0; border: 1px solid var(--border);
+  border-left: none; border-top-left-radius: 0; border-bottom-left-radius: 0; background: var(--surface); }
+.replayctl .replaymore:hover { background: var(--surface-2); }
+.replaymenu { top: calc(100% + 6px); right: 0; min-width: 150px; padding: 5px; display: flex; flex-direction: column; gap: 1px; }
+.replaymenu button { justify-content: flex-start; min-height: 30px; padding: 0 10px; border: none; background: none;
+  font-weight: 400; white-space: pre; border-radius: var(--r-xs); }
+.replaymenu button:hover { background: var(--surface-2); }
+.replaymenu button.on { font-weight: 600; color: var(--accent-strong); }
+/* a run on the canvas: its header's switch holds Workflow and Data Flow */
+body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display: none; }
+/* the KEY OPS label is the steps' filter */
+.highlights .hl-keytoggle { min-height: 22px; padding: 0 4px; border: none; background: none; border-radius: 4px;
+  cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.highlights .hl-keytoggle:hover { color: var(--text); background: var(--surface-2); }
+.highlights .hl-keytoggle.on { color: var(--accent-strong); text-decoration: underline solid; text-decoration-thickness: 2px; }
 .replayctl .icon { width: 13px; height: 13px; }
 
 .findbox {
@@ -3976,8 +3992,13 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dfport { justify-content: flex-start; }
 .dfport.out { justify-content: flex-start; }
 
-.viewseg .vshort { display: none; }
+.viewseg .vshort, .runviews .vshort { display: none; }
+.runviews .vlong { margin: 0; padding: 0; background: none; border-radius: 0; }
 @media (max-width: 640px) {
+  .runviews .vlong { display: none; }
+  .runviews .vshort { display: inline; }
+  .runhead-top .runviews { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .runviews button { padding: 0 9px; flex: none; }
   .viewseg .vlong { display: none; }
   .viewseg .vshort { display: inline; }
   .viewseg button { padding: 4px 9px; }
