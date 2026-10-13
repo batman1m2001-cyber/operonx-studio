@@ -462,6 +462,13 @@ showViewSeg();
     if (state.dfTerm) { toggleTerm(state.dfTerm); return; }
     deselect();
   });
+  // the second press of a double-click fell off the card the first one
+  // moved (canvas.js doubleClickKey): it still opens that card
+  stage.addEventListener("dblclick", (ev) => {
+    if (ev.target.closest(".node")) return;
+    const key = doubleClickKey(null, ev);
+    if (opensInPlace(key)) toggleExpand(key);
+  });
 })();
 
 /* ── find a node by name ──────────────────────────────────────────── */
