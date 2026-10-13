@@ -1,7 +1,9 @@
 /* operonx studio — one run, read like a document (docs/STUDIO_EXPERIENCE_PLAN.md §3).
  *
- *   the header     was it OK, how long, what it cost; what it was asked
- *                  and what it answered (the run's input and output)
+ *   the header     was it OK, how long, what it cost
+ *   the run row    the first row of the steps: the run itself, whose panel
+ *                  is what it was asked and what it answered — open when
+ *                  the page opens (Langfuse's trace root)
  *   the turns      a conversation's exchanges, one chip each
  *   the steps      every execution, as the ctx tree or as a timeline, on
  *                  one time axis; search, errors only, key ops only
@@ -94,6 +96,9 @@ const RunTree = (() => {
       }
     } else if (r.kind === "stand-in") {
       text = "an item of a stream that records none of its own";
+    } else if (r.kind === "run") {
+      const out = runValue((cur.data.summary || {}).output);
+      text = out == null ? "the run's input and output" : typeof out === "object" ? IO.preview(out, 90) : IO.brief(out, 90);
     }
     r._preview = text;
     return text;
@@ -102,7 +107,8 @@ const RunTree = (() => {
   function iconOf(r) {
     const node = r.op && !r.child ? irNodeByName(r.op) : null;
     const sv = r.child ? AgentSteps.visual(r.op_type) : null;
-    const ico = el("span", "rt-ico", node ? kindIcon(node) : sv ? sv.icon : (r.kind === "container" ? "▣" : "≋"));
+    const ico = el("span", "rt-ico", node ? kindIcon(node) : sv ? sv.icon
+      : r.kind === "run" ? "◉" : r.kind === "container" ? "▣" : "≋");
     if (node || sv) ico.style.setProperty("--kind", node ? kindColor(node) : sv.color);
     if (sv) ico.title = sv.label;
     return ico;
@@ -223,7 +229,9 @@ const RunTree = (() => {
     paint();
     scrollTo(r);
     cur.root.classList.add("rt-has-step");
-    if (r.kind === "record" || r.step) {
+    if (r.kind === "run") {
+      runPanel();
+    } else if (r.kind === "record" || r.step) {
       // a subgraph with its own record opens like a step: its inputs and outputs
       renderExecPanel(cur.run, r, cur.execs, cur.stepEl);
     } else {
@@ -282,34 +290,48 @@ const RunTree = (() => {
     ev.preventDefault();
   }
 
-  // ── the header: the run's input and output ──
+  // ── the run itself: the first row, and its panel ──
 
-  function valueCard(label, text) {
-    const card = el("section", "rt-io");
-    card.append(el("div", "rt-io-h", label));
-    const body = el("div", "rt-io-b");
-    let value = text;
-    try { value = JSON.parse(text); } catch { /* a cut preview: shown as text */ }
-    body.append(traceValue(value));
-    card.append(body);
-    // a long value folds; one click opens it
-    requestAnimationFrame(() => {
-      if (body.scrollHeight > body.clientHeight + 4) {
-        const more = el("button", "linkbtn rt-io-more", "Show all");
-        more.type = "button";
-        more.onclick = () => { card.classList.toggle("open"); more.textContent = card.classList.contains("open") ? "Show less" : "Show all"; };
-        card.append(more);
-      }
-    });
-    return card;
+  // a run's input or output as kept with its summary: JSON, or text when
+  // the preview was cut at its limit
+  function runValue(text) {
+    if (text == null || text === "") return null;
+    try { return JSON.parse(text); } catch { return String(text); }
   }
 
-  function ioCards(s) {
-    if (!s || (!s.input && !s.output)) return null;
-    const box = el("div", "rt-iorow");
-    if (s.input) box.append(valueCard("Input", s.input));
-    if (s.output) box.append(valueCard("Output", s.output));
-    return box;
+  function runRow(data) {
+    const s = data.summary || {};
+    return {kind: "run", id: "run:" + (s.trace_id || ""), name: "The run", depth: 0, start_ms: 0,
+            dur_ms: data.total_ms || s.duration_ms || 0, status: s.status === "error" ? "error" : "ok"};
+  }
+
+  /* The run's panel: what it was asked and what it answered, read as a
+   * step's values are (io.js), Input first. */
+  function runPanel() {
+    const s = cur.data.summary || {};
+    const panel = cur.stepEl;
+    state.execSel = null;
+    state.execId = null;
+    panel.textContent = "";
+    panel.scrollTop = 0;
+    const head = el("div", "phead");
+    const title = el("div", "pheadrow");
+    const back = Icons.button("back", "Steps", "small ghost rt-back", "Back to the steps");
+    back.onclick = () => backToSteps();
+    const ico = el("span", "rt-ico", "◉");
+    title.append(back, ico, el("h3", null, "The run"));
+    head.append(title, el("div", "rt-run-sub", "What it was asked and what it answered — pick a step below for one execution."));
+    panel.append(head);
+    const inputs = runValue(s.input), output = runValue(s.output);
+    if (inputs == null && output == null) {
+      panel.append(el("div", "note", "This run recorded no input or output."));
+      return;
+    }
+    const asFields = (v) => (v == null ? null : typeof v === "object" && !Array.isArray(v) ? v : {value: v});
+    const sec = el("section");
+    valueZones(sec, asFields(inputs), asFields(output), {}, {});
+    panel.append(sec);
+    pushView();
   }
 
   // ── the turns: a conversation's exchanges ──
@@ -447,7 +469,9 @@ const RunTree = (() => {
 
   function syncToolbar() {
     cur.search.value = cur.filter.q;
-    cur.search.placeholder = cur.mode === "conversation" ? "Find a line  ( / )" : "Find a step, a value, an error  ( / )";
+    cur.search.placeholder = cur.mode === "conversation" ? "Find a line" : "Find steps";
+    cur.searchField.title = cur.mode === "conversation" ? "Find a line by what was said" : "Find a step by its name, a value or an error";
+    cur.searchField.sync();
     cur.errBtn.classList.toggle("on", cur.filter.errors);
     cur.keyBtn.classList.toggle("on", cur.filter.key);
     for (const b of cur.modeBtns) b.classList.toggle("on", b.dataset.mode === cur.mode);
@@ -465,14 +489,13 @@ const RunTree = (() => {
       cur.modeBtns.push(b);
       modes.append(b);
     }
-    const search = el("input", "rt-search");
-    search.type = "search";
-    search.placeholder = "Find a step, a value, an error  ( / )";
-    search.setAttribute("aria-label", "Find a step");
-    let t = 0;
-    search.oninput = () => { clearTimeout(t); t = setTimeout(() => { cur.filter.q = search.value; relist(); }, 120); };
+    const field = searchField({placeholder: "Find steps", label: "Find a step by its name, a value or an error", hint: "/",
+      wait: 120, cls: "rt-search", onInput: (q) => { cur.filter.q = q; relist(); }});
     // (in the conversation, the search finds lines; the other filters are the steps')
+    const search = field.input;
+    search.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !search.value) cur.listEl.focus(); });
     cur.search = search;
+    cur.searchField = field;
     const errs = cur.rows.filter(r => r.status === "error").length;
     const errBtn = el("button", "chipbtn", `Errors${errs ? ` ${errs}` : ""}`);
     errBtn.type = "button";
@@ -492,7 +515,7 @@ const RunTree = (() => {
     openAll.onclick = () => { cur.folded.clear(); relist(); };
     const count = el("span", "rt-count");
     cur.count = count;
-    bar.append(modes, search, errBtn, keyBtn, el("span", "spacer"), count, foldAll, openAll);
+    bar.append(modes, field, errBtn, keyBtn, el("span", "spacer"), count, foldAll, openAll);
     return bar;
   }
 
@@ -510,7 +533,8 @@ const RunTree = (() => {
     if (state.tracesView !== mine) return;
     state.runSummary = data.summary || null;
     followRun(run, mine, data, () => show(run));
-    const {rows, byId, feeds} = index(data);
+    // the run itself is the first row (its panel: its input and output)
+    const {rows, byId, feeds} = index({rows: [runRow(data), ...(data.rows || [])]});
     const parentIdx = rows.map(r => (r.parent && byId.has(r.parent) ? byId.get(r.parent)._i : null));
     const svc = (state.ir && (state.ir.services || []).find(s => s.name === (data.summary || {}).service)) || null;
     const prev = cur && cur.run === run ? cur : null;
@@ -529,8 +553,6 @@ const RunTree = (() => {
     const root = el("div", "rt" + (cur.rows.length <= 40 ? " rt-short" : ""));
     cur.root = root;
     root.append(runHeader(run, data, "tree"));
-    const io = ioCards(data.summary);
-    if (io) root.append(io);
     const turns = turnStrip();
     if (turns) root.append(turns);
 
@@ -584,6 +606,8 @@ const RunTree = (() => {
     relist();
     loadConversation(cur);
     if (prev && prev.sel && byId.has(prev.sel.id)) select(byId.get(prev.sel.id), {quiet: true});
+    // a desk opens on the run's own input and output; a phone on the steps
+    else if (!matchMedia("(max-width: 760px)").matches) select(rows[0], {quiet: true});
     state._tlrun = run;
     renderFlowInfo();
     pushView();

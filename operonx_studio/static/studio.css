@@ -500,15 +500,31 @@ select { width: auto; min-height: 30px; padding: 4px 28px 4px 10px; font-size: v
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .actions button { min-height: 36px; padding: 0 14px; }
 
+/* a search: a quiet well with a magnifier; it lifts to the surface with
+ * the accent ring while typing; a clear button once there is text, a key
+ * hint while it is empty (searchField in studio.js) */
 .searchfield {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
-  background: var(--surface); border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm); padding: 0 12px; color: var(--text-3);
-  transition: border-color var(--tr), box-shadow var(--tr);
+  display: flex; align-items: center; gap: 8px; margin-bottom: 12px; min-width: 0;
+  min-height: 34px; padding: 0 6px 0 11px; cursor: text;
+  background: var(--surface-2); border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm); color: var(--text-3);
+  transition: border-color var(--tr), box-shadow var(--tr), background var(--tr);
 }
-.searchfield:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
-.searchfield input[type=text] { border: none; box-shadow: none; padding: 8px 0; background: transparent; }
+.searchfield:hover { border-color: var(--border-strong); }
+.searchfield:focus-within { background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.searchfield > .icon { width: 15px; height: 15px; flex: none; }
+.searchfield input[type=text] { flex: 1; min-width: 0; min-height: 0; border: none; box-shadow: none; padding: 6px 0;
+  background: transparent; font-size: var(--fs-md); color: var(--text); }
+.searchfield input[type=text]::placeholder { color: var(--text-3); }
+.searchfield input[type=text]:hover { border: none; }
 .searchfield input[type=text]:focus { box-shadow: none; }
+.sfkey { flex: none; font: 600 11px/1 var(--mono); color: var(--text-3); padding: 3px 6px; border-radius: 5px;
+  border: 1px solid var(--border); background: var(--surface); }
+.sfkey[hidden], .sfclear[hidden] { display: none; }
+.sfclear { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  min-height: 0; padding: 0; border: none; border-radius: 6px; background: none; box-shadow: none; color: var(--text-3); }
+.sfclear:hover { background: var(--surface-3); color: var(--text); }
+.sfclear .icon { width: 13px; height: 13px; }
 
 /* the project list: one bordered list, rows divided — a list, not a
    pile of cards */
@@ -1744,8 +1760,10 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   overflow-wrap: anywhere; }
 .runspicker { display: none; }
 .runsbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-.runssearch { flex: 1 1 220px; margin: 0; min-height: 30px; }
-.runssearch input[type=text] { min-height: 30px; padding: 4px 0; font-size: var(--fs-md); }
+.runssearch { flex: 1 1 220px; margin: 0; }
+/* the filters beside it wear the same well, at the same height */
+.runsbar select { min-height: 34px; background-color: var(--surface-2); border-color: var(--border-soft); }
+.runsbar select:hover { border-color: var(--border-strong); }
 .runsbar .followpin { margin-left: 4px; }
 .runstrip { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; min-width: 0; }
 .striplabel { font-size: var(--fs-sm); color: var(--text-3); white-space: nowrap; }
@@ -3804,7 +3822,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .iohidden.open > .iohidbtn > .iohidnames { visibility: hidden; }
 /* a narrow panel (a phone, a slim side panel): a long value goes under
  * its name; names wrap after an underscore, never mid-word */
-.iopanel, .rt-io-b { container-type: inline-size; }
+.iopanel { container-type: inline-size; }
 @container (max-width: 420px) {
   .iofields { --namecol: minmax(84px, 44%); }
   .iofname, .iohidlabel { font-size: 11.5px; }
@@ -4346,13 +4364,10 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
    one time axis for every bar; the duration is a column of its own, so
    it is never cut. */
 .rt { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
-.rt-iorow { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-.rt-io { background: var(--surface-2); border-radius: var(--r-md); padding: 10px 12px; position: relative; min-width: 0; }
-.rt-io-h { font-size: var(--fs-sm); font-weight: 650; color: var(--text); margin-bottom: 4px; }
-.rt-io-b > .iofields { margin: 0 -12px; }
-.rt-io-b { max-height: 168px; overflow: hidden; font-size: var(--fs-md); }
-.rt-io.open .rt-io-b { max-height: none; }
-.rt-io-more { margin-top: 6px; font-size: var(--fs-sm); }
+/* the run itself, the first of the steps: its panel is its input and output */
+.rt-row.rt-run .rt-n { font-weight: 650; }
+.rt-row.rt-run { border-bottom: 1px solid var(--border-soft); }
+.rt-run-sub { font-size: var(--fs-sm); color: var(--text-3); margin-top: 2px; }
 .rt-turns { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
 .rt-turn { flex: 0 0 auto; max-width: 300px; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; text-align: left;
   background: var(--surface-2); border: 1px solid transparent; border-radius: var(--r-md); padding: 8px 10px; cursor: pointer; }
@@ -4371,7 +4386,8 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .rt-tools .seg { display: inline-flex; background: var(--surface-3); border-radius: var(--r-sm); padding: 2px; }
 .rt-tools .seg button { border: none; background: none; min-height: 26px; padding: 0 10px; border-radius: var(--r-xs); font-size: var(--fs-sm); color: var(--text-2); }
 .rt-tools .seg button.on { background: var(--surface); color: var(--text); box-shadow: var(--sh-1); font-weight: 550; }
-.rt-search { flex: 1 1 180px; min-width: 140px; max-width: 340px; min-height: 30px; }
+.rt-search { flex: 1 1 120px; min-width: 110px; max-width: 320px; margin: 0; min-height: 30px; }
+.rt-tools .rt-count { white-space: nowrap; }
 .rt-tools .chipbtn { min-height: 28px; padding: 0 10px; border-radius: 999px; border: none; background: var(--surface-2); font-size: var(--fs-sm); }
 .rt-tools .chipbtn:hover { background: var(--surface-3); }
 .rt-tools .chipbtn.on { background: var(--accent-soft); color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -4437,7 +4453,7 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   .rt-back { display: inline-flex; }
   .rt-axis, .rt-row { grid-template-columns: minmax(0, 1fr) 62px 64px; }
   .rt-pv { display: none; }
-  .rt-iorow { grid-template-columns: 1fr; }
+  .rt-tools .rt-search { flex: 1 1 100%; max-width: none; order: 9; }
 }
 
 /* the runs list: what each run was asked and answered */
