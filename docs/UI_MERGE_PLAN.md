@@ -161,3 +161,11 @@ Research:
   - The inspector keeps the full sentence for all three.
 - **Files:** `canvas.js` (`toolLine` and the agent tool card in `opCard`; `drawAgentParts` marks a denied tool's cable), `studio.css` (`.atpolicy`, a `.tool-denied` card), `inspector.js` (unchanged).
 - **Test data:** the scratch project gets an agent with `policy=ToolPolicy(rules={"x": "ask", "y": "deny"})`, so all three states render.
+
+**B2. A double-click on an agent cell sometimes does not open it.** *(seen 2026-10-13 while testing, not yet diagnosed)*
+- **What was seen:** in a scripted browser (Playwright `dblclick`), the scratch project's `three` agent stayed folded on a fresh page, while `one`, `a` and brd's `email` opened.
+- **Workaround:** clicking a socket's place opens it reliably.
+- **Likely cause, to confirm first:** the first click selects the card. In Workflow, selecting re-lays out the canvas round it (`select` → `renderKeeping`). So the card can be replaced or moved before the second click, and the `dblclick` never reaches the node that has the handler.
+- **To check:**
+  - Does it also happen by hand?
+  - Does it happen to every card with `ondblclick`: nested graphs and agents?
