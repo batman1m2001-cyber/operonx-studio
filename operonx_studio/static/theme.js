@@ -1,4 +1,4 @@
-/* operonx studio — light, dark, or as the system says.
+/* operonx studio — light or dark: the system's until the viewer picks.
  *
  * The choice is the viewer's (this browser: localStorage `ox:theme`), and
  * the page already wears it before its first paint: an inline script in
@@ -64,29 +64,24 @@ const Theme = (() => {
     return box;
   }
 
-  // the header's button: the choice in a small menu
+  // the header's button: one click flips light and dark. Until the first
+  // click the page follows the system; after it, the choice is kept.
+  // (Settings still offers System, Light and Dark.)
   function button() {
-    const wrap = document.createElement("span");
-    wrap.className = "themebtn-wrap";
     const b = document.createElement("button");
     b.type = "button";
     b.className = "iconbtn themebtn";
-    b.title = "Theme";
-    b.setAttribute("aria-label", "Theme");
-    b.setAttribute("aria-haspopup", "true");
     if (window.Icons) b.append(Icons.svg("theme"));
-    const menu = document.createElement("div");
-    menu.className = "popover thememenu";
-    menu.hidden = true;
-    const title = document.createElement("div");
-    title.className = "thememenu-title";
-    title.textContent = "Theme";
-    menu.append(title, picker());
-    b.onclick = (ev) => { ev.stopPropagation(); menu.hidden = !menu.hidden; };
-    document.addEventListener("pointerdown", (ev) => { if (!wrap.contains(ev.target)) menu.hidden = true; });
-    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") menu.hidden = true; });
-    wrap.append(b, menu);
-    return wrap;
+    const label = () => {
+      const next = resolve(read()) === "dark" ? "light" : "dark";
+      b.title = `Switch to ${next}`;
+      b.setAttribute("aria-label", b.title);
+    };
+    b.onclick = () => set(resolve(read()) === "dark" ? "light" : "dark");
+    listeners.add(label);
+    if (media) media.addEventListener("change", label);
+    label();
+    return b;
   }
 
   // a CSS colour token's value now (for drawings made in script)

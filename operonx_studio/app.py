@@ -30,8 +30,10 @@ import re
 import struct
 import subprocess
 import sys
+import threading
 import time
 import yaml
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -687,7 +689,7 @@ VIEWER_CANNOT = frozenset({"setup", "try"})
 
 
 def build_studio_app(recents: Optional[Recents] = None):
-    from fastapi import FastAPI
+    from fastapi import FastAPI, Query
     from fastapi.responses import JSONResponse
     from fastapi.staticfiles import StaticFiles
 
@@ -2201,11 +2203,26 @@ def build_studio_app(recents: Optional[Recents] = None):
             return None
         return project_runs(watcher.root)
 
-    def _record(pid: str, run: str):
-        """(rows, record) for one run, or a JSONResponse saying why not."""
+    # A finished run never changes, so its rows stay here: the tree, each
+    # step click and the other views of it read the store once, not per
+    # request. Keyed by the project's open stores (a configuration change
+    # opens new ones); a running run is never kept; least recent goes first.
+    run_cache: "OrderedDict[Tuple[str, int, str], Dict[str, Any]]" = OrderedDict()
+    run_cache_lock = threading.Lock()
+    RUN_CACHE_MAX = 24
+
+    def _cached(pid: str, run: str) -> Any:
+        """The cache entry {rows, rec, resolved, by_id} for one run, or a
+        JSONResponse saying why there is none."""
         pr = _runs(pid)
         if pr is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
+        key = (pid, id(pr), run)
+        with run_cache_lock:
+            hit = run_cache.get(key)
+            if hit is not None:
+                run_cache.move_to_end(key)
+                return hit
         store, rid = pr.split(run)
         if store is None:
             return JSONResponse({"error": "no Langfuse source configured"}, status_code=404)
@@ -2215,7 +2232,45 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=502)
         if rec is None:
             return JSONResponse({"error": "no such run"}, status_code=404)
-        return rec.nodes, rec
+        entry = {"rows": rec.nodes, "rec": rec, "resolved": None, "by_id": None}
+        if getattr(rec.summary, "status", None) != "running":
+            with run_cache_lock:
+                run_cache[key] = entry
+                while len(run_cache) > RUN_CACHE_MAX:
+                    run_cache.popitem(last=False)
+        return entry
+
+    def _forget_run(run: str) -> None:
+        with run_cache_lock:
+            for key in [k for k in run_cache if k[2] == run]:
+                run_cache.pop(key, None)
+
+    def _record(pid: str, run: str):
+        """(rows, record) for one run, or a JSONResponse saying why not."""
+        got = _cached(pid, run)
+        return got if isinstance(got, JSONResponse) else (got["rows"], got["rec"])
+
+    def _steps_by_id(entry: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """A run's rows with their inputs resolved, by step id — once per run."""
+        if entry["by_id"] is None:
+            from operonx.telemetry.runs.model import resolve_inputs
+
+            rows = resolve_inputs(list(entry["rows"]))
+            entry["by_id"] = {r.get("op_id"): r for r in rows if r.get("op_id")}
+        return entry["by_id"]
+
+    def _step_payload(run: str, id: str, rec: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "run": run, "id": id,
+            "op": rec.get("op_name") or rec.get("op_full_name"),
+            "op_full_name": rec.get("op_full_name"),
+            "op_type": rec.get("op_type"),
+            "status": rec.get("status"), "error": rec.get("error"),
+            "ctx": rec.get("ctx"), "attempt": rec.get("attempt", 1),
+            "start_time": rec.get("start_time"), "duration_ms": rec.get("duration_ms"),
+            "wall_start": rec.get("wall_start"),
+            "inputs": rec.get("inputs"), "outputs": rec.get("outputs"), "attrs": rec.get("attrs"),
+        }
 
     def _row(s, source: str = "local") -> Dict[str, Any]:
         """A run summary as the list rows the UI reads."""
@@ -2470,6 +2525,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         pr = _runs(pid)
         if pr is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
+        _forget_run(run)
         if not pr.store.delete_runs(RunFilter(trace_ids=[run])):
             return JSONResponse({"error": "no such run"}, status_code=404)
         return JSONResponse({"ok": True})
@@ -2573,26 +2629,39 @@ def build_studio_app(recents: Optional[Recents] = None):
         recorded inputs and outputs — the step panel's values. Before this
         the panel fetched every execution of the op and guessed which one
         by its duration."""
-        got = _record(pid, run)
+        got = _cached(pid, run)
         if isinstance(got, JSONResponse):
             return got
-        from operonx.telemetry.runs.model import resolve_inputs
-
-        rows = resolve_inputs(list(got[0]))
-        rec = next((r for r in rows if r.get("op_id") == id), None)
+        rec = _steps_by_id(got).get(id)
         if rec is None:
             return JSONResponse({"error": f"no step {id!r} in run {run!r}"}, status_code=404)
-        return JSONResponse({
-            "run": run, "id": id,
-            "op": rec.get("op_name") or rec.get("op_full_name"),
-            "op_full_name": rec.get("op_full_name"),
-            "op_type": rec.get("op_type"),
-            "status": rec.get("status"), "error": rec.get("error"),
-            "ctx": rec.get("ctx"), "attempt": rec.get("attempt", 1),
-            "start_time": rec.get("start_time"), "duration_ms": rec.get("duration_ms"),
-            "wall_start": rec.get("wall_start"),
-            "inputs": rec.get("inputs"), "outputs": rec.get("outputs"), "attrs": rec.get("attrs"),
-        })
+        return JSONResponse(_step_payload(run, id, rec))
+
+    @app.get("/api/p/{pid}/trace/{run}/steps")
+    def trace_steps(pid: str, run: str, ids: Optional[List[str]] = Query(None),
+                    max_bytes: int = 4_000_000) -> JSONResponse:
+        """Many steps' values in one answer, by id. Without ``ids``, every
+        step of the run in recorded order, until ``max_bytes`` of JSON —
+        the run page preloads them when it opens, so a click reads them
+        from the browser; ``complete`` says whether all fitted."""
+        got = _cached(pid, run)
+        if isinstance(got, JSONResponse):
+            return got
+        by_id = _steps_by_id(got)
+        wanted = list(dict.fromkeys(ids)) if ids else list(by_id)
+        steps: Dict[str, Any] = {}
+        size, complete = 0, True
+        for sid in wanted:
+            rec = by_id.get(sid)
+            if rec is None:
+                continue
+            one = _step_payload(run, sid, rec)
+            size += len(json.dumps(one, default=str))
+            if steps and size > max(0, max_bytes):
+                complete = False
+                break
+            steps[sid] = one
+        return JSONResponse({"run": run, "steps": steps, "complete": complete})
 
     # ── resources: prices ────────────────────────────────────────────────
 
