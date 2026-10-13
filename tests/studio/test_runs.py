@@ -582,6 +582,50 @@ def test_a_step_is_read_by_its_id_with_its_values(client, project):
     assert missing.status_code == 404 and "no step" in missing.json()["error"]
 
 
+def test_many_steps_come_in_one_answer_whole_or_by_id(client, project):
+    _seed(project)
+    pid = _open(client, project)
+    url = f"/api/p/{pid}/trace/call-new/steps"
+    every = client.get(url).json()
+    assert every["complete"] is True and list(every["steps"]) == ["g.a#call-new"]
+    assert every["steps"]["g.a#call-new"]["outputs"] == {"y": 1}
+    # the same payload as /step, so the page reads either the same way
+    one = client.get(f"/api/p/{pid}/trace/call-new/step", params={"id": "g.a#call-new"}).json()
+    assert every["steps"]["g.a#call-new"] == one
+    picked = client.get(url, params={"ids": ["g.a#nope", "g.a#call-new"]}).json()
+    assert list(picked["steps"]) == ["g.a#call-new"]
+    assert client.get(f"/api/p/{pid}/trace/nope/steps").status_code == 404
+
+
+def test_a_preload_stops_at_its_size_and_says_so(client, project):
+    runs = project / ".operonx" / "runs"
+    t = _trace("big", origin="service", service="call")
+    t.nodes.append(OpExecution(
+        op_id="g.b#big", op_name="b", op_full_name="g.b", ctx=("main",),
+        start_time=100.02, end_time=100.03, inputs={}, outputs={"text": "x" * 5000}, upstreams=[]))
+    FilesRunStore(root=runs, refresh_every=0).consume(t)
+    pid = _open(client, project)
+    got = client.get(f"/api/p/{pid}/trace/big/steps", params={"max_bytes": 1000}).json()
+    assert got["complete"] is False and list(got["steps"]) == ["g.a#big"]
+
+
+def test_a_finished_run_is_read_from_the_store_once(client, project, monkeypatch):
+    from operonx_studio.runs import project_runs
+
+    _seed(project)
+    pid = _open(client, project)
+    store = project_runs(project, sweep=False).store
+    calls = []
+    real = store.get_run
+    monkeypatch.setattr(store, "get_run", lambda rid: calls.append(rid) or real(rid))
+    for path in ("tree", "steps", "step?id=g.a%23call-new", "flow"):
+        assert client.get(f"/api/p/{pid}/trace/call-new/{path}").status_code == 200
+    assert calls == ["call-new"]
+    # deleting it forgets it
+    assert client.post(f"/api/p/{pid}/trace/call-new/delete").status_code == 200
+    assert client.get(f"/api/p/{pid}/trace/call-new/tree").status_code == 404
+
+
 def test_the_runs_list_carries_each_runs_input_and_output(client, project):
     runs = project / ".operonx" / "runs"
     t = _trace("asked", origin="service", service="call")

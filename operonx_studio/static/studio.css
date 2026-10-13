@@ -3347,14 +3347,8 @@ button.chip.kbpagechip.on { background: var(--accent-soft); color: var(--accent-
 .modal:has(.tplgrid) .browser { height: 170px; max-height: 24vh; }
 .tplcard.sel { box-shadow: 0 0 0 2px var(--accent); background: var(--accent-soft); }
 
-/* ── the theme: System, Light or Dark (theme.js) ──────────────────── */
-.themebtn-wrap { position: relative; display: inline-flex; }
+/* ── the theme: a light/dark button; System, Light or Dark in Settings (theme.js) ── */
 .themebtn .icon { width: 17px; height: 17px; }
-.thememenu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 80; min-width: 220px; padding: 10px;
-  background: var(--surface);  border-radius: var(--r-md); box-shadow: var(--sh-3); }
-.thememenu[hidden] { display: none; }
-.thememenu-title { margin: 0 0 8px 2px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
-  color: var(--text-3); }
 .themepick { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--surface-3); }
 .themepick button { min-height: 0; height: 28px; padding: 0 12px; border: none; border-radius: 999px; background: none;
   color: var(--text-2); font-size: var(--fs-sm); font-weight: 500; }
@@ -3549,7 +3543,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   /* who is signed in sits last, its menu opening leftwards; the theme is in
      Settings, so the crowded phone bar gives its button up */
   header.bar > .acct-wrap { order: 6; }
-  header.bar > .themebtn-wrap { display: none; }
+  header.bar > .themebtn { display: none; }
   .crumbs .sep:first-child { display: none; }
   body.onegraph .crumbs .sep:not(:first-child), body.onegraph #btn-project { display: none; }
   body.onegraph .crumbbtn.projname { max-width: 46vw; }
@@ -4633,7 +4627,7 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 
 /* ── Floating surfaces: a shadow in light, an edge in dark (--float-edge) ── */
 .projlist, .logincard, .callpill, .popover, .canvasbar, .livebar, .viztip, .ax-pop, .ax-signin, .ax-slash,
-.ax-askbar, .kbpage, .thememenu { border: 1px solid var(--float-edge); }
+.ax-askbar, .kbpage { border: 1px solid var(--float-edge); }
 
 /* ── Rows: one hairline between the rows of every list and table ── */
 .projrow, .rrow, .factrow, .setrow, .playev, .playrun, .revrow, .actrow, .datatable td,

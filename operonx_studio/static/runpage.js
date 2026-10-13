@@ -96,8 +96,46 @@ function originLine(s) {
 }
 
 async function loadRunTree(run) {
-  return api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/tree`);
+  const tree = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/tree`);
+  StepValues.preload(run, tree);
+  return tree;
 }
+
+/* Every step's values, kept in the page. A finished run's are fetched in
+ * one request as soon as its tree arrives (each request through a tunnel
+ * costs a second or more), so a click reads them here. What the preload
+ * did not bring (a run still going, or one past the size cap) comes on
+ * the click, with the steps after it in the same request. A recorded
+ * step never changes: nothing here goes stale. */
+const StepValues = (() => {
+  const cache = new Map();      // `${PID}|${run}|${id}` -> the step's values
+  const preloads = new Map();   // `${PID}|${run}` -> the preload's promise
+  const key = (run, id) => `${PID}|${run}|${id}`;
+  const url = (run) => `/api/p/${PID}/trace/${encodeURIComponent(run)}/steps`;
+  function put(run, steps) {
+    if (cache.size > 20000) cache.clear();      // a long session: start over
+    for (const [id, step] of Object.entries(steps || {})) cache.set(key(run, id), step);
+  }
+  function preload(run, tree) {
+    const k = `${PID}|${run}`;
+    if (preloads.has(k) || ((tree || {}).summary || {}).status === "running") return;
+    preloads.set(k, api(url(run)).then(d => { put(run, d.steps); return d; })
+      .catch(() => { preloads.delete(k); return null; }));
+  }
+  async function get(run, id, ahead) {
+    if (cache.has(key(run, id))) return cache.get(key(run, id));
+    const pending = preloads.get(`${PID}|${run}`);
+    if (pending) {
+      await pending;
+      if (cache.has(key(run, id))) return cache.get(key(run, id));
+    }
+    const ids = [id, ...(ahead || []).filter(x => x && x !== id && !cache.has(key(run, x)))].slice(0, 24);
+    const d = await api(`${url(run)}?${ids.map(x => "ids=" + encodeURIComponent(x)).join("&")}`);
+    put(run, d.steps);
+    return cache.get(key(run, id)) || null;
+  }
+  return {preload, get};
+})();
 
 // A run still going (a live run store lists it as running) is followed:
 // asked again every 2.5 s, drawn again only when it grew or ended — at the
@@ -308,7 +346,11 @@ async function renderExecPanel(run, e, execs, target) {
     let match = null;
     const stepId = e.step || e.id;
     if (stepId) {
-      try { match = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/step?id=${encodeURIComponent(stepId)}`); }
+      // the steps after this one ride along, for the next clicks
+      const at = execs.indexOf(e);
+      const ahead = at < 0 ? [] : [...execs.slice(at + 1, at + 17), ...execs.slice(Math.max(0, at - 4), at)]
+        .map(x => x.step || x.id);
+      try { match = await StepValues.get(run, stepId, ahead); }
       catch { match = null; }
     }
     if (!match) {
