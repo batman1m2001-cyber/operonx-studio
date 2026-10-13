@@ -305,6 +305,114 @@
     return n;
   }
 
+  /* ── what a field list leads with, folds and compares ──────────────── */
+
+  const isPlain = (v) => !!v && typeof v === "object" && !Array.isArray(v)
+    && !("$media" in v) && !("$media_ref" in v) && !("$unserializable" in v);
+
+  // nothing to read: "", null, {} and [] — false and 0 are values
+  function isEmpty(v) {
+    if (v === null || v === undefined || v === "") return true;
+    if (Array.isArray(v)) return v.length === 0;
+    return isPlain(v) && Object.keys(v).length === 0;
+  }
+
+  // a value that fits on its name's line
+  function isSimple(v) {
+    if (v === null || v === undefined || typeof v === "boolean" || typeof v === "number") return true;
+    if (typeof v === "string") return v.length <= 80 && !v.includes("\n") && jsonish(v) === undefined;
+    if (Array.isArray(v)) return v.length > 0 && v.every((x) => x === null || ["number", "boolean"].includes(typeof x)
+      || (typeof x === "string" && x.length < 40)) && JSON.stringify(v).length <= 80;
+    return false;
+  }
+
+  const sameValue = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
+
+  /* The fields an object changed between its input and its output: the
+   * changed ones (new, gone or different) and the rest, in the output's
+   * order with any dropped key last. `$type` is the object's name, not a
+   * field. */
+  function changes(before, after) {
+    const changed = [], unchanged = [];
+    const keys = [...new Set([...Object.keys(after || {}), ...Object.keys(before || {})])].filter((k) => k !== "$type");
+    for (const k of keys) (sameValue((before || {})[k], (after || {})[k]) ? unchanged : changed).push(k);
+    return { changed, unchanged };
+  }
+
+  /* An object whose every field repeats a sibling of the same name (an
+   * op's `result` beside the outputs it bundles): those names, else null. */
+  function repeats(obj, siblings, selfKey) {
+    if (!isPlain(obj) || !siblings) return null;
+    const ks = Object.keys(obj).filter((k) => k !== "$type");
+    if (ks.length < 2) return null;
+    for (const k of ks) {
+      if (k === selfKey || !(k in siblings) || !sameValue(obj[k], siblings[k])) return null;
+    }
+    return ks;
+  }
+
+  // a value in a few characters, for a one-line preview
+  function brief(v, max) {
+    max = max || 32;
+    if (v === undefined) return "—";
+    if (v === null) return "null";
+    if (typeof v === "string") {
+      if (v === "") return '""';
+      const one = v.replace(/\s+/g, " ").trim();
+      return one.length > max ? one.slice(0, max - 1) + "…" : one;
+    }
+    if (typeof v !== "object") return String(v);
+    if ("$media" in v || "$media_ref" in v) return `[${v.mime || "media"}]`;
+    if (Array.isArray(v)) return v.length ? `[${v.length}]` : "[]";
+    const n = Object.keys(v).filter((k) => k !== "$type").length;
+    return v.$type ? String(v.$type) : n ? `{${n}}` : "{}";
+  }
+
+  /* An object or list in one line: its type and count, then its first
+   * fields that say something (empty ones skipped). */
+  function preview(v, width) {
+    width = width || 140;
+    const parts = [];
+    if (Array.isArray(v)) {
+      parts.push(`${v.length} ${v.length === 1 ? "item" : "items"}`);
+      if (v.length && v.every(isMessage)) {
+        const last = v[v.length - 1];
+        const text = typeof last.content === "string" ? last.content : "";
+        parts[0] = `${v.length} ${v.length === 1 ? "message" : "messages"}`;
+        parts.push(`last ${last.role || "message"}: ${brief(text, 60)}`);
+      } else if (v.length) parts.push(brief(v[0], 48));
+      return parts.join(" · ");
+    }
+    const keys = Object.keys(v).filter((k) => k !== "$type");
+    parts.push(v.$type ? String(v.$type) : `${keys.length} ${keys.length === 1 ? "field" : "fields"}`);
+    let len = parts[0].length;
+    for (const k of keys) {
+      if (isEmpty(v[k])) continue;
+      const s = `${k} ${brief(v[k])}`;
+      if (len + s.length > width) { parts.push("…"); break; }
+      parts.push(s);
+      len += s.length + 3;
+    }
+    return parts.join(" · ");
+  }
+
+  /* An object passed through an op, said as its change: "3 changed ·
+   * current_state REMINDER → FINISH · …", or "unchanged". */
+  function changeSummary(before, after, width) {
+    width = width || 140;
+    const { changed } = changes(before, after);
+    if (!changed.length) return "unchanged";
+    const parts = [`${changed.length} changed`];
+    let len = parts[0].length;
+    for (const k of changed) {
+      const s = `${k} ${brief(before[k], 18)} → ${brief(after[k], 24)}`;
+      if (len + s.length > width) { parts.push("…"); break; }
+      parts.push(s);
+      len += s.length + 3;
+    }
+    return parts.join(" · ");
+  }
+
   /* ── DOM (browser only) ─────────────────────────────────────────────── */
 
   function h(tag, cls, text) {
@@ -458,8 +566,9 @@
 
   /* any value, formatted: scalars plain, strings as text, dicts as
    * labelled fields, arrays as numbered fields */
-  function valueView(v, depth) {
+  function valueView(v, depth, ctx) {
     depth = depth || 0;
+    ctx = ctx || { path: "" };
     if (v === null || v === undefined) return h("span", "ionull", "null");
     if (typeof v === "boolean" || typeof v === "number") return h("span", "ioscalar mono", String(v));
     if (typeof v === "string") return textView(v, { lines: depth ? 10 : 18 });
@@ -468,7 +577,7 @@
       if ("$media" in v || "$media_ref" in v) return mediaView(v);
     }
     if (Array.isArray(v) && v.length && v.every(isMessage)) return chatList(v.map((m) => ({ ...m })));
-    if (depth >= 3) return jsonView(v, 1);
+    if (depth >= 6) return jsonView(v, 1);
     const entries = Array.isArray(v) ? v.map((x, i) => [String(i), x]) : Object.entries(v);
     if (!entries.length) return h("span", "ioempty", Array.isArray(v) ? "empty list" : "empty object");
     if (Array.isArray(v) && v.every((x) => x === null || ["number", "boolean"].includes(typeof x)
@@ -483,7 +592,10 @@
     // a list of flat records with the same few fields: a table
     const cols = tableOf(v);
     if (cols) return tableView(v, cols);
-    return fields(entries.slice(0, 200), depth, entries.length > 200 ? entries.length - 200 : 0, null, Array.isArray(v));
+    // a record's name is its fold's preview; inside, it is noise
+    const shown = isPlain(v) && v.$type && depth > 0 ? entries.filter(([k]) => k !== "$type") : entries;
+    return fieldList(shown.slice(0, 200), { ...ctx, depth, more: shown.length > 200 ? shown.length - 200 : 0,
+      arr: Array.isArray(v) });
   }
 
   /* The columns of a list that reads best as a table — 2 to 200 records,
@@ -548,24 +660,209 @@
     keyEl.onmouseenter = () => { keyEl.title = `Copy the path ${pathOf(keyEl)}`; };
   }
 
-  function fields(entries, depth, more, badges, arr) {
+  /* What the reader opened or closed, by side and path, for the session:
+   * stepping to the op's next run keeps the same things open. */
+  const OPEN = new Map();
+  const openKey = (ctx, path) => `${ctx.side || "v"}${path}`;
+
+  // a nested value that folds behind a one-line preview
+  function foldable(v, depth) {
+    if (!v || typeof v !== "object" || isSimple(v) || isEmpty(v)) return false;
+    if (!Array.isArray(v) && !isPlain(v)) return false;
+    // a top-level conversation is read, not peeked at
+    if (Array.isArray(v) && v.every(isMessage)) return depth > 0;
+    return true;
+  }
+
+  // small enough to be open from the start: a few one-line fields
+  const small = (v) => isPlain(v) && Object.keys(v).filter((k) => k !== "$type").length <= 4
+    && Object.entries(v).every(([k, x]) => k === "$type" || isSimple(x));
+
+  /* A field that folds: its name and a preview on one line, its value
+   * drawn on first open. `body` makes the value; `open` is the default. */
+  function foldRow(row, name, summary, body, open, ctx, path, openSummary) {
+    row.classList.add("iofoldrow");
+    const key = openKey(ctx, path);
+    let isOpen = OPEN.has(key) ? OPEN.get(key) : !!open;
+    const head = h("div", "iofhead");
+    head.setAttribute("role", "button");
+    head.tabIndex = 0;
+    const sum = h("span", "iofsum", summary);
+    sum.title = summary;
+    head.append(name, sum);
+    const slot = h("div", "iofbody");
+    let drawn = false;
+    const paint = () => {
+      row.classList.toggle("open", isOpen);
+      head.setAttribute("aria-expanded", String(isOpen));
+      // open, the rows below say it: the line keeps only its count
+      sum.textContent = isOpen && openSummary ? openSummary : summary;
+      if (isOpen && !drawn) { slot.append(body()); drawn = true; }
+    };
+    const flip = (ev) => {
+      if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+      isOpen = !isOpen;
+      OPEN.set(key, isOpen);
+      paint();
+    };
+    head.onclick = flip;
+    head.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") flip(ev); };
+    row.append(head, slot);
+    paint();
+    return row;
+  }
+
+  // a field's name, free to wrap after its underscores and nowhere else
+  function keyName(k) {
+    const name = h("div", "iofname mono");
+    String(k).split(/(?<=_)/).forEach((part, i) => {
+      if (i) name.append(document.createElement("wbr"));
+      name.append(part);
+    });
+    return name;
+  }
+
+  function nameOf(k, ctx) {
+    const name = keyName(k);
+    if (ctx.focus && ctx.focus.includes(k)) {
+      name.classList.add("focus");
+      name.title = "One of the op's show keys — what its row in the steps shows";
+    }
+    if (ctx.badges && ctx.badges[k]) {
+      const b = h("span", "iobadge", ctx.badges[k][0]);
+      b.title = ctx.badges[k][1] || "";
+      name.append(b);
+    }
+    return name;
+  }
+
+  /* One field. A value that fits sits beside its name; an object folds
+   * behind a preview; an output object that was also an input reads as
+   * its change; one that repeats its siblings folds away. */
+  function fieldRow(k, x, ctx) {
+    const depth = ctx.depth || 0;
+    const path = `${ctx.path || ""}.${k}`;
+    const row = h("div", "iofield");
+    row.dataset.k = String(k);
+    row.style.setProperty("--d", String(depth));
+    if (ctx.arr) row.dataset.arr = "1";
+    const name = nameOf(k, ctx);
+    const inner = { ...ctx, depth: depth + 1, path, focus: null, badges: null, before: null, siblings: null, arr: false };
+    const was = ctx.before && ctx.before[k];
+    if (isPlain(x) && isPlain(was)) {
+      row.classList.add("iochange");
+      const { changed } = changes(was, x);
+      if (!changed.length) row.classList.add("same");
+      return foldRow(row, name, changeSummary(was, x), () => changeView(was, x, inner), false, ctx, path,
+        changed.length ? `${changed.length} changed` : "unchanged");
+    }
+    const rep = ctx.siblings && repeats(x, ctx.siblings, k);
+    if (rep) {
+      row.classList.add("repeat");
+      return foldRow(row, name, `same as ${rep.join(" · ")}`, () => valueView(x, depth + 1, inner), false, ctx, path);
+    }
+    if (foldable(x, depth)) {
+      return foldRow(row, name, preview(x), () => valueView(x, depth + 1, inner), small(x), ctx, path, preview(x).split(" · ")[0]);
+    }
+    // JSON sent as text (a prompt's variables, a payload) folds like the object it is
+    const parsed = typeof x === "string" ? jsonish(x) : undefined;
+    if (parsed && !isEmpty(parsed)) {
+      return foldRow(row, name, `${preview(parsed)} · as text`, () => valueView(x, depth + 1, inner), small(parsed), ctx, path);
+    }
+    copiesPath(name);
+    // beside its name; or, when it needs the room (a conversation, a
+    // table, a player), under it
+    const wide = (Array.isArray(x) && x.length && x.every(isMessage)) || tableOf(x)
+      || (x && typeof x === "object" && ("$media" in x || "$media_ref" in x));
+    row.classList.add(isSimple(x) || isEmpty(x) ? "inline" : wide ? "block" : "wide");
+    row.append(name, valueView(x, depth + 1, inner));
+    return row;
+  }
+
+  /* A list of fields: the op's show keys first, the ones with nothing to
+   * read gathered into one line at the end. */
+  function fieldList(entries, ctx) {
+    const depth = ctx.depth || 0;
     const box = h("div", "iofields" + (depth ? " nested" : ""));
-    for (const [k, x] of entries) {
-      const row = h("div", "iofield");
-      row.dataset.k = String(k);
-      if (arr) row.dataset.arr = "1";
-      const name = h("div", "iofname mono", k);
+    let list = entries;
+    if (ctx.focus && ctx.focus.length) {
+      const f = ctx.focus;
+      list = [...entries.filter(([k]) => f.includes(k)), ...entries.filter(([k]) => !f.includes(k))];
+    }
+    const blank = ctx.arr || list.length < 3 ? [] : list.filter(([k, x]) => isEmpty(x) && !(ctx.before && k in ctx.before));
+    const keep = blank.length >= 2 ? list.filter((e) => !blank.includes(e)) : list;
+    for (const [k, x] of keep) box.append(fieldRow(k, x, ctx));
+    if (blank.length >= 2) box.append(hiddenRows(`${blank.length} empty`, blank.map(([k]) => k).join(" · "),
+      () => blank.map(([k, x]) => fieldRow(k, x, ctx)), ctx, `${ctx.path || ""}#empty`));
+    if (ctx.more) box.append(h("div", "ioempty", `+ ${ctx.more} more`));
+    return box;
+  }
+
+  // rows kept behind one quiet line ("4 empty — a · b", "6 unchanged")
+  function hiddenRows(label, names, rows, ctx, path) {
+    const wrap = h("div", "iohidden");
+    wrap.style.setProperty("--d", String(ctx.depth || 0));
+    const btn = h("button", "iohidbtn");
+    btn.type = "button";
+    btn.append(h("span", "iohidlabel", label));
+    if (names) {
+      const n = h("span", "iohidnames", names);
+      n.title = names;
+      btn.append(n);
+    }
+    const slot = h("div", "iofields nested");
+    const key = openKey(ctx, path);
+    let open = !!OPEN.get(key), drawn = false;
+    const paint = () => {
+      wrap.classList.toggle("open", open);
+      btn.setAttribute("aria-expanded", String(open));
+      if (open && !drawn) { for (const r of rows()) slot.append(r); drawn = true; }
+    };
+    btn.onclick = () => { open = !open; OPEN.set(key, open); paint(); };
+    wrap.append(btn, slot);
+    paint();
+    return wrap;
+  }
+
+  /* An object's change: the changed fields first, each old → new, the
+   * rest behind "N unchanged". */
+  function changeView(before, after, ctx) {
+    const { changed, unchanged } = changes(before, after);
+    const box = h("div", "iofields nested");
+    for (const k of changed) {
+      const row = h("div", "iofield changed");
+      row.dataset.k = k;
+      row.style.setProperty("--d", String(ctx.depth || 0));
+      const name = keyName(k);
       copiesPath(name);
-      if (badges && badges[k]) {
-        const b = h("span", "iobadge", badges[k][0]);
-        b.title = badges[k][1] || "";
-        name.append(b);
+      const a = before[k], b = after[k];
+      if ((isSimple(a) || isEmpty(a)) && (isSimple(b) || isEmpty(b))) {
+        row.classList.add("inline");
+        const val = h("div", "iodelta");
+        val.append(h("span", "ioold mono", a === undefined ? "—" : a === "" ? '""' : typeof a === "string" ? a : JSON.stringify(a)),
+          h("span", "ioarrow", "→"),
+          b === undefined ? h("span", "ioempty", "removed") : valueView(b, (ctx.depth || 0) + 1, { ...ctx, path: `${ctx.path}.${k}` }));
+        row.append(name, val);
+      } else {
+        row.classList.add("wide");
+        const val = h("div");
+        val.append(h("div", "iowas", `was ${a === undefined ? "absent" : isPlain(a) || Array.isArray(a) ? preview(a, 80) : brief(a, 80)}`),
+          valueView(b, (ctx.depth || 0) + 1, { ...ctx, path: `${ctx.path}.${k}` }));
+        row.append(name, val);
       }
-      row.append(name, valueView(x, depth + 1));
       box.append(row);
     }
-    if (more) box.append(h("div", "ioempty", `+ ${more} more`));
+    if (unchanged.length) {
+      const rows = () => unchanged.map((k) => fieldRow(k, after[k], { ...ctx, depth: ctx.depth }));
+      if (!changed.length) for (const r of rows()) box.append(r);
+      else box.append(hiddenRows(`${unchanged.length} unchanged`, unchanged.join(" · "), rows, ctx, `${ctx.path}#same`));
+    }
     return box;
+  }
+
+  // the old call shape, kept for the chat folds
+  function fields(entries, depth, more, badges, arr) {
+    return fieldList(entries, { depth, more, badges, arr, path: "" });
   }
 
   const ROLE_LABEL = { system: "System", developer: "Developer", user: "User", assistant: "Assistant",
@@ -655,22 +952,48 @@
 
   /* ── the cards ──────────────────────────────────────────────────────── */
 
+  /* A card folds from its title, and stays folded as you step from one
+   * execution to the next (and across reloads, where storage allows). */
+  const FOLDED = new Map();
+  const foldedKey = (cls) => `ox:iofold:${cls}`;
+  function isFolded(cls) {
+    if (FOLDED.has(cls)) return FOLDED.get(cls);
+    try { return global.localStorage && global.localStorage.getItem(foldedKey(cls)) === "1"; } catch { return false; }
+  }
+  function setFolded(cls, on) {
+    FOLDED.set(cls, on);
+    try { global.localStorage && global.localStorage.setItem(foldedKey(cls), on ? "1" : "0"); } catch { /* private window */ }
+  }
+
   function card(label, cls, raw, body, meta) {
     const c = h("section", `iocard ${cls}`);
     const head = h("div", "iocardhead");
+    head.setAttribute("role", "button");
+    head.tabIndex = 0;
+    head.title = `Fold or open the ${label.toLowerCase()}`;
     head.append(h("span", "iocardlabel", label));
     if (meta) head.append(h("span", "iocardmeta", meta));
     head.append(copyBtn(() => raw, "Copy JSON"));
+    const paint = () => {
+      const on = isFolded(cls);
+      c.classList.toggle("folded", on);
+      head.setAttribute("aria-expanded", String(!on));
+    };
+    const flip = (ev) => { ev.preventDefault(); setFolded(cls, !isFolded(cls)); paint(); };
+    head.onclick = flip;
+    head.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") flip(ev); };
     c.append(head, body);
+    paint();
     return c;
   }
 
   function inputBody(inputs, mode, badges) {
     if (mode === "json") return jsonView(inputs, 2);
     const chat = chatOf(inputs);
+    const side = { side: "in", path: "", depth: 0, badges };
     if (!chat) {
       const entries = Object.entries(inputs || {});
-      return entries.length ? fields(entries, 0, 0, badges) : h("div", "ioempty", "none recorded");
+      return entries.length ? fieldList(entries, side) : h("div", "ioempty", "none recorded");
     }
     const box = h("div", "iobody");
     if (chat.source === "rendered") {
@@ -701,20 +1024,26 @@
       box.append(d);
     };
     const used = Object.entries(chat.used);
-    if (used.length) fold(`Variables · ${used.length}`, fields(used, 0, 0, badges));
+    if (used.length) fold(`Variables · ${used.length}`, fieldList(used, side));
     if (chat.template) fold("Prompt template", jsonView(chat.template, 2));
     const extra = Object.entries(chat.extra);
-    if (extra.length) fold(`Other inputs · ${extra.length}`, fields(extra, 0, 0, badges));
+    if (extra.length) fold(`Other inputs · ${extra.length}`, fieldList(extra, side));
     return box;
   }
 
-  function outputBody(outputs, mode) {
+  /* opts: {focus: the op's show keys, before: its inputs — an output
+   * object that was also an input reads as its change} */
+  function outputBody(outputs, mode, opts) {
     if (mode === "json") return jsonView(outputs, 2);
+    opts = opts || {};
     const r = replyOf(outputs);
+    const side = { side: "out", path: "", depth: 0 };
     if (!r) {
-      const entries = Object.entries(outputs || {}).filter(([k]) => k !== "_" || true);
-      if (entries.length === 1 && entries[0][0] === "_") return valueView(entries[0][1]);
-      return entries.length ? fields(entries, 0, 0) : h("div", "ioempty", "none recorded");
+      const entries = Object.entries(outputs || {});
+      if (entries.length === 1 && entries[0][0] === "_") return valueView(entries[0][1], 0, side);
+      const before = isPlain(opts.before) ? opts.before : null;
+      return entries.length ? fieldList(entries, { ...side, focus: opts.focus, before, siblings: outputs })
+        : h("div", "ioempty", "none recorded");
     }
     const box = h("div", "iobody");
     if (r.error) box.append(h("div", "ionote bad", String(r.error)));
@@ -727,10 +1056,15 @@
     box.append(chatList([{ role: "assistant", content: r.content, tool_calls: r.tool_calls }]));
     const facts = factsLine(r);
     if (facts) box.append(facts);
-    const rest = Object.entries(r.rest);
-    if (rest.length) {
+    // what only repeats the reply (`full_content`) waits behind one line
+    const said = (x) => typeof x === "string" && typeof r.content === "string" && x.trim() === r.content.trim();
+    const rest = Object.entries(r.rest).filter(([, x]) => !said(x));
+    const again = Object.entries(r.rest).filter(([, x]) => said(x));
+    if (rest.length || again.length) {
       box.append(h("div", "iosub", "Parsed"));
-      box.append(fields(rest, 0, 0));
+      if (rest.length) box.append(fieldList(rest, side));
+      if (again.length) box.append(hiddenRows("same as the reply", again.map(([k]) => k).join(" · "),
+        () => again.map(([k, x]) => fieldRow(k, x, side)), side, "#said"));
     }
     return box;
   }
@@ -741,7 +1075,7 @@
 
   /* The whole thing: a Formatted / JSON switch, then the input and
    * output cards. opts: {outputsFirst, badges: {key: [label, title]},
-   * hide: [output keys], mode, onMode} */
+   * hide: [output keys], focus: [the op's show keys], mode, onMode} */
   function panel(inputs, outputs, opts) {
     opts = opts || {};
     const outs = outputs && typeof outputs === "object" && !Array.isArray(outputs) ? { ...outputs } : outputs;
@@ -758,10 +1092,11 @@
       const isChat = !!chatOf(inputs);
       const inCard = card("Input", "ioin", inputs, inputBody(inputs || {}, mode, opts.badges),
         inputs ? `${Object.keys(inputs).length} fields · ${fmtSize(sizeOf(inputs))}` : null);
-      const outCard = card("Output", "ioout", outputs, outputBody((mode === "json" ? outputs : outs) || {}, mode),
+      const outCard = card("Output", "ioout", outputs, outputBody((mode === "json" ? outputs : outs) || {}, mode,
+        { focus: opts.focus, before: inputs }),
         outputs ? fmtSize(sizeOf(outputs)) : null);
-      // a conversation reads top-down, its reply last; elsewhere the
-      // answer comes first
+      // in time order, as Langfuse reads: what came in, then what came out
+      // (a caller can still ask for the answer first)
       if (opts.outputsFirst && !isChat) cards.append(outCard, inCard);
       else cards.append(inCard, outCard);
     };
@@ -789,7 +1124,8 @@
   }
 
   const api = { KNOBS, pyRepr, pyStr, pyFormat, chatOf, replyOf, toolCallOf, messageParts, jsonish, segments, contentParts,
-                lineCount, panel, valueView, jsonView, textView, tableOf };
+                lineCount, panel, valueView, jsonView, textView, tableOf,
+                isEmpty, isSimple, changes, repeats, brief, preview, changeSummary };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.IO = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -150,3 +150,47 @@ test("a list of flat records reads as a table; anything else does not", () => {
   assert.equal(require("../../operonx_studio/static/io.js").tableOf([{id: 1, tags: ["x"]}, {id: 2}]), null); // a nested value
   assert.equal(require("../../operonx_studio/static/io.js").tableOf([1, 2, 3]), null);
 });
+
+// ── what a field list leads with, folds and compares ──
+const { isEmpty, isSimple, changes, repeats, brief, preview, changeSummary } =
+  require("../../operonx_studio/static/io.js");
+
+test("empty is nothing to read; false and 0 are values", () => {
+  for (const v of ["", null, undefined, {}, []]) assert.equal(isEmpty(v), true);
+  for (const v of [false, 0, " ", { a: 1 }, [0], { $media: "x" }]) assert.equal(isEmpty(v), false);
+});
+
+test("a simple value fits on its name's line", () => {
+  assert.equal(isSimple("FINISH"), true);
+  assert.equal(isSimple(false), true);
+  assert.equal(isSimple([1, 2, "a"]), true);
+  assert.equal(isSimple("x".repeat(81)), false);
+  assert.equal(isSimple("a\nb"), false);
+  assert.equal(isSimple('{"a": 1}'), false);          // JSON as text folds
+  assert.equal(isSimple({ a: 1 }), false);
+});
+
+test("an object's change: changed first in output order, $type is not a field", () => {
+  const before = { $type: "AgentState", current_state: "REMINDER", should_hangup: false, last_intent: "", gone: 1 };
+  const after = { $type: "AgentState", current_state: "FINISH", should_hangup: true, last_intent: "" };
+  assert.deepEqual(changes(before, after), { changed: ["current_state", "should_hangup", "gone"], unchanged: ["last_intent"] });
+  assert.equal(changeSummary(before, after, 200),
+    "3 changed · current_state REMINDER → FINISH · should_hangup false → true · gone 1 → —");
+  assert.equal(changeSummary(after, after), "unchanged");
+});
+
+test("an object that only repeats its siblings is named as such", () => {
+  const outs = { response: "hi", intent: "confirm", result: { response: "hi", intent: "confirm" } };
+  assert.deepEqual(repeats(outs.result, outs, "result"), ["response", "intent"]);
+  assert.equal(repeats({ response: "hi", intent: "other" }, outs, "result"), null);
+  assert.equal(repeats({ response: "hi" }, outs, "result"), null);   // one field is not a bundle
+});
+
+test("a preview leads with the type and skips empty fields", () => {
+  assert.equal(preview({ $type: "AgentState", a: "", b: "FINISH", c: true }), "AgentState · b FINISH · c true");
+  assert.equal(preview({ x: 1, y: 2 }), "2 fields · x 1 · y 2");
+  assert.equal(preview([{ role: "user", content: "hello there" }]), "1 message · last user: hello there");
+  assert.equal(brief("a  b\nc"), "a b c");
+  assert.equal(brief(""), '""');
+  assert.equal(brief({ $type: "T", a: 1 }), "T");
+});
