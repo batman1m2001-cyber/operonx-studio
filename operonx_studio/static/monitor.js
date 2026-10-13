@@ -589,8 +589,11 @@
     box.append(charts);
     if ((scored.scores || []).length) box.append(scoresSection(scored.scores));
 
-    box.append(card("Where the time goes", opsTable(m.ops),
-      m.key_ops && m.key_ops.length ? el("span", "note", `key ops first: ${m.key_ops.join(", ")}`) : null));
+    const opsCard = card("Where the time goes", opsTable(m.ops),
+      m.key_ops && m.key_ops.length ? el("span", "note", `key ops first: ${m.key_ops.join(", ")}`) : null);
+    // read from Langfuse: the table holds only what this machine also stores
+    if (m.ops_note) opsCard.insertBefore(el("p", "note", m.ops_note), opsCard.children[1]);
+    box.append(opsCard);
     box.append(card("Cost", costBody(m)));
     box.append(card("What broke", errorsBody(m.errors)));
     if (m.truncated) box.append(el("p", "note", "Only the first 50,000 runs in the range are summarised."));

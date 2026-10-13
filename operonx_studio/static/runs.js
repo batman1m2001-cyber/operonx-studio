@@ -427,6 +427,7 @@ const RunsView = (() => {
     head.append(picker, htext, tools);
     main.append(head);
     if (first && first.store) main.append(storeLine(first.store));
+    if (first && first.source_error) main.append(el("div", "errbox loaderr", first.source_error));
 
     const bar = el("div", "runsbar");
     const range = el("select");

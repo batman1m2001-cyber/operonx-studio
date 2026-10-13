@@ -26,7 +26,10 @@ from operonx.telemetry.media import LocalMediaStore, detect_media
 from operonx_studio import runs as runs_mod
 from operonx_studio.app import build_studio_app
 from operonx_studio.registry import Recents
-from operonx_studio.runs import StoreUnreachable, project_runs
+from operonx.telemetry.runs import RunStore
+from operonx.telemetry.runs.model import Page, RunFilter, RunRecord, RunSummary
+
+from operonx_studio.runs import StoreUnreachable, WithLocal, project_runs
 
 pytestmark = pytest.mark.unit
 
@@ -94,13 +97,36 @@ def test_tracing_local_reads_the_runs_dir_and_says_why(tmp_path):
 
 
 @needs_api
-def test_tracing_local_and_langfuse_reads_local_with_langfuse_as_remote(tmp_path):
+def test_tracing_local_and_langfuse_reads_langfuse_with_local_beside_it(tmp_path):
+    """ClickHouse → Langfuse → local: with no ClickHouse, Langfuse is the
+    source; the local store stays beside it (a Playground session is only
+    ever recorded locally)."""
     root = _project(tmp_path, '[tracing]\nsinks = ["local", "trace_langfuse:edupia"]\n',
                     LANGFUSE, env="LF_PK=pk-1\nLF_SK=sk-1\n")
     pr = project_runs(root, sweep=False)
-    assert pr.spec["backend"] == "files"
-    assert pr.remote is not None and pr.remote.config["host"] == "https://lf.example"
-    assert pr.info["remote"] == "Langfuse at https://lf.example — from [tracing] → trace_langfuse:edupia"
+    assert pr.spec["backend"] == "langfuse" and pr.spec["host"] == "https://lf.example"
+    assert isinstance(pr.store, WithLocal) and pr.remote is None
+    assert pr.info["backend"] == "langfuse"
+    assert pr.info["label"] == "Langfuse at https://lf.example"
+    assert pr.info["local"] == f"files at {root / '.operonx' / 'runs'}"
+    assert "no ClickHouse store" in pr.info["why"]
+
+
+@needs_api
+def test_studio_langfuse_alone_is_the_source_too(tmp_path):
+    root = _project(tmp_path, '[studio.langfuse]\nhost = "https://lf.example"\n'
+                              'public_key = "pk"\nsecret_key = "sk"\n')
+    pr = project_runs(root, sweep=False)
+    assert pr.spec["backend"] == "langfuse" and isinstance(pr.store, WithLocal)
+
+
+@needs_api
+def test_studio_runs_still_wins_over_langfuse(tmp_path):
+    root = _project(tmp_path, '[tracing]\nsinks = ["local", "trace_langfuse:edupia"]\n\n'
+                              '[studio]\nruns = "run_store:db"\n',
+                    LANGFUSE + "run_store:\n  db:\n    backend: sqlite\n", env="LF_PK=pk\nLF_SK=sk\n")
+    pr = project_runs(root, sweep=False)
+    assert pr.spec["backend"] == "sqlite" and not isinstance(pr.store, WithLocal)
 
 
 @needs_api
@@ -522,3 +548,79 @@ def test_live_clickhouse_run_is_listed_opened_and_its_audio_served(client, tmp_p
             writer._client().command(f"DROP DATABASE IF EXISTS {db}")
         except Exception:  # noqa: BLE001
             pass
+
+
+# ── Langfuse with the local store beside it ──────────────────────────────
+
+
+class _Mem(RunStore):
+    """An in-memory store of summaries, newest first, paged by page number."""
+
+    def __init__(self, runs, fail=False):
+        super().__init__({})
+        self.runs, self.fail, self.deleted = list(runs), fail, []
+
+    def put_trace(self, trace):
+        raise NotImplementedError
+
+    def list_runs(self, where=None, order="started_desc", limit=50, cursor=None):
+        if self.fail:
+            raise ConnectionError("lf.example refused")
+        got = [s for s in self.runs if (where or RunFilter()).matches(s)]
+        got.sort(key=lambda s: s.started_at, reverse=order != "started_asc")
+        start = int(cursor or 0)
+        page = got[start:start + limit]
+        return Page(items=page, next_cursor=str(start + limit) if start + limit < len(got) else None)
+
+    def get_run(self, trace_id):
+        return next((RunRecord(summary=s, nodes=[], meta={}) for s in self.runs if s.trace_id == trace_id), None)
+
+    def rollups(self, where=None):
+        return []
+
+    def delete_runs(self, where):
+        self.deleted.append(where.trace_ids)
+        return len(where.trace_ids or [])
+
+
+def _s(tid, at, origin="service"):
+    s = RunSummary(trace_id=tid, workflow="call")
+    s.started_at, s.origin = at, origin
+    return s
+
+
+def test_lists_merge_newest_first_one_row_per_run_and_page_by_time():
+    lf = _Mem([_s("a", 10), _s("b", 8), _s("c", 6)])
+    local = _Mem([_s("b", 8.0), _s("p1", 9, "playground"), _s("p2", 5, "playground")])
+    store = WithLocal(lf, local)
+    first = store.list_runs(limit=2)
+    assert [s.trace_id for s in first.items] == ["a", "p1"]
+    second = store.list_runs(limit=2, cursor=first.next_cursor)
+    assert [s.trace_id for s in second.items] == ["b", "c"]
+    third = store.list_runs(limit=2, cursor=second.next_cursor)
+    assert [s.trace_id for s in third.items] == ["p2"] and third.next_cursor is None
+
+
+def test_langfuse_away_still_lists_the_local_runs_and_says_why():
+    store = WithLocal(_Mem([], fail=True), _Mem([_s("p1", 9, "playground")]))
+    assert [s.trace_id for s in store.list_runs().items] == ["p1"]
+    assert "lf.example refused" in store.primary_error
+
+
+def test_a_run_opens_locally_first_and_deletes_reach_only_the_local_store():
+    lf, local = _Mem([_s("a", 10)]), _Mem([_s("p1", 9)])
+    store = WithLocal(lf, local)
+    assert store.get_run("p1").summary.trace_id == "p1"
+    assert store.get_run("a").summary.trace_id == "a"
+    store.delete_runs(RunFilter(trace_ids=["a"]))
+    assert local.deleted == [["a"]] and lf.deleted == []
+
+
+def test_monitor_says_its_op_table_is_this_machines_runs_only():
+    from operonx_studio.monitor import monitor
+
+    import time as _t
+    now = _t.time()
+    m = monitor(WithLocal(_Mem([_s("a", now - 60)]), _Mem([])), since=now - 3600, until=now)
+    assert m["ops_note"] and "ClickHouse" in m["ops_note"]
+    assert monitor(_Mem([_s("a", now - 60)]), since=now - 3600, until=now)["ops_note"] is None
