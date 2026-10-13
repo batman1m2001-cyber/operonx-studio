@@ -493,6 +493,8 @@ function drawDataLayer() {
    * branch condition's chip is entered from the side its row's branch
    * edge does NOT leave by: from the right, the wire runs in through the
    * gap above its row and drops into the chip's hole. */
+  // where a wire leaves: right of its card, or left for a hole facing left
+  const exitX = (a) => a.exit === "left" ? Math.min(a.x, boxOf(a).left) - 20 : Math.max(a.x, boxOf(a).right) + 20;
   const entryX = (b) => b.entry === "right" ? Math.max(b.x, boxOf(b).right) + 20 : Math.min(b.x, boxOf(b).left) - 20;
   const viaGap = (b) => b.entry === "right" || b.entry === "over";
   const by = (b) => viaGap(b) ? b.gapY : b.y;
@@ -521,13 +523,13 @@ function drawDataLayer() {
     // a run lower down with a wire already there
     let x1 = col, ymA = null;
     if (col == null) {
-      const x0 = Math.max(a.x, A.right) + 20;
+      const x0 = exitX(a), step = a.exit === "left" ? -4 : 4;
       for (let i = 0; i < 60 && ymA === null; i++) {
-        const x = x0 + 4 * i;
+        const x = x0 + step * i;
         if (!(clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownOf(a)))) continue;
         for (let j = 0; j < 200; j++) if (chan(x, yA0 + 4 * j)) { x1 = x; ymA = yA0 + 4 * j; break; }
       }
-      if (ymA === null) x1 = scan(x0, 4, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownOf(a)));
+      if (ymA === null) x1 = scan(x0, step, x => clearV(x, a.y, yA0) && clearH(a.y, a.x, x, ownOf(a)));
     }
     if (ymA === null) ymA = scan(yA0, 4, y => chan(x1, y), 200);
     const okB = (y) => clearH(y, xc, x2) && clearV(x2, y, by(b));
@@ -545,7 +547,7 @@ function drawDataLayer() {
    * into the hole. Columns are taken left to right, and wires are laid
    * from the lowest source up, so a jog never crosses its neighbours'. */
   const zig = (a, b) => {
-    if (viaGap(b) || b.fromTop) return null;
+    if (viaGap(b) || b.fromTop || a.exit === "left") return null;
     const lim = Math.min(b.x, boxOf(b).left) - 6;
     // a free column, else one close beside another (still apart)
     const x = twice(() => {
@@ -589,7 +591,7 @@ function drawDataLayer() {
   const placeHub = (H, g) => {
     const a = H.a, A = boxOf(a);
     const xs = H.targets.map(entryX), ys = H.targets.map(b => boxOf(b).top - 22);
-    const x0 = median([Math.max(a.x, A.right) + 20, ...xs]);
+    const x0 = median([exitX(a), ...xs]);
     const below = ys.filter(y => y >= A.bottom + 22);
     const y0 = below.length ? Math.min(...below) : A.bottom + 22;
     const side0 = (b) => { const x = entryX(b); return x < x0 - 30 ? "L" : x > x0 + 30 ? "R" : "D"; };
@@ -797,6 +799,8 @@ function drawDataLayer() {
       at = {x: it.x + (hr.left + hr.width / 2 - cr.left) / k, y: it.y + (hr.top + hr.height / 2 - cr.top) / k};
     } else at = holePt(card, it, r.querySelector(".dfhole"));
     const h = {...at, row: r, key};
+    // an agent keeps its right wall for its parts: its outputs leave left too
+    if (dir === "out" && card.classList.contains("agentcell")) h.exit = "left";
     if (brow) {
       // a chip in a condition: in from the side its row's edge does not use
       let top = 0, e = brow;
@@ -1440,8 +1444,21 @@ function render() {
   const laidOut = measured.map(m => ({shown: !!m.card.offsetHeight, widths: m.els.map(e => e.clientWidth)}));
   measured.forEach((m, i) => {
     if (!laidOut[i].shown || !m.els.length) return;
-    // an agent's cell is as wide as its own content (max-content, capped)
-    if (m.card.classList.contains("agentcell")) return;
+    // an agent's cell is as wide as its own content (max-content, capped).
+    // Opened onto its data, its rows' holes sit on the left wall, which is
+    // straight only along the middle half of its height: the cell grows
+    // (still a regular hexagon) until its head and rows fit in that half
+    if (m.card.classList.contains("agentcell")) {
+      const ports = m.card.querySelector(".dfports"), head = m.card.querySelector(".ahead");
+      if (ports && head) {
+        // (+ room so the last hole clears the rivet at the wall's lower end)
+        const c = head.offsetHeight + ports.offsetHeight + 28;
+        const w = Math.ceil(Math.max(m.card.offsetWidth, 2 * c * 0.8660254));
+        m.card.style.maxWidth = "none";
+        m.card.style.width = `${w}px`;
+      }
+      return;
+    }
     // a port row sits in one of two equal columns: the card must grow by
     // twice its deficit for that column to gain it
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
