@@ -223,13 +223,14 @@ const RunTree = (() => {
     paint();
     scrollTo(r);
     cur.root.classList.add("rt-has-step");
-    if (r.kind === "record") {
+    if (r.kind === "record" || r.step) {
+      // a subgraph with its own record opens like a step: its inputs and outputs
       renderExecPanel(cur.run, r, cur.execs, cur.stepEl);
     } else {
       cur.stepEl.textContent = "";
       cur.stepEl.append(el("h3", "rt-step-title", r.name),
         el("div", "note", r.kind === "container"
-          ? "A subgraph: the steps under it are its ops."
+          ? "A subgraph: the steps under it are its ops. Runs recorded before operonx 1.22.3 kept no values for the subgraph itself."
           : "An item of a stream that records nothing per item (a transient op): the steps under it ran for it."));
     }
     if (!(opts && opts.quiet) && cur.mode !== "conversation") cur.listEl.focus({preventScroll: true});

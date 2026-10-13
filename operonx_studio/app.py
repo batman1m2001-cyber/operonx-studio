@@ -408,8 +408,11 @@ def _tree_records(records, run_name: str) -> Dict[str, Any]:
             "kids": len(children.get(nid, [])),
         }
         if rec is not None:
-            raw = raw_by_id.get(nid, {})
+            # a subgraph's box holds its record (operonx 1.22.3): the box
+            # is the row, the record's id opens its values
+            raw = raw_by_id.get(rec.op_id, {})
             row.update({
+                "step": rec.op_id,
                 # a step its op recorded with `child()`, not one of the graph's ops
                 "child": child_parent_id(rec.op_full_name, rec.ctx) is not None,
                 "status": rec.status, "error": rec.error, "is_yield": rec.is_yield, "op_type": rec.op_type,
