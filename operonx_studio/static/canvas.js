@@ -2854,6 +2854,22 @@ function inlineBranchPlugs(card, ports) {
   if (!ports.querySelector(".dfport")) ports.remove();
 }
 
+/* A double-click opens the card its FIRST click landed on. That click
+ * selects the card, which opens its plugs in place and lays the canvas out
+ * again; when the flow fits the window there is no scroll to hold the card
+ * still, so the second press can land beside it, or on another card. */
+let firstClick = null;
+function doubleClickKey(fallback, ev) {
+  const c = firstClick;
+  firstClick = null;
+  if (c && ev.timeStamp - c.at < 700 && state.rendered.has(c.key)) return c.key;
+  return fallback;
+}
+function opensInPlace(key) {
+  const it = key && state.rendered.get(key);
+  return !!(it && (it.node.graph || it.node.parts));
+}
+
 function opCard(it) {
   const n = it.node;
   if (n.kind === "__boundary__") return boundaryCard(it);
@@ -3021,10 +3037,18 @@ function opCard(it) {
     // a router's exits are its condition rows — no anonymous base port
     if (!(n.routes && n.routes.length)) card.append(el("span", "port out"));
   }
-  card.onclick = (ev) => { ev.stopPropagation(); select(it.key); };
+  card.onclick = (ev) => {
+    ev.stopPropagation();
+    if (ev.detail <= 1) firstClick = {key: it.key, at: ev.timeStamp};
+    select(it.key);
+  };
   card.onmouseenter = () => { dfHoverEnter(it.key); if (n.part) partHover(it.key, true); };
   card.onmouseleave = () => { dfHoverLeave(it.key); if (n.part) partHover(it.key, false); };
-  if (n.graph || n.parts) card.ondblclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
+  card.ondblclick = (ev) => {
+    ev.stopPropagation();
+    const key = doubleClickKey(it.key, ev);
+    if (opensInPlace(key)) toggleExpand(key);
+  };
   return card;
 }
 

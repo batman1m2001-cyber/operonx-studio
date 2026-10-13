@@ -1,6 +1,6 @@
 # One control per job: merging what the studio shows twice
 
-**Status:** 2026-10-13. P1–P3 done (studio #70–#72). Backlog B2 open.
+**Status:** 2026-10-13. P1–P3 done (studio #70–#72), backlog B1 and B2 fixed.
 
 ## Why
 
@@ -162,7 +162,9 @@ Research:
 - **Files:** `canvas.js` (`toolLine` and the agent tool card in `opCard`; `drawAgentParts` marks a denied tool's cable), `studio.css` (`.atpolicy`, a `.tool-denied` card), `inspector.js` (unchanged).
 - **Test data:** the scratch project gets an agent with `policy=ToolPolicy(rules={"x": "ask", "y": "deny"})`, so all three states render.
 
-**B2. A double-click on an agent cell sometimes does not open it.** *(seen 2026-10-13 while testing, not yet diagnosed)*
+**B2. A double-click on an agent cell sometimes does not open it.** *(seen 2026-10-13 while testing; fixed)*
+- **Cause, measured:** the first click selects the card, which opens its plugs and lays the canvas out again. When the flow fits the window there is no scroll to hold the card still: at 1600×2400 the `three` agent moved 87 px down, and the second press landed on empty canvas. Every agent failed in a 2400 px tall window; all opened at 1100 px.
+- **Fix:** a double-click opens the card its first click landed on, wherever the second press lands (`doubleClickKey` in canvas.js, plus a dblclick listener on the stage).
 - **What was seen:** in a scripted browser (Playwright `dblclick`), the scratch project's `three` agent stayed folded on a fresh page, while `one`, `a` and brd's `email` opened.
 - **Workaround:** clicking a socket's place opens it reliably.
 - **Likely cause, to confirm first:** the first click selects the card. In Workflow, selecting re-lays out the canvas round it (`select` → `renderKeeping`). So the card can be replaced or moved before the second click, and the `dblclick` never reaches the node that has the handler.
