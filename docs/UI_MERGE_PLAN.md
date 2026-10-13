@@ -1,6 +1,6 @@
 # One control per job: merging what the studio shows twice
 
-**Status:** plan, 2026-10-13. Nothing implemented yet.
+**Status:** 2026-10-13. P1 (M1, M2 with B1, M3) done; P2 and P3 not started.
 
 ## Why
 
@@ -138,7 +138,7 @@ Each phase is one PR, verified on the callbot, meeting-prep and meeting-prep-brd
 - no card overlaps (the overlap check);
 - the JS tests.
 
-1. **P1, cards:** M1, M2 (with B1), M3. The biggest space gain, on the canvas the user looks at most.
+1. **P1, cards:** M1, M2 (with B1), M3. *Done.* The biggest space gain, on the canvas the user looks at most.
 2. **P2, canvas toolbar and header:** M4, M5, M11, M12.
 3. **P3, run page:** M6, M7, M8, M9, M10. M6 touches the router (the `view=` values); old links keep working (`view=tree` → Tree).
 
