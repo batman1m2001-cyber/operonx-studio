@@ -213,5 +213,4 @@
   }
 
   registerPane("settings", {el: box, show});
-  $("#btn-settings").onclick = () => switchTab(state.tab === "settings" ? "flow" : "settings");
 })();

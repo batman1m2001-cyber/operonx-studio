@@ -20,6 +20,7 @@
     <nav class="crumbs" aria-label="Location">
       <span class="sep" aria-hidden="true">/</span>
       <button class="crumbbtn projname" id="pname" aria-haspopup="menu" title="Switch project">…</button>
+      <span class="live" id="live" role="status" title="Watching the project's code: the studio redraws when it changes"><span class="dot"></span><span id="live-text">Live</span></span>
       <div id="switcher" class="popover" role="menu" hidden></div>
       <span class="sep" aria-hidden="true">/</span>
       <button id="btn-project" class="crumbbtn graphname" aria-haspopup="menu" title="Operons, services and jobs of this project"><span id="graph-name">…</span></button>
@@ -28,9 +29,7 @@
     </nav>
     <button id="btn-screen" class="crumbbtn screenbtn" aria-haspopup="true" aria-controls="rail" title="Screens"><i data-icon="menu"></i><span id="screen-label">Flow</span></button>
     <div class="spacer"></div>
-    <span class="live" id="live" title="The studio re-extracts and redraws whenever the project's code changes"><span class="dot"></span><span id="live-text">live</span></span>
     <span id="themeslot"></span>
-    <button id="btn-settings" class="iconbtn" data-tabbtn="settings" aria-label="Settings" title="Settings — retention, where runs are kept"><i data-icon="settings"></i></button>
     <button id="btn-right" class="iconbtn paneltoggle" aria-label="Toggle the side panel" title="Side panel — inspect · assistant"><i data-icon="panel"></i></button>
     <span id="accountslot"></span>
   </header>
@@ -55,6 +54,7 @@
         <button data-tab="services" role="tab" title="Services"><i data-icon="server"></i><span>Services</span></button>
         <button data-tab="jobs" role="tab" title="Jobs"><i data-icon="clock"></i><span>Jobs</span></button>
         <button data-tab="alerts" role="tab" title="Alerts"><i data-icon="bell"></i><span>Alerts</span></button>
+        <button data-tab="settings" role="tab" title="Settings"><i data-icon="settings"></i><span>Settings</span></button>
       </nav>
       <button id="rail-slim" class="railtoggle" type="button" title="Collapse the menu" aria-label="Collapse the menu"><i data-icon="collapse"></i><span>Collapse</span></button>
     </aside>
@@ -100,10 +100,13 @@
       <button id="btn-find" class="iconbtn" aria-label="Find a node" title="Find a node  ( / or Ctrl+K )"><i data-icon="search"></i></button>
       <button id="btn-expand" class="iconbtn" aria-label="Open every nested graph" title="Open / close every nested graph"><i data-icon="unfold"></i></button>
       <span class="tsep" aria-hidden="true"></span>
-      <button id="btn-zoom-out" class="iconbtn" aria-label="Zoom out" title="Zoom out  ( − )"><i data-icon="minus"></i></button>
-      <button id="btn-zoom-pct" class="zoompct" title="Reset to 100%  ( 1 )">100%</button>
-      <button id="btn-zoom-in" class="iconbtn" aria-label="Zoom in" title="Zoom in  ( + )"><i data-icon="plus"></i></button>
-      <button id="btn-fit" class="iconbtn" aria-label="Fit the flow" title="Fit the flow to the screen  ( 0 )"><i data-icon="fit"></i></button>
+      <button id="btn-zoom-pct" class="zoompct" aria-haspopup="menu" aria-expanded="false" aria-controls="zoommenu" title="Zoom"><span id="zoom-pct">100%</span><i data-icon="chevron"></i></button>
+      <div id="zoommenu" class="popover zoommenu" role="menu" aria-label="Zoom" hidden>
+        <button type="button" role="menuitem" data-zoom="in"><i data-icon="plus"></i><span>Zoom in</span><kbd>+</kbd></button>
+        <button type="button" role="menuitem" data-zoom="out"><i data-icon="minus"></i><span>Zoom out</span><kbd>−</kbd></button>
+        <button type="button" role="menuitem" data-zoom="100"><span class="zm-pad"></span><span>Zoom to 100%</span><kbd>1</kbd></button>
+        <button type="button" role="menuitem" data-zoom="fit"><i data-icon="fit"></i><span>Fit the flow</span><kbd>0</kbd></button>
+      </div>
       <button id="btn-flowdots" class="iconbtn" aria-label="Show direction" aria-pressed="true" title="Direction: a light dot runs each control wire, a spark each data wire"><i data-icon="flow"></i></button>
       <span class="tsep" aria-hidden="true"></span>
       <button id="btn-live" class="iconbtn" aria-label="Follow runs live" title="Live: replay each new run as it lands, and follow playground sessions"><i data-icon="pulse"></i></button>

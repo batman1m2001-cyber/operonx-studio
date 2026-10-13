@@ -696,8 +696,13 @@ body.railslim .railtoggle .icon { transform: rotate(180deg); }
 .tabs button.active { color: var(--text); font-weight: 600; }
 .tabs button.active::after { background: var(--accent); }
 
+/* the project's status: a dot beside its name. Green says nothing more (the
+   tooltip says what it watches); a failed extraction or a lost link adds
+   its words */
 .live { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm);
-  color: var(--text-3); padding: 0 6px; white-space: nowrap; }
+  color: var(--text-3); padding: 0 6px 0 2px; white-space: nowrap; cursor: default; }
+.live:not(.stale):not(.down) #live-text { position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); }
 .live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
   box-shadow: 0 0 0 3px var(--sh-green53-a14); }
 .live.stale { color: var(--err); font-weight: 500; }
@@ -777,9 +782,19 @@ body.railslim .railtoggle .icon { transform: rotate(180deg); }
 }
 body:not([data-stage]) .canvasbar { display: none; }
 .canvasbar .iconbtn { width: 32px; height: 32px; }
-.canvasbar .zoompct { min-width: 52px; padding: 0 6px; border-color: transparent; background: none;
+.canvasbar .zoompct { min-width: 62px; gap: 2px; padding: 0 6px 0 8px; border-color: transparent; background: none;
   color: var(--text-2); font: 500 12px var(--font); font-variant-numeric: tabular-nums; }
-.canvasbar .zoompct:hover { background: var(--surface-2); }
+.canvasbar .zoompct:hover, .canvasbar .zoompct[aria-expanded="true"] { background: var(--surface-2); }
+.canvasbar .zoompct .icon { width: 13px; height: 13px; color: var(--text-3); }
+/* its menu opens above it: the bar sits at the canvas's bottom */
+.zoommenu { bottom: calc(100% + 8px); left: auto; min-width: 190px; padding: 5px;
+  display: flex; flex-direction: column; gap: 1px; }
+.zoommenu button { justify-content: flex-start; gap: 10px; min-height: 32px; padding: 0 8px;
+  border: none; background: none; font-weight: 400; color: var(--text); border-radius: var(--r-xs); }
+.zoommenu button:hover, .zoommenu button:focus-visible { background: var(--surface-2); }
+.zoommenu button .icon, .zoommenu .zm-pad { width: 15px; height: 15px; flex: none; color: var(--text-2); }
+.zoommenu button span:not(.zm-pad) { flex: 1; text-align: left; }
+.zoommenu kbd { font: 500 11px var(--mono, ui-monospace, monospace); color: var(--text-3); }
 .canvasbar .tsep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 .canvasbar #btn-expand.active { color: var(--accent-strong); background: var(--accent-soft); }
 .canvasbar #btn-live.active { color: var(--signal); background: var(--signal-soft); }
@@ -3568,8 +3583,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   /* header: brand, crumbs and the panel button on one row, the tabs on
      their own row beneath — every tab reachable with a thumb */
   header.bar { flex-wrap: wrap; height: auto; padding: 0 8px 0 12px; column-gap: 6px; }
-  header.bar > .brand, header.bar > .crumbs, header.bar > .spacer,
-  header.bar > .live { height: 48px; }
+  header.bar > .brand, header.bar > .crumbs, header.bar > .spacer { height: 48px; }
   .pclose { display: none; }
   .ptitle-row { margin-right: 0; }
   header.bar .brand-name { display: none; }
@@ -3577,7 +3591,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   .crumbs { flex: 1 1 0; }
   .crumbbtn { max-width: 30vw; padding: 0 4px 0 6px; }
   header.bar > .spacer { display: none; }
-  .live #live-text { display: none; }
+  .live #live-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   /* the rail becomes a drawer from the left, opened by the screen button */
   body { --rail-w: 0px; }
   .rail { position: fixed; left: 0; top: 0; bottom: 0; width: min(280px, 82vw); z-index: 80;
@@ -3590,11 +3604,9 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   .screenbtn { display: inline-flex; align-items: center; gap: 6px; order: 1; flex: none;
     max-width: 34vw; font-weight: 600; padding: 0 8px 0 6px; }
   header.bar > .crumbs { order: 2; }
-  header.bar > .live { order: 3; }
   header.bar > .callpill { order: 3; margin-right: 0; }
   body.oncall header.bar > .crumbs { display: none; }
   .callpill-name { display: none; }
-  header.bar > #btn-settings { order: 4; }
   header.bar > #btn-right { order: 5; }
   /* who is signed in sits last, its menu opening leftwards; the theme is in
      Settings, so the crowded phone bar gives its button up */
@@ -3631,7 +3643,6 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   .canvasbar { left: 12px; bottom: 12px; }
   .canvasbar #btn-expand, .canvasbar .tsep:first-of-type { display: none; }
   /* a phone pinches to zoom: the − / + buttons give their room to the view switch */
-  .canvasbar #btn-zoom-in, .canvasbar #btn-zoom-out { display: none; }
   .findbox, #legend { left: 12px; bottom: 64px; }
 
   #traces, #jobs, #resources, .pane { padding: 16px 14px 88px; }

@@ -3046,7 +3046,7 @@ function applyView() {
   world.style.height = `${h}px`;
   $("#plane").style.transform =
     `translate(${-ex.minX * s + VIEW_PAD}px, ${-ex.minY * s + VIEW_PAD}px) scale(${s})`;
-  $("#btn-zoom-pct").textContent = `${Math.round(s * 100)}%`;
+  $("#zoom-pct").textContent = `${Math.round(s * 100)}%`;
 
   // no semantic zoom: a card is the same at every zoom (its detail shows
   // when it is clicked), so zooming never lays the canvas out again

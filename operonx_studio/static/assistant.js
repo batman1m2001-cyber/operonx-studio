@@ -2684,7 +2684,9 @@
       bFocus.replaceChildren(icon(mode === "focus" ? "collapse" : "expand"));
       bFocus.title = mode === "focus" ? "Leave focus  ( Esc )" : "Focus  ( Ctrl J )";
       bFocus.hidden = mode === "sheet";
-      bClose.hidden = mode === "hero";
+      // docked in the side panel, the panel's own toggle (and Esc) close it,
+      // and Inspect is the tab beside it: no second ×
+      bClose.hidden = mode === "hero" || mode === "dock";
       if (mode === "focus" && !PHONE.matches) { root.classList.add("side-open"); refreshList(); }
       if (mode === "dock") root.classList.remove("side-open");
       requestAnimationFrame(() => { autosize(); toBottom(); });
