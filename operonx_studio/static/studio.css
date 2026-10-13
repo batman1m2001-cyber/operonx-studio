@@ -1137,22 +1137,29 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
   font-size: 11px; padding: 0 2px; box-shadow: none;
 }
 .node.container .collapse:hover { color: var(--text); box-shadow: none; }
-/* a nested graph's icon band is its open button: the glyph, and under it
-   how many ops are inside with ▸ (canvas.js graphBand) */
+/* a nested graph's icon band is its open button: the graph's square with
+   the count inside it, ▸ beside it (canvas.js graphBand). Hover fills the
+   square; the band itself is never tinted (its box would poke out of the
+   cell's curve) */
 .node button.iconband.gband {
-  pointer-events: auto; cursor: pointer; flex-direction: column; gap: 1px;
+  pointer-events: auto; cursor: pointer; flex-direction: row; gap: 3px;
   min-height: 0; padding: 0; border: none; border-radius: 0; background: transparent;
   border-right: 1.5px dashed color-mix(in srgb, var(--kind, var(--k-default)) 22%, var(--rt-bay));
   color: color-mix(in srgb, var(--kind, var(--k-default)) 74%, var(--ink-indigo49));
   font: inherit; font-size: 19px; line-height: 1; box-shadow: none; }
+.node button.iconband.gband:hover, .node button.iconband.gband:active { background: transparent;
+  border-color: color-mix(in srgb, var(--kind, var(--k-default)) 22%, var(--rt-bay)); }
 .node .gband .bglyph { display: grid; place-items: center; }
-.node .gband .bcount { font: 650 11px/1 var(--mono, ui-monospace, monospace); letter-spacing: 0;
-  color: color-mix(in srgb, var(--kind, var(--k-default)) 80%, var(--ink-indigo39)); }
-.node button.iconband.gband:hover { background: color-mix(in srgb, var(--kind, var(--k-default)) 12%, transparent);
-  border-color: color-mix(in srgb, var(--kind, var(--k-default)) 40%, var(--rt-bay)); }
-.node button.iconband.gband:hover .bcount, .node button.iconband.gband:focus-visible .bcount {
-  color: var(--kind, var(--k-default)); }
-.node button.iconband.gband:focus-visible { outline: 2px solid var(--kind, var(--k-default)); outline-offset: -2px; }
+.node .gband .bbox { min-width: 22px; height: 22px; padding: 0 3px; box-sizing: border-box;
+  border: 2px solid currentColor; border-radius: 4px;
+  font: 700 11.5px/1 var(--mono, ui-monospace, monospace); letter-spacing: -.02em;
+  transition: background var(--tr), color var(--tr); }
+.node .gband .bcount { font: 650 11px/1 var(--mono, ui-monospace, monospace); }
+.node .gband .barrow { font-size: 10px; opacity: .75; }
+.node button.iconband.gband:hover .bbox, .node button.iconband.gband:focus-visible .bbox {
+  background: var(--kind, var(--k-default)); border-color: var(--kind, var(--k-default)); color: var(--on-fill); }
+.node button.iconband.gband:hover .barrow { opacity: 1; }
+.node button.iconband.gband:focus-visible { outline: none; }
 
 /* wrap seam — where a long chain breaks to the next band, like a
    newline. A layout artifact, not uncertainty: thin, faint, SOLID —

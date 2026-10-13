@@ -2521,14 +2521,17 @@ function toolMarks(card, line, n) {
   if (runs) line.append(el("span", "atcount", `×${runs.runs}`));
 }
 
-/* A nested graph's icon band is its open button: the kind's glyph, the
- * count of what is inside under it, and ▸. A click on the rest of the
+/* A nested graph's icon band is its open button: the graph's square with
+ * the count of what is inside written in it, and ▸ beside it (a kind with
+ * its own glyph keeps it, the count beside). A click on the rest of the
  * card still selects it; a double-click opens it too. */
 function graphBand(it) {
   const n = it.node;
   const b = el("button", "iconband gband");
-  b.append(el("span", "bglyph", kindIcon(n)));
-  b.append(el("span", "bcount", `${n.subgraph_ops} ▸`));
+  const icon = kindIcon(n);
+  if (icon === "▣") b.append(el("span", "bglyph bbox", String(n.subgraph_ops)));
+  else b.append(el("span", "bglyph", icon), el("span", "bcount", String(n.subgraph_ops)));
+  b.append(el("span", "barrow", "▸"));
   const what = n.agentSteps ? "turns" : n.step ? "steps" : "ops";
   b.title = `Open: ${n.subgraph_ops} ${what} inside`;
   b.setAttribute("aria-expanded", "false");
