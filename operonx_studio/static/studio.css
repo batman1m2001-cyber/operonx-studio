@@ -1106,8 +1106,22 @@ body:not([data-stage]) .canvasbar { display: none; }
   font-size: 11px; padding: 0 2px; box-shadow: none;
 }
 .node.container .collapse:hover { color: var(--text); box-shadow: none; }
-.badge.expand { cursor: pointer; }
-.badge.expand:hover { background: var(--k-graph); color: var(--on-fill); border-color: var(--k-graph); }
+/* a nested graph's icon band is its open button: the glyph, and under it
+   how many ops are inside with ▸ (canvas.js graphBand) */
+.node button.iconband.gband {
+  pointer-events: auto; cursor: pointer; flex-direction: column; gap: 1px;
+  min-height: 0; padding: 0; border: none; border-radius: 0; background: transparent;
+  border-right: 1.5px dashed color-mix(in srgb, var(--kind, var(--k-default)) 22%, var(--rt-bay));
+  color: color-mix(in srgb, var(--kind, var(--k-default)) 74%, var(--ink-indigo49));
+  font: inherit; font-size: 19px; line-height: 1; box-shadow: none; }
+.node .gband .bglyph { display: grid; place-items: center; }
+.node .gband .bcount { font: 650 11px/1 var(--mono, ui-monospace, monospace); letter-spacing: 0;
+  color: color-mix(in srgb, var(--kind, var(--k-default)) 80%, var(--ink-indigo39)); }
+.node button.iconband.gband:hover { background: color-mix(in srgb, var(--kind, var(--k-default)) 12%, transparent);
+  border-color: color-mix(in srgb, var(--kind, var(--k-default)) 40%, var(--rt-bay)); }
+.node button.iconband.gband:hover .bcount, .node button.iconband.gband:focus-visible .bcount {
+  color: var(--kind, var(--k-default)); }
+.node button.iconband.gband:focus-visible { outline: 2px solid var(--kind, var(--k-default)); outline-offset: -2px; }
 
 /* wrap seam — where a long chain breaks to the next band, like a
    newline. A layout artifact, not uncertainty: thin, faint, SOLID —
@@ -4402,16 +4416,18 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .node.container.agentframe .chead .nname { color: var(--ag-ink); }
 .node.container.agentframe .chead .nkind { color: var(--ag-sub); }
 
-/* a tool inside an opened agent: what it is, what the policy lets it do */
-.node .atool { display: flex; gap: 6px; align-items: center; margin-top: 3px;
-  font-size: 10.5px; color: var(--muted); }
-.node .atkind { font-family: var(--mono, ui-monospace, monospace); }
-.atpolicy { font-weight: 700; font-size: 9px; letter-spacing: .05em; padding: 1px 5px;
-  border-radius: 4px; }
+/* an agent's tool: its policy only when it is not the usual allow — ask a
+   small mark after the name, deny the whole card greyed out */
+.atpolicy { flex: none; font-weight: 700; font-size: 8.5px; letter-spacing: .05em; padding: 1px 4px;
+  border-radius: 4px; line-height: 1.4; }
 .atpolicy.p-allow { color: var(--ok, var(--ink-green56)); background: color-mix(in srgb, var(--ok, var(--bg-green56)) 12%, transparent); }
-.atpolicy.p-ask { color: var(--warn, var(--ink-amber63)); background: color-mix(in srgb, var(--warn, var(--bg-amber63)) 14%, transparent); }
 .atpolicy.p-deny { color: var(--err, var(--ink-red54)); background: color-mix(in srgb, var(--err, var(--bg-red54)) 12%, transparent); }
-.node .atcount { font-weight: 700; color: var(--k-res); }
+.atpolicy.p-ask { color: var(--warn, var(--ink-amber63)); background: color-mix(in srgb, var(--warn, var(--bg-amber63)) 14%, transparent); }
+.node .atcount { flex: none; font-size: 10.5px; font-weight: 700; color: var(--k-res); }
+.node.agenttool.tool-denied { filter: grayscale(1); opacity: .5; }
+.node.agenttool.tool-denied:hover, .node.agenttool.tool-denied.selected { opacity: .8; }
+.wires .apw .apw-cable.p-deny, .wires .apw .apw-cable.p-deny.hot { stroke: var(--cable); opacity: .35; }
+.wires .apw .apw-term.p-deny, .wires .apw .apw-term.p-deny.hot { fill: var(--cable); opacity: .35; }
 
 /* ── the run page (runtree.js) ─────────────────────────────────────────
    The header, the run's input and output, the turns, then the steps

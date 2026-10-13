@@ -1443,19 +1443,7 @@ function render() {
     // a port row sits in one of two equal columns: the card must grow by
     // twice its deficit for that column to gain it
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
-    let want = Math.ceil(m.it.w + need + 8);
-    // an agent's tool: its kind-and-policy line sits low in the oval, where
-    // the curve comes in — the card is wide enough that the line's end
-    // clears the curve at that height (an ellipse: inset (w/2)(1 - √(1 - f²)))
-    const tl = m.card.querySelector(".atool");
-    const last = tl && tl.lastElementChild;
-    if (last && m.card.offsetHeight) {
-      const left = last.offsetParent === m.card ? 0 : tl.offsetLeft;
-      const right = left + last.offsetLeft + last.offsetWidth + 10;
-      const h = m.card.offsetHeight, yc = tl.offsetTop + tl.offsetHeight / 2;
-      const f = Math.min(0.95, Math.abs(yc - h / 2) / (h / 2));
-      want = Math.max(want, Math.ceil(right / ((1 + Math.sqrt(1 - f * f)) / 2)));
-    }
+    const want = Math.ceil(m.it.w + need + 8);
     // a router is as wide as its zones: they never fold or cut
     const cap = m.card.classList.contains("cols") ? 2000 : m.card.querySelector(".dfports") ? 420 : 310;
     const w = Math.max(180, Math.min(cap, want));
@@ -2461,7 +2449,8 @@ function drawAgentParts(svg, parts) {
     const anim = mk("g", {class: "apw-anim"});
     state.partWires.set(A.key, g);
     const draw = (P, d, r) => {
-      const cls = `apw-${P.part}`, id = `apw${++apwSeq}`, to = anchor(P.item);
+      const denied = ((P.item.node.tool || {}).policy) === "deny";
+      const cls = `apw-${P.part}` + (denied ? " p-deny" : ""), id = `apw${++apwSeq}`, to = anchor(P.item);
       mk("path", {id, d, class: `apw-cable ${cls}`, "data-part": P.item.key}, g);
       terminal(g, to.x, to.y, r, cls, P.item.key);
       return id;
@@ -2485,6 +2474,7 @@ function drawAgentParts(svg, parts) {
       const d = `M${f(x0)} ${f(y0)} C${f(x0 + FAN.run * 0.55)} ${f(y0)} ${f(xj - FAN.run * 0.55)} ${f(yl)} ${f(xj)} ${f(yl)}`
         + curve(xj, yl, to.x - TERM, to.y);
       const id = draw(P, d, TOOL_R);
+      if (((P.item.node.tool || {}).policy) === "deny") return;   // never called
       // a call: out to the tool and its answer back, each tool in turn
       const times = [0, i / m, (i + 0.4) / m, (i + 0.5) / m, (i + 0.9) / m, 1].map(v => v.toFixed(3)).join(";");
       ride(anim, {r: 1.4, class: "apw-dot apw-tool"}, id, `${2.6 * m}s`, "0s",
@@ -2510,20 +2500,40 @@ function partHover(key, on) {
   partCablesFocus();
 }
 
-/* An agent's tool: what it is, and what the policy decides. */
-function toolLine(n) {
-  const t = n.tool || {};
-  const line = el("div", "atool");
-  line.append(el("span", "atkind", TOOL_KIND_WORDS[t.kind] || "function"));
-  const policy = t.policy || "allow";
-  const chip = el("span", "atpolicy p-" + policy, policy.toUpperCase());
-  chip.title = policy === "allow" ? "Runs when the model calls it."
-    : policy === "ask" ? "Waits for a human's approval before it runs."
-    : "Refused: the model is told it may not call it.";
-  line.append(chip);
+/* An agent's tool: the policy shows only when it is not the usual allow.
+ * Ask: a small mark after the name. Deny: the card greyed out (and its
+ * cable, drawAgentParts). The inspector says all three in full. */
+const POLICY_WORDS = {allow: "Runs when the model calls it.",
+  ask: "Waits for a human's approval before it runs.",
+  deny: "Refused: the model may not call it."};
+function toolMarks(card, line, n) {
+  const policy = (n.tool || {}).policy || "allow";
+  if (policy === "ask") {
+    const m = el("span", "atpolicy p-ask", "ASK");
+    m.title = POLICY_WORDS.ask;
+    line.append(m);
+  }
+  if (policy === "deny") card.classList.add("tool-denied");
+  card.dataset.policy = policy;
   const runs = state.run && state.run.ops && state.run.ops[n.name];
   if (runs) line.append(el("span", "atcount", `×${runs.runs}`));
-  return line;
+}
+
+/* A nested graph's icon band is its open button: the kind's glyph, the
+ * count of what is inside under it, and ▸. A click on the rest of the
+ * card still selects it; a double-click opens it too. */
+function graphBand(it) {
+  const n = it.node;
+  const b = el("button", "iconband gband");
+  b.append(el("span", "bglyph", kindIcon(n)));
+  b.append(el("span", "bcount", `${n.subgraph_ops} ▸`));
+  const what = n.agentSteps ? "turns" : n.step ? "steps" : "ops";
+  b.title = `Open: ${n.subgraph_ops} ${what} inside`;
+  b.setAttribute("aria-expanded", "false");
+  b.setAttribute("aria-label", `Open ${n.name}: ${n.subgraph_ops} ${what}`);
+  b.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
+  b.ondblclick = (ev) => ev.stopPropagation();
+  return b;
 }
 
 /* The pills that ARE an opened GraphOp's boundary. Clicking one selects
@@ -2580,28 +2590,12 @@ function toggleTerm(kind) {
   render();
 }
 
-// the op's kind (FUNC / LLM / GRAPH…), bound (SYNC / IO / CPU) and the
-// generator flash ride the name line as quiet buttons, instead of
-// hiding below the fold — the kind wears its family colour so it can
-// never be mistaken for part of the name
+// a clicked op's name line says only what its icon and the usual do not:
+// its bound when it is not sync, and the generator flash. The kind is the
+// icon band's (and the inspector's), never a chip beside the name
 function nameChips(n) {
   const box = el("span", "nchips");
-  if (n.kind) {
-    // a long custom kind must not eat the op's name: strip the Op
-    // suffix, then keep whole camel-case words while they fit — the
-    // full kind always lives in the tooltip
-    const words = String(n.kind).replace(/Op$/, "")
-      .match(/[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+/g) || [n.kind];
-    let short = words[0];
-    for (const w of words.slice(1)) {
-      if ((short + w).length > 9) break;
-      short += w;
-    }
-    const c = el("span", "nchip kind", short.toUpperCase());
-    c.title = n.kind;
-    box.append(c);
-  }
-  if (n.bound) {
+  if (n.bound && String(n.bound).toLowerCase() !== "sync") {
     const c = el("span", "nchip", String(n.bound).toUpperCase());
     c.title = `execution bound: ${n.bound}`;
     box.append(c);
@@ -2940,24 +2934,26 @@ function opCard(it) {
     card.classList.add("cell", n.name.length % 2 ? "alt" : "base");
     // the kind's icon fills the cell's left quarter — a pastel
     // half-oval slice cut along the membrane, not a badge on the line
-    card.append(el("span", "iconband", kindIcon(n)));
+    const band = n.graph ? graphBand(it) : el("span", "iconband", kindIcon(n));
+    card.append(band);
     const line = el("div", "nname nline");
     line.append(el("span", "ntext", n.name));
+    // an agent's tool: what the policy lets it do, said only when it is
+    // not the usual allow
+    if (n.part === "tool") {
+      card.classList.add("agenttool");
+      toolMarks(card, line, n);
+    }
     const chips = state.run ? null : nameChips(n);
     if (chips) line.append(chips);
     card.append(line);
     // an agent's tools are what it can DO: one line under its name
     const tools = agentToolsLine(n);
     if (tools) card.append(tools);
-    // an agent's tool says what it is and what the policy lets it do
-    if (n.part === "tool") {
-      card.classList.add("agenttool");
-      card.append(toolLine(n));
-    }
-    // an agent's memory wears the database it is
-    if (n.part === "memory") card.querySelector(".iconband").replaceChildren(dbIcon());
-    // and its model the brain it is
-    if (n.part === "model") card.querySelector(".iconband").replaceChildren(brainIcon());
+    // an agent's memory wears the database it is, its model the brain it is
+    const glyph = band.querySelector(".bglyph") || band;
+    if (n.part === "memory") glyph.replaceChildren(dbIcon());
+    if (n.part === "model") glyph.replaceChildren(brainIcon());
     // the kind line was card noise at fit-zoom; it lives in the
     // tooltip and the inspector — and on the card once it is clicked
     // (the .detail block shows on the selected card only)
@@ -3004,15 +3000,8 @@ function opCard(it) {
   // At most TWO badges: one semantic marker, plus the run chip. Density
   // is respect — everything else is one click away in the inspector.
   const badges = el("div", "badges");
-  // an agent card opens from its own row (agentCard): no generic badge
-  if (n.graph && !card.classList.contains("agentcell")) {
-    const b = el("button", "badge sub expand", `▣ ${n.subgraph_ops} ▸`);
-    b.title = n.agentSteps ? "This run's turns — click to open them in place."
-      : n.step ? "The steps under it — click to open them in place."
-      : "A nested @graph — click to open it in place.";
-    b.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
-    badges.append(b);
-  }
+  // a nested graph opens from its icon band (graphBand), an agent from
+  // its sockets: no badge for either
   // a loop's member wears no badge: the violet zone it sits in says it
 
   if (state.run && !ranInRun(n)) card.classList.add("dormant");
