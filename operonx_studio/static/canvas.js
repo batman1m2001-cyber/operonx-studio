@@ -2181,18 +2181,21 @@ function containerCard(it) {
 
 /* ── the agent op: a hive cell ──────────────────────────────────────
  * An agent is the op that decides for itself, so it does not look like
- * the others: an octagon cell with a glossy steel edge and a soft glow,
- * a faint honeycomb inside, and the bee. On its right edge, three round
- * sockets: ✧ the model it thinks with, the database of its memory, ⚒ its
- * tools. Opened, each socket is wired to the real op behind it, drawn as
+ * the others: a regular hexagon cell, point up — its input on the top
+ * point, its output on the bottom one — with a glossy steel edge and a
+ * soft glow, a faint honeycomb inside, the bee and its name on one line
+ * and its tools under them. The cell is sized by that line and keeps its
+ * proportions (it grows and shrinks whole), up to a cap that cuts the
+ * name. Down its right side, three round sockets: ✧ the model it thinks
+ * with, the database of its memory, ⚒ its tools. Opened, each socket is wired to the real op behind it, drawn as
  * the card that op is anywhere else (extract.py `_agent_parts`): the
  * model's LLM cell, its session store, each tool — an @op's cell, a
  * @graph's card that opens like any GraphOp, another agent's cell that
  * opens like this one. The wires are the agent's own, never the flow's:
  * the model's a nerve with one spike, memory's three lanes of bandwidth,
  * the tools' a rack — one trunk to a bus, a straight branch to each.
- * With a run painted the pips fill with the turns it took; a live run
- * sweeps a light along the edge and sets the wires moving. */
+ * With a run painted its line says the turns it took; a live run sweeps
+ * a light along the edge and sets the wires moving. */
 const TOOL_ICONS = {function: "ƒ", op: "◈", graph: "▣", agent: "✺", mcp: "⇄"};
 const TOOL_KIND_WORDS = {function: "function", op: "@op", graph: "@graph", agent: "agent",
                          mcp: "MCP tool"};
@@ -2229,11 +2232,21 @@ function beeMark() {
   return b;
 }
 
+/* The cell's second line: its tools. */
 function agentSub(n) {
+  const tools = ((n.agent || {}).tools || []).length;
+  return `${tools} tool${tools === 1 ? "" : "s"}`;
+}
+
+/* Everything else, on hover: its model, its tools, its turns — the cap,
+ * or what a painted run took. */
+function agentFacts(n) {
   const a = n.agent || {};
-  const model = (a.model || [])[0];
-  const tools = (a.tools || []).length;
-  return `agent${model ? " · " + model : ""} · ${tools} tool${tools === 1 ? "" : "s"}`;
+  const bits = [`model ${(a.model || []).join(" → ") || "?"}`, agentSub(n)];
+  const cap = (a.limits || {}).turns, took = agentTurns(n);
+  if (took) bits.push(cap ? `${took} of at most ${cap} turns` : `${took} turn${took === 1 ? "" : "s"}`);
+  else if (cap) bits.push(`at most ${cap} turns`);
+  return bits.join(" · ");
 }
 
 /* How many turns this agent took in the painted run: its `turn` steps. */
@@ -2247,31 +2260,19 @@ function agentTurns(n) {
   return t ? t.runs : 0;
 }
 
-function agentPips(n) {
-  const cap = ((n.agent || {}).limits || {}).turns;
-  const took = agentTurns(n);
-  const row = el("span", "apips");
-  if (!cap && !took) return row;
-  const shown = Math.min(cap || took, 8);
-  for (let i = 0; i < shown; i++) {
-    row.append(el("span", "apip" + (i < took ? " done" : "")));
-  }
-  if (cap > 8) row.append(el("span", "apipmore", `≤${cap}`));
-  row.title = cap ? `${took ? took + " of " : "at most "}${cap} turns` : `${took} turns`;
-  return row;
-}
-
 function agentCard(card, it) {
   const n = it.node;
   card.classList.add("agentcell");
   card.append(el("span", "ahull"), el("span", "abody"));
   const head = el("div", "ahead");
-  head.append(beeMark());
-  const who = el("div", "awho");
-  who.append(el("div", "nname ntext", n.name));
-  who.append(el("div", "asub", agentSub(n)));
-  head.append(who);
-  head.append(agentPips(n));
+  // the bee and the name on one line; a long name is cut, whole on hover
+  const line = el("div", "aline");
+  const name = el("div", "nname ntext", n.name);
+  name.title = n.name;
+  line.append(beeMark(), name);
+  const sub = el("div", "asubline");
+  sub.append(el("span", "asub", agentSub(n)));
+  head.append(line, sub);
   card.append(head);
   const open = state.expanded.has(it.key);
   if (n.parts && n.parts.length) {
@@ -2280,15 +2281,21 @@ function agentCard(card, it) {
     b.title = open ? "Fold its parts back into the agent."
       : "Open the agent: its model, its memory and each tool, as the ops they are.";
     b.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
-    head.append(b);
+    sub.append(b);
   }
-  card.title = `${n.name} — ${agentSub(n)}. Double-click to ${open ? "fold" : "open"} it.`;
+  card.title = `${n.name} — an agent: ${agentFacts(n)}. Double-click to ${open ? "fold" : "open"} it.`;
 }
 
-/* The agent's three sockets, top to bottom: model, memory, tools. A
- * socket with nothing behind it (no session store: each run starts
- * fresh) is shown empty; clicking one opens the agent. */
-const SOCK_DY = {model: -26, memory: 0, tool: 26};
+/* The agent's three sockets, top to bottom: model, memory, tools, down the
+ * cell's upright right side, 15% of its height apart (studio.css places
+ * them; this says where, for the wires). A socket with nothing behind it
+ * (no session store: each run starts fresh) is shown empty; clicking one
+ * opens the agent. */
+const SOCK_R = 9;                                   // a socket's radius (studio.css .asock)
+function sockAt(A, part) {
+  const dy = part === "model" ? -0.15 : part === "tool" ? 0.15 : 0;
+  return {x: A.x + A.w, y: A.y + A.h * (0.5 + dy)};
+}
 function agentSockets(n, key) {
   const a = n.agent || {};
   const have = new Set((n.parts || []).map(p => p.part));
@@ -2296,7 +2303,6 @@ function agentSockets(n, key) {
   const box = el("span", "asocks");
   const sock = (part, icon, tip) => {
     const s = el("span", `asock s-${part}` + (have.has(part) ? "" : " empty"));
-    s.style.top = `calc(50% + ${SOCK_DY[part]}px)`;
     if (typeof icon === "string") s.textContent = icon; else s.append(icon);
     s.title = tip;
     s.onclick = (ev) => { ev.stopPropagation(); toggleExpand(key); };
@@ -2364,16 +2370,21 @@ function drawAgentParts(svg, parts) {
     const an = mk("animateMotion", {dur, begin, repeatCount: "indefinite", ...extra}, m);
     mk("mpath", {href: `#${id}`}, an);
   };
-  const anchor = (it) => ({x: it.x, y: it.inner ? it.y + 17 : it.y + Math.min(it.h / 2, 32)});
+  // where a wire meets its part: the left edge's middle — a card's oval is
+  // widest there (a card taller than a line, a @graph tool with its ops
+  // badge, left the wire's ring in the air when this was capped at 32 px);
+  // an opened part's title strip
+  const anchor = (it) => ({x: it.x, y: it.inner ? it.y + 17 : it.y + it.h / 2});
   for (const [A, mine] of byAgent) {
     const g = mk("g", {class: "apw", "data-agent": A.key}, svg);
     const anim = mk("g", {class: "apw-anim"});
     state.partWires.set(A.key, g);
-    const sx = A.x + A.w + 11, sy = (part) => A.y + A.h / 2 + SOCK_DY[part];
+    // each wire leaves its socket's outer side
+    const sx = (part) => sockAt(A, part).x + SOCK_R, sy = (part) => sockAt(A, part).y;
     for (const P of mine.filter(q => q.part !== "tool")) {
-      const to = anchor(P.item), y0 = sy(P.part), x1 = to.x - 6;
-      const e = [sx, y0, sx + 52, y0, x1 - 52, to.y, x1, to.y];
-      const d = `M${f(sx)} ${f(y0)} C${f(e[2])} ${f(e[3])} ${f(e[4])} ${f(e[5])} ${f(x1)} ${f(to.y)}`;
+      const to = anchor(P.item), y0 = sy(P.part), x1 = to.x - 6, x0 = sx(P.part);
+      const e = [x0, y0, x0 + 52, y0, x1 - 52, to.y, x1, to.y];
+      const d = `M${f(x0)} ${f(y0)} C${f(e[2])} ${f(e[3])} ${f(e[4])} ${f(e[5])} ${f(x1)} ${f(to.y)}`;
       const id = `apw${++apwSeq}`;
       const cls = `apw-${P.part}`;
       if (P.part === "model") {
@@ -2396,12 +2407,12 @@ function drawAgentParts(svg, parts) {
     // the tools' rack
     const tools = mine.filter(q => q.part === "tool");
     if (tools.length) {
-      const y0 = sy("tool");
+      const y0 = sy("tool"), x0 = sx("tool");
       const ys = tools.map(P => anchor(P.item).y);
       const px = Math.min(...tools.map(P => P.item.x));
       const bx = px - 34;
       const cls = "apw-tool";
-      mk("path", {d: `M${f(sx)} ${f(y0)} H${f(bx)}`, class: `apw-line ${cls}`}, g);
+      mk("path", {d: `M${f(x0)} ${f(y0)} H${f(bx)}`, class: `apw-line ${cls}`}, g);
       mk("path", {d: `M${f(bx)} ${f(Math.min(y0, ...ys))} V${f(Math.max(y0, ...ys))}`, class: `apw-line ${cls}`}, g);
       mk("circle", {cx: f(bx), cy: f(y0), r: 3, class: `apw-joint ${cls}`}, g);
       tools.forEach((P, i) => {
@@ -2413,7 +2424,7 @@ function drawAgentParts(svg, parts) {
       // a call: out along the rack to a tool and its answer back, each tool in turn
       tools.forEach((P, i) => {
         const id = `apw${++apwSeq}`;
-        mk("path", {id, d: `M${f(sx)} ${f(y0)} H${f(bx)} V${f(ys[i])} H${f(P.item.x - 6)}`, class: "apw-track"}, anim);
+        mk("path", {id, d: `M${f(x0)} ${f(y0)} H${f(bx)} V${f(ys[i])} H${f(P.item.x - 6)}`, class: "apw-track"}, anim);
         const dur = 2.6 * tools.length;
         const a0 = i / tools.length, a1 = (i + 0.4) / tools.length, a2 = (i + 0.5) / tools.length, a3 = (i + 0.9) / tools.length;
         const times = [0, a0, a1, a2, a3, 1].map(v => v.toFixed(3)).join(";");
