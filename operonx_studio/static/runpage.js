@@ -303,8 +303,9 @@ async function renderExecPanel(run, e, execs, target) {
     // one execution by its id; an older studio's record without ids
     // falls back to the op's executions, matched by duration
     let match = null;
-    if (e.id) {
-      try { match = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/step?id=${encodeURIComponent(e.id)}`); }
+    const stepId = e.step || e.id;
+    if (stepId) {
+      try { match = await api(`/api/p/${PID}/trace/${encodeURIComponent(run)}/step?id=${encodeURIComponent(stepId)}`); }
       catch { match = null; }
     }
     if (!match) {
