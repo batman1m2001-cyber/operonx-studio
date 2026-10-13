@@ -15,12 +15,12 @@
 "use strict";
 
 const RunView = (() => {
+  // the path, and one heat on it; a failed op is marked whatever is
+  // picked, and an op's values are in the step panel beside the canvas
   const LENSES = [
     ["path", "Path", "Which ops ran — the rest fade"],
     ["time", "Time", "Each op's time in this run, the three slowest ranked"],
-    ["errors", "Errors", "Only what failed, with its error"],
     ["cost", "Cost", "Only ops that cost money"],
-    ["values", "Values", "The values each op produced"],
   ];
 
   function money(cost, unpriced) {
@@ -440,5 +440,6 @@ const RunView = (() => {
   }
 
   state.lens = recall("lens", "path");
+  if (!LENSES.some(([k]) => k === state.lens)) state.lens = "path";   // a retired lens (errors, values)
   return {header, pill, copyId, lensBar, timeline, anomalies, rank, dots, compare, money, focusOp, focusExec, background, LENSES};
 })();

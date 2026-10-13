@@ -4588,3 +4588,34 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .ax-card, .ax-start, .xpcard, .xpwhy:not(.warn):not(.bad), .xpgroup, .evds, .kbtext, .kbinspect,
 .kbchunkrow, .kbhit, .kbcite-row { background: var(--card); --well: var(--surface); }
 .ax-error { background: var(--err-soft); }
+
+/* ── a run's Workflow: the canvas and the step it is on ────────────────
+   The step panel is always beside the canvas (a sheet on a phone): what
+   an op did is never in a side panel the user had to have opened. */
+#traces.workflow .wfsplit { flex: 1; min-height: 0; display: grid; margin: 0 -20px;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 30vw, 460px); border-top: 1px solid var(--border); }
+#traces.workflow .wfsplit #stage { margin: 0; border-top: none; min-height: 0; height: 100%; }
+.wfstep { position: relative; min-width: 0; overflow-y: auto; padding: 14px 16px 24px;
+  border-left: 1px solid var(--border); background: var(--surface); }
+.wfstep .wfbar { display: none; }   /* always there on a desktop: only the phone's sheet closes */
+.wfarrow { min-width: 28px; padding: 0 6px; font-size: 11px; }
+.wfstep .wfhint { margin-top: 24px; }
+.wfexecs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 2px 32px 12px 0; }
+.wfexecs .pill { cursor: pointer; border: none; min-height: 24px; font: 500 var(--fs-xs) var(--mono); }
+.wfexecs .pill:hover { background: var(--surface-3); }
+.wfexecs .pill.on { background: var(--accent-soft); color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--accent); }
+.wfexecs .pill.err { color: var(--err); }
+.wfstepper { display: inline-flex; align-items: center; gap: 2px; }
+.wfstepat { min-width: 96px; text-align: center; font-size: var(--fs-sm); color: var(--text-2); font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  #traces.workflow .wfsplit { grid-template-columns: minmax(0, 1fr); margin: 0 -12px; }
+  .wfstep { display: none; }
+  .wfstep.open { display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; max-height: 64vh;
+    border-left: none; border-radius: 16px 16px 0 0; box-shadow: var(--sh-3); outline: 1px solid var(--float-edge); }
+  .wfstepat { min-width: 0; }
+  .wfstep.open { padding-top: 0; }
+  .wfstep .wfbar { display: flex; align-items: center; justify-content: flex-end; position: sticky; top: 0; z-index: 3;
+    margin: 0 -16px 8px; padding: 6px 8px; background: var(--surface); }
+  .wfstep .wfgrip { position: absolute; left: 50%; top: 8px; width: 36px; height: 4px; margin-left: -18px;
+    border-radius: 2px; background: var(--surface-3); }
+}
