@@ -4390,7 +4390,9 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .node.agentcell .asock.s-memory { color: var(--ap-mem); }
 .node.agentcell .asock.s-tool { color: var(--ap-tool); }
 .node.agentcell .amark { position: absolute; right: calc(100% + 4px); top: 50%; transform: translateY(-50%);
-  display: grid; place-items: center; width: 11px; height: 11px; pointer-events: none; }
+  display: grid; place-items: center; width: 11px; height: 11px; pointer-events: auto; cursor: pointer; }
+/* the icon is what is clicked to plug the parts in or out: a few px round it count */
+.node.agentcell .amark::after { content: ""; position: absolute; inset: -5px -4px -5px -6px; }
 .node.agentcell .amark .dbicon { width: 11px; height: 11px; }
 .node.agentcell .asock.empty .amark { opacity: .45; }
 .node.agentcell .asockg { position: absolute; inset: 0; display: block; width: 100%; height: 100%;
