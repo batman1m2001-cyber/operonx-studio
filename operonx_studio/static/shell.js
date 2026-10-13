@@ -320,7 +320,6 @@ $("#graph-pick").onchange = (ev) => {
   render(); fit(); renderFlowInfo(); pushView();
 };
 
-$("#btn-fit").onclick = fit;
 for (const b of document.querySelectorAll(".viewseg button")) b.onclick = () => setCanvasView(b.dataset.view);
 showViewSeg();
 {
@@ -335,12 +334,42 @@ showViewSeg();
     if (flowDotsOn && !document.querySelector(".eflow")) render();
   };
 }
-$("#btn-zoom-in").onclick = () => { const c = stageCenter(); zoomAt(c.x, c.y, 1.25); };
-$("#btn-zoom-out").onclick = () => { const c = stageCenter(); zoomAt(c.x, c.y, 0.8); };
-$("#btn-zoom-pct").onclick = () => {
-  const c = stageCenter();
-  zoomAt(c.x, c.y, 1 / state.view.scale);   // back to exactly 100%
-};
+/* One zoom control: the percentage opens a menu of in, out, 100% and fit
+ * (each keeps its key: + − 1 0, and ctrl+wheel and pinch still zoom). */
+(() => {
+  const btn = $("#btn-zoom-pct"), menu = $("#zoommenu");
+  const show = (open) => {
+    // above the percentage, kept inside the bar's own width
+    const bar = btn.offsetParent;
+    menu.style.left = `${Math.max(0, Math.min(btn.offsetLeft, (bar ? bar.offsetWidth : 0) - 190))}px`;
+    menu.hidden = !open;
+    btn.setAttribute("aria-expanded", String(open));
+  };
+  btn.onclick = (ev) => {
+    ev.stopPropagation();
+    show(menu.hidden);
+    if (!menu.hidden) menu.querySelector("button").focus();
+  };
+  for (const b of menu.querySelectorAll("button[data-zoom]")) b.onclick = (ev) => {
+    ev.stopPropagation();
+    const c = stageCenter(), z = b.dataset.zoom;
+    if (z === "in") zoomAt(c.x, c.y, 1.25);
+    else if (z === "out") zoomAt(c.x, c.y, 0.8);
+    else if (z === "100") zoomAt(c.x, c.y, 1 / state.view.scale);   // back to exactly 100%
+    else fit();
+    // in and out are pressed again and again: the menu stays for them
+    if (z === "100" || z === "fit") { show(false); btn.focus(); }
+  };
+  menu.addEventListener("keydown", (ev) => {
+    const items = [...menu.querySelectorAll("button")], i = items.indexOf(document.activeElement);
+    if (ev.key === "Escape") { ev.stopPropagation(); show(false); btn.focus(); }
+    else if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      ev.preventDefault(); ev.stopPropagation();
+      items[(i + (ev.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+    }
+  });
+  document.addEventListener("click", (ev) => { if (!menu.hidden && !ev.target.closest("#zoommenu")) show(false); });
+})();
 
 (() => {
   const stage = $("#stage");
@@ -554,12 +583,14 @@ async function load(first) {
     $("#stage").append(box);
     $("#live").classList.add("stale");
     $("#live-text").textContent = "Extraction failed";
+    $("#live").title = "Extraction failed: " + lines[lines.length - 1];
     state.stamp = data.stamp;
     return;
   }
   for (const b of document.querySelectorAll("#stage .errbox")) b.remove();
   $("#live").classList.remove("stale");
   $("#live-text").textContent = "Live";
+  $("#live").title = "Watching the project's code: the studio redraws when it changes";
   // which ops' code changed since the last extraction — the canvas
   // outlines them for a while, so an edit (the assistant's or anyone's)
   // shows where it landed
@@ -660,6 +691,8 @@ function setLinkState(up) {
   if (!live || live.classList.contains("stale")) return;
   live.classList.toggle("down", !up);
   $("#live-text").textContent = up ? "Live" : "Reconnecting…";
+  live.title = up ? "Watching the project's code: the studio redraws when it changes"
+    : "Lost the studio: reconnecting…";
 }
 
 async function performUi(kind, args) {
