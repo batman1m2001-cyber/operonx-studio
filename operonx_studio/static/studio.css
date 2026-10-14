@@ -4821,3 +4821,11 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   max-width: 100%; color: var(--ag-ink); }
 /* on the wall: the rows start inside the cell's 14px left padding */
 .node.agentcell.dfcard .dfport .dfhole { position: absolute; left: -19.5px; margin: 0; }
+
+/* Inspect, n8n's order: the op's last Input, its settings, its last Output */
+#inspector section.lastio > .stitle { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+#inspector .lastfrom { font-size: 11.5px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-3); }
+#inspector .lastfrom .linkbtn { font-size: 11.5px; min-height: 0; padding: 0; }
+#inspector .lastfrom .lastbad { color: var(--err); }
+#inspector .lastio.last-out .iobar { display: none; }
+

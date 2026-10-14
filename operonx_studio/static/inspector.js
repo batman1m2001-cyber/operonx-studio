@@ -137,8 +137,12 @@ function select(key) {
   // repeat what every execution already shows, and code lives in the
   // flow view — both stand down until the run is cleared.
   if (n.description) panel.append(el("div", "rolenote", n.description));
-  // what can be set on it, as what it is (configure.js), then its wiring
+  // what can be set on it, as what it is (configure.js), then its wiring.
+  // n8n's order: what it got last, its settings, what it gave last
+  const lastP = !state.run && !n.graph ? lastExecution(n) : null;
+  if (lastP) panel.append(lastSection(n, lastP, "in"));
   if (!state.run && !n.graph) panel.append(Configure.section(it));
+  if (lastP) panel.append(lastSection(n, lastP, "out"));
   if (!state.run) panel.append(portsSection(it));
   const res = resourceSection(n);
   if (res) panel.append(res);
@@ -150,6 +154,47 @@ function select(key) {
   if (execP && n.graph) panel.append(executionsSection(n, execP));
   if (n.code && !state.run) panel.append(codeSection(n));
   if (n.graph) panel.append(membersSection(it));
+}
+
+/* The op's last recorded execution (any run of this graph), fetched once
+ * per selection and shared by Input and Output. */
+function lastExecution(n) {
+  const g = state.graph ? state.graph.name : "";
+  return api(`/api/p/${PID}/op/${encodeURIComponent(n.name)}/last?graph=${encodeURIComponent(g)}`).catch(() => ({run: null}));
+}
+
+/* Input (what it got) or Output (what it gave), from its last execution;
+ * the run it came from is a link. */
+function lastSection(n, lastP, side) {
+  const sec = el("section", `lastio last-${side}`);
+  const head = el("div", "stitle", side === "in" ? "Input" : "Output");
+  sec.append(head);
+  const body = el("div", "lastbody");
+  body.append(el("div", "note", "Reading its last run…"));
+  sec.append(body);
+  lastP.then((got) => {
+    body.textContent = "";
+    if (!got || !got.run) {
+      if (side === "in") body.append(el("div", "note", "It has not run yet. Run the flow in the Playground to see what it gets and gives."));
+      else sec.remove();
+      return;
+    }
+    const x = got.execution || {};
+    if (side === "in") {
+      const from = el("div", "lastfrom");
+      const link = el("button", "linkbtn mono", got.run);
+      link.type = "button";
+      link.title = "Open this run";
+      link.onclick = () => performUi("open_run", {run: got.run, mode: "workflow", quiet: true});
+      from.append(el("span", null, "last run "), link);
+      if (got.at) from.append(el("span", null, ` · ${new Date(got.at * 1000).toLocaleString([], {hour12: false, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"})}`));
+      if (x.status && x.status !== "ok") from.append(el("span", "lastbad", ` · ${x.status}`));
+      head.append(from);
+    }
+    if (side === "out" && x.error) body.append(el("div", "errline mono", String(x.error).trim().split("\n").pop()));
+    body.append(IO.panel(x.inputs, x.outputs, {only: side, mode: recall("ioMode", "pretty"), onMode: (m) => store("ioMode", m)}));
+  });
+  return sec;
 }
 
 function valuesSection(n, execP) {

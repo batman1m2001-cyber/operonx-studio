@@ -1,6 +1,6 @@
 # Must-have UX: sign in with Google, the assistant's Claude sign-in where it is needed, edit an op like n8n
 
-**Status:** proposal, 2026-10-14. Nothing implemented.
+**Status:** 2026-10-14. U2 was already built (found when starting it). U3 (c) done; (a) and (b) next; U1 waits for an OAuth client.
 
 ## Why
 
@@ -46,15 +46,12 @@ Who may sign in, and with which role:
 - the page shows the sign-in link and takes back the code;
 - the token never leaves that directory.
 
-But it lives in **Settings › Assistant**. Someone who opens the assistant signed out gets an error, not a way in.
+**Correction (found when starting U2):** the plan said it lived only in Settings. It does not. The assistant panel already does everything proposed here:
+- signed out, the panel shows its own **Sign in with Claude** card when the page loads (`assistant.js`, on load);
+- a reply that fails for want of a sign-in brings the card back, and an error card offers **Sign in**;
+- the usage popover at the composer's foot shows the account, with **Switch account** and **Sign out**.
 
-**Proposal:**
-- Signed out, the assistant panel itself says **Sign in with Claude**. The link opens claude.ai, and the field to paste the code sits right there.
-- Signed in, the composer's footer shows the account (its email) with **Sign out**.
-- Settings keeps the same block for whoever looks there.
-- No new sign-in mechanism.
-
-**Size:** small.
+**Proposal:** none. It is built.
 
 ### U3. Edit an op in the Flow view, like n8n's node panel (no drag and drop)
 
@@ -80,6 +77,8 @@ Every change is shown as a diff first, written into the code safely (`safewrite.
   Proposal: Inspect shows an op in that order, top to bottom: **Input** (last recorded), **Settings** (editable), **Output** (last, or the new one after Run this op). Only the order changes; each part already exists somewhere in the studio.
 
 **Size:** (c) small, (a) medium, (b) medium.
+
+**(c) done:** a new endpoint returns an op's last recorded execution from its graph's newest runs (`/api/p/{pid}/op/{op}/last`). Inspect shows **Input** (with a link to that run), the settings, then **Output**.
 
 **Not proposed:** dragging or moving anything; adding, deleting or rewiring ops on the canvas. The flow stays code-first, and the assistant writes new ops.
 

@@ -1097,7 +1097,11 @@
         outputs ? fmtSize(sizeOf(outputs)) : null);
       // in time order, as Langfuse reads: what came in, then what came out
       // (a caller can still ask for the answer first)
-      if (opts.outputsFirst && !isChat) cards.append(outCard, inCard);
+      // one side only: a caller that puts something between them (Inspect:
+      // Input, then the op's settings, then Output)
+      if (opts.only === "in") cards.append(inCard);
+      else if (opts.only === "out") cards.append(outCard);
+      else if (opts.outputsFirst && !isChat) cards.append(outCard, inCard);
       else cards.append(inCard, outCard);
     };
     for (const [key, label] of [["pretty", "Formatted"], ["json", "JSON"]]) {
