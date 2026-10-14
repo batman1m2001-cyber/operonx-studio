@@ -5,3 +5,6 @@ uv.lock
 studio.html
 .pytest_cache/
 scripts/perf/edge_audit/
+
+# secrets (Google sign-in keys)
+.env

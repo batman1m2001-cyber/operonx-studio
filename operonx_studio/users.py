@@ -180,7 +180,7 @@ def audit_detail(body: Any) -> Dict[str, Any]:
             out[key] = [x[:200] if isinstance(x, str) else x for x in v[:20]]
     return out
 
-_USER_FIELDS = ("name", "role", "must_change", "disabled", "machine_login", "claude_home", "claude_email")
+_USER_FIELDS = ("name", "role", "must_change", "disabled", "machine_login", "claude_home", "claude_email", "email")
 
 
 class UserStore:
@@ -206,6 +206,9 @@ class UserStore:
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=NORMAL")
             self._db.executescript(_SCHEMA)
+            # the Google address a person signs in with (Google's device sign-in)
+            if "email" not in {r[1] for r in self._db.execute("PRAGMA table_info(users)")}:
+                self._db.execute("ALTER TABLE users ADD COLUMN email TEXT")
         self._cache: Dict[str, Tuple[float, Any]] = {}
         # the studio prunes at start (app.py); after that, once a day as rows arrive
         self._pruned = time.time()
@@ -253,6 +256,13 @@ class UserStore:
     def by_name(self, username: str) -> Optional[Dict[str, Any]]:
         rows = self._q("SELECT * FROM users WHERE username = ?", ((username or "").strip().lower(),))
         return self._user(rows[0]) if rows else None
+
+    def by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """The account a Google address belongs to (case does not matter)."""
+        email = (email or "").strip().lower()
+        if not email:
+            return None
+        return self._user(next(iter(self._q("SELECT * FROM users WHERE lower(email) = ?", (email,))), None))
 
     def first_admin(self) -> Optional[Dict[str, Any]]:
         """The oldest active admin: who everyone is when auth is off."""

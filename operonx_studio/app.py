@@ -1091,6 +1091,119 @@ def build_studio_app(recents: Optional[Recents] = None):
         _cookie(response, request, token)
         return response
 
+    # ── sign in with Google: its device flow (docs/UX_MUSTHAVE_PLAN.md U1) ──
+    # The page shows Google's link and a code; the person signs in on Google
+    # and types it there; the page asks here until Google says done. Google
+    # never comes back to the studio, so its address may change (a tunnel).
+    # The keys: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, from the environment
+    # or the studio checkout's .env; an OAuth client of the type "TVs and
+    # Limited Input devices". Only an address an admin gave an account signs in.
+    def _google_keys() -> Tuple[str, str]:
+        cid, secret = os.environ.get("GOOGLE_CLIENT_ID", ""), os.environ.get("GOOGLE_CLIENT_SECRET", "")
+        if not (cid and secret):
+            env_file = Path(__file__).resolve().parents[1] / ".env"
+            if env_file.is_file():
+                from dotenv import dotenv_values
+
+                vals = dotenv_values(env_file)
+                cid, secret = cid or (vals.get("GOOGLE_CLIENT_ID") or ""), secret or (vals.get("GOOGLE_CLIENT_SECRET") or "")
+        return cid.strip(), secret.strip()
+
+    google_logins: Dict[str, Dict[str, Any]] = {}   # id -> {device_code, interval, expires}
+
+    @app.get("/api/login/google")
+    def google_enabled() -> JSONResponse:
+        cid, secret = _google_keys()
+        return JSONResponse({"enabled": bool(auth_on and cid and secret)})
+
+    @app.post("/api/login/google/start")
+    def google_start() -> JSONResponse:
+        import httpx
+
+        cid, secret = _google_keys()
+        if not (auth_on and cid and secret):
+            return JSONResponse({"error": "Google sign-in is not set up on this studio"}, status_code=404)
+        now = time.time()
+        for k in [k for k, v in google_logins.items() if v["expires"] < now]:
+            google_logins.pop(k, None)
+        if len(google_logins) > 50:
+            return JSONResponse({"error": "Too many sign-ins in progress — try again in a minute"}, status_code=429)
+        try:
+            r = httpx.post("https://oauth2.googleapis.com/device/code",
+                           data={"client_id": cid, "scope": "openid email"}, timeout=15)
+            got = r.json()
+        except Exception as exc:  # noqa: BLE001 — Google unreachable: said, not raised
+            return JSONResponse({"error": f"Google did not answer: {type(exc).__name__}"}, status_code=502)
+        if "device_code" not in got:
+            return JSONResponse({"error": f"Google refused: {got.get('error_description') or got.get('error') or r.status_code}"},
+                                status_code=502)
+        import secrets as _secrets
+
+        lid = _secrets.token_urlsafe(16)
+        google_logins[lid] = {"device_code": got["device_code"], "interval": int(got.get("interval") or 5),
+                              "expires": now + int(got.get("expires_in") or 1800)}
+        return JSONResponse({"id": lid, "code": got["user_code"],
+                             "url": got.get("verification_url") or got.get("verification_uri"),
+                             "interval": int(got.get("interval") or 5), "expires_in": int(got.get("expires_in") or 1800)})
+
+    @app.post("/api/login/google/poll")
+    def google_poll(body: Dict[str, Any], request: Request) -> JSONResponse:
+        import base64
+
+        import httpx
+
+        lid = str(body.get("id") or "")
+        lg = google_logins.get(lid)
+        if lg is None or lg["expires"] < time.time():
+            google_logins.pop(lid, None)
+            return JSONResponse({"error": "That sign-in expired — start again"}, status_code=410)
+        cid, secret = _google_keys()
+        try:
+            r = httpx.post("https://oauth2.googleapis.com/token", timeout=15, data={
+                "client_id": cid, "client_secret": secret, "device_code": lg["device_code"],
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"})
+            got = r.json()
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"status": "pending", "note": f"Google did not answer: {type(exc).__name__}"})
+        err = got.get("error")
+        if err in ("authorization_pending", "slow_down"):
+            if err == "slow_down":
+                lg["interval"] += 5
+            return JSONResponse({"status": "pending", "interval": lg["interval"]})
+        google_logins.pop(lid, None)
+        if err or "id_token" not in got:
+            words = {"access_denied": "The sign-in was declined on Google", "expired_token": "The code expired — start again"}
+            return JSONResponse({"error": words.get(err, f"Google refused: {got.get('error_description') or err}")}, status_code=401)
+        # the ID token came straight from Google's token endpoint over TLS, for
+        # this client's secret: its claims are read, not its signature checked
+        # (OpenID Connect Core 3.1.3.7, point 6)
+        try:
+            part = got["id_token"].split(".")[1]
+            claims = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+        except Exception:  # noqa: BLE001
+            return JSONResponse({"error": "Google's answer could not be read"}, status_code=502)
+        if (claims.get("aud") != cid or claims.get("iss") not in ("accounts.google.com", "https://accounts.google.com")
+                or float(claims.get("exp") or 0) < time.time() or not claims.get("email_verified")):
+            return JSONResponse({"error": "Google's answer did not check out — start again"}, status_code=401)
+        email = str(claims.get("email") or "").lower()
+        user = users.by_email(email)
+
+        def note(status: int, who: Optional[Dict[str, Any]]) -> None:
+            users.audit(user=who["id"] if who else None, username=who["username"] if who else None, via="google",
+                        method="POST", route="/api/login/google/poll", status=status, detail={"email": email[:120]})
+
+        if user is None:
+            note(403, None)
+            return JSONResponse({"error": f"No account has {email} — ask an admin to add it"}, status_code=403)
+        if user["disabled"]:
+            note(403, user)
+            return JSONResponse({"error": "This account is disabled — ask an admin"}, status_code=403)
+        note(200, user)
+        token = users.start_session(user["id"], label=request.headers.get("user-agent", ""))
+        response = JSONResponse({"ok": True, "user": _person(user, "web")})
+        _cookie(response, request, token)
+        return response
+
     def _end_this_session(request: Any) -> None:
         token = request.cookies.get("oxsession") or ""
         if token and agents.resolve(token) is None:
@@ -1113,7 +1226,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         return response
 
     def _me_out(user: Dict[str, Any]) -> Dict[str, Any]:
-        return {k: user.get(k) for k in ("id", "username", "name", "role", "must_change", "disabled",
+        return {k: user.get(k) for k in ("id", "username", "name", "role", "must_change", "disabled", "email",
                                           "machine_login", "claude_email", "created", "last_seen")}
 
     @app.get("/api/me")
@@ -1200,6 +1313,14 @@ def build_studio_app(recents: Optional[Recents] = None):
         update: Dict[str, Any] = {}
         if "name" in body:
             update["name"] = str(body.get("name") or "").strip()[:80]
+        if "email" in body:
+            email = str(body.get("email") or "").strip().lower()[:120]
+            if email and ("@" not in email or " " in email):
+                return JSONResponse({"error": "That is not an email address"}, status_code=400)
+            other = users.by_email(email) if email else None
+            if other is not None and other["id"] != uid:
+                return JSONResponse({"error": f"{email} already belongs to {other['username']}"}, status_code=400)
+            update["email"] = email or None
         if "role" in body and body["role"] != row["role"]:
             if uid == me_id:
                 return JSONResponse({"error": "You can't change your own role"}, status_code=400)

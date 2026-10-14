@@ -80,3 +80,51 @@ try {
   const boot = JSON.parse(($("login-boot") || {}).textContent || "{}");
   if (boot.step === "password") passwordStep(boot.username || "");
 } catch { /* no boot data: the form */ }
+
+// Sign in with Google: Google's device sign-in. The page shows Google's link
+// and a code; the person signs in on Google and types the code there; this
+// page asks the studio until Google says done. Shown only when the studio
+// has the keys.
+(async () => {
+  let on = false;
+  try { on = (await (await fetch("/api/login/google")).json()).enabled; } catch { on = false; }
+  if (!on) return;
+  $("google-wrap").hidden = false;
+  let timer = null;
+  const fail = (msg) => {
+    clearTimeout(timer);
+    $("google-step").hidden = true;
+    $("google-err").textContent = msg;
+    $("google-btn").disabled = false;
+    $("google-btn").querySelector("span").textContent = "Sign in with Google";
+  };
+  $("google-btn").onclick = async () => {
+    // a tab opened inside the click: one opened after the request is a popup
+    const tab = window.open("", "_blank");
+    $("google-err").textContent = "";
+    $("google-btn").disabled = true;
+    $("google-btn").querySelector("span").textContent = "Asking Google…";
+    const {res, data} = await post("/api/login/google/start", {});
+    if (!res.ok) { if (tab) tab.close(); fail(data.error || "Google sign-in did not start"); return; }
+    $("google-url").href = data.url;
+    $("google-url").textContent = data.url.replace(/^https?:\/\/(www\.)?/, "");
+    $("google-code").textContent = data.code;
+    $("google-step").hidden = false;
+    $("google-btn").querySelector("span").textContent = "Signing in with Google…";
+    if (tab && !tab.closed) { try { tab.location.href = data.url; } catch { /* opened elsewhere */ } }
+    let wait = (data.interval || 5) * 1000;
+    const poll = async () => {
+      const got = await post("/api/login/google/poll", {id: data.id});
+      if (got.res.ok && got.data.ok) { location.href = NEXT; return; }
+      if (!got.res.ok) { fail(got.data.error || "Google sign-in failed"); return; }
+      if (got.data.interval) wait = got.data.interval * 1000;
+      timer = setTimeout(poll, wait);
+    };
+    timer = setTimeout(poll, wait);
+  };
+  $("google-code").onclick = async () => {
+    try { await navigator.clipboard.writeText($("google-code").textContent); $("google-wait").textContent = "Code copied. Waiting for Google…"; }
+    catch { /* select it by hand */ }
+  };
+})();
+
