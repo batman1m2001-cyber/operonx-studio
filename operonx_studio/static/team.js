@@ -235,6 +235,10 @@
       user.placeholder = "ann";
       const name = Account.input("text", "off");
       name.placeholder = "Ann Lee";
+      const gmail = Account.input("email", "off");
+      gmail.autocapitalize = "none";
+      gmail.spellcheck = false;
+      gmail.placeholder = "ann.lee@gmail.com";
       const role = mk("select");
       for (const [v, label] of ROLES) {
         const o = mk("option", null, label);
@@ -256,14 +260,17 @@
       save.type = "submit";
       foot.append(cancel, save);
       form.append(Account.field("Username", user, "Lowercase letters, digits, . _ or - — what they sign in with."),
-                  Account.field("Name", name), roleField, err, foot);
+                  Account.field("Name", name),
+                  Account.field("Google address", gmail, "Optional — they can then use Sign in with Google."),
+                  roleField, err, foot);
       form.onsubmit = async (ev) => {
         ev.preventDefault();
         err.textContent = "";
         save.disabled = true;
         try {
           const got = await Account.call("POST", "/api/admin/users",
-                                         {username: user.value.trim().toLowerCase(), name: name.value.trim(), role: role.value});
+                                         {username: user.value.trim().toLowerCase(), name: name.value.trim(), role: role.value,
+                                          email: gmail.value.trim().toLowerCase()});
           close();
           passwordCard(got.user, got.password, "add");
           load();
