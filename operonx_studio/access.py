@@ -101,6 +101,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/trace/{{run}}/flow"): "read",
     ("GET", f"{P}/trace/{{run}}/tree"): "read",
     ("GET", f"{P}/compare"): "read",
+    ("GET", f"{P}/compare/code"): "read",      # git diff between two runs' commits
     ("GET", f"{P}/trace/{{run}}/timeline"): "read",
     ("GET", f"{P}/trace/{{run}}/op/{{op_name}}"): "read",
     ("GET", f"{P}/op/{{op_name}}/last"): "read",

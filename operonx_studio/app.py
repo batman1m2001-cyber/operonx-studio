@@ -688,6 +688,10 @@ def _bytes_response(request: Any, data: bytes, mime: str, headers: Dict[str, str
 VIEWER_CANNOT = frozenset({"setup", "try"})
 
 
+#: A commit as a run records it (operonx `code_version`: 12 hex).
+_COMMIT = re.compile(r"^[0-9a-f]{7,40}$")
+
+
 def build_studio_app(recents: Optional[Recents] = None):
     from fastapi import FastAPI, Query
     from fastapi.responses import JSONResponse
@@ -2728,6 +2732,73 @@ def build_studio_app(recents: Optional[Recents] = None):
             ops.append(row)
         return JSONResponse({"a": sa, "b": sb, "ops": ops,
                              "d_ms": (sb["duration_ms"] or 0) - (sa["duration_ms"] or 0)})
+
+    @app.get("/api/p/{pid}/compare/code")
+    def compare_code(pid: str, a: str, b: str) -> JSONResponse:
+        """What changed in the project's code between two runs: ``git diff``
+        between the commits each recorded (``version``), limited to the
+        project's directory — per file, its counts and its patch (Operon
+        docs/N8N_LANGGRAPH_GAP_PLAN.md S5). A run made from uncommitted
+        changes says so: those are in no commit."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        sides = []
+        for run in (a, b):
+            got = _record(pid, run)
+            if isinstance(got, JSONResponse):
+                return got
+            s = got[1].summary
+            sides.append({"run": run, "version": s.version, "dirty": bool(s.version_dirty)})
+        out: Dict[str, Any] = {"a": sides[0], "b": sides[1], "files": []}
+        va, vb = sides[0]["version"], sides[1]["version"]
+        if not va or not vb:
+            out["why"] = "a run did not record its commit (not a git checkout, or an older operonx)"
+            return JSONResponse(out)
+        if not (_COMMIT.match(str(va)) and _COMMIT.match(str(vb))):
+            out["why"] = "a run's recorded version is not a commit"
+            return JSONResponse(out)
+        if va == vb:
+            out["same"] = True
+            return JSONResponse(out)
+
+        def git(*args: str, limit: int = 0) -> subprocess.CompletedProcess:
+            return subprocess.run(["git", "-c", "core.quotepath=off", *args], cwd=str(watcher.root),
+                                  capture_output=True, text=True, timeout=15,
+                                  env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+
+        try:
+            for v in (va, vb):
+                if git("cat-file", "-e", f"{v}^{{commit}}").returncode != 0:
+                    out["why"] = f"commit {v} is not in this checkout (fetch it, or it was rebased away)"
+                    return JSONResponse(out)
+            stat = git("diff", "--numstat", "--no-color", va, vb, "--", ".")
+            patch = git("diff", "--no-color", "--no-ext-diff", "-U3", va, vb, "--", ".")
+            log = git("log", "--format=%h%x09%s", "-n", "20", f"{va}..{vb}")
+        except (OSError, subprocess.SubprocessError) as exc:
+            return JSONResponse({"error": f"git: {exc}"}, status_code=502)
+        files: Dict[str, Dict[str, Any]] = {}
+        for line in stat.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3:
+                added, removed, path = parts
+                files[path] = {"path": path, "added": None if added == "-" else int(added),
+                               "removed": None if removed == "-" else int(removed), "patch": ""}
+        text, cap = patch.stdout, 400_000
+        out["truncated"] = len(text) > cap
+        chunks = re.split(r"(?m)^(?=diff --git )", text[:cap])
+        order = list(files)
+        for chunk in chunks:
+            m = re.match(r"diff --git a/(.+?) b/(.+)\n", chunk)
+            if not m:
+                continue
+            name = m.group(2)
+            hit = files.get(name) or next((f for k, f in files.items() if k.endswith(name) or name.endswith(k)), None)
+            if hit is not None:
+                hit["patch"] = chunk
+        out["files"] = [files[k] for k in order]
+        out["commits"] = [dict(zip(("sha", "subject"), ln.split("\t", 1))) for ln in log.stdout.splitlines() if "\t" in ln]
+        return JSONResponse(out)
 
     @app.get("/api/p/{pid}/trace/{run}/timeline")
     def trace_timeline(pid: str, run: str) -> JSONResponse:

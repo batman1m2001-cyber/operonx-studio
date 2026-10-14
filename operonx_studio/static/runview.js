@@ -630,6 +630,72 @@ const RunView = (() => {
     table.append(tbody);
     wrap.append(table);
     box.append(wrap);
+    box.append(codeDiff(a, b, data.a, data.b));
+  }
+
+  /* What changed in the code between the two runs: git diff between the
+   * commits they recorded, asked for only when opened. */
+  function codeDiff(a, b, sa, sb) {
+    const sec = el("section", "cmpcode");
+    const short = (v) => String(v || "").slice(0, 7);
+    const dirty = [[sa, "A"], [sb, "B"]].filter(([s]) => s.version_dirty).map(([, l]) => l);
+    const dirtyNote = dirty.length
+      ? el("div", "note", `Run ${dirty.join(" and ")} ran with uncommitted changes, which no commit holds — they are not in this diff.`)
+      : null;
+    sec.append(el("div", "stitle", "Code"));
+    if (!sa.version || !sb.version) {
+      sec.append(el("div", "note", "A run did not record its commit, so the code cannot be compared."));
+      return sec;
+    }
+    if (sa.version === sb.version) {
+      sec.append(el("div", "note", `Same commit (${short(sa.version)}).`));
+      if (dirtyNote) sec.append(dirtyNote);
+      return sec;
+    }
+    const open = el("button", null, `Show what changed: ${short(sa.version)} → ${short(sb.version)}`);
+    open.type = "button";
+    sec.append(open);
+    if (dirtyNote) sec.append(dirtyNote);
+    open.onclick = async () => {
+      open.disabled = true;
+      let d;
+      try { d = await api(`/api/p/${PID}/compare/code?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`); }
+      catch (e) { open.replaceWith(el("div", "errbox", e.message)); return; }
+      const body = el("div", "cmpcodebody");
+      if (d.why) body.append(el("div", "note", d.why));
+      else if (!d.files.length) body.append(el("div", "note", "No change in this project's files between the two commits."));
+      if ((d.commits || []).length) {
+        const log = el("div", "cmpcommits");
+        for (const c of d.commits) {
+          const row = el("div", "cmpcommit");
+          row.append(el("span", "mono", c.sha), el("span", null, c.subject));
+          log.append(row);
+        }
+        body.append(log);
+      }
+      for (const f of d.files) {
+        const det = el("details", "cmpfile");
+        const sum = el("summary");
+        sum.append(el("span", "mono", f.path));
+        sum.append(el("span", "cmpfile-n add", f.added == null ? "binary" : `+${f.added}`));
+        if (f.removed != null) sum.append(el("span", "cmpfile-n del", `−${f.removed}`));
+        det.append(sum);
+        const pre = el("pre", "mono cmppatch");
+        // git's own header lines repeat the file's name above them
+        const lines = String(f.patch || "").split("\n").filter(l => !/^(diff --git |index |--- |\+\+\+ |similarity |rename |new file|deleted file)/.test(l));
+        for (const line of lines) {
+          const cls = line.startsWith("+") && !line.startsWith("+++") ? "add"
+            : line.startsWith("-") && !line.startsWith("---") ? "del" : line.startsWith("@@") ? "hunk" : null;
+          pre.append(el("span", cls ? `pl ${cls}` : "pl", line));
+        }
+        det.append(pre);
+        body.append(det);
+      }
+      if (d.truncated) body.append(el("div", "note", "The diff is long: the rest is cut. Run git diff for all of it."));
+      open.replaceWith(body);
+      if (d.files.length === 1) body.querySelector("details").open = true;
+    };
+    return sec;
   }
 
   function render() {
