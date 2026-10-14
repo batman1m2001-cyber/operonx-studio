@@ -1717,6 +1717,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .status.s-ok { color: var(--ok); } .status.s-ok::before { background: var(--ok); }
 .status.s-bad { color: var(--err); } .status.s-bad::before { background: var(--err); }
 .status.s-run { color: var(--ink-amber51); } .status.s-run::before { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.status.s-wait { color: var(--warn); } .status.s-wait::before { background: var(--warn); }
 .status.s-skip { color: var(--text-3); }
 @keyframes pulse { 50% { opacity: .35; } }
 .counts { display: inline-flex; gap: 10px; flex-wrap: wrap; font-size: var(--fs-md);
@@ -1855,6 +1856,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .stdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
 .stdot.bad { background: var(--err); }
 .stdot.run { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.stdot.wait { background: var(--warn); }
 .runerr { color: var(--err); font-size: 12px; margin-top: 2px; max-width: 560px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runstable .runacts .iconbtn { opacity: 0; }
@@ -1967,6 +1969,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .pill.status.s-ok { background: var(--ok-soft); }
 .pill.status.s-bad { background: var(--err-soft); }
 .pill.status.s-run { background: var(--accent-soft); }
+.pill.status.s-wait { background: var(--warn-soft); }
 .idcopy { min-height: 24px; width: 24px; min-width: 24px; padding: 0; color: var(--text-3); flex: none; }
 .idcopy:hover { color: var(--text); }
 .idcopy .icon { width: 13px; height: 13px; }
@@ -4853,3 +4856,19 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 #inspector .lastnow { margin-bottom: 6px; }
 #inspector .lastthen { margin: 12px 0 4px; font-size: 11.5px; color: var(--text-3); }
 
+
+/* a parked run's questions, answered on its page (S1) */
+.waitcard { margin: 10px 0 4px; padding: 12px 14px; border: 1px solid var(--warn); border-radius: var(--r-md, 8px);
+  background: var(--warn-soft); display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
+.waitcard-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.waitcard-head strong { color: var(--warn); }
+.waitq { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: var(--r-sm, 6px); background: var(--surface); }
+.waitq-op { font-size: var(--fs-sm); color: var(--text-2); }
+.waitq-payload { margin: 0; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; font-size: 13px; }
+.waitq-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.waitq-free { display: flex; flex-direction: column; gap: 6px; }
+.waitq-free textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+.waitq-free .btn { align-self: flex-start; }
+.waitcard-note:empty { display: none; }
+.waitcard-note { font-size: var(--fs-sm); color: var(--text-2); }
+.waitcard-note.bad { color: var(--err); }

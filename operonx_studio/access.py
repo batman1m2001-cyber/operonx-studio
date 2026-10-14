@@ -173,6 +173,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/play/send"): "edit",
     ("POST", f"{P}/play/end"): "edit",
     ("POST", f"{P}/play/rerun"): "edit",
+    ("POST", f"{P}/runs/answer"): "edit",       # resumes a parked run: a real run goes on
     ("POST", f"{P}/play/restart"): "edit",
     ("POST", f"{P}/kb/{{service}}/{{path:path}}"): "edit",     # a query runs the project's code and its answer model
 

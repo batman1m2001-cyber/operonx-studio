@@ -54,6 +54,83 @@ const RunView = (() => {
     return b;
   }
 
+  /* A parked run's questions (its trace's metadata.interrupted), each
+   * answered here: Approve, Deny, or any JSON. The answer resumes the run
+   * through the project's bridge, which checks the journal still waits;
+   * the page then reads the run again, the whole of it. */
+  function questions(run, s, mode) {
+    const asked = ((s.metadata || {}).interrupted || []);
+    const box = el("div", "waitcard");
+    const head = el("div", "waitcard-head");
+    head.append(el("strong", null, asked.length > 1 ? `Waiting for ${asked.length} answers` : "Waiting for an answer"));
+    head.append(el("span", "muted", "The run stopped here and holds nothing while it waits."));
+    box.append(head);
+    const note = el("div", "waitcard-note");
+    const canAnswer = !(window.Account && Account.viewOnly);
+    async function send(q, value, buttons) {
+      buttons.forEach(b => { b.disabled = true; });
+      note.className = "waitcard-note";
+      note.textContent = "Sending the answer — the run goes on…";
+      let got;
+      try {
+        got = await api(`/api/p/${PID}/runs/answer`, {run_id: run, answers: {[q.id]: value}});
+      } catch (err) {
+        note.className = "waitcard-note bad";
+        note.textContent = String(err.message || err);
+        buttons.forEach(b => { b.disabled = false; });
+        return;
+      }
+      toast(got.status === "interrupted" ? "Answered — it asks again"
+        : got.status === "error" ? "Answered — the run failed after it" : "Answered — the run finished");
+      return mode === "workflow" ? showRunWorkflow(run) : showRunTree(run);
+    }
+    for (const q of asked) {
+      const item = el("div", "waitq");
+      const op = String(q.op || "").replace(/^\./, "").split(".").pop();
+      item.append(el("div", "waitq-op", op ? `Question from ${op}` : "The run asks"));
+      const payload = el("pre", "waitq-payload");
+      payload.textContent = typeof q.payload === "string" ? q.payload : JSON.stringify(q.payload, null, 2);
+      item.append(payload);
+      if (canAnswer) {
+        const row = el("div", "waitq-actions");
+        const yes = el("button", "btn primary small", "Approve");
+        const no = el("button", "btn small", "Deny");
+        const other = el("button", "btn ghost small", "Answer…");
+        [yes, no, other].forEach(b => { b.type = "button"; });
+        yes.title = 'Answer "approve"';
+        no.title = 'Answer "deny"';
+        other.title = "Answer with any JSON value";
+        const free = el("div", "waitq-free");
+        free.hidden = true;
+        const text = el("textarea", "mono");
+        text.rows = 3;
+        text.placeholder = '{"approved": true, "note": "ok"}  — any JSON; plain text is sent as a string';
+        text.setAttribute("aria-label", "Your answer, as JSON");
+        const go = el("button", "btn primary small", "Send");
+        go.type = "button";
+        free.append(text, go);
+        const all = [yes, no, other, go];
+        yes.onclick = () => send(q, "approve", all);
+        no.onclick = () => send(q, "deny", all);
+        other.onclick = () => { free.hidden = !free.hidden; if (!free.hidden) text.focus(); };
+        go.onclick = () => {
+          const raw = text.value.trim();
+          if (!raw) { text.focus(); return; }
+          let value = raw;
+          try { value = JSON.parse(raw); } catch { /* plain text: a string */ }
+          send(q, value, all);
+        };
+        row.append(yes, no, other);
+        item.append(row, free);
+      }
+      box.append(item);
+    }
+    if (!asked.length) box.append(el("div", "muted", "Its questions are not in this trace (recorded by an older operonx)."));
+    else if (!canAnswer) box.append(el("div", "muted", "A viewer cannot answer; an editor can."));
+    box.append(note);
+    return box;
+  }
+
   /* The header: title row, the verdict, the two highlights, the origin. */
   function header(run, data, mode, extras) {
     const s = data.summary || {};
@@ -79,8 +156,10 @@ const RunView = (() => {
     const line = el("div", "verdict runfacts");
     // a run still going (or whose process died) has no verdict yet
     const running = s.status === "running";
-    const status = el("span", "pill status " + (running ? "s-run" : failed ? "s-bad" : "s-ok"),
-      running ? "running" : failed ? "failed" : "ok");
+    // a journalled run parked on a question: neither failed nor done
+    const waiting = s.status === "interrupted" && !failed;
+    const status = el("span", "pill status " + (running ? "s-run" : waiting ? "s-wait" : failed ? "s-bad" : "s-ok"),
+      running ? "running" : waiting ? "waiting" : failed ? "failed" : "ok");
     statusSlot.append(status);
     line.append(pill(fmtMs(s.duration_ms || data.total_ms || 0), "Took"));
     const cost = money(s.cost_usd, s.unpriced);
@@ -107,6 +186,7 @@ const RunView = (() => {
       line.append(next);
     }
     head.append(line);
+    if (waiting) head.append(questions(run, s, mode));
     if (records.length) head.append(errorList(records, mode));
 
     const rolls = data.rollups || [];

@@ -267,8 +267,9 @@ const RunsView = (() => {
     tr.dataset.key = r.run;            // a revisit marks the rows it had not seen
     const st = el("td", "stcell");
     // a live store lists a run that has not ended (or whose process died) as running
-    const dot = el("span", "stdot " + (r.status === "error" ? "bad" : r.status === "running" ? "run" : "ok"));
-    dot.title = r.status;
+    const dot = el("span", "stdot " + (r.status === "error" ? "bad" : r.status === "running" ? "run"
+      : r.status === "interrupted" ? "wait" : "ok"));
+    dot.title = r.status === "interrupted" ? "waiting for an answer" : r.status;
     const cb = el("input", "runpick");
     cb.type = "checkbox";
     cb.checked = picked.has(r.run);
@@ -436,7 +437,8 @@ const RunsView = (() => {
     range.onchange = () => { v.range = range.value; save(); render(); };
     const status = el("select");
     status.setAttribute("aria-label", "Status");
-    for (const [k, label] of [["", "Any status"], ["ok", "Succeeded"], ["error", "Failed"], ["running", "Running"]]) {
+    for (const [k, label] of [["", "Any status"], ["ok", "Succeeded"], ["error", "Failed"], ["running", "Running"],
+      ["interrupted", "Waiting for an answer"]]) {
       const o = el("option", null, label); o.value = k; o.selected = k === v.status; status.append(o);
     }
     status.onchange = () => { v.status = status.value; save(); render(); };
