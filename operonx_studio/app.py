@@ -4401,6 +4401,54 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": text}, status_code=502)
         return JSONResponse(got, status_code=409 if got.get("status") == "error" and "not waiting" in str(got.get("error")) else 200)
 
+    def _run_owner(pid: str, run_id: str) -> Any:
+        """The service (and variant) or job that ran *run_id*, read off its
+        record — what the bridge resumes or forks it with."""
+        got = _record(pid, run_id)
+        if isinstance(got, JSONResponse):
+            return got
+        s = got[1].summary
+        if s.job and s.origin in ("job", "playground"):
+            return {"job": s.job}
+        if s.origin in ("service", "playground"):
+            return {"service": s.service or s.name, **({"variant": s.variant} if s.variant else {})}
+        return JSONResponse({"error": f"a {s.origin} run has no service or job to run it again"},
+                            status_code=400)
+
+    @app.post("/api/p/{pid}/runs/fork")
+    async def runs_fork(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """A new run from one step of a journalled run, as if that op had
+        answered ``outputs`` — ``{"run_id", "at", "ctx"?, "outputs"}`` —
+        with the project's code as it is now (operonx ``fork``,
+        docs/N8N_LANGGRAPH_GAP_PLAN.md L4/S3). The original is not changed.
+        Waits for the new run; its id is ``run_id`` in the reply."""
+        run_id, at, outputs = str(body.get("run_id") or ""), str(body.get("at") or ""), body.get("outputs")
+        if not run_id or not at or not isinstance(outputs, dict):
+            return JSONResponse({"error": 'a fork is {"run_id", "at": "<op>", "outputs": {...}}'}, status_code=400)
+        owner = _run_owner(pid, run_id)
+        if isinstance(owner, JSONResponse):
+            return owner
+        ctx = body.get("ctx") or ["main"]
+        if isinstance(ctx, str):
+            ctx = ctx.split(".")
+        bridge, err = await _play(pid)
+        if err is not None:
+            return err
+        msg = {"op": "fork", "run_id": run_id, "at": at, "ctx": list(ctx), "outputs": outputs,
+               "occurrence": int(body.get("occurrence") or 0), **owner}
+        try:
+            reply = await bridge.ask(msg, timeout=600)
+        except (BridgeError, asyncio.TimeoutError) as exc:
+            return JSONResponse({"error": str(exc) or "the new run did not finish in 10 minutes"}, status_code=504)
+        if reply.get("t") == "error":
+            text = str(reply.get("text") or "the bridge refused the fork")
+            if "unknown op" in text:
+                text = "this project's operonx cannot fork a run: it needs operonx 1.23 or later"
+            return JSONResponse({"error": text}, status_code=502)
+        if reply.get("status") == "error" and not str(reply.get("run_id") or "").startswith(run_id + "~"):
+            return JSONResponse({"error": reply.get("error") or "the fork was refused"}, status_code=400)
+        return JSONResponse(reply)
+
     @app.post("/api/p/{pid}/runs/retry")
     async def runs_retry(pid: str, body: Dict[str, Any]) -> JSONResponse:
         """Run a failed journalled run again from its first failed op, with
@@ -4410,17 +4458,9 @@ def build_studio_app(recents: Optional[Recents] = None):
         run_id = str(body.get("run_id") or "")
         if not run_id:
             return JSONResponse({"error": 'a retry is {"run_id": "..."}'}, status_code=400)
-        got = _record(pid, run_id)
-        if isinstance(got, JSONResponse):
-            return got
-        s = got[1].summary
-        if s.origin == "job" and s.job:
-            owner: Dict[str, Any] = {"job": s.job}
-        elif s.origin in ("service", "playground"):
-            owner = {"service": s.service or s.name, **({"variant": s.variant} if s.variant else {})}
-        else:
-            return JSONResponse({"error": f"a {s.origin} run has no service or job to run it again"},
-                                status_code=400)
+        owner = _run_owner(pid, run_id)
+        if isinstance(owner, JSONResponse):
+            return owner
         bridge, err = await _play(pid)
         if err is not None:
             return err

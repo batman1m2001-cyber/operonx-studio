@@ -189,3 +189,34 @@ def test_a_failed_run_is_run_again_from_its_failure(client, project):
     again = client.post(f"/api/p/{pid}/runs/retry", json={"run_id": run_id}).json()
     assert again["status"] == "error" and "no op of the run failed" in again["error"]
     assert client.post(f"/api/p/{pid}/runs/retry", json={}).status_code == 400
+
+
+def test_a_step_is_changed_and_the_run_continues_from_it(client, project):
+    pid = client.post("/api/open", json={"path": str(project)}).json()["id"]
+    got = client.post(f"/api/p/{pid}/play/open", json={
+        "service": "order", "toy": "form", "wait": True, "end": True,
+        "send": [{"kind": "json", "value": {"order": "B2"}}]}).json()
+    run_id = got["events"][-1]["trace_id"]
+
+    forked = client.post(f"/api/p/{pid}/runs/fork",
+                         json={"run_id": run_id, "at": "c", "ctx": "main", "outputs": {"receipt": "R-X"}})
+    assert forked.status_code == 200 and forked.json()["status"] == "ok", forked.text
+    new_id = forked.json()["run_id"]
+    assert new_id.startswith(run_id + "~")
+    assert (project / "charged.txt").read_text().split() == ["B2"]  # charged once
+
+    for _ in range(60):
+        tree = client.get(f"/api/p/{pid}/trace/{new_id}/tree")
+        if tree.status_code == 200:
+            break
+        time.sleep(0.1)
+    tree = tree.json()
+    assert tree["summary"]["status"] == "ok"
+    assert tree["summary"]["metadata"]["forked_from"] == run_id
+    assert [r["op"] for r in tree["rows"]] == ["c", "s"]
+    original = client.get(f"/api/p/{pid}/trace/{run_id}/tree").json()
+    assert original["summary"]["status"] == "ok" and len(original["rows"]) == 2  # unchanged
+
+    bad = client.post(f"/api/p/{pid}/runs/fork",
+                      json={"run_id": run_id, "at": "c", "outputs": {"nope": 1}})
+    assert bad.status_code == 400 and "has no output 'nope'" in bad.json()["error"]

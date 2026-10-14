@@ -4872,3 +4872,6 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .waitcard-note:empty { display: none; }
 .waitcard-note { font-size: var(--fs-sm); color: var(--text-2); }
 .waitcard-note.bad { color: var(--err); }
+
+/* the step panel's "what if" and re-run blocks: apart from the values above them */
+.rerunsec { margin-top: 14px; }

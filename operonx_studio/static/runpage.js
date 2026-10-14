@@ -175,6 +175,79 @@ async function showRunTree(run) {
 /* One execution, in the order it is read: the verdict (how it went, how
  * it ranks among this op's runs, what stands out), what it produced,
  * what it received, what it cost, its other runs, and what fed it. */
+/* "What if this op had answered otherwise?" — a step of a run kept in a
+ * journal can be changed and the run continued from it (operonx fork): the
+ * steps before it are replayed, not run; what follows runs with the new
+ * value, in the current code. The original run is not changed: the new
+ * one opens, with Compare beside it. */
+function forkable(sm, e, node) {
+  return (sm.metadata || {}).durable && (sm.service || sm.job)
+    && ["service", "playground", "job"].includes(sm.origin)
+    // the graph shown may be another service's: an op it does not know is
+    // left to the bridge, which refuses one that does not answer once
+    && e.status !== "error" && !e.child && !(node && (node.is_gen || node.kind === "graph"))
+    && !String(e.id || "").endsWith("@stopped") && !(window.Account && Account.viewOnly);
+}
+
+function forkSection(run, e, recorded) {
+  const sec = el("section", "rerunsec forksec");
+  sec.append(el("div", "stitle", "What if"));
+  const hint = el("div", "note", "Change what this op answered and run what follows, in the current code — the steps before it are not run again, and this run stays as it is.");
+  const start = el("button", null, "Change this output and continue…");
+  start.type = "button";
+  sec.append(hint, start);
+  start.onclick = () => {
+    const outs = {};
+    for (const [k, v] of Object.entries((recorded && recorded.outputs) || {})) {
+      if (!k.startsWith("_") && !["usage", "cost_usd", "model_used"].includes(k)) outs[k] = v;
+    }
+    const box = el("div", "rerunbox");
+    const ta = el("textarea", "mono playjson");
+    ta.spellcheck = false;
+    ta.setAttribute("aria-label", "The op's output, changed");
+    ta.value = JSON.stringify(outs, null, 2);
+    const err = el("div", "fielderr");
+    const acts = el("div", "priceacts");
+    const go = el("button", "primary", "Continue from here");
+    go.type = "button";
+    acts.append(go);
+    const res = el("div", "rerunres");
+    box.append(ta, err, acts, res);
+    start.replaceWith(box);
+    ta.focus();
+    go.onclick = async () => {
+      let outputs;
+      try { outputs = JSON.parse(ta.value); err.textContent = ""; }
+      catch (x) { err.textContent = `Not JSON: ${x.message}`; return; }
+      if (!outputs || typeof outputs !== "object" || Array.isArray(outputs)) {
+        err.textContent = "The output is an object: {\"<output>\": value}"; return;
+      }
+      go.disabled = true;
+      res.textContent = "";
+      res.append(el("div", "note", "Running what follows…"));
+      let got;
+      try {
+        got = await api(`/api/p/${PID}/runs/fork`, {run_id: run, at: e.op, ctx: e.ctx || "main", outputs});
+      } catch (x) {
+        res.textContent = ""; res.append(el("div", "errbox", x.message)); go.disabled = false; return;
+      }
+      go.disabled = false;
+      res.textContent = "";
+      const top = el("div", "execverdict");
+      const word = got.status === "error" ? "failed" : got.status === "interrupted" ? "waiting" : "ok";
+      top.append(el("span", "status " + (got.status === "error" ? "s-bad" : got.status === "interrupted" ? "s-wait" : "s-ok"), word));
+      const open = el("button", "linkbtn", "Open the new run"); open.type = "button";
+      open.onclick = () => performUi("open_run", {run: got.run_id, quiet: true});
+      const cmp = el("button", "linkbtn", "Compare with this run"); cmp.type = "button";
+      cmp.onclick = () => performUi("compare", {a: run, b: got.run_id});
+      top.append(el("span", "vsep", "·"), open, el("span", "vsep", "·"), cmp);
+      res.append(top);
+      if (got.error) res.append(el("div", "errbox", got.error));
+    };
+  };
+  return sec;
+}
+
 async function renderExecPanel(run, e, execs, target) {
   state.execSel = `${e.op} @ ${e.ctx || "main"} (+${fmtMs(e.start_ms)})`;
   state.execId = e.id || null;
@@ -398,6 +471,10 @@ async function renderExecPanel(run, e, execs, target) {
     const sm = state.runSummary;
     if (typeof PlayView !== "undefined" && sm && (sm.service || sm.job) && state._tlrun === run) {
       panel.insertBefore(PlayView.rerunSection(run, e, match), costSec.nextSibling);
+    }
+    // a journalled run's step: what if it had answered otherwise?
+    if (sm && forkable(sm, e, node)) {
+      panel.insertBefore(forkSection(run, e, match), costSec.nextSibling);
     }
     // an LLM reply carries its own facts line (io.js); only a priced op
     // that is not a chat reply keeps the separate block
