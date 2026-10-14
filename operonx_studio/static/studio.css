@@ -1964,6 +1964,8 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .pill.p-strong .pill-v { font-weight: 650; }
 .pill.mono .pill-v { font-family: var(--mono); font-size: 11.5px; }
 .pill.p-bad { background: var(--err-soft); color: var(--err); font-weight: 600; }
+.runfacts.slowed { margin-top: 6px; align-items: center; }
+.slowed-k { font-size: var(--fs-sm); color: var(--text-3); margin-right: 2px; }
 .pill.p-bad .pill-k { color: inherit; font-weight: 500; }
 .pill.status, .verdict .pill.status { font-size: var(--fs-sm); font-weight: 600; gap: 6px; }
 .pill.status.s-ok { background: var(--ok-soft); }

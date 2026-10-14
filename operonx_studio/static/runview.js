@@ -44,6 +44,39 @@ const RunView = (() => {
     return p;
   }
 
+  /* What slowed the run beside its ops (operonx 1.24): a queue that grew
+   * on an edge, a worker's event loop held for a while, and the worker that
+   * served it with its load. Shown only when something did: on one edge,
+   * 10 or more items waiting at once AND one of them waiting 500 ms or
+   * more, or a loop late by 50 ms at p95. Either half alone is normal: a
+   * burst that drains in milliseconds; a paced consumer (audio playback)
+   * making the next item wait on purpose. One startup spike is not a
+   * held loop. */
+  const QUEUE_ITEMS = 10, QUEUE_WAIT_MS = 500, LAG_P95_MS = 50;
+  function slowedLine(md) {
+    const queued = Object.entries(md.backlog || {}).filter(([, q]) => q.max >= QUEUE_ITEMS && q.max_wait_ms >= QUEUE_WAIT_MS);
+    const lag = md.loop_lag_ms;
+    const held = lag && lag.p95 >= LAG_P95_MS;
+    if (!queued.length && !held) return null;
+    const line = el("div", "verdict runfacts slowed");
+    line.append(el("span", "slowed-k", "Slowed by"));
+    const short = (name) => String(name).split(".").pop();
+    for (const [edge, q] of queued) {
+      const [src, dst] = edge.split(" -> ");
+      line.append(pill(`${q.max} waiting, up to ${fmtMs(q.max_wait_ms)}`, `${short(src)} → ${short(dst)}`, "p-bad",
+        `Items queued on ${edge}: ${q.max} at most at once; the longest waited ${q.max_wait_ms} ms`));
+    }
+    if (held) {
+      line.append(pill(`p95 ${fmtMs(lag.p95)}, max ${fmtMs(lag.max)}`, "Loop lag", "p-bad",
+        "How late the worker's event loop woke while this run went (a 50 ms heartbeat)"));
+    }
+    if (md.worker) {
+      line.append(pill(`${md.worker.active_runs} run${md.worker.active_runs === 1 ? "" : "s"}`, `Worker ${md.worker.pid}`,
+        null, "Runs this worker process was serving when this one started"));
+    }
+    return line;
+  }
+
   /* A run or step id, with one click to copy it. */
   function copyId(text, title) {
     const b = Icons.button("copy", undefined, "small ghost idcopy", title || "Copy the id");
@@ -216,6 +249,8 @@ const RunView = (() => {
       line.append(next);
     }
     head.append(line);
+    const slowed = slowedLine(s.metadata || {});
+    if (slowed) head.append(slowed);
     if (waiting) head.append(questions(run, s, mode));
     if (records.length) head.append(errorList(records, mode));
 
