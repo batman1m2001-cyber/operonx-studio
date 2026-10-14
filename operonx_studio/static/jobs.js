@@ -8,23 +8,10 @@
 
 function renderProjectMenu() {
   const box = $("#pmenu");
-  box.textContent = "";
   const ir = state.ir || {};
-  const col = (title, rows) => {
-    const c = el("div", "pcol");
-    c.append(el("div", "ptitle", title));
-    if (!rows.length) c.append(el("div", "pnone", "none"));
-    for (const r of rows) c.append(r);
-    return c;
-  };
-  const row = (name, sub, onclick, cls) => {
-    const r = el("div", "prow" + (cls ? " " + cls : ""));
-    r.append(el("span", "pn", name));
-    if (sub) r.append(el("span", "ps", sub));
-    r.onclick = () => { $("#pmenu").hidden = true; onclick(); };
-    return r;
-  };
-  const operons = (ir.graphs || []).map(g => row(g.name, `${g.nodes.length} ops`, () => {
+  const row = (name, sub, onclick, cls) => ({name, sub, current: cls === "sel",
+    pick: () => { box.hidden = true; $("#btn-project").setAttribute("aria-expanded", "false"); onclick(); }});
+  const operons = (ir.graphs || []).map(g => row(g.name, `${g.nodes.length} op${g.nodes.length === 1 ? "" : "s"}`, () => {
     state.graph = g; $("#graph-pick").value = g.name; switchTab("flow"); render(); renderFlowInfo();
   }, state.graph && state.graph.name === g.name ? "sel" : ""));
   const services = (ir.services || ir.serves || []).map(sv => {
@@ -44,7 +31,11 @@ function renderProjectMenu() {
   const jobs = (ir.jobs || []).map(j => row(j.name,
     `${jobKind(j)}${j.schedule ? " · " + j.schedule : ""}`,
     () => { state.jobSel = j.name; switchTab("jobs"); }));
-  box.append(col("Operons", operons), col("Services", services), col("Jobs", jobs));
+  menuList(box, {placeholder: "Find an operon, service or job", sections: [
+    {title: "Operons", icon: "graph", rows: operons},
+    {title: "Services", icon: "server", rows: services},
+    {title: "Jobs", icon: "clock", rows: jobs},
+  ]});
 }
 $("#btn-project").onclick = (ev) => {
   ev.stopPropagation();

@@ -128,6 +128,81 @@ function pushView() {
   if (typeof Router !== "undefined") Router.follow(window.__oxview);
 }
 
+/* One menu, used by the project switcher and the project's graphs menu: a
+ * search field that filters as you type, sections each with its icon, rows
+ * of a name and a quiet line under it, the current one ticked. ↑ ↓ move,
+ * Enter picks, Esc closes (the caller's). Rebuilt in place: `keep` holds
+ * what was typed when the rows refresh. */
+function menuList(box, {placeholder, sections, footer}, keep) {
+  const typed = keep ? (box.querySelector(".mlsearch") || {}).value || "" : "";
+  box.textContent = "";
+  box.classList.add("mlist");
+  const search = el("input", "mlsearch");
+  search.type = "text";
+  search.placeholder = placeholder;
+  search.setAttribute("aria-label", placeholder);
+  search.autocomplete = "off";
+  search.value = typed;
+  const list = el("div", "mlrows");
+  list.setAttribute("role", "menu");
+  box.append(search, list);
+  const rows = [];
+  for (const sec of sections) {
+    const head = el("div", "mlhead");
+    if (sec.icon) head.append(Icons.svg(sec.icon));
+    head.append(el("span", null, sec.title));
+    list.append(head);
+    const mine = [];
+    if (!sec.rows.length) list.append(el("div", "mlnone", "none"));
+    for (const r of sec.rows) {
+      const b = el("button", "mlrow" + (r.current ? " current" : ""));
+      b.type = "button";
+      b.setAttribute("role", "menuitem");
+      const text = el("span", "mltext");
+      text.append(el("span", "mlname", r.name));
+      if (r.sub) text.append(el("span", "mlsub", r.sub));
+      b.append(text);
+      if (r.current) b.append(Icons.svg("check", "mlcheck"));
+      if (r.title) b.title = r.title;
+      b.onclick = (ev) => { ev.stopPropagation(); r.pick(); };
+      b._find = `${r.name} ${r.sub || ""}`.toLowerCase();
+      list.append(b);
+      rows.push(b); mine.push(b);
+    }
+    head._rows = mine;
+  }
+  if (footer) {
+    const f = el("button", "mlrow mlfoot", footer.name);
+    f.type = "button";
+    f.onclick = (ev) => { ev.stopPropagation(); footer.pick(); };
+    box.append(f);
+  }
+  let at = -1;
+  const shown = () => rows.filter(r => !r.hidden);
+  const mark = (i) => {
+    const vis = shown();
+    rows.forEach(r => r.classList.remove("active"));
+    at = vis.length ? Math.max(0, Math.min(i, vis.length - 1)) : -1;
+    if (at >= 0) { vis[at].classList.add("active"); vis[at].scrollIntoView({block: "nearest"}); }
+  };
+  const filter = () => {
+    const q = search.value.trim().toLowerCase();
+    for (const r of rows) r.hidden = !!q && !r._find.includes(q);
+    for (const h of list.querySelectorAll(".mlhead")) h.hidden = !!q && h._rows.every(r => r.hidden);
+    mark(0);
+  };
+  search.oninput = filter;
+  search.onclick = (ev) => ev.stopPropagation();
+  search.onkeydown = (ev) => {
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { ev.preventDefault(); mark(at + (ev.key === "ArrowDown" ? 1 : -1)); }
+    else if (ev.key === "Enter") { ev.preventDefault(); const r = shown()[at]; if (r) r.click(); }
+  };
+  if (typed) filter();
+  else mark(Math.max(0, rows.findIndex(r => r.classList.contains("current"))));
+  // a phone's keyboard would cover the menu: the field takes focus on a desk only
+  if (!matchMedia("(max-width: 760px)").matches) requestAnimationFrame(() => search.focus({preventScroll: true}));
+}
+
 /* One shared voice for action feedback: applied, painted, copied. */
 let _toastTimer = null;
 function toast(text, bad, action) {

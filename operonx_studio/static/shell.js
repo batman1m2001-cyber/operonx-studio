@@ -249,27 +249,42 @@ $("#btn-legend").onclick = () => {
 
 /* ── quick switcher: change project without the round trip home ───── */
 
-$("#pname").onclick = async () => {
+/* The projects are fetched once, when the page opens, so the switcher
+ * opens at once (behind a tunnel a fetch is a second); each opening
+ * refreshes them quietly and redraws only if they changed. */
+let projectsSeen = null;
+const fetchProjects = () => api("/api/projects")
+  .then(({projects}) => { projectsSeen = projects.filter(x => x.exists); return projectsSeen; })
+  .catch(() => projectsSeen);
+fetchProjects();
+// a path as a reader scans it: the home folder as ~, the last two folders
+const shortPath = (root) => {
+  const p = String(root || "").replace(/^\/(?:home\/[^/]+|root)(?=\/|$)/, "~");
+  const parts = p.split("/");
+  return parts.length > 3 ? "…/" + parts.slice(-2).join("/") : p;
+};
+function renderSwitcher(keep) {
+  const list = projectsSeen || [];
+  menuList($("#switcher"), {
+    placeholder: list.length ? "Find a project" : "Loading projects…",
+    sections: [{title: "Projects", icon: "folder", rows: list.map(p => ({
+      name: p.name, sub: shortPath(p.root), title: p.root, current: p.id === PID,
+      pick: () => { if (p.id !== PID) location.href = `/p/${p.id}`; else $("#switcher").hidden = true; },
+    }))}],
+    footer: {name: "All projects", pick: () => { location.href = "/"; }},
+  }, keep);
+}
+$("#pname").onclick = () => {
   const menu = $("#switcher");
   if (!menu.hidden) { menu.hidden = true; $("#pname").setAttribute("aria-expanded", "false"); return; }
   $("#pmenu").hidden = true;
-  menu.textContent = "";
-  try {
-    const {projects} = await api("/api/projects");
-    for (const p of projects.filter(x => x.exists)) {
-      const item = el("button", "switchrow" + (p.id === PID ? " here" : ""));
-      item.setAttribute("role", "menuitem");
-      item.append(el("span", "name", p.name));
-      item.append(el("span", "path mono", p.root));
-      item.onclick = () => { if (p.id !== PID) location.href = `/p/${p.id}`; };
-      menu.append(item);
-    }
-    const all = el("button", "switchrow switchall", "All projects");
-    all.onclick = () => { location.href = "/"; };
-    menu.append(all);
-  } catch (e) { menu.append(el("div", "note", e.message)); }
+  renderSwitcher(false);
   menu.hidden = false;
   $("#pname").setAttribute("aria-expanded", "true");
+  const before = JSON.stringify(projectsSeen);
+  fetchProjects().then(() => {
+    if (!menu.hidden && JSON.stringify(projectsSeen) !== before) renderSwitcher(true);
+  });
 };
 document.addEventListener("click", (ev) => {
   if (!ev.target.closest("#switcher") && !ev.target.closest("#pname")) {

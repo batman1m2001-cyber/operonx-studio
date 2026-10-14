@@ -811,6 +811,15 @@ def build_studio_app(recents: Optional[Recents] = None):
             me = {"user": {k: who[k] for k in ("id", "username", "name", "role")}, "auth": auth_on}
             boot = ('<script id="me-boot" type="application/json">'
                     + json.dumps(me).replace("</", "<\\/") + "</script>" + boot)
+        if name == "home.html":
+            # the home page is where a project is picked: its page's script
+            # and styles are fetched while the list is read, so the click
+            # does not wait on them (behind a tunnel, ~25 KB/s: seconds)
+            ptext, _ = _built("project.html")
+            hrefs = re.findall(r'(?:src|href)="(/static/(?:bundle/project\.js|[A-Za-z0-9_-]+\.css)\?v=[^"]+)"', ptext)
+            links = "".join(f'<link rel="prefetch" href="{h}" as="{"script" if h.endswith(".js") or ".js?" in h else "style"}">'
+                            for h in dict.fromkeys(hrefs))
+            text = text.replace("</head>", links + "\n</head>", 1)
         if boot:
             at = text.find("<script src=")
             text = text[:at] + boot + "\n" + text[at:] if at >= 0 else text + boot
