@@ -1296,12 +1296,21 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.post("/api/admin/users")
     def admin_add(body: Dict[str, Any]) -> JSONResponse:
-        """Someone new, with a temporary password shown once."""
+        """Someone new, with a temporary password shown once (and the Google
+        address they may sign in with, when given)."""
+        email = str(body.get("email") or "").strip().lower()[:120]
+        if email and ("@" not in email or " " in email):
+            return JSONResponse({"error": "That is not an email address"}, status_code=400)
+        other = users.by_email(email) if email else None
+        if other is not None:
+            return JSONResponse({"error": f"{email} already belongs to {other['username']}"}, status_code=400)
         try:
             user, password = users.create(str(body.get("username") or ""), name=str(body.get("name") or ""),
                                           role=str(body.get("role") or "editor"), must_change=True)
         except PasswordError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        if email:
+            user = users.update(user["id"], email=email)
         return JSONResponse({"user": _user_out(user), "password": password})
 
     @app.patch("/api/admin/users/{uid}")
