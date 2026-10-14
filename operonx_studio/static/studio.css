@@ -4828,4 +4828,7 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 #inspector .lastfrom .linkbtn { font-size: 11.5px; min-height: 0; padding: 0; }
 #inspector .lastfrom .lastbad { color: var(--err); }
 #inspector .lastio.last-out .iobar { display: none; }
+#inspector .agentins-text { width: 100%; min-height: 90px; resize: vertical; font: 12.5px/1.5 var(--mono, ui-monospace, monospace);
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); }
+#inspector .agentins-text:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 

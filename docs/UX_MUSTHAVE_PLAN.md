@@ -1,6 +1,6 @@
 # Must-have UX: sign in with Google, the assistant's Claude sign-in where it is needed, edit an op like n8n
 
-**Status:** 2026-10-14. U2 was already built (found when starting it). U3 (c) done; (a) and (b) next; U1 waits for an OAuth client.
+**Status:** 2026-10-14. U2 was already built (found when starting it). U3 (c) and a narrower (a) done; (b) next; U1 waits for an OAuth client.
 
 ## Why
 
@@ -77,6 +77,18 @@ Every change is shown as a diff first, written into the code safely (`safewrite.
   Proposal: Inspect shows an op in that order, top to bottom: **Input** (last recorded), **Settings** (editable), **Output** (last, or the new one after Run this op). Only the order changes; each part already exists somewhere in the studio.
 
 **Size:** (c) small, (a) medium, (b) medium.
+
+**(a) narrowed when built:** real agents do not keep their settings as plain values:
+- brd builds every agent in one factory: `instructions=PROMPTS[identity]`, read from `<agent>.prompt` files; `model=Model("agent")`, one resource for all of them;
+- meeting-prep computes instructions in a function, and shares one policy object (`READ_ONLY`) between agents.
+
+What was built:
+- **Instructions** are edited in Inspect wherever they are text: a `.prompt`, `.md` or `.yaml` file, or a literal in the code. They are saved through the Prompts screen's save, which now also finds `.prompt` files, with the diff first and Undo.
+- Instructions computed in code say which function writes them.
+
+Not built, on purpose:
+- **The model:** it is a resource shared by agents, and Inspect's Resource section already shows it, edited on Resources.
+- **Tool policy:** it is a shared object, so changing it for one agent would change others.
 
 **(c) done:** a new endpoint returns an op's last recorded execution from its graph's newest runs (`/api/p/{pid}/op/{op}/last`). Inspect shows **Input** (with a link to that run), the settings, then **Output**.
 
