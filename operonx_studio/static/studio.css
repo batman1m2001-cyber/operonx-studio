@@ -4875,3 +4875,21 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 
 /* the step panel's "what if" and re-run blocks: apart from the values above them */
 .rerunsec { margin-top: 14px; }
+
+/* Compare runs: what changed in the code between them (S5) */
+.cmpcode { margin-top: 18px; display: flex; flex-direction: column; gap: 8px; }
+.cmpcode > button { align-self: flex-start; }
+.cmpcodebody { display: flex; flex-direction: column; gap: 6px; }
+.cmpcommits { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); color: var(--text-2); }
+.cmpcommit { display: flex; gap: 8px; min-width: 0; }
+.cmpcommit span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmpfile { border: 1px solid var(--line, var(--border)); border-radius: var(--r-sm); background: var(--surface); }
+.cmpfile > summary { cursor: pointer; padding: 6px 10px; display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+.cmpfile > summary .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
+.cmpfile-n { font-size: var(--fs-sm); }
+.cmpfile-n.add { color: var(--ok); } .cmpfile-n.del { color: var(--err); }
+.cmppatch { margin: 0; padding: 8px 0; font-size: 12px; line-height: 1.45; overflow: auto; max-height: 520px; border-top: 1px solid var(--line, var(--border)); }
+.cmppatch .pl { display: block; padding: 0 10px; white-space: pre; }
+.cmppatch .pl.add { background: var(--ok-soft); }
+.cmppatch .pl.del { background: var(--err-soft); }
+.cmppatch .pl.hunk { color: var(--text-3); }
