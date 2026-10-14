@@ -3333,7 +3333,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     # bridge) with it; saving writes it back where the text lives, when it
     # lives there verbatim — otherwise the assistant is asked to.
 
-    PROMPT_SUFFIXES = {".yaml", ".yml", ".py", ".txt", ".md", ".json", ".jinja", ".j2", ".toml"}
+    PROMPT_SUFFIXES = {".yaml", ".yml", ".py", ".txt", ".md", ".json", ".jinja", ".j2", ".toml", ".prompt"}
 
     @app.get("/api/p/{pid}/prompts/{op}/samples")
     def prompt_samples(pid: str, op: str, limit: int = 20) -> JSONResponse:

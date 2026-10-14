@@ -142,6 +142,7 @@ function select(key) {
   const lastP = !state.run && !n.graph ? lastExecution(n) : null;
   if (lastP) panel.append(lastSection(n, lastP, "in"));
   if (!state.run && !n.graph) panel.append(Configure.section(it));
+  if (!state.run && n.agent) panel.append(instructionsSection(n));
   if (lastP) panel.append(lastSection(n, lastP, "out"));
   if (!state.run) panel.append(portsSection(it));
   const res = resourceSection(n);
@@ -154,6 +155,36 @@ function select(key) {
   if (execP && n.graph) panel.append(executionsSection(n, execP));
   if (n.code && !state.run) panel.append(codeSection(n));
   if (n.graph) panel.append(membersSection(it));
+}
+
+/* An agent's instructions, edited where they live: the text is found in
+ * the one project file that holds it (a .prompt, .md, .yaml or a literal in
+ * the code) and saved there, the diff first (/prompts/save). Instructions a
+ * function writes at run time say where that function is. */
+function instructionsSection(n) {
+  const ins = (n.agent || {}).instructions || {};
+  const sec = el("section", "agentins");
+  sec.append(el("div", "stitle", "Instructions"));
+  if (!ins.text) {
+    sec.append(el("div", "note", ins.dynamic
+      ? `Written by code at run time: ${ins.from || "a function"}. Edit it there.`
+      : "No instructions."));
+    return sec;
+  }
+  const row = el("div", "cf-row");
+  const box = el("textarea", "cf-text agentins-text");
+  box.value = ins.text;
+  box.rows = Math.min(14, Math.max(4, ins.text.split("\n").length));
+  box.spellcheck = false;
+  box.setAttribute("aria-label", `${n.name}'s instructions`);
+  row.append(box);
+  sec.append(row);
+  let original = ins.text;
+  Configure.review(row, (apply, base) => ({
+    run: () => api(`/api/p/${PID}/prompts/save`, {original, updated: box.value, apply, base})
+      .then((got) => { if (apply) original = box.value; return {...got, changed: !!got.diff}; }),
+  }), "Instructions saved");
+  return sec;
 }
 
 /* The op's last recorded execution (any run of this graph), fetched once
