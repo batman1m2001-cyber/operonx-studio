@@ -1,6 +1,6 @@
 # Must-have UX: sign in with Google, the assistant's Claude sign-in where it is needed, edit an op like n8n
 
-**Status:** 2026-10-14. U2 was already built (found when starting it). U3 (c) and a narrower (a) done; (b) next; U1 waits for an OAuth client.
+**Status:** 2026-10-14. U2 was already built (found when starting it). All done: U1 #83–#84, U2 was already built, U3 #81, #82 and (b) Run this op.
 
 ## Why
 
@@ -89,6 +89,8 @@ What was built:
 Not built, on purpose:
 - **The model:** it is a resource shared by agents, and Inspect's Resource section already shows it, edited on Resources.
 - **Tool policy:** it is a shared object, so changing it for one agent would change others.
+
+**(b) done:** Inspect's Input says where its input comes from: one of the op's last five recorded runs, or **my own input**, typed as JSON (Edit input). **Run this op** runs that op alone, in the current code, on exactly what Input shows. It goes through the Playground's existing rerun, which works for every op kind and records a run of its own. Output shows the answer above the recorded one. An op with a resource says it makes a real call. An op that never ran is run through the service or job behind its graph.
 
 **(c) done:** a new endpoint returns an op's last recorded execution from its graph's newest runs (`/api/p/{pid}/op/{op}/last`). Inspect shows **Input** (with a link to that run), the settings, then **Output**.
 

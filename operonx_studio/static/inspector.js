@@ -140,10 +140,11 @@ function select(key) {
   // what can be set on it, as what it is (configure.js), then its wiring.
   // n8n's order: what it got last, its settings, what it gave last
   const lastP = !state.run && !n.graph ? lastExecution(n) : null;
-  if (lastP) panel.append(lastSection(n, lastP, "in"));
+  const io = lastP ? lastSections(n, lastP) : null;
+  if (io) panel.append(io.in);
   if (!state.run && !n.graph) panel.append(Configure.section(it));
   if (!state.run && n.agent) panel.append(instructionsSection(n));
-  if (lastP) panel.append(lastSection(n, lastP, "out"));
+  if (io) panel.append(io.out);
   if (!state.run) panel.append(portsSection(it));
   const res = resourceSection(n);
   if (res) panel.append(res);
@@ -194,38 +195,153 @@ function lastExecution(n) {
   return api(`/api/p/${PID}/op/${encodeURIComponent(n.name)}/last?graph=${encodeURIComponent(g)}`).catch(() => ({run: null}));
 }
 
-/* Input (what it got) or Output (what it gave), from its last execution;
- * the run it came from is a link. */
-function lastSection(n, lastP, side) {
-  const sec = el("section", `lastio last-${side}`);
-  const head = el("div", "stitle", side === "in" ? "Input" : "Output");
-  sec.append(head);
-  const body = el("div", "lastbody");
-  body.append(el("div", "note", "Reading its last run…"));
-  sec.append(body);
+/* Input and Output, n8n's way, with Run this op between them. Input is
+ * what goes in: a recorded execution picked from its last runs ("from"),
+ * or one typed in (Edit). Run this op runs that op alone, in the current
+ * code, on exactly what the Input shows (the Playground's rerun, waited
+ * for), recorded as a run of its own; Output then shows its answer above
+ * the recorded one. */
+function lastSections(n, lastP) {
+  const make = (side, title) => {
+    const sec = el("section", `lastio last-${side}`);
+    const head = el("div", "stitle");
+    head.append(el("span", null, title));
+    const body = el("div", "lastbody");
+    sec.append(head, body);
+    return {sec, head, body};
+  };
+  const IN = make("in", "Input"), OUT = make("out", "Output");
+  IN.body.append(el("div", "note", "Reading its last runs…"));
+  let recent = [], pick = 0, editing = false, typed = null, result = null, running = false;
+  const when = (at) => at ? new Date(at * 1000).toLocaleString([], {hour12: false, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "";
+  const chosen = () => (editing ? null : recent[pick] || null);
+  const blankInputs = () => Object.fromEntries((n.inputs || []).map(p => [typeof p === "string" ? p : (p.name || p.port || "?"), null]));
+  // the service (or job) behind the graph on screen: what runs an op that never ran
+  const graphTarget = () => {
+    const ir = state.ir || {}, g = state.graph ? state.graph.name : "";
+    for (const sv of ir.services || ir.serves || []) {
+      const base = sv.graph ? String(sv.graph).split(":").pop() : "";
+      if (base && (g === base || g.startsWith(base + "["))) return {service: sv.name};
+    }
+    for (const jb of ir.jobs || []) {
+      const base = jb.graph ? String(jb.graph).split(":").pop() : "";
+      if (base && g === base) return {job: jb.name};
+    }
+    return null;
+  };
+
+  function drawIn() {
+    IN.head.querySelector(".lastfrom")?.remove();
+    IN.body.textContent = "";
+    const from = el("span", "lastfrom");
+    if (recent.length) {
+      const sel = el("select", "lastpick");
+      sel.setAttribute("aria-label", "Which input");
+      recent.forEach((r, i) => {
+        const o = el("option", null, `${i === 0 ? "last run" : "run"} ${r.run.slice(0, 18)} · ${when(r.at)}${r.execution.status && r.execution.status !== "ok" ? " · " + r.execution.status : ""}`);
+        o.value = String(i);
+        o.selected = !editing && i === pick;
+        sel.append(o);
+      });
+      const own = el("option", null, "my own input");
+      own.value = "own";
+      own.selected = editing;
+      sel.append(own);
+      sel.onchange = () => {
+        if (sel.value === "own") { editing = true; typed = typed || JSON.stringify((recent[pick] || {}).execution?.inputs || blankInputs(), null, 2); }
+        else { editing = false; pick = Number(sel.value); }
+        drawIn();
+      };
+      from.append(el("span", null, "from "), sel);
+    } else {
+      from.append(el("span", null, "it has not run yet"));
+      if (!editing) { editing = true; typed = typed || JSON.stringify(blankInputs(), null, 2); }
+    }
+    IN.head.append(from);
+    if (editing) {
+      const ta = el("textarea", "mono playjson lastedit");
+      ta.spellcheck = false;
+      ta.setAttribute("aria-label", "The input, as JSON");
+      ta.value = typed;
+      ta.rows = Math.min(16, Math.max(4, typed.split("\n").length));
+      ta.oninput = () => { typed = ta.value; };
+      IN.body.append(ta);
+    } else {
+      const x = recent[pick].execution;
+      IN.body.append(IO.panel(x.inputs, x.outputs, {only: "in", mode: recall("ioMode", "pretty"), onMode: (m) => store("ioMode", m)}));
+    }
+    const acts = el("div", "lastacts");
+    if (!editing && recent.length) {
+      const ed = el("button", "small ghost", "Edit input");
+      ed.type = "button";
+      ed.onclick = () => { editing = true; typed = JSON.stringify(recent[pick].execution.inputs || {}, null, 2); drawIn(); };
+      acts.append(ed);
+    }
+    const go = Icons.button("play", running ? "Running…" : "Run this op", "small primary needs-edit lastrun",
+      "Run this op alone, in the current code, on the input above");
+    go.disabled = running;
+    go.onclick = runIt;
+    acts.append(go);
+    const err = el("div", "fielderr");
+    IN.body.append(acts, err);
+    // an op that reaches out (an LLM, a speech service) makes a real call
+    if (n.resource) IN.body.append(el("div", "note lastcost", `Uses ${n.resource}: running it makes a real call.`));
+    IN.err = err;
+  }
+
+  async function runIt() {
+    let inputs;
+    if (editing) {
+      try { inputs = JSON.parse(typed || "{}"); } catch (x) { IN.err.textContent = `Not JSON: ${x.message}`; return; }
+      if (!inputs || typeof inputs !== "object" || Array.isArray(inputs)) { IN.err.textContent = "The input is an object: {\"name\": value, …}"; return; }
+    } else inputs = recent[pick].execution.inputs || {};
+    const body = {op: n.name, inputs, wait: true};
+    const r = chosen() || recent[0];
+    if (r) body.run = r.run;
+    else {
+      const t = graphTarget();
+      if (!t) { IN.err.textContent = "This graph is not behind a service or job here: run it from the Playground once."; return; }
+      Object.assign(body, t);
+    }
+    running = true; drawIn();
+    try { result = await api(`/api/p/${PID}/play/rerun`, body); }
+    catch (x) { result = {status: "error", error: x.message}; }
+    running = false; drawIn(); drawOut();
+  }
+
+  function drawOut() {
+    OUT.body.textContent = "";
+    OUT.head.querySelector(".lastfrom")?.remove();
+    const last = recent[editing ? 0 : pick];
+    if (result) {
+      const top = el("div", "execverdict lastnow");
+      top.append(el("span", "status " + (result.status === "error" ? "s-bad" : "s-ok"), result.status === "error" ? "failed" : "ok"),
+                 el("span", "strong", " this run"));
+      if (result.ms != null) top.append(el("span", "note", ` · ${fmtMs(result.ms)}`));
+      if (result.trace_id) {
+        const o = el("button", "linkbtn", "open it");
+        o.type = "button";
+        o.onclick = () => performUi("open_run", {run: result.trace_id, mode: "workflow", quiet: true});
+        top.append(el("span", "note", " · "), o);
+      }
+      OUT.body.append(top);
+      if (result.status === "error") OUT.body.append(el("div", "errline mono", String(result.error || "failed").trim().split("\n").pop()));
+      else OUT.body.append(IO.panel(null, result.outputs, {only: "out", mode: "pretty"}));
+      if (last) OUT.body.append(el("div", "lastthen", `Before (${last.run.slice(0, 18)}):`));
+    }
+    if (last) {
+      const x = last.execution;
+      if (x.error) OUT.body.append(el("div", "errline mono", String(x.error).trim().split("\n").pop()));
+      else OUT.body.append(IO.panel(x.inputs, x.outputs, {only: "out", mode: "pretty"}));
+    }
+    OUT.sec.hidden = !result && !last;
+  }
+
   lastP.then((got) => {
-    body.textContent = "";
-    if (!got || !got.run) {
-      if (side === "in") body.append(el("div", "note", "It has not run yet. Run the flow in the Playground to see what it gets and gives."));
-      else sec.remove();
-      return;
-    }
-    const x = got.execution || {};
-    if (side === "in") {
-      const from = el("div", "lastfrom");
-      const link = el("button", "linkbtn mono", got.run);
-      link.type = "button";
-      link.title = "Open this run";
-      link.onclick = () => performUi("open_run", {run: got.run, mode: "workflow", quiet: true});
-      from.append(el("span", null, "last run "), link);
-      if (got.at) from.append(el("span", null, ` · ${new Date(got.at * 1000).toLocaleString([], {hour12: false, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"})}`));
-      if (x.status && x.status !== "ok") from.append(el("span", "lastbad", ` · ${x.status}`));
-      head.append(from);
-    }
-    if (side === "out" && x.error) body.append(el("div", "errline mono", String(x.error).trim().split("\n").pop()));
-    body.append(IO.panel(x.inputs, x.outputs, {only: side, mode: recall("ioMode", "pretty"), onMode: (m) => store("ioMode", m)}));
+    recent = (got && got.recent) || (got && got.run ? [got] : []);
+    drawIn(); drawOut();
   });
-  return sec;
+  return {in: IN.sec, out: OUT.sec};
 }
 
 function valuesSection(n, execP) {

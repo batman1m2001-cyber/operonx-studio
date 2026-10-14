@@ -2763,7 +2763,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse(_op_executions(got[0], run, op_name, limit=max(1, min(limit, 200))))
 
     @app.get("/api/p/{pid}/op/{op_name}/last")
-    def op_last(pid: str, op_name: str, graph: str = "", scan: int = 8) -> JSONResponse:
+    def op_last(pid: str, op_name: str, graph: str = "", scan: int = 8, n: int = 5) -> JSONResponse:
         """An op's last recorded execution, from the newest runs of its graph
         that ran it — the Flow view's Input and Output (n8n's node panel
         reads the last execution the same way). ``{"run": null}`` when none
@@ -2778,15 +2778,22 @@ def build_studio_app(recents: Optional[Recents] = None):
         rows = [_row(s) for s in page.items]
         # its own graph's runs first; a run that names no workflow may still be one
         mine = [r for r in rows if r.get("workflow") in (graph, None, "")] if graph else rows
+        # the last execution of each of its newest runs: the first is "last
+        # run", the rest are what Run this op can be given instead
+        recent: List[Dict[str, Any]] = []
         for r in mine[:max(1, min(scan, 20))]:
             got = _record(pid, r["run"])
             if isinstance(got, JSONResponse):
                 continue
             ex = _op_executions([x for x in got[0] if (x.get("op_name") or "") == op_name], r["run"], op_name, limit=1)
             if ex["executions"]:
-                return JSONResponse({"run": r["run"], "at": r.get("started_at") or r.get("mtime"),
-                                     "total": ex["total"], "execution": ex["executions"][-1]})
-        return JSONResponse({"run": None})
+                recent.append({"run": r["run"], "at": r.get("started_at") or r.get("mtime"),
+                               "total": ex["total"], "execution": ex["executions"][-1]})
+                if len(recent) >= max(1, min(n, 10)):
+                    break
+        if not recent:
+            return JSONResponse({"run": None, "recent": []})
+        return JSONResponse({**recent[0], "recent": recent})
 
     @app.get("/api/p/{pid}/trace/{run}/step")
     def trace_step(pid: str, run: str, id: str) -> JSONResponse:
