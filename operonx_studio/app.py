@@ -2632,6 +2632,32 @@ def build_studio_app(recents: Optional[Recents] = None):
             return got
         return JSONResponse(_op_executions(got[0], run, op_name, limit=max(1, min(limit, 200))))
 
+    @app.get("/api/p/{pid}/op/{op_name}/last")
+    def op_last(pid: str, op_name: str, graph: str = "", scan: int = 8) -> JSONResponse:
+        """An op's last recorded execution, from the newest runs of its graph
+        that ran it — the Flow view's Input and Output (n8n's node panel
+        reads the last execution the same way). ``{"run": null}`` when none
+        of the last ``scan`` runs did."""
+        pr = _runs(pid)
+        if pr is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        try:
+            page = pr.store.list_runs(_filter_from({}), order="started_desc", limit=60)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        rows = [_row(s) for s in page.items]
+        # its own graph's runs first; a run that names no workflow may still be one
+        mine = [r for r in rows if r.get("workflow") in (graph, None, "")] if graph else rows
+        for r in mine[:max(1, min(scan, 20))]:
+            got = _record(pid, r["run"])
+            if isinstance(got, JSONResponse):
+                continue
+            ex = _op_executions([x for x in got[0] if (x.get("op_name") or "") == op_name], r["run"], op_name, limit=1)
+            if ex["executions"]:
+                return JSONResponse({"run": r["run"], "at": r.get("started_at") or r.get("mtime"),
+                                     "total": ex["total"], "execution": ex["executions"][-1]})
+        return JSONResponse({"run": None})
+
     @app.get("/api/p/{pid}/trace/{run}/step")
     def trace_step(pid: str, run: str, id: str) -> JSONResponse:
         """One execution of one run by its id (a tree row's ``id``), with its
