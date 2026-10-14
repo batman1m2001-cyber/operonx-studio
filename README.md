@@ -38,6 +38,25 @@ Clicking an op in either view draws all its data wires. Pointing at a
 variable or a wire singles it out; clicking a variable follows its value
 through the graph. The **?** button on the canvas explains every mark.
 
+**Runs** lists every run the project recorded (filter by service, job,
+status, time, or `key:value`), and opens one as a tree of its steps, a
+timeline, or replayed on the canvas, each step with what it was given and
+answered. **Compare runs** puts two side by side: time and cost per op,
+the steps that took different values, and the code that changed between
+their commits.
+
+A project with `[durable]` in its `operonx.toml` (operonx 1.23 or later)
+journals its runs, and the studio can act on them:
+
+- **Waiting for an answer**: a run parked on an `InterruptOp` is listed
+  under this status, and its page answers each question: Approve, Deny,
+  or any JSON.
+- **Retry from the failure**: a failed run runs again from its failed op,
+  with the code as it is now; what ended before it is not done again.
+- **What if**: on any step, change what it answered and continue the run
+  from there; the original stays as it was, and Compare shows what the
+  change changed.
+
 `install.sh` installs the commands as a uv tool, in an environment of their
 own (with plain pip when uv is missing); operonx comes from PyPI. Inside a
 project, `operonx studio` (`uv run operonx studio` in a uv project, or in
