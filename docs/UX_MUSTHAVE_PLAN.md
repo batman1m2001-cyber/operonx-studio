@@ -17,18 +17,27 @@ Each was checked against the code as it is today. Two of the three are partly bu
 
 **Now:** username and password only (`users.sqlite`). An admin creates each account and hands over a temporary password.
 
-**Proposal:**
-- The sign-in page gets **Continue with Google** above the password form.
-- An admin adds a person by their email address, and picks their role as today.
-- That person's first Google sign-in links the address to the account. A Google account nobody added is refused, with "ask an admin to add you".
+**Proposal: Google's device sign-in.** It works the way the assistant's Claude sign-in does: a link and a code, with no fixed address needed.
+1. The sign-in page gets **Sign in with Google** above the password form.
+2. A click shows Google's link (`google.com/device`) and a short code.
+3. The person opens the link themselves, signs in with their Google account and types the code.
+4. The studio asks Google every few seconds until the sign-in is done, then logs them in.
+
+Who may sign in, and with which role:
+- An admin adds a person by their email address and picks their role as today.
+- That person's first Google sign-in links the address to the account.
+- A Google account nobody added is refused, with "ask an admin to add you".
 - Passwords stay as the fallback: the first admin, a machine with no internet, and the tests.
 - The users table gains an `email` column. Roles, sessions and the per-person Claude sign-in are unchanged.
 
-**What it needs from you (it cannot be built without both):**
-1. **A fixed address for the studio.** Google only sends a sign-in back to a URL registered in advance. The localhost.run links change on every reconnect (five times in two days), so each new link would break Google sign-in. A fixed address means localhost.run's custom domain (paid), or a server name the team can reach.
-2. **A Google OAuth client** (client id and secret), created in Google Cloud for that address and put in the studio's `.env`.
+**Why the device sign-in:** the usual "redirect back to the site" sign-in only returns to a URL registered in advance. The localhost.run links change on every reconnect (five times in two days), so every new link would break it. The device sign-in never comes back to the studio: the studio asks Google instead. So the tunnel can change freely.
 
-**Size:** small to medium. It is the standard OpenID Connect code flow: one redirect, one callback that checks Google's signed ID token, and a link to an existing user.
+**What it needs from you:** a Google OAuth client of the type **"TVs and Limited Input devices"**, created in Google Cloud (free, a couple of minutes). It asks only for `openid` and `email`. Its client id and secret go in the studio's `.env`.
+
+**Size:** small to medium:
+- one call to start the sign-in, a poll until it finishes, and a check of Google's signed ID token;
+- a link to an existing user by email;
+- the sign-in page's box with the link and the code.
 
 ### U2. The assistant signs in with Claude where it is used
 
@@ -78,7 +87,7 @@ Every change is shown as a diff first, written into the code safely (`safewrite.
 
 1. **U2**, the assistant's sign-in where it is used: small, and the assistant is useless to anyone who cannot find it.
 2. **U3**, edit an op like n8n, in three PRs: (c) the panel's order, (a) agents, (b) Run this op.
-3. **U1**, Google sign-in, once the two things it needs exist.
+3. **U1**, Google sign-in, once the OAuth client exists.
 
 Each PR is checked on the callbot, meeting-prep and meeting-prep-brd, on desktop and phone, in light and dark.
 
