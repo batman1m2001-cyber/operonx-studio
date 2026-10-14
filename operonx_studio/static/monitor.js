@@ -27,7 +27,7 @@
   paletteNow();
   // a new theme redraws what is on screen
   document.addEventListener("oxtheme", () => { paletteNow(); if (state.tab === "monitor") show(); });
-  const RANGES = [["24h", "24 hours", 86400, 24], ["7d", "7 days", 7 * 86400, 28], ["30d", "30 days", 30 * 86400, 30]];
+  const RANGES = [["1h", "1 hour", 3600, 30], ["24h", "24 hours", 86400, 24], ["7d", "7 days", 7 * 86400, 28], ["30d", "30 days", 30 * 86400, 30]];
   const v = Object.assign({target: "", range: "7d"}, recall(`monitor:${PID}`, {}));
   let tip = null;
   let token = 0;     // the latest show() owns the pane; slower answers are dropped
@@ -334,6 +334,147 @@
     return det;
   }
 
+  /* a line per series over time, on one axis: the focus series blue, a
+   * context series grey and dashed; ringed dots, a crosshair, one tooltip
+   * naming every series of the bucket */
+  function linesChart(series, lines, fmt, aria, floorTop) {
+    const f = frame(series, 140);
+    const svg = svgEl("svg", {viewBox: `0 0 ${f.W} ${f.H}`, class: "vizsvg", role: "img", "aria-label": aria});
+    const all = lines.flatMap(ln => series.map(b => b[ln.key]).filter(x => x != null));
+    const top = niceTop(Math.max(floorTop || 0, ...all, 1e-9));
+    yAxis(svg, f, top, fmt, 4);
+    const y = (val) => f.T + f.ph - f.ph * val / top;
+    for (const ln of lines) {
+      let d = "", pen = false;
+      series.forEach((b, i) => {
+        const val = b[ln.key];
+        if (val == null) { pen = false; return; }
+        d += `${pen ? "L" : "M"}${f.x(i).toFixed(1)},${y(val).toFixed(1)} `;
+        pen = true;
+      });
+      svg.append(svgEl("path", {d, fill: "none", stroke: ln.color, "stroke-width": 2, "stroke-linejoin": "round",
+        "stroke-linecap": "round", ...(ln.dash ? {"stroke-dasharray": "5 4"} : {})}));
+      series.forEach((b, i) => {
+        if (b[ln.key] != null) svg.append(svgEl("circle", {cx: f.x(i), cy: y(b[ln.key]), r: 4, fill: ln.color, stroke: C.surface, "stroke-width": 2}));
+      });
+    }
+    const cross = svgEl("line", {x1: 0, x2: 0, y1: f.T, y2: f.T + f.ph, stroke: C.axis, "stroke-width": 1, visibility: "hidden"});
+    svg.append(cross);
+    series.forEach((b, i) => {
+      const hit = svgEl("rect", {x: f.x(i) - f.bw / 2, y: f.T, width: f.bw, height: f.ph, fill: "transparent"});
+      hit.addEventListener("pointermove", (ev) => {
+        cross.setAttribute("x1", f.x(i)); cross.setAttribute("x2", f.x(i)); cross.setAttribute("visibility", "visible");
+        const has = lines.filter(ln => b[ln.key] != null);
+        showTip(ev, [`${when(b.t0)} – ${when(b.t1)}`, ...(has.length ? has.map(ln => `${ln.name} ${fmt(b[ln.key])}`) : ["no runs"])]);
+      });
+      hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+      svg.append(hit);
+    });
+    xLabels(svg, f, series);
+    return svg;
+  }
+
+  // the numbers behind a chart, one row per bucket that has any
+  function bucketTable(series, cols) {
+    const det = el("details", "viztable");
+    det.append(el("summary", null, "Table"));
+    const wrap = el("div", "tablewrap");
+    const table = el("table", "datatable");
+    const hr = el("tr");
+    hr.append(el("th", null, "From"));
+    for (const [h] of cols) hr.append(el("th", "num", h));
+    const thead = el("thead"); thead.append(hr); table.append(thead);
+    const tbody = el("tbody");
+    for (const b of series.filter(x => cols.some(([, k]) => x[k] != null))) {
+      const tr = el("tr");
+      tr.append(el("td", null, when(b.t0)));
+      for (const [, k, fmt] of cols) tr.append(el("td", "num", b[k] == null ? "—" : fmt(b[k])));
+      tbody.append(tr);
+    }
+    table.append(tbody); wrap.append(table); det.append(wrap);
+    return det;
+  }
+
+  const cpuFmt = (x) => `${Math.round(x)}%`;
+  // a latency on an axis or a tile: "850ms", "5.4s", "0"
+  const latFmt = (x) => (x === 0 ? "0" : x < 1000 ? `${Math.round(x)}ms` : `${+(x / 1000).toFixed(x < 10000 ? 1 : 0)}s`);
+  const runsFmt = (x) => String(+x.toFixed(1));
+
+  /* Latency: what callers waited through (the ops' `measure`), the
+   * workers that served them, and the runs that were slowed */
+  function latencySection(lat) {
+    const sec = el("div", "monscores monlatency");
+    sec.append(el("h3", "monscoreshead", "Latency"),
+      el("p", "note", "What users waited through, as the service's ops measured it; typical is the median call, "
+        + "slow calls the p95 of calls. Below it, the workers that served them."));
+    const tiles = el("div", "stattiles");
+    for (const ms of lat.measures) {
+      tiles.append(tile(`${ms.name} · typical`, ms.typical_ms, ms.prev_typical_ms, latFmt, true));
+      tiles.append(tile(`${ms.name} · slow calls`, ms.slow_ms, ms.prev_slow_ms, latFmt, true));
+    }
+    const w = lat.workers;
+    if (w) {
+      tiles.append(tile("Busiest worker", w.busiest, w.previous.busiest, (x) => `${runsFmt(x)} runs`, true));
+      tiles.append(tile("Worker CPU", w.cpu, w.previous.cpu, cpuFmt, true,
+        w.cpu == null ? "no CPU readings" : null));
+    }
+    sec.append(tiles);
+    const charts = el("div", "vizgrid");
+    const lines = [{key: "slow_ms", color: C.line, name: "slow calls"},
+                   {key: "typical_ms", color: C.muted, dash: true, name: "typical"}];
+    for (const ms of lat.measures) {
+      const c = card(ms.name, linesChart(ms.series, lines, latFmt, `${ms.name} over time`),
+        legend([[C.line, "Slow calls"], [C.muted, "Typical"]]));
+      c.append(bucketTable(ms.series, [["Slow calls", "slow_ms", latFmt], ["Typical", "typical_ms", latFmt]]));
+      charts.append(c);
+    }
+    if (w) {
+      const one = (key, name) => [{key, color: C.line, name}];
+      const busy = card("Busiest worker · runs at once", linesChart(w.series, one("busiest", "busiest worker"), runsFmt,
+        "Runs on the busiest worker over time", 4));
+      busy.append(bucketTable(w.series, [["Runs", "busiest", runsFmt]]));
+      const cpu = card("Worker CPU · busiest call's average", linesChart(w.series, one("cpu", "CPU"), cpuFmt,
+        "Worker CPU over time, one core = 100%", 100), el("span", "note", "one core = 100%"));
+      cpu.append(bucketTable(w.series, [["CPU", "cpu", cpuFmt]]));
+      const lag = card("Loop lag · p95", linesChart(w.series, one("lag_p95_ms", "loop lag p95"), latFmt,
+        "Event-loop lag over time", 50));
+      lag.append(bucketTable(w.series, [["Loop lag p95", "lag_p95_ms", latFmt]]));
+      charts.append(busy, cpu, lag);
+    }
+    sec.append(charts);
+    sec.append(card("Slowed runs", slowedBody(lat.slowed)));
+    return sec;
+  }
+
+  function slowedBody(slowed) {
+    if (!slowed.count) return el("p", "note", "No run was slowed: no queue grew on an edge and no loop ran late.");
+    const body = el("div");
+    if (slowed.count > slowed.runs.length) body.append(el("p", "note", `${slowed.count} runs were slowed; the latest ${slowed.runs.length}:`));
+    const wrap = el("div", "tablewrap");
+    const table = el("table", "datatable");
+    const hr = el("tr");
+    for (const [h, cls] of [["Why"], ["Worker", "hide-sm"], ["When"], [""]]) hr.append(el("th", cls || null, h));
+    const thead = el("thead"); thead.append(hr); table.append(thead);
+    const tbody = el("tbody");
+    for (const r of slowed.runs) {
+      const tr = el("tr");
+      const why = el("td");
+      for (const line of r.why) why.append(el("div", null, line));
+      const open = el("td", "num");
+      const b = el("button", "linkbtn", "Open");
+      b.type = "button";
+      b.append(Icons.svg("right"));
+      b.title = `Open ${r.trace_id}`;
+      b.onclick = () => { switchTab("traces", {quiet: true}); showRunTree(r.trace_id); };
+      open.append(b);
+      tr.append(why, el("td", "hide-sm mono", r.worker == null ? "—" : String(r.worker)),
+        el("td", "nowrap", fmtAgo(r.started_at * 1000)), open);
+      tbody.append(tr);
+    }
+    table.append(tbody); wrap.append(table); body.append(wrap);
+    return body;
+  }
+
   function scoresSection(list) {
     const sec = el("div", "monscores");
     sec.append(el("h3", "monscoreshead", "Scores"),
@@ -587,6 +728,7 @@
     const latCard = card("p95 duration", p95Chart(m.series, m.versions));
     charts.append(runsCard, latCard);
     box.append(charts);
+    if (m.latency) box.append(latencySection(m.latency));
     if ((scored.scores || []).length) box.append(scoresSection(scored.scores));
 
     const opsCard = card("Where the time goes", opsTable(m.ops),

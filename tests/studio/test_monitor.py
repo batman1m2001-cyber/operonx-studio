@@ -136,3 +136,65 @@ def test_a_services_playground_sessions_count_and_are_said(store):
     assert next(o for o in served["ops"] if o["op"] == "stt")["runs"] == 5
     # a job's view, or everything, is untouched by it
     assert monitor(store, since=NOW - DAY, until=NOW)["playground_runs"] == 0
+
+
+# -- latency: what the service's ops measured, and its workers ---------------
+
+def _call(tid, age_h, *, reply=None, cpu=None, busiest=None, lag=None, backlog=None):
+    t = _run(tid, age_h)
+    md = t.metadata
+    if reply is not None:  # (p50, p95, n)
+        md["latency_ms"] = {"reply": {"p50": reply[0], "p95": reply[1], "max": reply[1], "n": reply[2]}}
+    if cpu is not None:
+        md["cpu_pct"] = {"avg": cpu - 20, "max": cpu}
+    if busiest is not None:
+        md["worker"] = {"pid": 7, "active_runs": busiest}
+    if lag is not None:
+        md["loop_lag_ms"] = {"p95": lag, "max": lag * 3}
+    if backlog is not None:
+        md["backlog"] = backlog
+    return t
+
+
+@pytest.fixture()
+def calls(tmp_path):
+    s = SqliteRunStore(path=tmp_path / "l.sqlite")
+    s.consume(_call("a", 20, reply=(800, 1000, 3), cpu=70, busiest=4, lag=2))
+    s.consume(_call("b", 15, reply=(900, 1200, 2), cpu=80, busiest=5, lag=3))
+    # an overloaded worker: its queue grew and its loop ran late
+    s.consume(_call("c", 1, reply=(4000, 6000, 2), cpu=100, busiest=12, lag=80,
+                    backlog={"g.audio_in -> g.detect": {"max": 40, "max_wait_ms": 1800}}))
+    # a paced consumer: items wait on purpose, not slowed
+    s.consume(_call("d", 1, reply=(850, 1100, 1), cpu=60, busiest=3, lag=2,
+                    backlog={"g.synth -> g.play": {"max": 3, "max_wait_ms": 8000}}))
+    s.consume(_call("p", 30, reply=(700, 900, 2), cpu=50, busiest=2, lag=1))  # the previous period
+    return s
+
+
+def test_latency_describes_the_calls(calls):
+    m = monitor(calls, origin="service", name="call", since=NOW - DAY, until=NOW, buckets=4)
+    (reply,) = m["latency"]["measures"]
+    assert reply["name"] == "reply" and reply["runs"] == 4 and reply["samples"] == 8
+    assert reply["typical_ms"] == pytest.approx(percentile([800, 900, 4000, 850], 50))
+    assert reply["slow_ms"] == pytest.approx(percentile([1000, 1200, 6000, 1100], 95))
+    assert reply["prev_typical_ms"] == 700
+    # 6 h buckets: a | b | - | c + d
+    assert [b["typical_ms"] for b in reply["series"]][:3] == [800, 900, None]
+    assert reply["series"][3]["slow_ms"] == pytest.approx(percentile([6000, 1100], 95))
+
+
+def test_the_workers_and_the_slowed_calls(calls):
+    m = monitor(calls, origin="service", name="call", since=NOW - DAY, until=NOW, buckets=4)
+    w = m["latency"]["workers"]
+    assert w["busiest"] == 12 and w["cpu"] == 80  # the overloaded call's average
+    assert w["previous"]["busiest"] == 2
+    assert [b["busiest"] for b in w["series"]] == [4, 5, None, 12]
+    slowed = m["latency"]["slowed"]
+    assert slowed["count"] == 1 and slowed["runs"][0]["trace_id"] == "c"
+    assert slowed["runs"][0]["why"] == ["40 waiting on audio_in → detect, up to 1800 ms",
+                                        "loop late 80 ms at p95"]
+
+
+def test_no_latency_section_without_the_metadata(store):
+    m = monitor(store, origin="service", name="call", since=NOW - DAY, until=NOW)
+    assert m["latency"] is None

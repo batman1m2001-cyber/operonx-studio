@@ -15,6 +15,13 @@ The rules that keep the numbers honest:
   kept out of the ranking, their time being the session's length.
 * **Key ops** the service declares (``Service(key_ops=[...])``) come
   first, in the order declared.
+* **Latency** a user feels is what the service's ops measured
+  (``measure(name, ms)`` → each run's ``metadata["latency_ms"]``). Runs
+  carry a summary, not samples, so a range is described by its calls:
+  *typical* is the median of the calls' medians, *slow calls* the p95 of
+  the calls' p95. The workers beside it (busiest worker's runs, the
+  busiest call's average CPU, loop lag) and the slowed runs come from the
+  same metadata.
 * **A service's playground sessions** are its runs too (``origin=playground``
   under the service's name): a service's view counts them unless asked
   not to, and says how many there are.
@@ -127,6 +134,94 @@ def _errors(runs: Sequence[Any], limit: int = 10) -> List[Dict[str, Any]]:
     return sorted(groups.values(), key=lambda g: (-g["count"], -g["last_seen"]))[:limit]
 
 
+#: The run page's "Slowed by" rule (static/runview.js): 10 or more items
+#: waiting at once on an edge AND one waiting 500 ms, or the loop late by
+#: 50 ms at p95. Either half alone is normal.
+QUEUE_ITEMS, QUEUE_WAIT_MS, LAG_P95_MS = 10, 500, 50
+
+
+def _num(d: Any, *keys: str) -> Optional[float]:
+    for k in keys:
+        if not isinstance(d, dict):
+            return None
+        d = d.get(k)
+    return float(d) if isinstance(d, (int, float)) and not isinstance(d, bool) else None
+
+
+def _why_slowed(md: Dict[str, Any]) -> List[str]:
+    why = []
+    for edge, q in (md.get("backlog") or {}).items():
+        if (_num(q, "max") or 0) >= QUEUE_ITEMS and (_num(q, "max_wait_ms") or 0) >= QUEUE_WAIT_MS:
+            src, _, dst = edge.partition(" -> ")
+            why.append(f"{int(q['max'])} waiting on {src.split('.')[-1]} → {dst.split('.')[-1]}, "
+                       f"up to {int(q['max_wait_ms'])} ms")
+    lag = _num(md, "loop_lag_ms", "p95")
+    if lag is not None and lag >= LAG_P95_MS:
+        why.append(f"loop late {int(lag)} ms at p95")
+    return why
+
+
+def _measure_stats(runs: Sequence[Any], name: str) -> Dict[str, Any]:
+    p50s = [v for r in runs if (v := _num(r.metadata, "latency_ms", name, "p50")) is not None]
+    p95s = [v for r in runs if (v := _num(r.metadata, "latency_ms", name, "p95")) is not None]
+    return {
+        "typical_ms": percentile(p50s, 50) if p50s else None,
+        "slow_ms": percentile(p95s, 95) if p95s else None,
+        "runs": len(p50s),
+        "samples": int(sum(_num(r.metadata, "latency_ms", name, "n") or 0 for r in runs)),
+    }
+
+
+def _latency(runs: Sequence[Any], prev: Sequence[Any], since: float, until: float,
+             buckets: int) -> Optional[Dict[str, Any]]:
+    names = sorted({k for r in runs for k in ((r.metadata or {}).get("latency_ms") or {})})
+    has_worker = any((r.metadata or {}).get(k) for r in runs for k in ("loop_lag_ms", "cpu_pct", "worker"))
+    if not names and not has_worker:
+        return None
+    width = max(1.0, (until - since) / buckets)
+    slots: List[List[Any]] = [[] for _ in range(buckets)]
+    for r in runs:
+        i = int((r.started_at - since) // width)
+        if 0 <= i < buckets:
+            slots[i].append(r)
+    edges = [(since + i * width, since + (i + 1) * width) for i in range(buckets)]
+
+    measures = []
+    for name in names:
+        series = []
+        for (t0, t1), rs in zip(edges, slots):
+            st = _measure_stats(rs, name)
+            series.append({"t0": t0, "t1": t1, "typical_ms": st["typical_ms"], "slow_ms": st["slow_ms"]})
+        before = _measure_stats(prev, name)
+        measures.append({"name": name, **_measure_stats(runs, name),
+                         "prev_typical_ms": before["typical_ms"], "prev_slow_ms": before["slow_ms"],
+                         "series": series})
+
+    def worker_point(rs: Sequence[Any]) -> Dict[str, Optional[float]]:
+        busy = [v for r in rs if (v := _num(r.metadata, "worker", "active_runs")) is not None]
+        # a call's average, not its 1 s peak: a healthy worker touches
+        # 100 % now and then; an overloaded one stays above it
+        cpu = [v for r in rs if (v := _num(r.metadata, "cpu_pct", "avg")) is not None]
+        lag = [v for r in rs if (v := _num(r.metadata, "loop_lag_ms", "p95")) is not None]
+        return {"busiest": max(busy) if busy else None, "cpu": max(cpu) if cpu else None,
+                "lag_p95_ms": percentile(lag, 95) if lag else None}
+
+    slowed = []
+    for r in runs:
+        why = _why_slowed(r.metadata or {})
+        if why:
+            slowed.append({"trace_id": r.trace_id, "started_at": r.started_at, "why": why,
+                           "worker": (r.metadata.get("worker") or {}).get("pid")})
+    slowed.sort(key=lambda x: -x["started_at"])
+    return {
+        "measures": measures,
+        "workers": {**worker_point(runs), "previous": worker_point(prev),
+                    "series": [{"t0": t0, "t1": t1, **worker_point(rs)} for (t0, t1), rs in zip(edges, slots)]}
+        if has_worker else None,
+        "slowed": {"count": len(slowed), "runs": slowed[:10]},
+    }
+
+
 def monitor(
     store: RunStore,
     origin: Optional[str] = None,
@@ -178,6 +273,7 @@ def monitor(
         "tiles": _tiles(runs),
         "previous": _tiles(prev),
         "series": _series(runs, since, until, max(1, min(int(buckets), 120))),
+        "latency": _latency(runs, prev, since, until, max(1, min(int(buckets), 120))),
         "versions": _versions(runs),
         "ops": ops,
         "cost_ops": cost_ops,
