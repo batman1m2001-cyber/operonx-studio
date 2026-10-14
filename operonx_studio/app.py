@@ -688,6 +688,21 @@ def _bytes_response(request: Any, data: bytes, mime: str, headers: Dict[str, str
 VIEWER_CANNOT = frozenset({"setup", "try"})
 
 
+#: A value shown in Compare runs is cut past this many characters of JSON.
+_CMP_CAP = 4000
+
+
+def _cap(value: Any) -> Any:
+    """*value*, or its JSON cut to ``_CMP_CAP`` characters when longer."""
+    try:
+        text = json.dumps(value, default=repr)
+    except (TypeError, ValueError):
+        text = repr(value)
+    if len(text) <= _CMP_CAP:
+        return value
+    return {"$cut": text[:_CMP_CAP], "$size": len(text)}
+
+
 #: A commit as a run records it (operonx `code_version`: 12 hex).
 _COMMIT = re.compile(r"^[0-9a-f]{7,40}$")
 
@@ -2732,6 +2747,64 @@ def build_studio_app(recents: Optional[Recents] = None):
             ops.append(row)
         return JSONResponse({"a": sa, "b": sb, "ops": ops,
                              "d_ms": (sb["duration_ms"] or 0) - (sa["duration_ms"] or 0)})
+
+    @app.get("/api/p/{pid}/compare/values")
+    def compare_values(pid: str, a: str, b: str) -> JSONResponse:
+        """The steps two runs took with different values: a step is the
+        same op at the same ctx in both (its step id), and it differs when
+        what it was given or what it answered differs. Each one with its
+        values in both runs, key by key; how many were the same; the steps
+        only one run took. A fork against its original shows what the
+        changed answer changed downstream."""
+        entries = []
+        for run in (a, b):
+            got = _cached(pid, run)
+            if isinstance(got, JSONResponse):
+                return got
+            entries.append(_steps_by_id(got))
+        by_a, by_b = entries
+
+        def key(v: Any) -> str:
+            try:
+                return json.dumps(v, sort_keys=True, default=repr)
+            except (TypeError, ValueError):
+                return repr(v)
+
+        def keyed(x: Any, y: Any) -> List[Dict[str, Any]]:
+            """Each key of two dicts (or the two values, as one), and whether it changed."""
+            if not isinstance(x, dict) or not isinstance(y, dict):
+                return [{"key": None, "a": _cap(x), "b": _cap(y), "changed": key(x) != key(y)}]
+            out = []
+            for k in list(x) + [k for k in y if k not in x]:
+                if k.startswith("_"):
+                    continue
+                out.append({"key": k, "a": _cap(x.get(k)), "b": _cap(y.get(k)),
+                            "changed": key(x.get(k)) != key(y.get(k)),
+                            **({"only": "a"} if k not in y else {"only": "b"} if k not in x else {})})
+            return out
+
+        changed, same = [], 0
+        for sid, ra in by_a.items():
+            rb = by_b.get(sid)
+            if rb is None:
+                continue
+            # a step replayed from a journal (a fork, a resume) kept no inputs: unknown, not changed
+            replayed = any(((r.get("attrs") or {}).get("operonx.replayed")) for r in (ra, rb))
+            ins = not replayed and key(ra.get("inputs")) != key(rb.get("inputs"))
+            outs = key(ra.get("outputs")) != key(rb.get("outputs"))
+            if not (ins or outs) and ra.get("status") == rb.get("status"):
+                same += 1
+                continue
+            changed.append({
+                "id": sid, "op": ra.get("op_name") or ra.get("op_full_name"), "ctx": ra.get("ctx"),
+                "status": [ra.get("status"), rb.get("status")],
+                "inputs": keyed(ra.get("inputs"), rb.get("inputs")) if ins else [],
+                "outputs": keyed(ra.get("outputs"), rb.get("outputs")) if outs else [],
+            })
+        only = lambda x, y: [{"id": sid, "op": r.get("op_name") or r.get("op_full_name")}  # noqa: E731
+                             for sid, r in x.items() if sid not in y][:100]
+        return JSONResponse({"changed": changed[:200], "more": max(0, len(changed) - 200), "same": same,
+                             "only_a": only(by_a, by_b), "only_b": only(by_b, by_a)})
 
     @app.get("/api/p/{pid}/compare/code")
     def compare_code(pid: str, a: str, b: str) -> JSONResponse:

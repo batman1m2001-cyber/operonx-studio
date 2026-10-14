@@ -220,3 +220,26 @@ def test_a_step_is_changed_and_the_run_continues_from_it(client, project):
     bad = client.post(f"/api/p/{pid}/runs/fork",
                       json={"run_id": run_id, "at": "c", "outputs": {"nope": 1}})
     assert bad.status_code == 400 and "has no output 'nope'" in bad.json()["error"]
+
+
+def test_compare_shows_what_a_forked_answer_changed_downstream(client, project):
+    pid = client.post("/api/open", json={"path": str(project)}).json()["id"]
+    got = client.post(f"/api/p/{pid}/play/open", json={
+        "service": "order", "toy": "form", "wait": True, "end": True,
+        "send": [{"kind": "json", "value": {"order": "C3"}}]}).json()
+    run_id = got["events"][-1]["trace_id"]
+    new_id = client.post(f"/api/p/{pid}/runs/fork", json={
+        "run_id": run_id, "at": "c", "outputs": {"receipt": "R-Z"}}).json()["run_id"]
+    for _ in range(60):
+        if client.get(f"/api/p/{pid}/trace/{new_id}/tree").status_code == 200:
+            break
+        time.sleep(0.1)
+
+    d = client.get(f"/api/p/{pid}/compare/values", params={"a": run_id, "b": new_id}).json()
+    by_op = {c["op"]: c for c in d["changed"]}
+    assert set(by_op) == {"c", "s"}
+    assert by_op["c"]["inputs"] == []  # replayed: its inputs are unknown, not changed
+    (out,) = by_op["c"]["outputs"]
+    assert (out["key"], out["a"], out["b"], out["changed"]) == ("receipt", "R-C3", "R-Z", True)
+    assert [r["key"] for r in by_op["s"]["inputs"] if r["changed"]] == ["receipt"]
+    assert [r["b"] for r in by_op["s"]["outputs"] if r["changed"]] == ["R-Z: shipped"]

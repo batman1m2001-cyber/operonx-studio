@@ -630,7 +630,67 @@ const RunView = (() => {
     table.append(tbody);
     wrap.append(table);
     box.append(wrap);
+    box.append(valueDiff(a, b));
     box.append(codeDiff(a, b, data.a, data.b));
+  }
+
+  /* The steps the two runs took with different values: given, answered,
+   * or how they ended — key by key, A beside B. A fork against its
+   * original shows here what its changed answer changed downstream. */
+  function valueDiff(a, b) {
+    const sec = el("section", "cmpvals");
+    sec.append(el("div", "stitle", "Values"));
+    const note = el("div", "note", "Comparing what each step was given and answered…");
+    sec.append(note);
+    const show = (v) => {
+      if (v && typeof v === "object" && "$cut" in v) return `${v.$cut}… (${v.$size} characters)`;
+      return typeof v === "string" ? v : JSON.stringify(v, null, 2);
+    };
+    (async () => {
+      let d;
+      try { d = await api(`/api/p/${PID}/compare/values?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`); }
+      catch (e) { note.replaceWith(el("div", "errbox", e.message)); return; }
+      const parts = [];
+      parts.push(d.changed.length ? `${d.changed.length + (d.more || 0)} step${d.changed.length + (d.more || 0) === 1 ? "" : "s"} took different values`
+        : "Every step both runs took had the same values");
+      if (d.same && d.changed.length) parts.push(`${d.same} the same`);
+      if (d.only_a.length) parts.push(`${d.only_a.length} only in A`);
+      if (d.only_b.length) parts.push(`${d.only_b.length} only in B`);
+      note.textContent = parts.join(" · ") + ".";
+      d.changed.forEach((c, i) => {
+        const det = el("details", "cmpstep");
+        if (i < 3) det.open = true;
+        const sum = el("summary");
+        sum.append(el("span", "mono", c.op), ...(c.ctx && String(c.ctx) !== "main" && String(c.ctx) !== "main," ? [el("span", "muted mono", String(c.ctx))] : []));
+        if (c.outputs.length) sum.append(el("span", "cmptag", "answered differently"));
+        if (c.inputs.length) sum.append(el("span", "cmptag", "given different input"));
+        if (c.status[0] !== c.status[1]) sum.append(el("span", "cmptag bad", `${c.status[0] || "ok"} → ${c.status[1] || "ok"}`));
+        det.append(sum);
+        for (const [title, rows] of [["Output", c.outputs], ["Input", c.inputs]]) {
+          if (!rows.length) continue;
+          const moved = rows.filter(r => r.changed);
+          const grid = el("div", "cmpgrid");
+          grid.append(el("div", "cmpgrid-h", title), el("div", "cmpgrid-h", "A"), el("div", "cmpgrid-h", "B"));
+          for (const r of moved) {
+            grid.append(el("div", "mono cmpgrid-k", r.key == null ? "" : r.key));
+            grid.append(el("pre", "mono cmpgrid-v a", r.only === "b" ? "—" : show(r.a)));
+            grid.append(el("pre", "mono cmpgrid-v b", r.only === "a" ? "—" : show(r.b)));
+          }
+          det.append(grid);
+          const kept = rows.length - moved.length;
+          if (kept) det.append(el("div", "note", `${kept} other ${title.toLowerCase()} field${kept === 1 ? "" : "s"} the same`));
+        }
+        sec.append(det);
+      });
+      if (d.more) sec.append(el("div", "note", `and ${d.more} more`));
+      const only = (list, side) => {
+        if (!list.length) return;
+        sec.append(el("div", "note", `Only in ${side}: ${list.slice(0, 12).map(x => x.op).join(", ")}${list.length > 12 ? "…" : ""}`));
+      };
+      only(d.only_a, "A");
+      only(d.only_b, "B");
+    })();
+    return sec;
   }
 
   /* What changed in the code between the two runs: git diff between the
