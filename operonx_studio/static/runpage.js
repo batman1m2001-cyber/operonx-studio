@@ -391,6 +391,9 @@ async function renderExecPanel(run, e, execs, target) {
     valueZones(vbox, match.inputs, match.outputs, scratchKeyOf,
                {hide: priced ? ["usage", "cost_usd", "model_used"] : [],
                 focus: (node && node.show_keys) || []});
+    // calls this step sent again (operonx retry_call): "3 calls, 2 retried (429)"
+    const resent = callRetries(match.attrs);
+    if (resent) vbox.prepend(resent);
     // the op again, with these inputs, in the current code
     const sm = state.runSummary;
     if (typeof PlayView !== "undefined" && sm && (sm.service || sm.job) && state._tlrun === run) {
@@ -413,6 +416,23 @@ async function renderExecPanel(run, e, execs, target) {
     vbox.textContent = "";
     vbox.append(el("div", "note", err.message));
   }
+}
+
+/* The calls a step sent again, folded: IO.retrySummary's line, the
+ * attempts under it. */
+function callRetries(attrs) {
+  const sum = IO.retrySummary(attrs);
+  if (!sum) return null;
+  const box = el("details", "callretry");
+  box.append(el("summary", null, sum.line));
+  const facts = el("div", "facts compact");
+  for (const [k, v] of sum.rows) {
+    const row = el("div", "factrow");
+    row.append(el("div", "factkey", k), el("div", "factval mono", v));
+    facts.append(row);
+  }
+  box.append(facts);
+  return box;
 }
 
 /* WORKFLOW view: the flow canvas itself, moved into the Traces pane and

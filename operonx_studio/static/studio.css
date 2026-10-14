@@ -4571,6 +4571,9 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .rt-step .pheadrow h3 { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .rt-back { display: none; }
 .rt-facts { margin-top: 12px; }
+.callretry { margin: 0 0 10px; padding: 6px 10px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-size: var(--fs-sm); }
+.callretry summary { cursor: pointer; }
+.callretry .facts { margin-top: 6px; color: var(--text-2); }
 .rt-facts summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-sm); padding: 6px 0; }
 
 @media (max-width: 760px) {

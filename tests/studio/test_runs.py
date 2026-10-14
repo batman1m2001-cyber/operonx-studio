@@ -635,3 +635,17 @@ def test_the_runs_list_carries_each_runs_input_and_output(client, project):
     (row,) = [r for r in client.get(f"/api/p/{pid}/runs").json()["runs"] if r["run"] == "asked"]
     assert json.loads(row["input"]) == {"question": "hi"}
     assert json.loads(row["output"]) == {"answer": "hello"}
+
+
+def test_settings_shows_the_projects_retry_as_written(client, project):
+    pid = _open(client, project)
+    assert client.get(f"/api/p/{pid}/settings").json()["retry"] is None  # off unless set
+    (project / "operonx.toml").write_text(
+        MANIFEST + '\n[retry]\nmax_attempts = 4\ninitial = 1\ntransient = ["crm:Throttled"]\n',
+        encoding="utf-8",
+    )
+    assert client.get(f"/api/p/{pid}/settings").json()["retry"] == {
+        "max_attempts": 4,
+        "initial": 1,
+        "transient": ["crm:Throttled"],
+    }

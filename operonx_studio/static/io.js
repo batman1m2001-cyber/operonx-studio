@@ -1127,9 +1127,34 @@
     return wrap;
   }
 
+  /* The calls a step sent again (operonx `retry_call`, recorded under
+   * attrs["operonx.call_retries"] as {call, attempt, error, waited}):
+   * {line: "llm:a: 3 calls, 2 retried (429) · waited 3.0 s", rows: [...]},
+   * or null when nothing was sent again. */
+  function retrySummary(attrs) {
+    const list = attrs && attrs["operonx.call_retries"];
+    if (!Array.isArray(list) || !list.length) return null;
+    const byCall = new Map();
+    for (const r of list) {
+      const k = r.call || "call";
+      if (!byCall.has(k)) byCall.set(k, []);
+      byCall.get(k).push(r);
+    }
+    const parts = [...byCall].map(([call, rs]) => {
+      const why = [...new Set(rs.map(r => (String(r.error || "").match(/\b\d{3}\b/) || [r.error || "error"])[0]))];
+      return `${call}: ${rs.length + 1} calls, ${rs.length} retried (${why.join(", ")})`;
+    });
+    const waited = list.reduce((t, r) => t + (Number(r.waited) || 0), 0);
+    return {
+      line: `${parts.join(" · ")} · waited ${waited.toFixed(1)} s`,
+      rows: list.map(r => [`${r.call || "call"} #${r.attempt}`,
+                           `${r.error || ""} · waited ${(Number(r.waited) || 0).toFixed(2)} s`]),
+    };
+  }
+
   const api = { KNOBS, pyRepr, pyStr, pyFormat, chatOf, replyOf, toolCallOf, messageParts, jsonish, segments, contentParts,
                 lineCount, panel, valueView, jsonView, textView, tableOf,
-                isEmpty, isSimple, changes, repeats, brief, preview, changeSummary };
+                isEmpty, isSimple, changes, repeats, brief, preview, changeSummary, retrySummary };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.IO = api;
 })(typeof window !== "undefined" ? window : globalThis);

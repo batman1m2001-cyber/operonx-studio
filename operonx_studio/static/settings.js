@@ -193,6 +193,28 @@
     }
     box.append(ret);
 
+    // [retry] in operonx.toml, as written: edited in the file
+    const rty = el("section", "setsection");
+    rty.append(el("h3", "setsectitle", "Retry"));
+    const r = current.retry;
+    if (r && typeof r === "object") {
+      rty.append(el("p", "setintro",
+        "Every op of the project's jobs and request–reply services runs again when it fails for a moment (a timeout, a 429, a 5xx), unless it opts out with retry=False. Set in operonx.toml [retry]."));
+      const rf = el("div", "facts");
+      const said = (k, v) => { if (v != null) rf.append(factRow(k, Array.isArray(v) ? v.join(", ") : String(v), true)); };
+      said("Attempts", r.max_attempts ?? 3);
+      said("First wait", `${r.initial ?? 0.5} s`);
+      said("Longest wait", `${r.max_interval ?? 30} s`);
+      if (r.min_interval != null) said("Shortest wait", `${r.min_interval} s`);
+      if (r.backoff != null) said("Backoff", `×${r.backoff}`);
+      if (r.transient && r.transient.length) said("Also transient", r.transient);
+      rty.append(rf);
+    } else {
+      rty.append(el("p", "setintro",
+        "Off. An op fails on its first error unless it sets retry= itself. Add [retry] to operonx.toml (max_attempts = 3) to retry every op of the jobs and request–reply services on a timeout, 429 or 5xx."));
+    }
+    box.append(rty);
+
     // how the studio looks, in this browser
     const look = el("section", "setsection");
     look.append(el("h3", "setsectitle", "Appearance"));
