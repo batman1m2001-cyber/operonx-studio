@@ -2917,6 +2917,9 @@ def build_studio_app(recents: Optional[Recents] = None):
             # what the current policy would delete, so the screen needs no
             # second round trip to say so
             "preview": preview,
+            # [retry] in operonx.toml: the project's default op retry, shown
+            # as written (it is edited in the file, like the services)
+            "retry": _studio_manifest(watcher.root).get("retry") or None,
         })
 
     # ── media: a trace's blobs, by content address ──────────────────────

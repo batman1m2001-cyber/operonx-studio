@@ -194,3 +194,16 @@ test("a preview leads with the type and skips empty fields", () => {
   assert.equal(brief(""), '""');
   assert.equal(brief({ $type: "T", a: 1 }), "T");
 });
+
+test("a step's calls sent again read as one line per call", () => {
+  const { retrySummary } = require("../../operonx_studio/static/io.js");
+  assert.equal(retrySummary({}), null);
+  assert.equal(retrySummary({"operonx.call_retries": []}), null);
+  const s = retrySummary({"operonx.call_retries": [
+    {call: "llm:assistant", attempt: 1, error: "RateLimitError 429", waited: 1.0},
+    {call: "llm:assistant", attempt: 2, error: "RateLimitError 429", waited: 2.04},
+    {call: "crm", attempt: 1, error: "ConnectError", waited: 0.5},
+  ]});
+  assert.equal(s.line, "llm:assistant: 3 calls, 2 retried (429) · crm: 2 calls, 1 retried (ConnectError) · waited 3.5 s");
+  assert.deepEqual(s.rows[1], ["llm:assistant #2", "RateLimitError 429 · waited 2.04 s"]);
+});
