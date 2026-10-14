@@ -4401,6 +4401,42 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": text}, status_code=502)
         return JSONResponse(got, status_code=409 if got.get("status") == "error" and "not waiting" in str(got.get("error")) else 200)
 
+    @app.post("/api/p/{pid}/runs/retry")
+    async def runs_retry(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Run a failed journalled run again from its first failed op, with
+        the project's code as it is now (``resume(retry_failed=True)``),
+        through the bridge: by the service or job that ran it, read off the
+        run's own record (docs/N8N_LANGGRAPH_GAP_PLAN.md S2). Waits for it."""
+        run_id = str(body.get("run_id") or "")
+        if not run_id:
+            return JSONResponse({"error": 'a retry is {"run_id": "..."}'}, status_code=400)
+        got = _record(pid, run_id)
+        if isinstance(got, JSONResponse):
+            return got
+        s = got[1].summary
+        if s.origin == "job" and s.job:
+            owner: Dict[str, Any] = {"job": s.job}
+        elif s.origin in ("service", "playground"):
+            owner = {"service": s.service or s.name, **({"variant": s.variant} if s.variant else {})}
+        else:
+            return JSONResponse({"error": f"a {s.origin} run has no service or job to run it again"},
+                                status_code=400)
+        bridge, err = await _play(pid)
+        if err is not None:
+            return err
+        try:
+            reply = await bridge.ask({"op": "retry", "run_id": run_id, **owner}, timeout=600)
+        except (BridgeError, asyncio.TimeoutError) as exc:
+            return JSONResponse({"error": str(exc) or "the run did not finish in 10 minutes"}, status_code=504)
+        finally:
+            _forget_run(run_id)
+        if reply.get("t") == "error":
+            text = str(reply.get("text") or "the bridge refused the retry")
+            if "unknown op" in text:
+                text = "this project's operonx cannot retry a run: it needs operonx 1.23 or later"
+            return JSONResponse({"error": text}, status_code=502)
+        return JSONResponse(reply)
+
     @app.post("/api/p/{pid}/play/restart")
     async def play_restart(pid: str) -> JSONResponse:
         watcher = _watcher(pid)

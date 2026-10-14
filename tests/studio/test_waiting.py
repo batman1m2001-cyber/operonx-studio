@@ -1,11 +1,13 @@
 """A run waiting for a person, answered from the studio (Operon
-docs/N8N_LANGGRAPH_GAP_PLAN.md S1).
+docs/N8N_LANGGRAPH_GAP_PLAN.md S1, S2).
 
 A real bridge under a ``[durable]`` project: a request parks on an
 ``InterruptOp``; the run is listed under the Waiting filter with its
 question; ``POST runs/answer`` resumes it, and its page then holds the whole
 run — the steps before the question and after it; answering again is
-refused (409), and a body that is not an answer is refused (400).
+refused (409), and a body that is not an answer is refused (400). A failed
+run is run again from its failed op after the fix: charged once, its page
+the failed attempt and the retry in one run.
 """
 
 from __future__ import annotations
@@ -24,6 +26,8 @@ from operonx_studio.registry import Recents
 pytestmark = pytest.mark.unit
 
 MAIN = '''
+from pathlib import Path
+
 from operonx.app import Application, Service, http
 from operonx.core import END, START, InterruptOp, graph, op
 
@@ -46,9 +50,36 @@ def refund(amount):
     START >> p >> ask >> a >> END
 
 
+CHARGED = Path(__file__).parent / "charged.txt"
+
+
+@op
+async def charge(order: str) -> dict:
+    with CHARGED.open("a") as f:  # a side effect that must not happen twice
+        f.write(order + "\\n")
+    return {"receipt": f"R-{order}"}
+
+
+@op
+async def ship(receipt: str) -> dict:
+    if (Path(__file__).parent / "broken").exists():
+        raise RuntimeError("the courier is down")
+    return {"done": f"{receipt}: shipped"}
+
+
+@graph
+def order(order):
+    c = charge(order=order)
+    s = ship(receipt=c["receipt"])
+    START >> c >> s >> END
+
+
 APP = Application(
     "refunds",
-    services=[Service("refund", http("POST", "/refund", port=8932), graph=refund)],
+    services=[
+        Service("refund", http("POST", "/refund", port=8932), graph=refund),
+        Service("order", http("POST", "/order", port=8932), graph=order),
+    ],
     resources=None,
     src=["."],
 )
@@ -128,3 +159,33 @@ def test_a_waiting_run_is_listed_answered_and_read_whole(client, project):
     again = client.post(f"/api/p/{pid}/runs/answer",
                         json={"run_id": run_id, "answers": {question["id"]: "deny"}})
     assert again.status_code == 409 and "not waiting" in again.json()["error"]
+
+
+def test_a_failed_run_is_run_again_from_its_failure(client, project):
+    (project / "broken").write_text("", encoding="utf-8")
+    pid = client.post("/api/open", json={"path": str(project)}).json()["id"]
+    got = client.post(f"/api/p/{pid}/play/open", json={
+        "service": "order", "toy": "form", "wait": True, "end": True,
+        "send": [{"kind": "json", "value": {"order": "A1"}}]}).json()
+    run_id = got["events"][-1]["trace_id"]
+    (failed,) = _runs(client, pid, status="error")
+    assert failed["trace_id"] == run_id
+    tree = client.get(f"/api/p/{pid}/trace/{run_id}/tree").json()
+    assert tree["summary"]["metadata"]["durable"] is True  # the page offers the retry
+
+    (project / "broken").unlink()  # fixed
+    done = client.post(f"/api/p/{pid}/runs/retry", json={"run_id": run_id})
+    assert done.status_code == 200 and done.json()["status"] == "ok", done.text
+    assert (project / "charged.txt").read_text().split() == ["A1"]  # charged once
+    for _ in range(60):
+        tree = client.get(f"/api/p/{pid}/trace/{run_id}/tree").json()
+        if tree["summary"]["status"] == "ok":
+            break
+        time.sleep(0.1)
+    assert tree["summary"]["status"] == "ok"
+    rows = [(r["op"], r["status"]) for r in tree["rows"]]
+    assert rows == [("c", "ok"), ("s", "retried"), ("s", "ok")]
+
+    again = client.post(f"/api/p/{pid}/runs/retry", json={"run_id": run_id}).json()
+    assert again["status"] == "error" and "no op of the run failed" in again["error"]
+    assert client.post(f"/api/p/{pid}/runs/retry", json={}).status_code == 400
