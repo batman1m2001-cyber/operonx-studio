@@ -2372,7 +2372,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         if rec is None:
             return JSONResponse({"error": "no such run"}, status_code=404)
         entry = {"rows": rec.nodes, "rec": rec, "resolved": None, "by_id": None}
-        if getattr(rec.summary, "status", None) != "running":
+        # a run still going, or waiting for an answer, will change
+        if getattr(rec.summary, "status", None) not in ("running", "interrupted"):
             with run_cache_lock:
                 run_cache[key] = entry
                 while len(run_cache) > RUN_CACHE_MAX:
@@ -4372,6 +4373,33 @@ def build_studio_app(recents: Optional[Recents] = None):
                 return JSONResponse({"error": str(exc) or "the re-run did not finish in time"}, status_code=504)
         await bridge.send(msg)
         return JSONResponse({"rid": msg["id"]})
+
+    @app.post("/api/p/{pid}/runs/answer")
+    async def runs_answer(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Answer a parked run's questions — ``{"run_id", "answers":
+        {interrupt id: value}}`` — through the project's bridge, which
+        resumes it with the engine of the service or job that ran it
+        (docs/N8N_LANGGRAPH_GAP_PLAN.md S1). Waits for it to end or park
+        again."""
+        run_id, answers = str(body.get("run_id") or ""), body.get("answers")
+        if not run_id or not isinstance(answers, dict) or not answers:
+            return JSONResponse({"error": 'an answer is {"run_id", "answers": {"<question id>": value}}'},
+                                status_code=400)
+        bridge, err = await _play(pid)
+        if err is not None:
+            return err
+        try:
+            got = await bridge.ask({"op": "answer", "run_id": run_id, "answers": answers}, timeout=600)
+        except (BridgeError, asyncio.TimeoutError) as exc:
+            return JSONResponse({"error": str(exc) or "the run did not finish in 10 minutes"}, status_code=504)
+        finally:
+            _forget_run(run_id)
+        if got.get("t") == "error":
+            text = str(got.get("text") or "the bridge refused the answer")
+            if "unknown op" in text:
+                text = "this project's operonx cannot answer a parked run: it needs operonx 1.23 or later"
+            return JSONResponse({"error": text}, status_code=502)
+        return JSONResponse(got, status_code=409 if got.get("status") == "error" and "not waiting" in str(got.get("error")) else 200)
 
     @app.post("/api/p/{pid}/play/restart")
     async def play_restart(pid: str) -> JSONResponse:

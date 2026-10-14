@@ -85,7 +85,9 @@ const RunTree = (() => {
     if (r._preview !== undefined) return r._preview;
     let text = "";
     if (r.kind === "record") {
-      if (r.error) text = String(r.error).trim().split("\n").pop();
+      // a resumed run's step as the run stopped on it (operonx: `<op_id>@stopped`)
+      if (String(r.id || "").endsWith("@stopped") && !r.error) text = "the run stopped here; it went on later";
+      else if (r.error) text = String(r.error).trim().split("\n").pop();
       else {
         const node = r.op && !r.child ? irNodeByName(r.op) : null;
         // words first: a value that is a record's shape ({…}, […]) only
