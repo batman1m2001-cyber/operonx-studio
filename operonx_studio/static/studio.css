@@ -624,6 +624,17 @@ select { width: auto; min-height: 30px; padding: 4px 28px 4px 10px; font-size: v
 .loginerr { color: var(--err); font-size: var(--fs-md); margin-top: 12px; }
 .loginerr:empty { display: none; }
 .loginrule { color: var(--text-3); font-size: var(--fs-sm); margin: 10px 0 0; }
+/* sign in with Google: "or", the button, then Google's link and the code */
+.loginor { display: flex; align-items: center; gap: 10px; margin: 18px 0 0; color: var(--text-3); font-size: var(--fs-sm); }
+.loginor::before, .loginor::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.googlebtn { gap: 10px; background: var(--surface); }
+.googlebtn svg { width: 18px; height: 18px; flex: none; }
+.googlestep { margin-top: 14px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--surface-2);
+  font-size: var(--fs-md); color: var(--text-2); }
+.googlestep p { margin: 0 0 6px; }
+.googlecode { display: block; width: 100%; min-height: 44px; margin: 4px 0 10px; font: 700 22px/1 var(--mono, ui-monospace, monospace);
+  letter-spacing: .12em; background: var(--surface); }
+.googlewait { color: var(--text-3); font-size: var(--fs-sm); }
 .loginalt { display: block; text-align: center; margin-top: 14px; font-size: var(--fs-md); color: var(--text-2); }
 .logincard [hidden] { display: none; }
 

@@ -62,6 +62,8 @@
       // the Claude account their assistant runs under, as last seen: never a token (§2.4)
       main.append(mk("div", "sig claude", p.claude_email ? `Claude: ${p.claude_email}`
         : p.machine_login ? "Claude: this machine's login" : "Claude: not signed in yet"));
+      // the Google address they may sign in with (Sign in with Google)
+      main.append(mk("div", "sig google", p.email ? `Google: ${p.email}` : "Google: no address — password only"));
       if (lastAdmin) main.append(mk("div", "sig guard", "The last active admin: can't be demoted, disabled or deleted"));
       row.append(main);
 
@@ -108,6 +110,7 @@
       it.onclick = () => { closeMenu(); fn(); };
       pop.append(it);
     };
+    item("globe", "Google address…", () => setEmail(p));
     item("refresh", "Reset password", () => reset(p), self);
     item(p.disabled ? "check" : "stop", p.disabled ? "Enable" : "Disable", () => toggle(p), self || (lastAdmin && !p.disabled));
     item("trash", "Delete…", () => remove(p), self || lastAdmin, "danger");
@@ -128,6 +131,17 @@
       const got = await Account.call("PATCH", `/api/admin/users/${p.id}`, {role});
       const stopped = got.stopped_turns ? `; ${got.stopped_turns} running assistant turn${got.stopped_turns > 1 ? "s" : ""} stopped` : "";
       Account.toast(`${p.name || p.username} is now ${role === "admin" ? "an admin" : role === "editor" ? "an editor" : "a viewer"}${stopped}`);
+    } catch (e) { Account.toast(e.message, true); }
+    load();
+  }
+
+  // the Gmail address this person signs in with; empty: password only
+  async function setEmail(p) {
+    const got = prompt(`The Google address ${p.name || p.username} signs in with (empty: password only)`, p.email || "");
+    if (got === null) return;
+    try {
+      await Account.call("PATCH", `/api/admin/users/${p.id}`, {email: got.trim()});
+      Account.toast(got.trim() ? `${p.name || p.username} can sign in with Google as ${got.trim().toLowerCase()}` : `${p.name || p.username} signs in with a password only`);
     } catch (e) { Account.toast(e.message, true); }
     load();
   }

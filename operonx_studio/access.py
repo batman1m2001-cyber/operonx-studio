@@ -52,6 +52,9 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", "/login"): "open",
     ("GET", "/.well-known/operonx-studio"): "open",  # "is a studio here?" for `operonx studio`
     ("POST", "/api/login"): "open",
+    ("GET", "/api/login/google"): "open",
+    ("POST", "/api/login/google/start"): "open",
+    ("POST", "/api/login/google/poll"): "open",
     ("GET", "/logout"): "open",
     ("GET", "/static/{name}.css"): "open",
     ("GET", "/static/bundle/{stem}.js"): "open",
@@ -239,7 +242,8 @@ def is_open_path(path: str) -> bool:
     ``open`` routes, and the static files they load. Kept a plain path test
     because the middleware runs before routing; test_access.py checks it
     agrees with the table for every route."""
-    return (path in ("/login", "/api/login", "/logout", "/.well-known/operonx-studio")
+    return (path in ("/login", "/api/login", "/logout", "/.well-known/operonx-studio",
+                     "/api/login/google", "/api/login/google/start", "/api/login/google/poll")
             or path == "/static" or path.startswith("/static/"))
 
 
