@@ -131,6 +131,32 @@ const RunView = (() => {
     return box;
   }
 
+  /* A failed run kept in a journal runs again from its failed op, with the
+   * code as it is now: what ended before the failure is not done again
+   * (a charge stays charged). The page then reads the run again — the
+   * failed attempt and the retry in one run. */
+  function retryButton(run, mode) {
+    const b = Icons.button("refresh", "Retry from the failure", "small",
+      "Run it again from the op that failed, with the code as it is now — the ops that ended before it are not run again");
+    b.onclick = async () => {
+      b.disabled = true;
+      toast("Running it again from the failure…");
+      let got;
+      try {
+        got = await api(`/api/p/${PID}/runs/retry`, {run_id: run});
+      } catch (err) {
+        b.disabled = false;
+        toast(String(err.message || err));
+        return;
+      }
+      toast(got.status === "ok" ? "It went through this time"
+        : got.status === "interrupted" ? "It went on, and now waits for an answer"
+        : `It failed again${got.error ? `: ${got.error}` : ""}`);
+      return mode === "workflow" ? showRunWorkflow(run) : showRunTree(run);
+    };
+    return b;
+  }
+
   /* The header: title row, the verdict, the two highlights, the origin. */
   function header(run, data, mode, extras) {
     const s = data.summary || {};
@@ -178,6 +204,10 @@ const RunView = (() => {
     }
     // where it came from (the service, its door, the session, the code) ends the line
     if (origin) line.append(origin);
+    if (failed && (s.metadata || {}).durable && ["job", "service", "playground"].includes(s.origin)
+        && !(window.Account && Account.viewOnly)) {
+      line.append(retryButton(run, mode));
+    }
     if (errs) {
       line.append(pill(`${errs} error${errs > 1 ? "s" : ""}`, null, "p-bad"));
       const next = Icons.button("right", "Next error", "small danger", "Select the failed ops one by one");
