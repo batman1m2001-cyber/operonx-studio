@@ -80,3 +80,13 @@ the parser drew, the chunk inspector, and an Ask page whose answers' `[n]`
 open the cited page with the cited boxes lit. The studio finds it by asking
 the running service (`/.well-known/operonx-kb`) and reads it over HTTP; it
 never imports operonx-kb.
+
+A project driven by
+[operonx-project](https://github.com/batman1m2001-cyber/Operonx/tree/main/packages/operonx-project)
+(it has `.operonx/project/project.db`) gets a **Board** tab: the
+milestone's columns, the questions waiting on you, its requirements
+checklist and its card graph. The studio reads the engine's store
+read-only and acts only through `operonx-project api` (on `PATH`, or
+`OPERONX_PROJECT_BIN`), so an answer from the studio follows the
+engine's rules: a second or stale one is refused. Each card attempt opens
+as a run page.

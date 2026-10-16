@@ -4153,6 +4153,11 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     _knowledge.register(app, watcher_of=_watcher)
 
+    # an operonx-project milestone's board, read from its store: operonx_studio/projectboard.py
+    from operonx_studio import projectboard as _projectboard
+
+    _projectboard.register(app, watcher_of=_watcher)
+
     # the run queue of a durable service: operonx_studio/runqueue.py
     from operonx_studio import runqueue as _runqueue
 
