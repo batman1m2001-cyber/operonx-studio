@@ -322,12 +322,12 @@ def toml_scope(allowed: Iterable[Sequence[Any]]) -> Scope:
 
 
 def pyedit_scope(before: str, manifest: Any, graph_label: str, action: str, args: Dict[str, Any]) -> Scope:
-    """The lines a typed Python edit (``operonx_project.apply``) may change:
+    """The lines a typed Python edit (``operonx_studio_toolkit.apply``) may change:
     the op's own statement for a parameter or a resource; the graph's body
     for a structural edit (rename, delete, insert)."""
     import ast
 
-    from operonx_project.pyedit import _assignment_for, find_graph
+    from operonx_studio_toolkit.pyedit import _assignment_for, find_graph
 
     attr = manifest.graph(graph_label).entry.split(":")[1]
     node = body = find_graph(ast.parse(before), attr)

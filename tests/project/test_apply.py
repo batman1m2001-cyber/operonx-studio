@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from operonx_project.apply import EditPlan, PlanError, apply_plan, plan_edit
-from operonx_project.manifest import Manifest
-from operonx_project.pyedit import PyEditError
+from operonx_studio_toolkit.apply import EditPlan, PlanError, apply_plan, plan_edit
+from operonx_studio_toolkit.manifest import Manifest
+from operonx_studio_toolkit.pyedit import PyEditError
 
 pytestmark = pytest.mark.unit
 

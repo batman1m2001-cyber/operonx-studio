@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from operonx_project.manifest import Manifest, ManifestError
-from operonx_project.pyedit import (
+from operonx_studio_toolkit.manifest import Manifest, ManifestError
+from operonx_studio_toolkit.pyedit import (
     delete_op,
     insert_op_after,
     insert_op_between,

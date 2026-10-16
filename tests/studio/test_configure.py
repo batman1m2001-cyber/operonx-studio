@@ -16,11 +16,11 @@ import yaml
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
-from operonx_project import pyedit
-from operonx_project.extract import _type_info
 from operonx_studio import yamldoc
 from operonx_studio.app import build_studio_app
 from operonx_studio.registry import Recents
+from operonx_studio_toolkit import pyedit
+from operonx_studio_toolkit.extract import _type_info
 
 pytestmark = pytest.mark.unit
 

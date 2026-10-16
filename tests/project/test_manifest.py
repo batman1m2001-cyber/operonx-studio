@@ -1,10 +1,12 @@
-"""Manifest parsing, validation, and marker behaviour."""
+"""The studio's manifest view: parsed by core (operonx.app.manifest), so
+these check the view and the few refusals the studio adds; core's own
+tests cover the parser."""
 
 from __future__ import annotations
 
 import pytest
 
-from operonx_project import GraphSpec, Manifest, ManifestError
+from operonx_studio_toolkit import GraphSpec, Manifest, ManifestError
 
 pytestmark = pytest.mark.unit
 
@@ -42,23 +44,21 @@ name = "callbot"
 description = "voice bot"
 
 [resources]
-base    = "common.yaml"
 overlay = "resources.yaml"
 
 [[graph]]
 name  = "pipeline"
-entry = "callbot.graph:build_pipeline"
+entry = "callbot.graph:pipeline"
 inputs = { turn_id = 0 }
-[graph.bind]
-agent = "agents.hr:HRAgent"
 """,
             )
         )
         assert m.description == "voice bot"
-        assert m.resources.base == "common.yaml"
+        # `[resources] base` and `[graph.bind]` were the studio's own: core
+        # never read them and no project used them
+        assert m.resources.overlay == "resources.yaml" and m.resources.base is None
         g = m.graph("pipeline")
-        assert g.bind == {"agent": "agents.hr:HRAgent"}
-        assert g.inputs == {"turn_id": 0}
+        assert g.bind == {} and g.inputs == {"turn_id": 0}
 
     def test_missing_file(self, tmp_path):
         with pytest.raises(ManifestError, match="no operonx.toml"):
@@ -76,8 +76,8 @@ agent = "agents.hr:HRAgent"
             # entry point is enough — but a manifest with neither still has
             # nothing anything could load.
             ('[project]\nname = "d"\n', "nothing to load"),
-            ('[project]\nname = "d"\n[[graph]]\nentry = "m:f"\n', "missing 'name'"),
-            ('[project]\nname = "d"\n[[graph]]\nname = "f"\n', "missing 'entry'"),
+            # (a [[graph]] without a name is named by its entry, as core does)
+            ('[project]\nname = "d"\n[[graph]]\nname = "f"\n', "no `entry`"),
         ],
     )
     def test_structural_errors(self, tmp_path, body, match):
@@ -87,7 +87,7 @@ agent = "agents.hr:HRAgent"
     @pytest.mark.parametrize("ref", ["mainflow", "main:flow:extra", ":flow", "main:"])
     def test_bad_entry_reference_fails_at_parse(self, tmp_path, ref):
         """A typo is a manifest error, not a confusing ImportError later."""
-        with pytest.raises(ManifestError, match="module:attr"):
+        with pytest.raises(ManifestError, match="module:function"):
             Manifest.load(
                 write(tmp_path, f'[project]\nname="d"\n[[graph]]\nname="f"\nentry="{ref}"\n')
             )
@@ -127,24 +127,6 @@ class TestResolve:
         with pytest.raises(ManifestError, match="no attribute 'absent'"):
             m.graph("g").resolve(m.root)
 
-    def test_resolve_bind(self, tmp_path):
-        (tmp_path / "dep.py").write_text("class Agent: pass\n", encoding="utf-8")
-        m = Manifest.load(
-            write(
-                tmp_path,
-                """
-[project]
-name = "d"
-[[graph]]
-name  = "g"
-entry = "dep:Agent"
-[graph.bind]
-agent = "dep:Agent"
-""",
-            )
-        )
-        assert m.graph("g").resolve_bind(m.root)["agent"].__name__ == "Agent"
-
     def test_resolve_does_not_leak_sys_path(self, tmp_path):
         import sys
 
@@ -167,7 +149,6 @@ class TestResourceSpec:
 [project]
 name = "d"
 [resources]
-base    = "absent.yaml"
 overlay = "resources.yaml"
 [[graph]]
 name  = "g"
@@ -291,7 +272,7 @@ entry = "deep_pkg.mod:VALUE"
 
 def test_operonx_triggers_are_known_kinds(tmp_path):
     """A webhook or schedule service extracts: they are operonx's own transports."""
-    from operonx_project.manifest import Manifest
+    from operonx_studio_toolkit.manifest import Manifest
 
     (tmp_path / "operonx.toml").write_text(
         '[project]\nname = "t"\n\n[[serve]]\nname = "mail"\nkind = "webhook"\ngraph = "main:flow"\npath = "/mail"\n\n'

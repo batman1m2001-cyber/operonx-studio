@@ -1,33 +1,24 @@
-"""``operonx.toml`` — the project manifest.
+"""``operonx.toml`` — the studio's view of a project manifest.
 
-A manifest answers the three questions no tool can infer from source alone:
+The file is parsed by core (``operonx.app.manifest``), the same parser
+``operonx serve`` boots from; this module keeps the shapes the studio's
+extraction and edits work with (``GraphSpec.resolve`` imports an entry
+inside the project's own interpreter, never the studio's).
 
-1. **Which graphs are entry points?** A module may define components and
-   runnable graphs side by side; only the author knows which is which.
-2. **What must be injected to build them?** Ops produced by an
-   ``@op_factory`` do not exist until a dependency is supplied, so a graph
-   cannot be constructed — let alone drawn — without a declared binding.
-3. **Where do resources come from?** An optional shared base hub merged
-   under a project-specific overlay.
-
-Everything else about a project is derived: input ports come from the entry
-signature, required env keys come from ``${VAR}`` in the resource files.
+Today a manifest mostly points at the application (``[project] app``),
+whose services and jobs name the graphs; ``[[graph]]`` still lists graphs
+nothing serves. A served door's ``[serve.variants]`` bind its graph's
+build-time parameters, one drawn graph per variant. Input ports come from
+each graph's signature, required env keys from ``${VAR}`` in
+``resources.yaml``. (``[resources] base`` and ``[graph.bind]`` were the
+studio's own and are gone: core never read them, and no project used them.)
 
 Example::
 
     [project]
     name = "callbot"
     src  = ["src", "."]     # import roots; defaults to ["."]
-
-    [resources]
-    base    = "~/.operonx/common.yaml"
-    overlay = "resources.yaml"
-
-    [[graph]]
-    name  = "ws_callbot_pipeline"
-    entry = "callbot.graph:build_ws_callbot_pipeline"
-    [graph.bind]
-    agent = "agents.ahamove_hr.agent:AhamoveHRAgent"
+    app  = "app.main:APP"
 """
 
 from __future__ import annotations
@@ -288,153 +279,76 @@ class Manifest:
 
     @classmethod
     def load(cls, root: str | Path) -> "Manifest":
-        """Read ``operonx.toml`` from *root*.
+        """Read ``operonx.toml`` from *root*, parsed by core.
+
+        The file is parsed by ``operonx.app.manifest`` (what ``operonx
+        serve`` boots from), so the studio and production can never read
+        one file two ways; this is the studio's view of the result. Nothing
+        is imported: the studio process never imports a project.
 
         Raises:
             ManifestError: file missing, unparseable, or structurally invalid.
         """
+        from operonx.app.declare import graph_refs, ref_name
+        from operonx.app.manifest import Manifest as CoreManifest
+        from operonx.app.manifest import ManifestError as CoreManifestError
+
         root = Path(root).resolve()
         path = root / MANIFEST_NAME
         if not path.exists():
             raise ManifestError(f"no {MANIFEST_NAME} in {root}")
         try:
-            raw = tomllib.loads(path.read_text(encoding="utf-8"))
-        except tomllib.TOMLDecodeError as exc:
-            raise ManifestError(f"{path}: {exc}") from exc
-
-        project = raw.get("project") or {}
-        name = project.get("name")
-        if not name:
+            core = CoreManifest.from_file(path)
+        except (CoreManifestError, ValueError, OSError) as exc:
+            msg = str(exc)
+            raise ManifestError(msg if str(path) in msg else f"{path}: {msg}") from exc
+        if not core.project.get("name"):
             raise ManifestError(f"{path}: [project] name is required")
-
-        declared_src = project.get("src") or ["."]
-        if isinstance(declared_src, str):
-            declared_src = [declared_src]
-        src = tuple(str(entry) for entry in declared_src)
-
-        res = raw.get("resources") or {}
-        graphs = []
-        seen: set[str] = set()
-        for i, entry in enumerate(raw.get("graph") or []):
-            g_name = entry.get("name")
-            g_entry = entry.get("entry")
-            where = f"{path}: [[graph]] #{i + 1}"
-            if not g_name:
-                raise ManifestError(f"{where} is missing 'name'")
-            if not g_entry:
-                raise ManifestError(f"{where} ('{g_name}') is missing 'entry'")
-            # Fail here rather than at import time — a typo in the reference
-            # should be a manifest error, not a confusing ImportError later.
-            _target(g_entry, f"{where} ('{g_name}')")
-            if g_name in seen:
-                raise ManifestError(f"{path}: duplicate graph name {g_name!r}")
-            seen.add(g_name)
-            graphs.append(
-                GraphSpec(
-                    name=g_name,
-                    entry=g_entry,
-                    bind=dict(entry.get("bind") or {}),
-                    inputs=dict(entry.get("inputs") or {}),
-                    src=src,
-                )
+        app_ref = core.app_entry
+        if not core.graphs and not core.serves and not app_ref:
+            # a manifest nothing can be loaded from is still worth refusing
+            raise ManifestError(
+                f"{path}: nothing to load — [project] app (the Application), a [[graph]], "
+                f"or a [[serve]] naming a `module:function` entry point"
             )
-
+        src = tuple(core.src)
+        graphs = []
+        seen: set = set()
+        for name, entry, _used_by, bind, _obj in graph_refs(core):
+            if name in seen:
+                raise ManifestError(f"{path}: duplicate graph name {name!r}")
+            seen.add(name)
+            inputs = next((dict(g.inputs) for g in core.graphs if g.name == name), {})
+            graphs.append(GraphSpec(name=name, entry=entry, bind=dict(bind), inputs=inputs, src=src))
         serves = []
-        for i, entry in enumerate(raw.get("serve") or []):
-            where = f"{path}: [[serve]] #{i + 1}"
-            kind = entry.get("kind")
-            if not kind:
-                raise ManifestError(f"{where} is missing 'kind'")
-            # A `module:Class` kind is a transport the project wrote
-            # itself. Rejecting those made the extension point invisible to
-            # the tools: a manifest operonx serves happily would not lint,
-            # would not extract and would not draw.
-            if ":" not in kind and kind not in SERVE_KINDS:
+        for i, s in enumerate(core.serves):
+            # core refuses an unknown kind only when it serves; the studio
+            # says so when the file is read, so it does not draw a door
+            # nothing can open
+            if ":" not in s.kind and s.kind not in SERVE_KINDS:
                 raise ManifestError(
-                    f"{where}: unknown kind {kind!r}. known: "
-                    f"{', '.join(SERVE_KINDS)}, or a `module:Class` path to "
-                    f"a transport of your own"
+                    f"{path}: [[serve]] #{i + 1}: unknown kind {s.kind!r}. known: "
+                    f"{', '.join(SERVE_KINDS)}, or a `module:Class` path to a transport of your own"
                 )
-
-            if kind == "asgi":
-                # A mount point for an app somebody else wrote — health,
-                # CRUD, admin. There is no graph behind it and there should
-                # not be one; it is listed so the manifest describes the
-                # whole deployment rather than only the parts operonx runs.
-                serves.append(
-                    ServeSpec(
-                        kind=kind,
-                        graph="",
-                        path=entry.get("path"),
-                        schedule=entry.get("schedule"),
-                        description=entry.get("description", ""),
-                    )
-                )
+            if s.kind == "asgi":
+                serves.append(ServeSpec(kind=s.kind, graph="", path=s.path, description=s.description))
                 continue
-
-            target = entry.get("graph")
-            if not target:
-                raise ManifestError(f"{where} is missing 'graph'")
-
-            # A served graph names its entry point outright. `[[graph]]`
-            # used to exist to give entry points names so `[[serve]]` could
-            # refer to them; that was a second place to keep in step for no
-            # benefit, and it is gone. The GraphSpec is synthesised here, so
-            # everything downstream — lint, extract, the studio — still sees
-            # one and needs no change of its own.
-            _target(target, f"{where} graph")
-            g_name = target.rsplit(":", 1)[1]
-            variants = entry.get("variants") or {}
-            if not isinstance(variants, dict) or not all(isinstance(v, dict) for v in variants.values()):
-                raise ManifestError(f"{where}: variants must be a table of tables")
-            if variants:
-                # One door, one compiled graph per variant: each binds the
-                # graph's build-time parameters (`module:attr` loaded, the
-                # rest literal), and is drawn as its own graph.
-                for v_name, bind in variants.items():
-                    label = f"{g_name}[{v_name}]"
-                    if label in seen:
-                        raise ManifestError(f"{path}: duplicate graph name {label!r}")
-                    seen.add(label)
-                    graphs.append(
-                        GraphSpec(name=label, entry=target, bind=dict(bind), inputs={}, src=src)
-                    )
-            elif g_name not in seen:
-                seen.add(g_name)
-                graphs.append(
-                    GraphSpec(name=g_name, entry=target, bind={}, inputs={}, src=src)
-                )
-            target = g_name
-
+            entry = ref_name(s.graph)
             serves.append(
                 ServeSpec(
-                    kind=kind,
-                    graph=target,
-                    path=entry.get("path"),
-                    schedule=entry.get("schedule"),
-                    description=entry.get("description", ""),
-                    variants=tuple(str(v) for v in variants),
+                    kind=s.kind,
+                    graph=entry.rpartition(":")[2],
+                    path=s.path,
+                    schedule=(s.options or {}).get("schedule"),
+                    description=s.description,
+                    variants=tuple(str(v) for v in s.variants),
                 )
             )
-
-        app_ref = project.get("app")
-        if app_ref is not None:
-            _target(str(app_ref), f"{path}: [project] app")
-        if not graphs and not app_ref:
-            # `[[graph]]` is no longer required, because a served graph
-            # names its own entry point. A manifest with neither — and no
-            # `[project] app` pointing at a Python declaration — is one
-            # nothing can be loaded from, which is still worth refusing.
-            raise ManifestError(
-                f"{path}: nothing to load — declare a [[graph]], a [[serve]] "
-                f"naming a `module:function` entry point, or [project] app"
-            )
-
         return cls(
-            name=name,
+            name=core.name,
             root=root,
-            description=project.get("description", ""),
-            resources=ResourceSpec(base=res.get("base"), overlay=res.get("overlay")),
+            description=str(core.project.get("description", "")),
+            resources=ResourceSpec(overlay=core.resources_overlay),
             graphs=tuple(graphs),
             serves=tuple(serves),
             src=src,

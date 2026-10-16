@@ -123,7 +123,7 @@ class TestExtraction:
     def test_the_extract_cli_keeps_stdout_for_the_ir(self, project, capfd):
         import json
 
-        from operonx_project.cli import extract_main
+        from operonx_studio_toolkit.cli import extract_main
 
         root, mod = project
         (root / f"{mod}.py").write_text('print("noise")\n' + WORKFLOW, encoding="utf-8")
@@ -221,11 +221,11 @@ class TestInterpreterSelection:
     def test_only_the_toolkit_is_put_on_the_child_path(self, project):
         """Injecting our whole sys.path shadowed the child's own packages —
         and could break its import of the standard library."""
-        import operonx_project
+        import operonx_studio_toolkit
 
         root, _ = project
         env = ProjectWatcher(root=root)._child_env()
-        toolkit = str(Path(operonx_project.__file__).resolve().parent.parent)
+        toolkit = str(Path(operonx_studio_toolkit.__file__).resolve().parent.parent)
         entries = env["PYTHONPATH"].split(os.pathsep)
         assert entries[0] == toolkit
         assert not any("site-packages" in e for e in entries), env["PYTHONPATH"]

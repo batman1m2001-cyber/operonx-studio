@@ -12,8 +12,8 @@ import uuid
 
 import pytest
 
-from operonx_project.extract import extract_project
-from operonx_project.manifest import Manifest, ManifestError
+from operonx_studio_toolkit.extract import extract_project
+from operonx_studio_toolkit.manifest import Manifest, ManifestError
 
 FLOW = '''
 from operonx.core import END, PARENT, START, graph
@@ -103,7 +103,7 @@ def test_variants_must_be_a_table_of_tables(project, tmp_path):
         '''),
         encoding="utf-8",
     )
-    with pytest.raises(ManifestError, match="table of tables"):
+    with pytest.raises(ManifestError, match="must be a table"):
         Manifest.load(tmp_path)
 
 

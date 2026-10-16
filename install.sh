@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 # Install (or upgrade, after a `git pull`) operonx-studio from this checkout:
-# the `operonx-studio`, `operonx-lint`, `operonx-extract` and `operonx-new`
-# commands, in an environment of their own.
+# the `operonx-studio` and `operonx-extract` commands (and `operonx-lint`,
+# `operonx-new`: old names of core's `operonx lint` and `operonx init`), in
+# an environment of their own.
 #
 #   git clone https://github.com/batman1m2001-cyber/operonx-studio
 #   operonx-studio/install.sh

@@ -92,16 +92,16 @@ _EXTRACTOR_DIGEST: Optional[str] = None
 
 
 def _extractor_digest() -> str:
-    """A hash of the extractor's own source (``operonx_project``), once per
+    """A hash of the extractor's own source (``operonx_studio_toolkit``), once per
     process."""
     global _EXTRACTOR_DIGEST
     if _EXTRACTOR_DIGEST is None:
         import hashlib
 
-        import operonx_project
+        import operonx_studio_toolkit
 
         h = hashlib.sha1()
-        for path in sorted(Path(operonx_project.__file__).resolve().parent.glob("*.py")):
+        for path in sorted(Path(operonx_studio_toolkit.__file__).resolve().parent.glob("*.py")):
             h.update(path.name.encode())
             h.update(path.read_bytes())
         _EXTRACTOR_DIGEST = h.hexdigest()[:10]
@@ -214,7 +214,7 @@ class ProjectWatcher:
         A project's own virtualenv if it has one, else ours. This is what
         lets a single studio installation serve projects whose dependencies
         it does not share: the project's interpreter supplies ``operonx`` and
-        everything the project imports, while ``operonx_project`` is injected
+        everything the project imports, while ``operonx_studio_toolkit`` is injected
         through ``PYTHONPATH`` — it is pure Python, so it needs no install
         in the target environment.
         """
@@ -227,7 +227,7 @@ class ProjectWatcher:
     def _child_env(self) -> Dict[str, str]:
         """Environment for the extractor: the toolkit, and nothing else.
 
-        Only the directory containing ``operonx_project`` is added. An
+        Only the directory containing ``operonx_studio_toolkit`` is added. An
         earlier version injected our whole ``sys.path``, which was harmless
         while the child was our own interpreter and actively destructive
         once it became the project's: another environment's ``site-packages``
@@ -237,9 +237,9 @@ class ProjectWatcher:
         The path is absolute because the child runs with ``cwd`` set to the
         project, where a relative entry would resolve to the wrong place.
         """
-        import operonx_project
+        import operonx_studio_toolkit
 
-        toolkit = str(Path(operonx_project.__file__).resolve().parent.parent)
+        toolkit = str(Path(operonx_studio_toolkit.__file__).resolve().parent.parent)
         env = dict(os.environ)
         # An inherited PYTHONPATH is kept — a user may have set it for this
         # project — but every entry is absolutised and existing-checked
@@ -264,8 +264,8 @@ class ProjectWatcher:
         code = (
             "import json,os,sys;"
             "out=os.fdopen(os.dup(1),'w',encoding='utf-8');os.dup2(2,1);sys.stdout=sys.stderr;"
-            "from operonx_project.manifest import Manifest;"
-            "from operonx_project.extract import extract_project;"
+            "from operonx_studio_toolkit.manifest import Manifest;"
+            "from operonx_studio_toolkit.extract import extract_project;"
             "out.write(json.dumps(extract_project(Manifest.load(sys.argv[1]))));out.flush()"
         )
         proc = subprocess.run(
@@ -421,9 +421,9 @@ def build_app(root: Path):
         the page reloads itself, so there is no separate refresh path to
         keep in step.
         """
-        from operonx_project.apply import PlanError, plan_edit
-        from operonx_project.manifest import Manifest, ManifestError
-        from operonx_project.pyedit import PyEditError
+        from operonx_studio_toolkit.apply import PlanError, plan_edit
+        from operonx_studio_toolkit.manifest import Manifest, ManifestError
+        from operonx_studio_toolkit.pyedit import PyEditError
 
         graph = body.get("graph")
         action = body.get("action")

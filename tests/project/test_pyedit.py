@@ -12,7 +12,7 @@ import ast
 
 import pytest
 
-from operonx_project.pyedit import (
+from operonx_studio_toolkit.pyedit import (
     PyEditError,
     delete_op,
     graph_names,
@@ -354,7 +354,7 @@ def main():
 
 
 def test_set_op_param_changes_one_token_only():
-    from operonx_project.pyedit import set_op_param
+    from operonx_studio_toolkit.pyedit import set_op_param
 
     out = set_op_param(SRC_PARAMS, "main", "a", "times", 5)
     assert 'times=5' in out
@@ -365,7 +365,7 @@ def test_set_op_param_changes_one_token_only():
 
 
 def test_set_op_param_refuses_wiring():
-    from operonx_project.pyedit import PyEditError, set_op_param
+    from operonx_studio_toolkit.pyedit import PyEditError, set_op_param
 
     src = SRC_PARAMS.replace('name="minh"', "name=some_ref")
     import pytest
@@ -376,7 +376,7 @@ def test_set_op_param_refuses_wiring():
 def test_set_op_param_names_a_missing_keyword():
     import pytest
 
-    from operonx_project.pyedit import PyEditError, set_op_param
+    from operonx_studio_toolkit.pyedit import PyEditError, set_op_param
 
     with pytest.raises(PyEditError, match="no nope"):
         set_op_param(SRC_PARAMS, "main", "a", "nope", 1)
