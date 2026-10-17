@@ -1,4 +1,5 @@
-/* operonx studio — light or dark: the system's until the viewer picks.
+/* operonx studio — light or dark: dark until the viewer picks (light, dark,
+ * or the system's).
  *
  * The choice is the viewer's (this browser: localStorage `ox:theme`), and
  * the page already wears it before its first paint: an inline script in
@@ -14,7 +15,7 @@
 const Theme = (() => {
   const KEY = "ox:theme";
   const media = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : null;
-  const read = () => { try { return localStorage.getItem(KEY) || "system"; } catch { return "system"; } };
+  const read = () => { try { return localStorage.getItem(KEY) || "dark"; } catch { return "dark"; } };
   const resolve = (choice) => (choice === "system" ? (media && media.matches ? "dark" : "light") : choice);
 
   function apply(choice) {
