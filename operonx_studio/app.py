@@ -32,10 +32,11 @@ import subprocess
 import sys
 import threading
 import time
-import yaml
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
 
 try:
     import tomllib as _toml
@@ -47,9 +48,9 @@ try:  # a module-level name: FastAPI resolves route annotations from here
 except ImportError:  # pragma: no cover — fastapi is a dependency
     Request = Any  # type: ignore[misc,assignment]
 
+from operonx_studio import safewrite
 from operonx_studio.daemon import ProjectWatcher
 from operonx_studio.layout import layout_graph
-from operonx_studio import safewrite
 from operonx_studio.registry import MANIFEST, ProjectRef, Recents
 
 __all__ = ["build_studio_app", "serve_studio"]
@@ -4152,6 +4153,11 @@ def build_studio_app(recents: Optional[Recents] = None):
     from operonx_studio import knowledge as _knowledge
 
     _knowledge.register(app, watcher_of=_watcher)
+
+    # an operonx-project milestone's board, read from its store: operonx_studio/projectboard.py
+    from operonx_studio import projectboard as _projectboard
+
+    _projectboard.register(app, watcher_of=_watcher)
 
     # the run queue of a durable service: operonx_studio/runqueue.py
     from operonx_studio import runqueue as _runqueue

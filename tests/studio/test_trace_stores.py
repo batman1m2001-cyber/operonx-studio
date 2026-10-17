@@ -22,13 +22,12 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 from operonx.telemetry.media import LocalMediaStore, detect_media
+from operonx.telemetry.runs import RunStore
+from operonx.telemetry.runs.model import Page, RunFilter, RunRecord, RunSummary
 
 from operonx_studio import runs as runs_mod
 from operonx_studio.app import build_studio_app
 from operonx_studio.registry import Recents
-from operonx.telemetry.runs import RunStore
-from operonx.telemetry.runs.model import Page, RunFilter, RunRecord, RunSummary
-
 from operonx_studio.runs import StoreUnreachable, WithLocal, project_runs
 
 pytestmark = pytest.mark.unit
@@ -617,9 +616,9 @@ def test_a_run_opens_locally_first_and_deletes_reach_only_the_local_store():
 
 
 def test_monitor_says_its_op_table_is_this_machines_runs_only():
-    from operonx_studio.monitor import monitor
-
     import time as _t
+
+    from operonx_studio.monitor import monitor
     now = _t.time()
     m = monitor(WithLocal(_Mem([_s("a", now - 60)]), _Mem([])), since=now - 3600, until=now)
     assert m["ops_note"] and "ClickHouse" in m["ops_note"]

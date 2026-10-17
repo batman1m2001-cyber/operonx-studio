@@ -4913,3 +4913,99 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   .cmpgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .cmpgrid-h:first-child, .cmpgrid-k { grid-column: 1 / -1; }
 }
+
+/* ── Board: an operonx-project milestone (board.js) ─────────────────── */
+.bdpick { max-width: 320px; }
+.bdctl { display: inline-flex; gap: 6px; }
+.bdhead { margin: -6px 0 14px; }
+.bdsum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; font-size: var(--fs-sm); color: var(--text-2); }
+.bdreason { margin-top: 6px; font-size: var(--fs-sm); color: var(--text-2); }
+.bdnotes { margin-top: 8px; font-size: var(--fs-sm); }
+.bdnotes ul { margin: 4px 0 0 18px; padding: 0; }
+
+.bdwait { border: 1px solid var(--warn); background: var(--warn-soft); border-radius: var(--r-md);
+  padding: 12px 14px; margin-bottom: 16px; }
+.bdwaithead { font-weight: 700; margin-bottom: 8px; }
+.bdq { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; }
+.bdq + .bdq { margin-top: 10px; }
+.bdq.flagged { border-color: var(--err); }
+.bdqtop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bdqtext { margin: 6px 0 4px; font-size: var(--fs-md); color: var(--text); }
+.bdq .note { font-size: var(--fs-sm); }
+.bdev { margin: 6px 0; max-height: 180px; overflow: auto; font-size: 11px; background: var(--surface-2);
+  border-radius: var(--r-sm); padding: 6px 8px; white-space: pre-wrap; }
+.bdplan { margin: 6px 0 0 18px; padding: 0; font-size: var(--fs-sm); }
+.bdopts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.bdwords { display: flex; gap: 6px; margin-top: 8px; align-items: flex-end; }
+.bdwords textarea { flex: 1; min-width: 0; resize: vertical; font: inherit; font-size: var(--fs-sm); }
+
+.bdcols { display: grid; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+.bdcol { background: var(--surface-2); border-radius: var(--r-md); padding: 8px; min-height: 120px;
+  display: flex; flex-direction: column; gap: 6px; }
+.bdcolhead { display: flex; justify-content: space-between; font-size: var(--fs-sm); font-weight: 700;
+  color: var(--text-2); padding: 2px 2px 4px; }
+.bdcolhead .count { color: var(--text-3); font-weight: 500; }
+.bdempty { color: var(--text-3); text-align: center; font-size: var(--fs-sm); padding: 8px; }
+.bdcol.empty .bdcolhead { flex-wrap: wrap; gap: 4px; }
+.bdcard { display: block; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--border); border-radius: var(--r-sm); padding: 7px 9px; cursor: pointer;
+  font: inherit; color: var(--text); white-space: normal; overflow-wrap: anywhere; }
+.bdcard:hover { border-color: var(--accent); }
+.bdcard.sel { box-shadow: 0 0 0 2px var(--accent-soft); border-color: var(--accent); }
+.bdcard.st-running { border-left-color: var(--accent); }
+.bdcard.st-done, .bdcard.st-verified { border-left-color: var(--ok); }
+.bdcard.st-failed, .bdcard.st-blocked { border-left-color: var(--err); }
+.bdcard.st-waiting_human, .bdcard.asks { border-left-color: var(--warn); }
+.bdcardtop { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.bdcardtop .chip { margin: 0; }
+.bdcardtitle { font-size: var(--fs-sm); margin-top: 3px; line-height: 1.35; }
+.bdcardmeta { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+.bdcardwhy { font-size: 11px; color: var(--err); margin-top: 4px; }
+
+.bdpanel { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 12px 14px; }
+.bdpaneltop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bdintent { margin: 8px 0; color: var(--text-2); font-size: var(--fs-sm); }
+.bdfacts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 8px 0;
+  font-size: var(--fs-sm); }
+.bdfacts dt { color: var(--text-3); }
+.bdfacts dd { margin: 0; overflow-wrap: anywhere; }
+.bdcrit { margin: 4px 0 0 18px; padding: 0; font-size: var(--fs-sm); }
+.bdevents { list-style: none; margin: 4px 0 0; padding: 0; font-size: var(--fs-sm); max-height: 280px; overflow: auto; }
+.bdevents li { padding: 3px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+
+.bdcheck .bdsum { margin-bottom: 10px; }
+.bdfilter { margin-bottom: 10px; }
+.bdtablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-md); }
+.bdtable { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
+.bdtable th, .bdtable td { text-align: left; vertical-align: top; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.bdtable th { background: var(--surface-2); color: var(--text-2); font-weight: 600; }
+.bdtable .chip { margin: 0; white-space: nowrap; }
+.bdtests div, .bdtable td:first-child { white-space: nowrap; }
+.bdqlist { list-style: none; padding: 0; margin: 4px 0; font-size: var(--fs-sm); }
+.bdqlist li { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+.bdqlist .chip { margin: 0; }
+.bdqlist .mono { white-space: nowrap; }
+
+.bdgraph { overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+.bdplane { position: relative; }
+.bdwires { left: 0; top: 0; }
+.bdwires path.bdwire { stroke: var(--text-3); }
+.bdwires path.bdwire.met { stroke: var(--ok); }
+.bdwave { position: absolute; top: 10px; font-size: 11px; font-weight: 700; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: .04em; }
+.bdcard.bdnode { position: absolute; overflow: hidden; }
+.bdnode .bdcardmeta, .bdnode .bdcardwhy { display: none; }
+.bdnode .bdcardtitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 760px) {
+  /* a phone stacks the columns; an empty one is a header line */
+  .bdcols { grid-template-columns: minmax(0, 1fr) !important; overflow: visible; }
+  .bdcol { min-height: 0; }
+  .bdcol.empty { padding: 6px 8px; }
+  .bdcol.empty .bdempty { display: none; }
+  .bdcol.empty .bdcolhead { padding: 0; }
+  .bdpick { max-width: 100%; }
+  .bdwords { flex-direction: column; align-items: stretch; }
+  .bdtable { min-width: 600px; }  /* the matrix scrolls sideways, its IDs whole */
+}

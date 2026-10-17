@@ -11,9 +11,9 @@ import pytest
 
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
-
 from operonx.core.workflow_trace import OpExecution, WorkflowTrace
 from operonx.telemetry.consumers.local import LocalConsumer
+
 from operonx_studio.app import build_studio_app
 from operonx_studio.registry import Recents
 
