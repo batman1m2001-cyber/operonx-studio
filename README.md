@@ -13,9 +13,8 @@ operonx-studio/install.sh           # again after a `git pull` to upgrade
 
 operonx-studio            # open the studio — pick, open, or create a project
 operonx-studio PATH       # … with the project at PATH already open
-operonx-new my_project    # scaffold a standard operonx project
-operonx-lint              # lint the manifest and graphs
 operonx-extract           # dump the project IR as JSON
+operonx-new, operonx-lint # old names of core's `operonx init` and `operonx lint`
 ```
 
 `operonx-studio` serves a local web app: a home screen listing your

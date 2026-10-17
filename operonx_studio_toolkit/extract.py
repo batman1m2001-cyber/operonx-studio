@@ -36,8 +36,12 @@ try:  # tomllib is stdlib from 3.11
 except ModuleNotFoundError:  # pragma: no cover - exercised on 3.10 only
     import tomli as tomllib  # type: ignore[no-redef]
 
-from operonx_project.lint import SKIP_DIRS
-from operonx_project.manifest import GraphSpec, Manifest
+from operonx_studio_toolkit.manifest import GraphSpec, Manifest
+
+# Directories no extraction reads. Kept here, not imported from core's
+# `operonx.lint`: extraction runs in each project's own interpreter, whose
+# operonx may predate it (1.31).
+SKIP_DIRS = {"__pycache__", ".venv", "venv", ".git", "build", "dist", "site", "node_modules", ".operonx"}
 
 __all__ = [
     "IR_VERSION",
@@ -783,11 +787,11 @@ def build_entry(spec: GraphSpec, root: Path) -> Any:
         # a static value into the body as-is (operonx ≥ 1.7.2), and the
         # rest stay runtime inputs wired to PARENT below.
 
-    if bound and not getattr(target, "_operonx_graph", False):
+    if spec.obj is None and not getattr(target, "_operonx_graph", False):
         raise ExtractError(
-            f"graph '{spec.name}': {spec.entry} is a plain function; bound values go to a "
-            "module-level @graph's own parameters, not to a function that builds a graph "
-            "(operonx guide 05)"
+            f"graph '{spec.name}': {spec.entry} is a plain function, not a @graph; a graph is "
+            "defined at module level and its settings are its own parameters, never a "
+            "function that builds one (operonx guide 05, lint C7)"
         )
     try:
         params = list(inspect.signature(target).parameters)

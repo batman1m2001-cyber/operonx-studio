@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from operonx_project.templates import TEMPLATES, TemplateError, create, describe
+from operonx_studio_toolkit.templates import TEMPLATES, TemplateError, create, describe
 
 pytestmark = pytest.mark.unit
 
@@ -87,8 +87,13 @@ def test_the_studio_creates_from_a_template_and_starts_its_first_runs(tmp_path, 
 
     monkeypatch.setenv("OPERONX_STUDIO_ALERTS", "off")
     client = TestClient(build_studio_app(Recents(state_file=tmp_path / "studio.json")))
-    ids = [t["id"] for t in client.get("/api/templates").json()["templates"]]
-    assert ids[0] == "blank" and set(ids[1:]) == set(TEMPLATES)
+    from operonx.cli.init import TEMPLATES as PROJECTS
+
+    listed = client.get("/api/templates").json()["templates"]
+    projects = [t["id"] for t in listed if t["kind"] == "project"]
+    examples = [t["id"] for t in listed if t["kind"] == "example"]
+    assert projects == list(PROJECTS) and set(examples) == set(TEMPLATES)
+    assert [t["id"] for t in listed] == projects + examples  # core's projects first
     got = client.post("/api/new", json={"path": str(tmp_path), "name": "scores", "template": "batch-scorer"}).json()
     assert got["first_runs"] == ["score_reviews", "labels"] and (tmp_path / "scores" / "main.py").is_file()
     log = tmp_path / "scores" / ".operonx" / "first-runs.log"

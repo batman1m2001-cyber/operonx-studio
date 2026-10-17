@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import pytest
 
-from operonx_project import Manifest, ManifestError, ServeSpec
+from operonx_studio_toolkit import Manifest, ManifestError, ServeSpec
+
+# A websocket door declares `max_inflight` below: core (which parses the
+# file) requires a bound on a stream transport, as `operonx serve` does.
 
 pytestmark = pytest.mark.unit
 
@@ -38,7 +41,7 @@ def test_absent_serve_is_fine(tmp_path):
 
 def test_websocket_round_trips(tmp_path):
     m = Manifest.load(
-        _write(tmp_path, '\n[[serve]]\nkind = "websocket"\npath = "/ws/call"\ngraph = "mod:build"\n')
+        _write(tmp_path, '\n[[serve]]\nkind = "websocket"\nmax_inflight = 8\npath = "/ws/call"\ngraph = "mod:build"\n')
     )
     assert m.serves == (ServeSpec(kind="websocket", graph="build", path="/ws/call"),)
     assert m.serves[0].as_dict() == {
@@ -79,7 +82,7 @@ def test_several_entry_points_on_one_graph(tmp_path):
     m = Manifest.load(
         _write(
             tmp_path,
-            '\n[[serve]]\nkind = "websocket"\npath = "/ws/call"\ngraph = "mod:build"\n'
+            '\n[[serve]]\nkind = "websocket"\nmax_inflight = 8\npath = "/ws/call"\ngraph = "mod:build"\n'
             '\n[[serve]]\nkind = "http"\npath = "/v1/run"\ngraph = "mod:build"\n',
         )
     )
@@ -90,7 +93,7 @@ def test_a_graph_that_is_not_an_entry_point_is_a_manifest_error(tmp_path):
     """A bare name used to mean "look it up in [[graph]]". It no longer does."""
     with pytest.raises(ManifestError):
         Manifest.load(
-            _write(tmp_path, '\n[[serve]]\nkind = "websocket"\ngraph = "pipeline"\n')
+            _write(tmp_path, '\n[[serve]]\nkind = "websocket"\nmax_inflight = 8\ngraph = "pipeline"\n')
         )
 
 
@@ -106,7 +109,7 @@ def test_unknown_kind_is_a_manifest_error(tmp_path):
     ("graph", '\n[[serve]]\nkind = "http"\n'),
 ])
 def test_required_fields(tmp_path, missing, body):
-    with pytest.raises(ManifestError, match=f"missing '{missing}'"):
+    with pytest.raises(ManifestError, match=f"no `{missing}`"):
         Manifest.load(_write(tmp_path, body))
 
 
@@ -132,6 +135,7 @@ name = "demo"
 
 [[serve]]
 kind  = "websocket"
+max_inflight = 8
 path  = "/ws/call"
 graph = "demo.pipeline:main"
 """)
@@ -179,6 +183,7 @@ entry = "demo.lab:try_this"
 
 [[serve]]
 kind  = "websocket"
+max_inflight = 8
 graph = "demo.pipeline:main"
 """)
     assert sorted(g.name for g in m.graphs) == ["experiment", "main"]
@@ -197,6 +202,8 @@ name = "demo"
 
 [[serve]]
 kind  = "websocket"
+max_inflight = 8
+path  = "/ws"
 graph = "demo.pipeline:main"
 
 [[serve]]
@@ -217,5 +224,6 @@ name = "demo"
 
 [[serve]]
 kind  = "websocket"
+max_inflight = 8
 graph = "demo.pipeline:"
 """)

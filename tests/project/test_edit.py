@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from operonx_project.edit import EditError, set_env_var, set_resource_field, unset_env_var
+from operonx_studio_toolkit.edit import EditError, set_env_var, set_resource_field, unset_env_var
 
 pytestmark = pytest.mark.unit
 

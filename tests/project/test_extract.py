@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from operonx.core import END, PARENT, SCRATCH, START, GraphOp, Operon, graph, op
 
-from operonx_project.extract import (
+from operonx_studio_toolkit.extract import (
     IR_VERSION,
     ExtractError,
     _binding,
@@ -21,7 +21,7 @@ from operonx_project.extract import (
     build_entry,
     extract_project,
 )
-from operonx_project.manifest import Manifest
+from operonx_studio_toolkit.manifest import Manifest
 
 pytestmark = pytest.mark.unit
 
@@ -307,13 +307,14 @@ def flow(x, tag):
             '[project]\nname="d"\n[[graph]]\nname="g"\nentry="wf:build"\n'
             '[graph.bind]\ndep="wf:value"\n',
         )
-        with pytest.raises(ExtractError, match="graph 'g'.*plain function.*guide 05"):
+        with pytest.raises(ExtractError, match="graph 'g'.*plain function.*guide 05"):  # bound or not
             extract_project(m)
 
 
 class TestFailures:
     def test_construction_error_names_the_graph(self, tmp_path):
-        m = project(tmp_path, "def flow(x):\n    raise ValueError('nope')\n", LINEAR_MANIFEST)
+        source = "from operonx.core import graph\n\n@graph\ndef flow(x):\n    raise ValueError('nope')\n"
+        m = project(tmp_path, source, LINEAR_MANIFEST)
         with pytest.raises(ExtractError, match="graph 'flow'.*nope"):
             extract_project(m)
 

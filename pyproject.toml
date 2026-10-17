@@ -1,7 +1,10 @@
 # One installable distribution carrying both halves of the tooling:
 #
-#   operonx_project   manifest, extract, lint, scaffold, typed source edits
-#   operonx_studio    the app — home screen, per-project daemons, the canvas
+#   operonx_studio_toolkit   the manifest view (parsed by core), extract, typed source edits
+#   operonx_studio           the app — home screen, per-project daemons, the canvas
+#
+# The conventions linter and the project template are core's (`operonx lint`,
+# `operonx init`); `operonx-lint` and `operonx-new` are their old names.
 #
 # They ship together because the studio is unusable without the extraction
 # toolkit and the toolkit's main consumer is the studio. Splitting them into
@@ -21,7 +24,7 @@ requires-python = ">=3.10"
 dependencies = [
     # the ClickHouse driver: a project whose [tracing] records to ClickHouse
     # is read from there
-    "operonx[clickhouse]>=1.17.1",
+    "operonx[clickhouse]>=1.31.0",  # `operonx lint` (operonx-lint is its alias)
     "tomli>=2.0; python_version < '3.11'",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
@@ -42,16 +45,16 @@ redis = [
 
 [project.scripts]
 operonx-studio = "operonx_studio.cli:main"
-operonx-lint = "operonx_project.cli:main"
-operonx-extract = "operonx_project.cli:extract_main"
-operonx-new = "operonx_project.cli:new_main"
+operonx-lint = "operonx_studio_toolkit.cli:main"
+operonx-extract = "operonx_studio_toolkit.cli:extract_main"
+operonx-new = "operonx_studio_toolkit.cli:new_main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["operonx_project", "operonx_studio"]
+packages = ["operonx_studio_toolkit", "operonx_studio"]
 
 [tool.uv.sources]
 operonx = { path = "../Operon", editable = true }

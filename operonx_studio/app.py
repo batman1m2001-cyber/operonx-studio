@@ -1573,13 +1573,20 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.post("/api/new")
     def new_project(body: Dict[str, Any]) -> JSONResponse:
-        """Scaffold a standard operonx project and open it.
+        """Create a project and open it.
 
-        The scaffold is `operonx_project.scaffold` — the same one
-        ``operonx-new`` runs — so a project born in the studio and one born
-        on the command line are byte-for-byte the same shape.
+        A project template (``hello``, ``http``, ``chat``, ``agent``) is
+        written by core's ``operonx init``, so a project born in the studio
+        and one born on the command line are byte-for-byte the same, with
+        its ``AGENTS.md`` and guide. An example (``http-api``, ``rag-qa``…)
+        is one of the studio's small demo products, run once on creation so
+        Runs and Evals open on something green.
         """
-        from operonx_project.scaffold import ScaffoldError, scaffold
+        from operonx.cli.init import TEMPLATES as PROJECTS
+        from operonx.cli.init import InitError, init_project
+
+        from operonx_studio_toolkit.templates import TEMPLATES as EXAMPLES
+        from operonx_studio_toolkit.templates import TemplateError, create
 
         parent = Path(str(body.get("path") or "")).expanduser()
         name = str(body.get("name") or "").strip()
@@ -1590,41 +1597,48 @@ def build_studio_app(recents: Optional[Recents] = None):
         root = parent / name
         if root.exists():
             return JSONResponse({"error": f"{root} already exists"}, status_code=400)
-        template = str(body.get("template") or "")
-        if template and template != "blank":
-            from operonx_project.templates import TEMPLATES, TemplateError, create
-
+        template = str(body.get("template") or "hello")
+        if template == "blank":  # the old id of the smallest start
+            template = "hello"
+        if template in PROJECTS:
+            try:
+                init_project(root, template=template, name=name)
+            except InitError as exc:
+                return JSONResponse({"error": str(exc)}, status_code=400)
+            first: List[str] = []
+        elif template in EXAMPLES:
             try:
                 create(root, template, name=name)
             except TemplateError as exc:
                 return JSONResponse({"error": str(exc)}, status_code=400)
-            ref = recents.touch(root)
+            first = EXAMPLES[template].get("first_runs") or []
+        else:
+            known = ", ".join([*PROJECTS, *EXAMPLES])
+            return JSONResponse({"error": f"no template {template!r}; one of {known}"}, status_code=400)
+        ref = recents.touch(root)
+        if first:
             # the first minutes: its eval and jobs run now, so Runs and Evals
             # open on something green instead of an empty page
-            first = TEMPLATES[template].get("first_runs") or []
-            if first:
-                watcher = _watcher(ref.id)
-                py = watcher.interpreter() if watcher else sys.executable
-                logs = root / ".operonx" / "first-runs.log"
-                logs.parent.mkdir(parents=True, exist_ok=True)
-                script = " && ".join(f'"{py}" -m operonx.cli.run {n}' for n in first)
-                with logs.open("ab") as fh:
-                    subprocess.Popen(["/bin/sh", "-c", script], cwd=str(root), stdout=fh, stderr=subprocess.STDOUT,
-                                     env=watcher._child_env() if watcher else dict(os.environ), start_new_session=True)
-            return JSONResponse({"id": ref.id, "name": ref.name, "root": str(root), "template": template,
-                                 "first_runs": first})
-        try:
-            scaffold(root, name=name, with_llm=bool(body.get("with_llm")))
-        except ScaffoldError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        ref = recents.touch(root)
-        return JSONResponse({"id": ref.id, "name": ref.name, "root": str(root)})
+            watcher = _watcher(ref.id)
+            py = watcher.interpreter() if watcher else sys.executable
+            logs = root / ".operonx" / "first-runs.log"
+            logs.parent.mkdir(parents=True, exist_ok=True)
+            script = " && ".join(f'"{py}" -m operonx.cli.run {n}' for n in first)
+            with logs.open("ab") as fh:
+                subprocess.Popen(["/bin/sh", "-c", script], cwd=str(root), stdout=fh, stderr=subprocess.STDOUT,
+                                 env=watcher._child_env() if watcher else dict(os.environ), start_new_session=True)
+        return JSONResponse({"id": ref.id, "name": ref.name, "root": str(root), "template": template,
+                             "first_runs": first})
 
     def _templates() -> List[Dict[str, Any]]:
-        from operonx_project.templates import describe
+        """Core's project templates (``operonx init``), then the studio's examples."""
+        from operonx.cli.init import TEMPLATES as PROJECTS
 
-        return [{"id": "blank", "title": "A blank project",
-                 "description": "One small graph behind an HTTP door — the smallest start."}, *describe()]
+        from operonx_studio_toolkit.templates import describe
+
+        projects = [{"id": t.name, "title": t.name, "description": t.summary, "kind": "project"}
+                    for t in PROJECTS.values()]
+        return [*projects, *({**e, "kind": "example"} for e in describe())]
 
     @app.get("/api/templates")
     def templates_list() -> JSONResponse:
@@ -1971,8 +1985,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         new category at the end of the file). A secret field is written as
         ``${VAR}`` and its value goes to ``.env`` — never into the YAML, never
         back in a response. ``apply`` false: the diffs (the .env one masked)."""
-        from operonx_project.edit import set_env_var
         from operonx_studio import yamldoc
+        from operonx_studio_toolkit.edit import set_env_var
 
         watcher = _watcher(pid)
         if watcher is None:
@@ -2037,7 +2051,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         """Set one variable in the project's ``.env`` (a secret a resource
         names as ``${VAR}``). Written through safewrite, only that variable;
         the value is never sent back, not even in the diff."""
-        from operonx_project.edit import set_env_var
+        from operonx_studio_toolkit.edit import set_env_var
 
         watcher = _watcher(pid)
         if watcher is None:
@@ -2126,8 +2140,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         arguments, typed, are in the IR."""
         import ast
 
-        from operonx_project import pyedit
-        from operonx_project.manifest import Manifest
+        from operonx_studio_toolkit import pyedit
+        from operonx_studio_toolkit.manifest import Manifest
 
         watcher = _watcher(pid)
         if watcher is None:
@@ -2157,7 +2171,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             literal = False
             try:
                 manifest = Manifest.load(watcher.root)
-                from operonx_project.apply import _module_file
+                from operonx_studio_toolkit.apply import _module_file
 
                 module, attr = manifest.graph(graph).entry.split(":")
                 tree = ast.parse(_module_file(manifest, module).read_text(encoding="utf-8"))
@@ -2178,7 +2192,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         lines, still parses, still builds)."""
         import ast
 
-        from operonx_project import pyedit
+        from operonx_studio_toolkit import pyedit
 
         watcher = _watcher(pid)
         if watcher is None:
@@ -2297,9 +2311,9 @@ def build_studio_app(recents: Optional[Recents] = None):
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
 
-        from operonx_project.apply import PlanError, plan_edit
-        from operonx_project.manifest import Manifest, ManifestError
-        from operonx_project.pyedit import PyEditError
+        from operonx_studio_toolkit.apply import PlanError, plan_edit
+        from operonx_studio_toolkit.manifest import Manifest, ManifestError
+        from operonx_studio_toolkit.pyedit import PyEditError
 
         graph = body.get("graph")
         action = body.get("action")

@@ -16,8 +16,8 @@ operonx_ops = pytest.importorskip("operonx.core.ops")
 if "door" not in operonx_ops.op.__code__.co_varnames:  # operonx < 1.8
     pytest.skip("this operonx has no @op(door=)", allow_module_level=True)
 
-from operonx_project.extract import extract_project  # noqa: E402
-from operonx_project.manifest import Manifest  # noqa: E402
+from operonx_studio_toolkit.extract import extract_project  # noqa: E402
+from operonx_studio_toolkit.manifest import Manifest  # noqa: E402
 
 FLOW = '''
 from operonx.core import END, START, graph

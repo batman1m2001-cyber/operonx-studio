@@ -293,15 +293,16 @@ $("#btn-open").onclick = () => modal("Open project", (box, close) => {
 });
 
 $("#btn-new").onclick = () => modal("New project", async (box, close) => {
-  // start from something that already works: each template runs offline,
-  // with a service, a dataset, an eval and a job
+  // start from something that already works: an `operonx init` project
+  // (AGENTS.md, the guide, the standard layout), or a small example product
+  // that runs offline with a service, a dataset, an eval and a job
   const pickField = el("div", "field");
   pickField.append(el("label", null, "Start from"));
   const gallery = el("div", "tplgrid");
   gallery.setAttribute("role", "radiogroup");
   pickField.append(gallery);
   box.append(pickField);
-  let chosen = "http-api";
+  let chosen = "hello";
   try {
     const {templates} = await api("/api/templates");
     for (const t of templates) {
@@ -309,7 +310,7 @@ $("#btn-new").onclick = () => modal("New project", async (box, close) => {
       card.type = "button";
       card.setAttribute("role", "radio");
       card.setAttribute("aria-checked", String(t.id === chosen));
-      card.append(el("b", null, t.title), el("span", null, t.description));
+      card.append(el("b", null, t.title + (t.kind === "example" ? " · example" : t.kind === "project" ? " · operonx init" : "")), el("span", null, t.description));
       card.onclick = () => {
         chosen = t.id;
         for (const c of gallery.children) { c.classList.toggle("sel", c === card); c.setAttribute("aria-checked", String(c === card)); }
@@ -317,11 +318,11 @@ $("#btn-new").onclick = () => modal("New project", async (box, close) => {
       };
       gallery.append(card);
     }
-  } catch { /* the blank project, then */ chosen = "blank"; }
+  } catch { /* the smallest project, then */ chosen = "hello"; }
   const nameField = el("div", "field");
   nameField.append(el("label", null, "Project name"));
   const name = el("input"); name.type = "text"; name.placeholder = "my_project";
-  name.value = "http_api"; name.dataset.auto = "1";
+  name.value = "hello"; name.dataset.auto = "1";
   name.oninput = () => { delete name.dataset.auto; };
   name.setAttribute("aria-label", "Project name");
   nameField.append(name);
