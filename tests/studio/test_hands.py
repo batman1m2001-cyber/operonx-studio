@@ -93,7 +93,7 @@ def test_initialize_and_list_tools():
     tools = {t["name"]: t for t in _rpc(s, "tools/list")["result"]["tools"]}
     assert set(tools) == {"list_runs", "open_run", "op_values", "monitor", "compare_runs",
                           "select_op", "run_job", "rerun_op", "play", "run_eval", "set_llm_price",
-                          "board_status", "board_card", "board_start", "board_act", "board_daemon", "board_take",
+                          "board_status", "board_card", "board_start", "board_request", "board_act", "board_daemon", "board_take",
                           "board_submit", "board_models"}
     # tools that run the project's code are not read tools
     assert not {"mcp__studio__rerun_op", "mcp__studio__play", "mcp__studio__run_job", "mcp__studio__board_take",

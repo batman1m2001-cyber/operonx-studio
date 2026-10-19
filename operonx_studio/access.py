@@ -77,6 +77,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", "/"): "read",
     ("GET", "/api/projects"): "read",
     ("GET", "/api/projects/health"): "read",
+    ("GET", "/api/boards/waiting"): "read",
     ("POST", "/api/open"): "edit",           # the shared recents
     ("GET", "/open"): "edit",                # a launch ticket from `operonx studio`: open its project
     ("POST", "/api/forget"): "edit",
@@ -187,6 +188,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/kb/{{service}}/{{path:path}}"): "edit",     # a query runs the project's code and its answer model
     ("POST", f"{P}/board/daemon"): "edit",                      # Run / Stop the project's daemon
     ("POST", f"{P}/board/new"): "edit",
+    ("POST", f"{P}/board/request"): "edit",
     ("GET", f"{P}/board/settings"): "read",
     ("POST", f"{P}/board/settings"): "edit",                         # a milestone for rows of the checklist
     ("POST", f"{P}/board/{{mid}}/act"): "edit",                # answers, approves, pauses: the engine acts on it

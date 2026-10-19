@@ -28,6 +28,7 @@ const BoardView = (() => {
   let timer = null;
   let last = null;     // the milestone as last drawn: {cursor, questions}
   let drafts = {};     // words being typed into a question, kept across redraws
+  let asking = false;  // the New request box is open
 
   const save = () => store(K, v);
   const go = (patch) => { Object.assign(v, patch); save(); show(); };
@@ -40,6 +41,7 @@ const BoardView = (() => {
     running: ["running", "s-run"], waiting_human: ["waiting on you", "s-wait"], paused: ["paused", "s-idle"],
     verifying: ["verifying", "s-run"], done: ["done", "s-ok"], failed: ["failed", "s-bad"],
     cancelled: ["cancelled", "s-idle"], budget_exhausted: ["budget spent", "s-bad"],
+    waiting_dependency: ["waits for another board", "s-wait"],
   };
   const CARD = {pending: "waits for its dependencies", ready: "ready", running: "running", waiting_human: "asks you",
                 verified: "verified, merging", done: "done", failed: "failed", blocked: "blocked", cancelled: "cancelled"};
@@ -145,10 +147,13 @@ const BoardView = (() => {
   function drawProject(ck, info) {
     clearTimeout(timer);
     last = null;
+    keepAsk();
     box.textContent = "";
     const head = el("div", "panehead");
-    head.append(el("h2", null, "Board"), el("span", "count", "project checklist"), el("div", "spacer"), daemonCtl(info));
+    head.append(el("h2", null, "Board"), el("span", "count", "project checklist"), el("div", "spacer"), askBtn(),
+      daemonCtl(info));
     box.append(head);
+    if (asking) box.append(askBox());
     box.append(paneNote("No milestone yet", "The checklist below is docs/brd as this checkout has it. Tick the "
       + "rows to build and press Build: a milestone plans them as cards, and the daemon (Run) moves them here."));
     if (ck) box.append(checklistView(ck, true));
@@ -189,6 +194,54 @@ const BoardView = (() => {
     return wrap;
   }
 
+  /* New request: the owner's words become rows (the engine extracts them into
+   * the BRD) and a milestone for them, which waits for approval */
+  function keepAsk() {
+    const ta = box.querySelector("textarea[data-ask]");
+    if (ta) { drafts.__ask = ta.value; drafts.__askAt = document.activeElement === ta ? ta.selectionStart : -1; }
+  }
+  function askBtn() {
+    const b = el("button", `${asking ? "" : "primary"} needs-edit`, asking ? "Close request" : "New request");
+    b.type = "button";
+    b.title = "Ask for something new in your words: it becomes requirements in the checklist and a milestone "
+      + "planned for them, which waits for your approval";
+    b.onclick = () => { keepAsk(); asking = !asking; drafts.__askAt = null; show(); };
+    return b;
+  }
+  function askBox() {
+    const sec = el("section", "bdask needs-edit");
+    sec.append(el("div", "bdwaithead", "New request"));
+    sec.append(el("div", "note", "Say what you want, as you would to a person. The engine writes it into the BRD "
+      + "as your request, turns it into checklist rows, plans cards for them and asks for your approval."));
+    const ta = el("textarea");
+    ta.dataset.ask = "1";
+    ta.rows = 4;
+    ta.placeholder = "e.g. The tip screen should remember the last tip percent I used.";
+    ta.value = drafts.__ask || "";
+    const row = el("div", "bdopts");
+    const send = el("button", "primary", "Send request");
+    send.type = "button";
+    send.onclick = async () => {
+      const text = ta.value.trim();
+      if (!text) { ta.focus(); return; }
+      send.disabled = true;
+      try {
+        const got = await api(`${base()}/request`, {text});
+        toast(got.message);
+        delete drafts.__ask;
+        asking = false;
+        Object.assign(v, {mid: got.milestone, view: "board", card: ""});
+        save();
+      } catch (err) { toast((err.data || {}).message || err.message, true); send.disabled = false; return; }
+      refresh(true);
+    };
+    row.append(send);
+    sec.append(ta, row);
+    const at = drafts.__askAt == null ? ta.value.length : drafts.__askAt;  // a redraw keeps the caret
+    if (at >= 0) setTimeout(() => { ta.focus(); ta.setSelectionRange(at, at); }, 0);
+    return sec;
+  }
+
   async function build(rows) {
     const title = prompt(`A milestone for ${rows.length} row${rows.length > 1 ? "s" : ""}: its title`, "");
     if (!title || !title.trim()) return;
@@ -206,6 +259,7 @@ const BoardView = (() => {
     const m = data.milestone;
     // keep what is being typed: a redraw must not eat the owner's words
     for (const ta of box.querySelectorAll("textarea[data-q]")) drafts[ta.dataset.q] = ta.value;
+    keepAsk();
     box.textContent = "";
     const head = el("div", "panehead");
     head.append(el("h2", null, "Board"));
@@ -222,8 +276,9 @@ const BoardView = (() => {
     } else {
       head.append(el("span", "count", `${m.id} · ${m.title}`));
     }
-    head.append(el("div", "spacer"), views(brd), controls(m), daemonCtl(info));
+    head.append(el("div", "spacer"), views(brd), controls(m, data), askBtn(), daemonCtl(info));
     box.append(head);
+    if (asking) box.append(askBox());
     box.append(summary(m, data));
     if (data.questions.length) box.append(waiting(data.questions));
     if (v.view === "checklist" || v.view === "project") box.append(checklistView(checklist, v.view === "project"));
@@ -248,7 +303,7 @@ const BoardView = (() => {
     return seg;
   }
 
-  function controls(m) {
+  function controls(m, data) {
     const wrap = el("span", "bdctl");
     const btn = (label, cls, fn, title) => {
       const b = el("button", `${cls || ""} needs-edit`, label);
@@ -260,6 +315,27 @@ const BoardView = (() => {
     const live = ["discovering", "requirements", "planning", "running", "verifying", "waiting_human", "awaiting_approval"];
     if (m.state === "paused") btn("Resume", "primary", () => act({op: "unpause"}));
     else if (live.includes(m.state)) btn("Pause", null, () => act({op: "pause"}), "Running cards end their round; nothing new starts");
+    const sh = data && data.shipped;
+    if (m.state === "done" && !sh) {
+      btn("Ship", "primary", () => {
+        if (confirm(`Ship ${m.id}? Its branch is pushed and the PR opened (on GitLab: a link to open the MR).`)) {
+          act({op: "ship"});
+        }
+      }, "Push the milestone's branch and open its PR: the one step the engine never takes by itself");
+    }
+    if (sh && sh.pr) {
+      const a = el("a", "chip", sh.merged ? "merged" : sh.remote === "gitlab" ? "Open the MR form" : "PR");
+      a.href = sh.pr;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.title = `${sh.branch} → ${sh.base}`;
+      wrap.append(a);
+    } else if (sh) wrap.append(el("span", "chip", `pushed ${sh.branch}`));
+    if (sh && sh.remote === "github" && !sh.merged && data.merge_granted) {
+      btn("Merge", null, () => {
+        if (confirm(`Merge ${m.id}'s PR into ${sh.base}? Its checks are read first.`)) act({op: "merge"});
+      }, "Merge the PR once its checks pass (granted in settings.toml)");
+    }
     if (!["done", "cancelled"].includes(m.state)) {
       btn("Cancel", "danger", () => {
         if (confirm(`Cancel ${m.id} (${m.title})? Its cards stop; merged work stays on its branch.`)) act({op: "cancel"});
@@ -277,6 +353,17 @@ const BoardView = (() => {
                   `${hours(m.running_s)} of ${m.max_hours == null ? "—" : `${m.max_hours} h`}`];
     if (m.replans) bits.push(`${m.replans} replan${m.replans > 1 ? "s" : ""}`);
     for (const b of bits) s.append(el("span", "bdbit", b));
+    // linked milestones (D17): what this one waits for, and who waits for it
+    for (const n of data.needs || []) {
+      const c = el("span", `chip ${n.state === "done" ? "" : "cwarn"}`, `needs ${n.ref}: ${n.state ? (STATE[n.state] || [n.state])[0] : "not found"}`);
+      c.title = "This milestone starts when the one it needs is delivered";
+      s.append(c);
+    }
+    for (const n of data.needed_by || []) {
+      const c = el("span", "chip", `needed by ${n.ref}`);
+      c.title = "That milestone waits until this one is delivered";
+      s.append(c);
+    }
     const wrap = el("div", "bdhead");
     wrap.append(s);
     if (m.reason) wrap.append(el("div", "bdreason", m.resume_at
@@ -295,7 +382,10 @@ const BoardView = (() => {
   /* ── waiting on you ───────────────────────────────────────────────── */
   function waiting(questions) {
     const sec = el("section", "bdwait");
-    sec.append(el("div", "bdwaithead", `Waiting on you (${questions.length})`));
+    const wh = el("div", "bdwaithead", `Waiting on you (${questions.length})`);
+    const nb = typeof Waiting !== "undefined" && Waiting.button();
+    if (nb) { nb.classList.add("bdnotify"); wh.append(nb); }
+    sec.append(wh);
     for (const q of questions) sec.append(question(q));
     return sec;
   }

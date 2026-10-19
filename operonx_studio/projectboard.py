@@ -185,6 +185,82 @@ def milestones(root: Path) -> Dict[str, Any]:
         db.close()
 
 
+# ── linked milestones (plan D17): ~/.operonx/projects.json, kept by the engine ──
+def _index() -> Dict[str, str]:
+    path = Path(os.environ.get("OPERONX_PROJECTS_INDEX") or Path.home() / ".operonx" / "projects.json")
+    try:
+        got = json.loads(path.read_text(encoding="utf-8"))
+        return got if isinstance(got, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _ro(state: Path) -> Optional[sqlite3.Connection]:
+    db = Path(state) / "project.db"
+    if not db.is_file():
+        return None
+    try:
+        return sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+    except sqlite3.Error:
+        return None
+
+
+def links(root: Path, db: sqlite3.Connection, mid: str) -> Dict[str, List[Dict[str, Any]]]:
+    """What milestone *mid* needs (each with its state now) and which milestones need it."""
+    idx = _index()
+    here_state = str(Path(root) / STATE_DIR)
+    here = next((n for n, s in idx.items() if s == here_state), Path(root).name)
+    needs = []
+    for ref in _record(db, mid, "needs").get("needs") or []:
+        name, _, m = str(ref).rpartition("#")
+        state = None
+        con = db if not name or name == here else _ro(Path(idx[name])) if name in idx else None
+        try:
+            row = con.execute("SELECT state FROM milestones WHERE id=?", (m,)).fetchone() if con else None
+            state = row[0] if row else None
+        except sqlite3.Error:
+            pass
+        finally:
+            if con is not None and con is not db:
+                con.close()
+        needs.append({"ref": ref, "state": state})
+    needed_by = []
+    for name, state in idx.items():
+        con = db if name == here else _ro(Path(state))
+        if con is None:
+            continue
+        try:
+            for key, data in con.execute("SELECT key, data FROM steps WHERE key LIKE 'ms:%:needs'"):
+                for ref in _json(data, {}).get("needs") or []:
+                    if ref == f"{here}#{mid}" or (name == here and ref == mid):
+                        needed_by.append({"ref": f"{name}#{key.split(':')[1]}"})
+        except sqlite3.Error:
+            pass
+        finally:
+            if con is not db:
+                con.close()
+    return {"needs": needs, "needed_by": needed_by}
+
+
+def overview(root: Path) -> Dict[str, Any]:
+    """One project's board at a glance, for the studio's home and the title count
+    (plan D18): its milestones, and the questions that wait on the owner."""
+    if not _has_store(root):
+        return {"milestones": [], "waiting": []}
+    db = _connect(root)
+    try:
+        ms = [{k: m[k] for k in ("id", "title", "state", "done", "cards", "open_questions")}
+              for m in (_ms(db, r) for r in db.execute("SELECT * FROM milestones ORDER BY created"))]  # fmt: skip
+        waiting = []
+        for r in db.execute("SELECT * FROM interactions WHERE state='open' ORDER BY created"):
+            q = _question(r)
+            waiting.append({"id": q["id"], "qid": q["qid"], "milestone": r["milestone"], "kind": q["kind"],
+                            "card": q["card"], "problem": q["problem"][:300], "created": q["created"]})  # fmt: skip
+        return {"milestones": ms, "waiting": waiting}
+    finally:
+        db.close()
+
+
 def _settings(root: Path) -> Dict[str, Any]:
     """``.operonx/project/settings.toml`` (machine-local); {} when missing or broken."""
     path = Path(root) / STATE_DIR / "settings.toml"
@@ -364,6 +440,8 @@ def milestone(root: Path, mid: str, events: int = 40) -> Dict[str, Any]:
                      "architecture": (plan.get("plan") or {}).get("architecture") or ""},
             "graph": {"waves": _waves(cards), "edges": [[d, c["id"]] for c in cards for d in c["deps"]]},
             "events": evs[::-1], "cursor": evs[0]["seq"] if evs else 0,
+            "shipped": _record(db, mid, "shipped") or None, "merge_granted": bool(_settings(root).get("merge")),
+            **links(root, db, mid),
         }  # fmt: skip
     finally:
         db.close()
@@ -476,16 +554,17 @@ def _engine() -> Optional[List[str]]:
 def act(root: Path, request: Dict[str, Any], actor: str) -> Dict[str, Any]:
     """Run one action through ``operonx-project api``; its JSON answer, or why there is none."""
     argv = _engine()
+    wait = 300 if request.get("op") in ("ship", "merge") else 60  # a push and gh take their time
     if argv is None:
         return {"ok": False, "status": "unavailable",
                 "message": "operonx-project is not installed where the studio runs (or set OPERONX_PROJECT_BIN)"}
     try:
         got = subprocess.run([*argv, "api", "--repo", str(root), "--actor", actor, "-"], input=json.dumps(request),
-                             capture_output=True, text=True, timeout=60, cwd=root)  # fmt: skip
+                             capture_output=True, text=True, timeout=wait, cwd=root)  # fmt: skip
     except OSError as exc:  # OPERONX_PROJECT_BIN names nothing runnable
         return {"ok": False, "status": "unavailable", "message": f"cannot run {argv[0]}: {exc.strerror}"}
     except subprocess.TimeoutExpired:
-        return {"ok": False, "status": "error", "message": "operonx-project did not answer within 60 s"}
+        return {"ok": False, "status": "error", "message": f"operonx-project did not answer within {wait} s"}
     try:
         out = json.loads(got.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -604,6 +683,22 @@ def register(app: Any, *, watcher_of: Any) -> None:
         if not isinstance(body, dict):
             return JSONResponse({"ok": False, "status": "invalid", "message": "a JSON object"}, status_code=400)
         out = await asyncio.to_thread(act, root, {**body, "op": "start"}, _actor(request))
+        return JSONResponse(out, status_code=200 if out.get("ok") else 409 if out.get("status") != "unavailable"
+                            else 503)  # fmt: skip
+
+    @app.post("/api/p/{pid}/board/request")
+    async def board_request(pid: str, request: Request) -> JSONResponse:
+        """The owner's words become rows (the engine's ``request``): a BRD source, its requirements, and a
+        milestone scoped to them that waits for the owner's approval."""
+        import asyncio
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        body = await request.json()
+        if not isinstance(body, dict):
+            return JSONResponse({"ok": False, "status": "invalid", "message": "a JSON object"}, status_code=400)
+        out = await asyncio.to_thread(act, root, {**body, "op": "request"}, _actor(request))
         return JSONResponse(out, status_code=200 if out.get("ok") else 409 if out.get("status") != "unavailable"
                             else 503)  # fmt: skip
 
