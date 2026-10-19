@@ -159,7 +159,7 @@ def test_admin_routes_refuse_editors_and_viewers(people):
 def test_edit_routes_refuse_viewers_before_the_handler_runs(people):
     team = people["team"]
     edit_routes = _by_level(team, "edit")
-    assert len(edit_routes) == 42   # + POST an operonx-project action (the Board tab), POST a run forked from a step (GAP S3), a failed run retried (GAP S2), a parked run answered (GAP S1), POST a knowledge-base query or eval case (K3), a run requeued (S3), a queue review (S1), GET /open (a launch ticket), undo a write (P3), an @op keyword and a YAML edit (P4), a resource added or deleted and a .env variable (P5)
+    assert len(edit_routes) == 44   # + Run/Stop the daemon and a new milestone (Board, B5), POST an operonx-project action (the Board tab), POST a run forked from a step (GAP S3), a failed run retried (GAP S2), a parked run answered (GAP S1), POST a knowledge-base query or eval case (K3), a run requeued (S3), a queue review (S1), GET /open (a launch ticket), undo a write (P3), an @op keyword and a YAML edit (P4), a resource added or deleted and a .env variable (P5)
     team.use(people["viewer"]["token"])
     # the real project id: a handler that ran would act on it
     for method, path in edit_routes:

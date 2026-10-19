@@ -50,6 +50,7 @@ class Studio:
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method="POST" if data is not None else "GET")
         req.add_header("content-type", "application/json")
+        req.add_header("x-operonx-via", "assistant")  # the Board's actor: who did it, through what
         if self.token:
             req.add_header("cookie", f"oxsession={self.token}")
         try:
@@ -57,7 +58,8 @@ class Studio:
                 return json.loads(res.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             try:
-                err = json.loads(exc.read().decode("utf-8")).get("error")
+                got = json.loads(exc.read().decode("utf-8"))
+                err = got.get("error") or got.get("message")
             except Exception:  # noqa: BLE001
                 err = None
             raise RuntimeError(err or f"HTTP {exc.code}") from None
@@ -283,6 +285,186 @@ def t_run_eval(s: Studio, a: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# ── the Board: operonx-project's milestones, cards and checklist ─────────
+
+
+def _ms_line(m: Dict[str, Any]) -> str:
+    asks = f", {m['open_questions']} question(s) for the owner" if m.get("open_questions") else ""
+    budget = f" of ${m['budget_usd']}" if m.get("budget_usd") is not None else ""
+    return (f"- {m['id']} · {m['title']} — {m['state']}{' (' + m['reason'] + ')' if m.get('reason') else ''}; "
+            f"{m['done']}/{m['cards']} cards done; ${m['cost_usd']:.2f}{budget}{asks}")
+
+
+def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
+    mid = str(a.get("milestone") or "")
+    if mid:
+        got = s.call(f"/board/{urllib.parse.quote(mid)}")
+        if got.get("error"):
+            return f"failed: {got['error']}"
+        s.show("open_board", mid=mid, view="board")
+        by = {c["id"]: c for c in got["cards"]}
+        lines = [_ms_line(got["milestone"])]
+        for col in got["columns"]:
+            if not col["cards"]:
+                continue
+            lines.append(f"{col['title']}:")
+            for cid in col["cards"]:
+                c = by[cid]
+                extra = [c["stage"] or "", f"taken by {c['taken']}" if c.get("taken") else "",
+                         "waits for a submit" if c.get("waiting_for_submit") else "",
+                         "asks the owner" if c.get("asks") else "", (c.get("activity") or {}).get("text", ""),
+                         c["reason"] if c["state"] in ("failed", "blocked") else ""]  # fmt: skip
+                lines.append(f"  {cid} · {c['title']} [{c['state']}] rows {', '.join(c['rows']) or '—'}"
+                             + "".join(f" — {x}" for x in extra if x))
+        for q in got["questions"]:
+            opts = "; ".join(f"{o['key']}) {o['label']}" for o in q["options"])
+            lines.append(f"Open question {q.get('qid') or q.get('short') or q['id']} ({q['kind']}{', card ' + q['card'] if q['card'] else ''}): "
+                         f"{q['problem']}" + (f" — options: {opts}" if opts else "")
+                         + (f" (recommended {q['recommended']})" if q.get("recommended") else ""))
+        return "\n".join(lines)
+    got = s.call("/board")
+    if not got.get("available"):
+        return ("This project has no docs/brd/ and no operonx-project state: `operonx-project brd init` "
+                "(or `operonx-project adopt` for built code) makes one.")
+    s.show("open_board", view="board")
+    d = got.get("daemon") or {}
+    lines = [f"Daemon: {'running (' + d.get('owner', '') + ')' if d.get('running') else 'stopped'}"
+             + ("" if got.get("sandbox", True) else "; coders run unsandboxed")]
+    lines += [_ms_line(m) for m in got.get("milestones") or []] or ["No milestones yet."]
+    if got.get("brd"):
+        ck = s.call("/brd")
+        counts = ", ".join(f"{k} {n}" for k, n in sorted((ck.get("counts") or {}).items()))
+        todo = [r["id"] for r in ck.get("rows") or [] if r["status"] not in
+                ("implemented_verified", "out_of_scope_demo", "not_applicable", "superseded")]  # fmt: skip
+        lines.append(f"Checklist (docs/brd on {ck.get('branch') or 'this checkout'}): {counts or 'no rows'}")
+        if todo:
+            lines.append("Rows not built yet: " + ", ".join(todo[:40]) + (" …" if len(todo) > 40 else ""))
+    return "\n".join(lines)
+
+
+def t_board_card(s: Studio, a: Dict[str, Any]) -> str:
+    mid, cid = str(a["milestone"]), str(a["card"])
+    got = s.call(f"/board/{urllib.parse.quote(mid)}/card/{urllib.parse.quote(cid)}")
+    if got.get("error"):
+        return f"failed: {got['error']}"
+    s.show("open_board", mid=mid, card=cid)
+    c = got["card"]
+    lines = [f"{c['id']} · {c['title']} [{c['state']}{' / ' + c['stage'] if c['stage'] else ''}] — {c['intent']}",
+             f"rows {', '.join(c['rows']) or '—'}; deps {', '.join(c['deps']) or '—'}; "
+             f"files {', '.join(c['paths']) or 'anywhere'}; ${c['cost_usd']:.2f}"]  # fmt: skip
+    lines += [f"  - {x}" for x in c["criteria"]]
+    if c["reason"]:
+        lines.append(f"reason: {c['reason']}")
+    for e in got["events"][-int(a.get("events") or 15):]:
+        text = e["data"].get("text") or e["data"].get("message") or e["data"].get("to") or ""
+        lines.append(f"  {e['kind']}{' (' + e['actor'] + ')' if e.get('actor') else ''}{': ' + str(text) if text else ''}")
+    return "\n".join(lines)
+
+
+def _board_act(s: Studio, mid: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        return s.call(f"/board/{urllib.parse.quote(mid)}/act", body)
+    except RuntimeError as exc:  # the engine's refusal comes back as the HTTP error's message
+        return {"ok": False, "message": str(exc)}
+
+
+def t_board_start(s: Studio, a: Dict[str, Any]) -> str:
+    body = {k: a[k] for k in ("title", "rows", "goal", "mode", "max_usd", "from_board") if a.get(k) not in (None, "")}
+    try:
+        got = s.call("/board/new", body)
+    except RuntimeError as exc:
+        return f"refused: {exc}"
+    if not got.get("ok"):
+        return f"refused: {got.get('message')}"
+    if got.get("milestone"):
+        s.show("open_board", mid=got["milestone"], view="board")
+    return (f"{got.get('message') or 'queued'}. The daemon plans it, then the plan waits for the owner's approval "
+            "(board_act approve) — it must be running (board_daemon start).")
+
+
+ACTS = ("answer", "approve", "pause", "unpause", "cancel", "replan", "retry", "prioritize", "release")
+
+
+def t_board_act(s: Studio, a: Dict[str, Any]) -> str:
+    op = str(a.get("op") or "")
+    if op not in ACTS:
+        return f"no op {op!r}; there are: {', '.join(ACTS)} (take and submit are board_take and board_submit)"
+    body = {k: a[k] for k in ("op", "ref", "answer", "notes", "card", "priority", "usd", "hours") if k in a}
+    got = _board_act(s, str(a["milestone"]), body)
+    s.show("open_board", mid=str(a["milestone"]))
+    return ("done: " if got.get("ok") else "refused: ") + str(got.get("message") or got.get("status"))
+
+
+def t_board_daemon(s: Studio, a: Dict[str, Any]) -> str:
+    action = str(a.get("action") or "")
+    if action not in ("start", "stop", "status"):
+        return "action: start, stop or status"
+    if action == "status":
+        d = s.call("/board").get("daemon") or {}
+        return f"running ({d.get('owner')})" if d.get("running") else "stopped"
+    try:
+        got = s.call("/board/daemon", {"action": action})
+    except RuntimeError as exc:
+        return f"failed: {exc}"
+    return str(got.get("message") or got.get("status"))
+
+
+def _settle(s: Studio, mid: str, cid: str, wait: float, done: Callable[[Dict[str, Any]], bool]) -> Dict[str, Any]:
+    deadline = time.time() + wait
+    while True:
+        brief = _board_act(s, mid, {"op": "card", "card": cid})
+        if not brief.get("ok", True) and brief.get("message"):
+            return brief
+        brief = brief.get("brief") or brief
+        if done(brief) or time.time() >= deadline:
+            return brief
+        time.sleep(1.5)
+
+
+_ENDED = ("verified", "done", "failed", "cancelled")
+
+
+def _brief_text(mid: str, b: Dict[str, Any]) -> str:
+    lines = [f"{b['card']} · {b['title']} — yours ({(b.get('taken') or {}).get('actor', '')}), round {b.get('round')}",
+             f"Work in {b['worktree']} (branch {b['branch']}); commit nothing outside its files: "
+             f"{', '.join(b.get('paths') or []) or 'anywhere in the project'}.",
+             f"Intent: {b.get('intent')}", f"Rows: {', '.join(b.get('rows') or []) or '—'}",
+             f"Acceptance tests (written for you, do not change them): {b.get('acceptance_tests') or '—'}",
+             "Criteria:"] + [f"  - {c}" for c in b.get("criteria") or []]  # fmt: skip
+    if b.get("feedback"):
+        lines.append("The last round found:\n" + b["feedback"])
+    lines.append(f"When the criteria pass there, call board_submit(milestone={mid!r}, card={b['card']!r}, summary=…).")
+    return "\n".join(lines)
+
+
+def t_board_take(s: Studio, a: Dict[str, Any]) -> str:
+    mid, cid = str(a["milestone"]), str(a["card"])
+    got = _board_act(s, mid, {"op": "take", "card": cid})
+    if not got.get("ok"):
+        return f"refused: {got.get('message')}"
+    s.show("open_board", mid=mid, card=cid)
+    b = _settle(s, mid, cid, float(a.get("wait") or 60), lambda b: b.get("waiting_for_submit") or b.get("state") in _ENDED)
+    if not b.get("waiting_for_submit"):
+        return f"{cid} is {b.get('state')} ({b.get('reason') or got.get('message')}); the daemon has not parked it for you yet"
+    return _brief_text(mid, b)
+
+
+def t_board_submit(s: Studio, a: Dict[str, Any]) -> str:
+    mid, cid = str(a["milestone"]), str(a["card"])
+    got = _board_act(s, mid, {"op": "submit", "card": cid, "summary": str(a.get("summary") or "")})
+    if not got.get("ok"):
+        return f"refused: {got.get('message')}"
+    s.show("open_board", mid=mid, card=cid)
+    time.sleep(2.0)  # the daemon takes the submit before the card leaves its park
+    b = _settle(s, mid, cid, float(a.get("wait") or 600),
+                lambda b: b.get("state") in _ENDED or (b.get("waiting_for_submit") and bool(b.get("feedback"))))
+    if b.get("waiting_for_submit"):
+        return "Not passed yet — it is yours again.\n" + _brief_text(mid, b)
+    if b.get("state") in _ENDED:
+        return f"{cid}: {b['state']}{' — ' + b['reason'] if b.get('reason') else ''}"
+    return f"{cid} is still being checked ({b.get('state')}/{b.get('stage')}); board_card shows where it is."
+
+
 # ── with no project open (the home page's assistant) ─────────────────────
 
 
@@ -370,6 +552,45 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                      "(in-house) model; leave a model unpriced rather than guessing.",
                       "schema": _schema({"resource": _S, "input_per_1m": _N, "output_per_1m": _N,
                                          "apply": {"type": "boolean"}}, ["resource", "input_per_1m", "output_per_1m"])},
+    "board_status": {"fn": t_board_status,
+                     "description": "The project's Board (operonx-project): the daemon, each milestone's state, cards "
+                                    "and spend, and the checklist's rows not built yet. With milestone: its cards by "
+                                    "column, what each running card does now, and the questions waiting on the owner. "
+                                    "Opens the Board on the user's screen.",
+                     "schema": _schema({"milestone": _S})},
+    "board_card": {"fn": t_board_card,
+                   "description": "One card of a milestone: intent, rows, criteria, files, and its last events.",
+                   "schema": _schema({"milestone": _S, "card": _S, "events": _N}, ["milestone", "card"])},
+    "board_start": {"fn": t_board_start,
+                    "description": "Start a new milestone for checklist rows (rows: their IDs) and/or a goal in "
+                                   "words; mode w2 (default, a few cards at a time) or w1 (all at once); max_usd "
+                                   "caps its spend; from_board seeds it with an earlier milestone's cards. The plan "
+                                   "waits for the owner's approval.",
+                    "schema": _schema({"title": _S, "rows": {"type": "array", "items": _S}, "goal": _S, "mode": _S,
+                                       "max_usd": _N, "from_board": _S}, ["title"])},
+    "board_act": {"fn": t_board_act,
+                  "description": "An owner's action on a milestone, checked by the engine: answer (ref: a question's "
+                                 "short id or a card, answer: an option key or words), approve, pause, unpause, cancel, "
+                                 "replan (notes), retry (usd or hours of extra budget), prioritize (card, priority; "
+                                 "lower runs first), release (a taken card back to the engine). Approve, cancel and "
+                                 "answers are the owner's calls: do them only when the owner asked for that.",
+                  "schema": _schema({"milestone": _S, "op": _S, "ref": _S, "answer": {}, "notes": _S, "card": _S,
+                                     "priority": _N, "usd": _N, "hours": _N}, ["milestone", "op"])},
+    "board_daemon": {"fn": t_board_daemon,
+                     "description": "Run (start), Stop (stop) or check (status) the project's operonx-project daemon, "
+                                    "which plans milestones and works their cards.",
+                     "schema": _schema({"action": _S}, ["action"])},
+    "board_take": {"fn": t_board_take,
+                   "description": "Take a card to work it yourself instead of the engine's implementer: waits until "
+                                  "the daemon parks it for you, then says where (its worktree), what (criteria, "
+                                  "acceptance tests) and what the last round found. Then edit there and board_submit.",
+                   "schema": _schema({"milestone": _S, "card": _S, "wait": _N}, ["milestone", "card"])},
+    "board_submit": {"fn": t_board_submit,
+                     "description": "Submit a taken card's work: the engine runs the same checks, review and held-out "
+                                    "tests as for its own implementer, and waits (up to wait seconds, default 600) "
+                                    "for the verdict — done, or the card is yours again with what failed.",
+                     "schema": _schema({"milestone": _S, "card": _S, "summary": _S, "wait": _N},
+                                       ["milestone", "card", "summary"])},
 }
 
 HOME_TOOLS.update({

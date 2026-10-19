@@ -15,11 +15,14 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from operonx_studio import mcp
 from operonx_studio.app import build_studio_app
 from operonx_studio.registry import Recents
 
@@ -212,7 +215,8 @@ def test_a_brd_folder_alone_is_a_board_its_checklist_from_the_checkout(client, t
     (req / "open_questions.md").write_text(QUESTIONS, encoding="utf-8")
     pid = _open(client, root)
     got = client.get(f"/api/p/{pid}/board").json()
-    assert got == {"available": True, "schema": 2, "milestones": [], "brd": True, "engine": False}
+    assert got == {"available": True, "schema": 2, "milestones": [], "brd": True, "engine": False,
+                   "daemon": {"running": False}, "sandbox": True}
     ck = client.get(f"/api/p/{pid}/brd").json()
     assert ck["branch"] == "main" and ck["brd"] == "docs/brd"
     assert ck["counts"] == {"implemented_verified": 1, "needs_clarification": 1}
@@ -221,3 +225,168 @@ def test_a_brd_folder_alone_is_a_board_its_checklist_from_the_checkout(client, t
     pid = _open(client, make_project(tmp_path / "calc"))
     assert client.get(f"/api/p/{pid}/board").json()["brd"] is False  # its matrix is on the milestone's branch only
     assert client.get(f"/api/p/{pid}/brd").json()["rows"] == []
+
+
+# ── B5: Run/Stop, a new milestone, the live line, the assistant's tools ─────
+DAEMON = """#!{python}
+# a stand-in daemon: holds the lease while it runs, lets it go on an interrupt
+import os, signal, socket, sqlite3, sys, time
+if sys.argv[1] != "daemon":
+    sys.exit(2)
+db = sqlite3.connect(os.path.join(sys.argv[3], ".operonx", "project", "project.db"))
+owner = f"{{socket.gethostname()}}:{{os.getpid()}}:ab12"
+db.execute("INSERT OR REPLACE INTO lease VALUES ('daemon', ?, ?)", (owner, time.time() + 60))
+db.commit()
+def bye(*_):
+    db.execute("DELETE FROM lease WHERE name='daemon'")
+    db.commit()
+    sys.exit(0)
+signal.signal(signal.SIGINT, bye)
+while True:
+    time.sleep(0.1)
+"""
+
+
+def _bin(tmp_path: Path, text: str, name: str = "operonx-project") -> Path:
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    return path
+
+
+def test_run_and_stop_start_and_stop_the_daemon(client, tmp_path, monkeypatch):
+    root = make_project(tmp_path / "calc")
+    pid = _open(client, root)
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", str(_bin(tmp_path, DAEMON.format(python=sys.executable))))
+    assert client.get(f"/api/p/{pid}/board").json()["daemon"] == {"running": False}
+
+    got = client.post(f"/api/p/{pid}/board/daemon", json={"action": "start"})
+    assert got.status_code == 200 and got.json()["status"] == "started", got.text
+    d = client.get(f"/api/p/{pid}/board").json()["daemon"]
+    assert d["running"] and d["here"] and d["pid"]
+    # a second Run is no second daemon
+    assert client.post(f"/api/p/{pid}/board/daemon", json={"action": "start"}).json()["status"] == "running"
+
+    got = client.post(f"/api/p/{pid}/board/daemon", json={"action": "stop"})
+    assert got.status_code == 200 and got.json()["status"] == "stopped"
+    assert client.get(f"/api/p/{pid}/board").json()["daemon"] == {"running": False}
+    assert not Path(f"/proc/{d['pid']}").exists() or b"zombie" in Path(f"/proc/{d['pid']}/status").read_bytes().lower()
+    assert client.post(f"/api/p/{pid}/board/daemon", json={"action": "go"}).status_code == 400
+
+
+def test_a_daemon_elsewhere_is_not_stopped_from_here(client, tmp_path):
+    root = make_project(tmp_path / "calc")
+    con = sqlite3.connect(root / ".operonx" / "project" / "project.db")
+    con.execute("INSERT INTO lease VALUES ('daemon', 'other-host:4242:ff', ?)", (time.time() + 60,))
+    con.commit()
+    con.close()
+    pid = _open(client, root)
+    got = client.post(f"/api/p/{pid}/board/daemon", json={"action": "stop"})
+    assert got.status_code == 409 and "other-host" in got.json()["message"]
+
+
+def test_settings_say_when_the_coders_run_unsandboxed(client, tmp_path):
+    root = make_project(tmp_path / "calc")
+    (root / ".operonx" / "project" / "settings.toml").write_text("sandbox = false\n", encoding="utf-8")
+    assert client.get(f"/api/p/{_open(client, root)}/board").json()["sandbox"] is False
+
+
+def test_a_new_milestone_is_the_engines_start_and_says_who_asked(client, tmp_path, monkeypatch):
+    root = make_project(tmp_path / "calc")
+    pid = _open(client, root)
+    log = tmp_path / "engine"
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", str(_bin(tmp_path, FAKE.format(log=log))))
+    got = client.post(f"/api/p/{pid}/board/new", json={"title": "double", "rows": ["CALC-REQ-MATH-02"], "op": "pause"})
+    assert got.status_code == 200, got.text
+    assert json.loads((tmp_path / "engine.stdin").read_text()) == {"title": "double", "rows": ["CALC-REQ-MATH-02"],
+                                                                   "op": "start"}  # fmt: skip
+    client.post(f"/api/p/{pid}/board/new", json={"title": "x", "goal": "y"}, headers={"x-operonx-via": "assistant"})
+    assert (tmp_path / "engine.argv").read_text().split()[4] == "studio:local/assistant"
+
+
+def test_a_running_card_shows_what_its_session_does_now(client, tmp_path):
+    root = make_project(tmp_path / "calc")
+    con = sqlite3.connect(root / ".operonx" / "project" / "project.db")
+    con.execute("UPDATE cards SET state='running', stage='implement' WHERE milestone='m1' AND id='C2'")
+    for at, text in ((1.0, "reads calc.py"), (2.0, "runs pytest tests/")):
+        con.execute("INSERT INTO events (at, milestone, card, kind, actor, data) VALUES (?, 'm1', 'C2', 'activity', "
+                    "'implementer', ?)", (at, json.dumps({"text": text})))  # fmt: skip
+    con.commit()
+    con.close()
+    cards = {c["id"]: c for c in client.get(f"/api/p/{_open(client, root)}/board/m1").json()["cards"]}
+    assert cards["C2"]["activity"] == {"text": "runs pytest tests/", "at": 2.0}
+    assert "activity" not in cards["C1"]  # done: no live line
+
+
+class BoardStudio(mcp.Studio):
+    """The assistant's tool server, its HTTP calls routed into the TestClient."""
+
+    def __init__(self, client: TestClient, pid: str):
+        super().__init__("http://testserver", pid)
+        self.client, self.shown = client, []
+
+    def call(self, path: str, body=None, **params):
+        if path == "/ui/action":
+            self.shown.append(body)
+            return {}
+        url = f"/api/p/{self.pid}{path}"
+        res = self.client.post(url, json=body, headers={"x-operonx-via": "assistant"}) if body is not None \
+            else self.client.get(url, params=params)  # fmt: skip
+        if res.status_code >= 400:
+            got = res.json()
+            raise RuntimeError(got.get("error") or got.get("message") or f"HTTP {res.status_code}")
+        return res.json()
+
+
+def _tool(s: mcp.Studio, name: str, **args):
+    got = mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}, s)
+    return got["result"]["content"][0]["text"]
+
+
+def test_the_assistant_reads_the_board_and_opens_it(client, tmp_path):
+    root = make_project(tmp_path / "calc")
+    s = BoardStudio(client, _open(client, root))
+    text = _tool(s, "board_status")
+    assert "Daemon: stopped" in text and "- m1 · calc" in text and "1/2 cards done" in text
+    text = _tool(s, "board_status", milestone="m1")
+    assert "C2 · " in text and "asks the owner" in text and "Open question Q-01" in text
+    assert _tool(s, "board_card", milestone="m1", card="C2").startswith("C2 · ")
+    assert [x["args"] for x in s.shown] == [{"view": "board"}, {"mid": "m1", "view": "board"},
+                                            {"mid": "m1", "card": "C2"}]  # fmt: skip
+    assert "no 'C9' here" in _tool(s, "board_card", milestone="m1", card="C9")
+    assert _tool(s, "board_act", milestone="m1", op="take").startswith("no op 'take'")
+
+
+TAKER = """#!{python}
+# a stand-in engine for take/submit: C2 parks for its taker, then passes on a submit
+import json, pathlib, sys
+state = pathlib.Path({state!r})
+req = json.loads(sys.stdin.read())
+seen = json.loads(state.read_text()) if state.exists() else []
+seen.append([sys.argv[5], req])
+state.write_text(json.dumps(seen))
+ops = [r["op"] for _, r in seen]
+if req["op"] in ("take", "submit"):
+    print(json.dumps({{"ok": True, "status": "queued", "message": req["op"] + " queued", "seq": len(seen)}}))
+elif req["op"] == "card":
+    done = "submit" in ops
+    print(json.dumps({{"ok": True, "status": "done", "card": "C2", "title": "double", "state": "done" if done
+                      else "waiting_human", "stage": None, "taken": {{"actor": sys.argv[5]}}, "waiting_for_submit":
+                      not done, "worktree": "/w/C2", "branch": "milestone/m1/C2", "intent": "double a number",
+                      "rows": ["CALC-REQ-MATH-02"], "criteria": ["double(2) == 4"], "paths": ["calc.py"],
+                      "acceptance_tests": "tests/acceptance/C2", "round": 1, "feedback": "", "reason": ""}}))
+"""
+
+
+def test_the_assistant_takes_a_card_and_submits_it(client, tmp_path, monkeypatch):
+    root = make_project(tmp_path / "calc")
+    state = tmp_path / "seen.json"
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", str(_bin(tmp_path, TAKER.format(python=sys.executable, state=str(state)))))
+    s = BoardStudio(client, _open(client, root))
+    text = _tool(s, "board_take", milestone="m1", card="C2")
+    assert "Work in /w/C2 (branch milestone/m1/C2)" in text and "double(2) == 4" in text and "board_submit" in text
+    assert _tool(s, "board_submit", milestone="m1", card="C2", summary="added double", wait=5) == "C2: done"
+    seen = json.loads(state.read_text())
+    assert [r["op"] for _, r in seen if r["op"] != "card"] == ["take", "submit"]
+    assert {actor for actor, _ in seen} == {"studio:local/assistant"}
+    assert next(r for _, r in seen if r["op"] == "submit")["summary"] == "added double"

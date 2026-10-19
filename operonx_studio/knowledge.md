@@ -71,6 +71,33 @@ GraphOp members share it), `status`, `duration_ms`, `start_time`,
 run X". Large values may be truncated at write time (media threshold);
 that is by design.
 
+## The Board: building the project from its checklist
+
+A project with `docs/brd/` is built by operonx-project, and the Board
+tab shows it. The checklist is
+`docs/brd/requirements/requirements_traceability.md`: one row per
+requirement, with its status and the tests that prove it. A milestone is
+a set of rows to build. Its cards go from backlog to done. The board
+files under `docs/brd/board/` are written by the engine; never edit
+them.
+
+The owner runs the project from here, in chat. Use the board tools:
+- `board_status`: where things stand. Pass `milestone` for its cards,
+  their live lines and the open questions.
+- `board_start`: a new milestone for rows or a goal. When the owner asks
+  for something the checklist has no row for, add the row first, with
+  status `open`.
+- `board_daemon start`: the daemon plans and works the cards.
+- `board_act`: answer a question, approve, pause, retry, replan. Approving
+  a plan, cancelling, and answering a question are the owner's calls:
+  only do them when the owner says so in this chat.
+- `board_take`, then edit in the worktree it names, then `board_submit`:
+  you work one card yourself, through the same checks, review and
+  held-out tests as the engine's coder. Never change its acceptance
+  tests. Edit only inside that worktree.
+Link a milestone or a card as `[m2](studio:board/m2)` or
+`[C3](studio:board/m2/C3)`.
+
 ## Studio briefing
 
 After this document the studio appends a live briefing for the project

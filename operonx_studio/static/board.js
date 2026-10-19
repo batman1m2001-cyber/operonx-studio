@@ -96,7 +96,7 @@ const BoardView = (() => {
         try { ck = await api(`/api/p/${PID}/brd`); } catch (err) { ck = {error: err.message}; }
         if (mine !== token) return;
       }
-      drawProject(ck);
+      drawProject(ck, list);
       return;
     }
     if (!ms.some((m) => m.id === v.mid)) v.mid = ms[ms.length - 1].id;
@@ -117,7 +117,7 @@ const BoardView = (() => {
       try { card = await api(`${base()}/${enc(v.mid)}/card/${enc(v.card)}`); } catch { card = null; }
       if (mine !== token) return;
     }
-    draw(ms, data, checklist, card, list.brd);
+    draw(ms, data, checklist, card, list);
     last = {cursor: data.cursor, questions: data.questions.map((q) => q.id).join()};
     schedule();
   }
@@ -142,20 +142,59 @@ const BoardView = (() => {
 
   /* ── the page ─────────────────────────────────────────────────────── */
   /* a project with a BRD and no milestone yet: its checklist is the board */
-  function drawProject(ck) {
+  function drawProject(ck, info) {
     clearTimeout(timer);
     last = null;
     box.textContent = "";
     const head = el("div", "panehead");
-    head.append(el("h2", null, "Board"), el("span", "count", "project checklist"));
+    head.append(el("h2", null, "Board"), el("span", "count", "project checklist"), el("div", "spacer"), daemonCtl(info));
     box.append(head);
-    box.append(paneNote("No milestone yet", "The checklist below is docs/brd as this checkout has it. "
-      + "`operonx-project start --title … --rows <ids>` builds the open rows; its daemon moves the cards here."));
-    if (ck) box.append(checklistView(ck));
+    box.append(paneNote("No milestone yet", "The checklist below is docs/brd as this checkout has it. Tick the "
+      + "rows to build and press Build: a milestone plans them as cards, and the daemon (Run) moves them here."));
+    if (ck) box.append(checklistView(ck, true));
     else box.append(paneNote("No BRD folder", "`operonx-project brd init` makes docs/brd/."));
   }
 
-  function draw(list, data, checklist, card, brd) {
+  /* Run / Stop: the project's daemon, which drives every milestone */
+  function daemonCtl(info) {
+    const wrap = el("span", "bdctl");
+    const d = (info && info.daemon) || {};
+    if (info && info.sandbox === false) {
+      const b = el("span", "chip cwarn", "unsandboxed");
+      b.title = "This machine runs the coders without the shell sandbox (.operonx/project/settings.toml)";
+      wrap.append(b);
+    }
+    wrap.append(el("span", `status ${d.running ? "s-run" : "s-idle"}`, d.running ? "daemon running" : "daemon stopped"));
+    const b = el("button", `${d.running ? "" : "primary"} needs-edit`, d.running ? "Stop" : "Run");
+    b.type = "button";
+    b.title = d.running ? "Stop the daemon: running sessions stop, the board keeps its state"
+      : "Start the daemon: it runs the queued commands and drives the milestones";
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const got = await api(`${base()}/daemon`, {action: d.running ? "stop" : "start"});
+        toast(got.message || got.status);
+      } catch (err) { toast((err.data || {}).message || err.message, true); }
+      refresh(true);
+    };
+    wrap.append(b);
+    return wrap;
+  }
+
+  async function build(rows) {
+    const title = prompt(`A milestone for ${rows.length} row${rows.length > 1 ? "s" : ""}: its title`, "");
+    if (!title || !title.trim()) return;
+    try {
+      const got = await api(`${base()}/new`, {title: title.trim(), rows});
+      toast(got.message);
+      Object.assign(v, {mid: got.milestone, view: "board", card: ""});
+      save();
+    } catch (err) { toast((err.data || {}).message || err.message, true); }
+    refresh(true);
+  }
+
+  function draw(list, data, checklist, card, info) {
+    const brd = info && info.brd;
     const m = data.milestone;
     // keep what is being typed: a redraw must not eat the owner's words
     for (const ta of box.querySelectorAll("textarea[data-q]")) drafts[ta.dataset.q] = ta.value;
@@ -175,11 +214,11 @@ const BoardView = (() => {
     } else {
       head.append(el("span", "count", `${m.id} · ${m.title}`));
     }
-    head.append(el("div", "spacer"), views(brd), controls(m));
+    head.append(el("div", "spacer"), views(brd), controls(m), daemonCtl(info));
     box.append(head);
     box.append(summary(m, data));
     if (data.questions.length) box.append(waiting(data.questions));
-    if (v.view === "checklist" || v.view === "project") box.append(checklistView(checklist));
+    if (v.view === "checklist" || v.view === "project") box.append(checklistView(checklist, v.view === "project"));
     else if (v.view === "graph") box.append(graphView(data));
     else box.append(columnsView(data));
     if (card && v.view !== "checklist" && v.view !== "project") box.append(cardPanel(card, data));
@@ -337,7 +376,19 @@ const BoardView = (() => {
     if (c.kind === "init") top.append(el("span", "chip", "init"));
     if (c.risk === "high") top.append(el("span", "chip cwarn", "risky"));
     if (c.asks) top.append(el("span", "chip cwarn", "asks you"));
+    if (c.taken) {
+      // short on the tile: who (the assistant, or a name), the full actor on hover
+      const who = /\/assistant$/.test(c.taken) ? "assistant" : c.taken.replace(/^[a-z]+:/, "");
+      const chip = el("span", "chip ctaken", c.waiting_for_submit ? `${who} works it` : who);
+      chip.title = `Taken by ${c.taken}${c.waiting_for_submit ? ": the engine waits for a submit" : ""}`;
+      top.append(chip);
+    }
     t.append(top, el("div", "bdcardtitle", c.title));
+    if (c.activity && c.activity.text) {
+      const live = el("div", "bdlive", c.activity.text);
+      live.title = `${fmtAgo(c.activity.at * 1000)}`;
+      t.append(live);
+    }
     const meta = [];
     if (c.rows.length) meta.push(c.rows.length > 2 ? `${c.rows.length} rows` : c.rows.join(", "));
     if (c.state === "pending" && c.deps.length) meta.push(`needs ${c.deps.join(", ")}`);
@@ -416,7 +467,7 @@ const BoardView = (() => {
   }
 
   /* ── Checklist: the requirements matrix ───────────────────────────── */
-  function checklistView(ck) {
+  function checklistView(ck, selectable) {
     const wrap = el("div", "bdcheck");
     if (!ck) return wrap;
     if (ck.error) { wrap.append(el("div", "errbox", ck.error)); return wrap; }
@@ -444,11 +495,38 @@ const BoardView = (() => {
     const table = el("table", "bdtable");
     const thead = el("thead");
     const hr = el("tr");
+    const picked = new Set();
+    const buildBtn = el("button", "primary needs-edit", "Build");
+    buildBtn.type = "button";
+    buildBtn.disabled = true;
+    buildBtn.onclick = () => build([...picked]);
+    const openRow = (r) => !ROW_OK.has(r.status) && !ROW_OUT.has(r.status);
+    if (selectable && ck.rows.some(openRow)) {
+      const bar = el("div", "bdbuild");
+      bar.append(el("span", "note", "Tick the rows to build, then"), buildBtn);
+      wrap.append(bar);
+    }
+    if (selectable) hr.append(el("th", null, ""));
     for (const h of ["ID", "Status", "Requirement", "Tests", "Questions"]) hr.append(el("th", null, h));
     thead.append(hr);
     const tb = el("tbody");
     for (const r of rows) {
       const tr = el("tr");
+      if (selectable) {
+        const td = el("td");
+        if (openRow(r)) {
+          const cb = el("input");
+          cb.type = "checkbox";
+          cb.setAttribute("aria-label", `build ${r.id}`);
+          cb.onchange = () => {
+            cb.checked ? picked.add(r.id) : picked.delete(r.id);
+            buildBtn.disabled = !picked.size;
+            buildBtn.textContent = picked.size ? `Build ${picked.size}` : "Build";
+          };
+          td.append(cb);
+        }
+        tr.append(td);
+      }
       tr.append(el("td", "mono", r.id));
       const st = el("td");
       st.append(el("span", `chip ${ROW_OK.has(r.status) ? "cok" : r.status === "needs_clarification" ? "cwarn" : ""}`, r.status.replaceAll("_", " ")));
@@ -462,7 +540,7 @@ const BoardView = (() => {
     scroll.append(table);
     wrap.append(scroll);
     if ((ck.questions || []).length) {
-      wrap.append(el("div", "stitle", "Questions in the BRD"));
+      wrap.append(el("div", "stitle bdqhead", "Questions in the BRD"));
       const ul = el("ul", "bdqlist");
       for (const q of ck.questions) {
         const li = el("li");
@@ -518,7 +596,15 @@ const BoardView = (() => {
     return wrap;
   }
 
+  /* the assistant points at a milestone, a card or a view (performUi "open_board") */
+  function open(patch) {
+    const keep = Object.fromEntries(Object.entries(patch || {}).filter(([k, x]) => ["mid", "card", "view"].includes(k) && x));
+    if (keep.mid && keep.mid !== v.mid && !keep.card) keep.card = "";
+    Object.assign(v, keep); save();
+    if (state.tab !== "board") switchTab("board"); else show();
+  }
+
   probe();
   registerPane("board", {el: box, show});
-  return {show, probe};
+  return {show, probe, open};
 })();
