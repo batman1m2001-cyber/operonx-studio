@@ -88,6 +88,13 @@ def viewer_deny(state: Path) -> List[str]:
     return [f"{tool}({where})" for tool in ("Read", "Grep", "Glob") for where in places]
 
 
+def card_worktrees() -> Optional[Path]:
+    """Where operonx-project keeps its cards' worktrees (``OPERONX_WORKTREES``, else
+    ``~/.operonx/worktrees``), when there is one."""
+    root = Path(os.environ.get("OPERONX_WORKTREES") or Path.home() / ".operonx" / "worktrees").expanduser()
+    return root if root.is_dir() else None
+
+
 def _mode_args(mode: Optional[str] = None) -> List[str]:
     """Permission flags for the chosen reach.
 
