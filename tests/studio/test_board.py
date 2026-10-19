@@ -201,3 +201,23 @@ def test_a_stale_answer_from_the_studio_is_refused_and_says_what_is_current(clie
     con.close()
     got = client.post(f"/api/p/{_open(client, root)}/board/m1/act", json={"op": "answer", "ref": "Q-01", "answer": "a"})
     assert got.status_code == 409 and got.json()["status"] == "stale", got.text
+
+
+def test_a_brd_folder_alone_is_a_board_its_checklist_from_the_checkout(client, tmp_path):
+    root = make_project(tmp_path / "plain", store=False)
+    _git(root, "init", "-q", "-b", "main")
+    req = root / "docs" / "brd" / "requirements"
+    req.mkdir(parents=True)
+    (req / "requirements_traceability.md").write_text(MATRIX, encoding="utf-8")
+    (req / "open_questions.md").write_text(QUESTIONS, encoding="utf-8")
+    pid = _open(client, root)
+    got = client.get(f"/api/p/{pid}/board").json()
+    assert got == {"available": True, "schema": 2, "milestones": [], "brd": True, "engine": False}
+    ck = client.get(f"/api/p/{pid}/brd").json()
+    assert ck["branch"] == "main" and ck["brd"] == "docs/brd"
+    assert ck["counts"] == {"implemented_verified": 1, "needs_clarification": 1}
+    assert [q["id"] for q in ck["questions"]] == ["Q-01"]
+    # an engine-driven project has it too, beside its milestones
+    pid = _open(client, make_project(tmp_path / "calc"))
+    assert client.get(f"/api/p/{pid}/board").json()["brd"] is False  # its matrix is on the milestone's branch only
+    assert client.get(f"/api/p/{pid}/brd").json()["rows"] == []

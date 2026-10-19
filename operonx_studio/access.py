@@ -98,6 +98,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/monitor"): "read",
     ("GET", f"{P}/monitor/scores"): "read",
     ("GET", f"{P}/board"): "read",                                 # an operonx-project milestone, read-only
+    ("GET", f"{P}/brd"): "read",                                   # the project checklist from the checkout
     ("GET", f"{P}/board/{{mid}}"): "read",
     ("GET", f"{P}/board/{{mid}}/checklist"): "read",
     ("GET", f"{P}/board/{{mid}}/card/{{cid}}"): "read",

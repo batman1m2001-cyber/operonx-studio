@@ -9,9 +9,12 @@
  *   Board      what is moving, and what is stuck (the columns, the card)
  *   Checklist  which requirements are met, with what evidence (the BRD's matrix)
  *   Graph      what depends on what, in waves
+ *   Project    the whole project's checklist, from the checkout's docs/brd
  *
- * "Waiting on you" sits above all three. The tab appears only when the
- * project has a store; it follows the milestone by its event cursor.
+ * "Waiting on you" sits above them. The tab appears when the project has a
+ * store or a BRD folder (docs/brd, made by `operonx init`); before the first
+ * milestone it is the project's checklist alone. It follows the milestone
+ * by its event cursor.
  */
 
 "use strict";
@@ -88,8 +91,12 @@ const BoardView = (() => {
     if (list.error) { box.textContent = ""; box.append(el("div", "errbox", list.error)); return; }
     const ms = list.milestones || [];
     if (!ms.length) {
-      box.textContent = "";
-      box.append(paneNote("No milestone yet", "`operonx project start --title …` creates one; the daemon drives it."));
+      let ck = null;
+      if (list.brd) {
+        try { ck = await api(`/api/p/${PID}/brd`); } catch (err) { ck = {error: err.message}; }
+        if (mine !== token) return;
+      }
+      drawProject(ck);
       return;
     }
     if (!ms.some((m) => m.id === v.mid)) v.mid = ms[ms.length - 1].id;
@@ -97,9 +104,11 @@ const BoardView = (() => {
     try { data = await api(`${base()}/${enc(v.mid)}`); }
     catch (err) { box.textContent = ""; box.append(loadError(err, () => show())); return; }
     if (mine !== token) return;
+    if (v.view === "project" && !list.brd) v.view = "board";
     let checklist = null;
-    if (v.view === "checklist") {
-      try { checklist = await api(`${base()}/${enc(v.mid)}/checklist`); }
+    if (v.view === "checklist" || v.view === "project") {
+      const url = v.view === "project" ? `/api/p/${PID}/brd` : `${base()}/${enc(v.mid)}/checklist`;
+      try { checklist = await api(url); }
       catch (err) { checklist = {error: err.message}; }
       if (mine !== token) return;
     }
@@ -108,7 +117,7 @@ const BoardView = (() => {
       try { card = await api(`${base()}/${enc(v.mid)}/card/${enc(v.card)}`); } catch { card = null; }
       if (mine !== token) return;
     }
-    draw(ms, data, checklist, card);
+    draw(ms, data, checklist, card, list.brd);
     last = {cursor: data.cursor, questions: data.questions.map((q) => q.id).join()};
     schedule();
   }
@@ -132,7 +141,21 @@ const BoardView = (() => {
   document.addEventListener("visibilitychange", () => { if (!document.hidden && state.tab === "board") refresh(false); });
 
   /* ── the page ─────────────────────────────────────────────────────── */
-  function draw(list, data, checklist, card) {
+  /* a project with a BRD and no milestone yet: its checklist is the board */
+  function drawProject(ck) {
+    clearTimeout(timer);
+    last = null;
+    box.textContent = "";
+    const head = el("div", "panehead");
+    head.append(el("h2", null, "Board"), el("span", "count", "project checklist"));
+    box.append(head);
+    box.append(paneNote("No milestone yet", "The checklist below is docs/brd as this checkout has it. "
+      + "`operonx-project start --title … --rows <ids>` builds the open rows; its daemon moves the cards here."));
+    if (ck) box.append(checklistView(ck));
+    else box.append(paneNote("No BRD folder", "`operonx-project brd init` makes docs/brd/."));
+  }
+
+  function draw(list, data, checklist, card, brd) {
     const m = data.milestone;
     // keep what is being typed: a redraw must not eat the owner's words
     for (const ta of box.querySelectorAll("textarea[data-q]")) drafts[ta.dataset.q] = ta.value;
@@ -152,20 +175,22 @@ const BoardView = (() => {
     } else {
       head.append(el("span", "count", `${m.id} · ${m.title}`));
     }
-    head.append(el("div", "spacer"), views(), controls(m));
+    head.append(el("div", "spacer"), views(brd), controls(m));
     box.append(head);
     box.append(summary(m, data));
     if (data.questions.length) box.append(waiting(data.questions));
-    if (v.view === "checklist") box.append(checklistView(checklist));
+    if (v.view === "checklist" || v.view === "project") box.append(checklistView(checklist));
     else if (v.view === "graph") box.append(graphView(data));
     else box.append(columnsView(data));
-    if (card && v.view !== "checklist") box.append(cardPanel(card, data));
+    if (card && v.view !== "checklist" && v.view !== "project") box.append(cardPanel(card, data));
   }
 
-  function views() {
+  function views(brd) {
     const seg = el("div", "viewseg bdviews");
     seg.setAttribute("role", "radiogroup");
-    for (const [key, label] of [["board", "Board"], ["checklist", "Checklist"], ["graph", "Graph"]]) {
+    const keys = [["board", "Board"], ["checklist", "Checklist"], ["graph", "Graph"]];
+    if (brd) keys.push(["project", "Project"]);
+    for (const [key, label] of keys) {
       const b = el("button", v.view === key ? "on" : null, label);
       b.type = "button";
       b.setAttribute("role", "radio");
@@ -395,13 +420,13 @@ const BoardView = (() => {
     const wrap = el("div", "bdcheck");
     if (!ck) return wrap;
     if (ck.error) { wrap.append(el("div", "errbox", ck.error)); return wrap; }
-    if (!ck.rows.length) { wrap.append(paneNote("No requirements matrix", ck.note || "Nothing on the milestone's branch yet.")); return wrap; }
+    if (!ck.rows.length) { wrap.append(paneNote("No requirements yet", ck.note || "The matrix has no rows yet.")); return wrap; }
     const counts = el("div", "bdsum");
     const total = ck.rows.length;
     const ok = ck.rows.filter((r) => ROW_OK.has(r.status)).length;
     counts.append(el("span", "bdbit", `${ok}/${total} verified`));
     for (const [st, n] of Object.entries(ck.counts)) if (!ROW_OK.has(st)) counts.append(el("span", "bdbit", `${n} ${st.replaceAll("_", " ")}`));
-    counts.append(el("span", "note", ` · from ${ck.branch}`));
+    counts.append(el("span", "note", ` · from ${ck.branch || ck.brd}`));
     wrap.append(counts);
     const seg = el("div", "viewseg bdfilter");
     for (const [key, label] of [["all", "All"], ["open", "Not verified"], ["asked", "Blocked by a question"]]) {

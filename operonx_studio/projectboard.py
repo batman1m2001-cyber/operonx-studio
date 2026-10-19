@@ -10,6 +10,10 @@ requirement's status is read from the BRD on the milestone's branch
 (``milestone/<id>/main``) with ``git show``, so the studio needs no
 worktree.
 
+A project with a BRD folder (``docs/brd/``, made by ``operonx init``) has a
+board before its first milestone: :func:`project_checklist` reads the
+matrix from the checkout, the project's status as committed work states it.
+
 The studio never changes that store: every action goes through the
 engine's ``operonx-project api`` (:func:`act`), where it is checked the
 same way as from the CLI or Telegram.
@@ -32,11 +36,15 @@ from typing import Any, Dict, List, Optional
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-__all__ = ["SCHEMA", "BoardError", "act", "available", "card", "checklist", "milestone", "milestones"]
+__all__ = ["SCHEMA", "BoardError", "act", "available", "card", "checklist", "milestone", "milestones",
+           "project_checklist"]
 
 #: The newest store layout this reader knows.
 SCHEMA = 2
 STATE_DIR = Path(".operonx") / "project"
+BRD_DIR = "docs/brd"
+MATRIX = "requirements/requirements_traceability.md"
+QUESTIONS = "requirements/open_questions.md"
 #: Board columns, left to right (the engine's ``board.COLUMNS``).
 COLUMNS = [("backlog", "Backlog"), ("ready", "Ready"), ("in_progress", "In progress"), ("review", "Review"),
            ("qa", "QA"), ("done", "Done"), ("blocked", "Stopped")]  # fmt: skip
@@ -52,8 +60,17 @@ def _db(root: Path) -> Path:
     return Path(root) / STATE_DIR / "project.db"
 
 
-def available(root: Path) -> bool:
+def _has_store(root: Path) -> bool:
     return _db(root).is_file()
+
+
+def _has_brd(root: Path) -> bool:
+    return (Path(root) / BRD_DIR / MATRIX).is_file()
+
+
+def available(root: Path) -> bool:
+    """A board: the engine's store, or a BRD folder (a project before its first milestone)."""
+    return _has_store(root) or _has_brd(root)
 
 
 def _connect(root: Path) -> sqlite3.Connection:
@@ -151,10 +168,12 @@ def _ms(db: sqlite3.Connection, row: sqlite3.Row) -> Dict[str, Any]:
 
 
 def milestones(root: Path) -> Dict[str, Any]:
+    if not _has_store(root):
+        return {"schema": SCHEMA, "milestones": [], "brd": _has_brd(root), "engine": False}
     db = _connect(root)
     try:
         rows = db.execute("SELECT * FROM milestones ORDER BY created").fetchall()
-        return {"schema": SCHEMA, "milestones": [_ms(db, r) for r in rows]}
+        return {"schema": SCHEMA, "milestones": [_ms(db, r) for r in rows], "brd": _has_brd(root), "engine": True}
     finally:
         db.close()
 
@@ -268,10 +287,29 @@ def checklist(root: Path, mid: str) -> Dict[str, Any]:
     finally:
         db.close()
     branch = f"milestone/{mid}/main"
-    text = _show(root, branch, f"{brd}/requirements/requirements_traceability.md")
+    text = _show(root, branch, f"{brd}/{MATRIX}")
     if text is None:
         return {"branch": branch, "brd": brd, "rows": [], "header": [], "counts": {},
                 "note": "no requirements matrix on the milestone's branch yet (a goal-only milestone has none)"}
+    return {"branch": branch, "brd": brd, **_parse(text, _show(root, branch, f"{brd}/{QUESTIONS}") or "", asks)}
+
+
+def project_checklist(root: Path) -> Dict[str, Any]:
+    """The project's matrix and questions as the checkout has them (its current branch)."""
+    root = Path(root)
+    got = subprocess.run(["git", "symbolic-ref", "--short", "-q", "HEAD"], cwd=root, capture_output=True, text=True,
+                         timeout=20)  # fmt: skip
+    branch = got.stdout.strip() if got.returncode == 0 else ""
+    brd = root / BRD_DIR
+    if not (brd / MATRIX).is_file():
+        return {"branch": branch, "brd": BRD_DIR, "rows": [], "header": [], "counts": {},
+                "note": "no docs/brd/ here: `operonx-project brd init` makes one"}  # fmt: skip
+    qfile = brd / QUESTIONS
+    qtext = qfile.read_text(encoding="utf-8") if qfile.is_file() else ""
+    return {"branch": branch, "brd": BRD_DIR, **_parse((brd / MATRIX).read_text(encoding="utf-8"), qtext, {})}
+
+
+def _parse(text: str, qtext: str, asks: Dict[str, str]) -> Dict[str, Any]:
     header: List[str] = []
     rows: List[Dict[str, Any]] = []
     for line in text.splitlines():
@@ -285,7 +323,6 @@ def checklist(root: Path, mid: str) -> Dict[str, Any]:
             rows.append({"id": cells[0], "status": status, "cells": cells, "tests": _TEST.findall(line),
                          "questions": re.findall(r"Q-\d{2,3}", line)})  # fmt: skip
     questions = []
-    qtext = _show(root, branch, f"{brd}/requirements/open_questions.md") or ""
     for line in qtext.splitlines():
         m = re.match(r"^\|\s*(Q-\d{2,3})\s*\|", line)
         if m:
@@ -296,7 +333,7 @@ def checklist(root: Path, mid: str) -> Dict[str, Any]:
     counts: Dict[str, int] = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
-    return {"branch": branch, "brd": brd, "header": header, "rows": rows, "counts": counts, "questions": questions}
+    return {"header": header, "rows": rows, "counts": counts, "questions": questions}
 
 
 # ── actions: the engine's own door ──────────────────────────────────────────
@@ -356,6 +393,11 @@ def register(app: Any, *, watcher_of: Any) -> None:
     def board_milestones(pid: str) -> JSONResponse:
         """The project's milestones, when operonx-project drives it (``available``)."""
         return _read(pid, milestones)
+
+    @app.get("/api/p/{pid}/brd")
+    def board_project(pid: str) -> JSONResponse:
+        """The project's checklist from its checkout's ``docs/brd`` (no milestone needed)."""
+        return _read(pid, project_checklist)
 
     @app.get("/api/p/{pid}/board/{mid}")
     def board_milestone(pid: str, mid: str) -> JSONResponse:
