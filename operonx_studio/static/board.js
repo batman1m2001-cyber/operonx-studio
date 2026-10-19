@@ -315,6 +315,14 @@ const BoardView = (() => {
     const live = ["discovering", "requirements", "planning", "running", "verifying", "waiting_human", "awaiting_approval"];
     if (m.state === "paused") btn("Resume", "primary", () => act({op: "unpause"}));
     else if (live.includes(m.state)) btn("Pause", null, () => act({op: "pause"}), "Running cards end their round; nothing new starts");
+    else if (m.state === "failed") {
+      btn("Retry", "primary", () => act({op: "retry"}), "Failed cards go back to Ready and the milestone runs again");
+    } else if (m.state === "budget_exhausted") {
+      btn("Add budget", "primary", () => {
+        const usd = prompt(`Extra budget for ${m.id}, in US$`, "5");
+        if (usd && Number(usd) > 0) act({op: "retry", usd: Number(usd)});
+      }, "Raise the cap; the milestone goes on where it stopped");
+    }
     const sh = data && data.shipped;
     if (data && data.shippable && !sh) {  // an adopted baseline (m0) has no branch: nothing to ship
       btn("Ship", "primary", () => {
