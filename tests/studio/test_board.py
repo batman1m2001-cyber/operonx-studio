@@ -442,6 +442,15 @@ def test_an_adopted_baseline_shows_the_checkouts_checklist(client, tmp_path):
     got = client.get(f"/api/p/{_open(client, root)}/board/m0/checklist").json()
     assert got["branch"] == "main" and got["counts"] == {"implemented_verified": 1, "needs_clarification": 1}, got
     assert "m0 has no branch" in got["note"]
+    # done, but no branch of its own: nothing to ship, so the Board offers no Ship (tipcalc B8 screenshots)
+    con = sqlite3.connect(root / ".operonx" / "project" / "project.db")
+    con.execute("UPDATE milestones SET state='done'")
+    con.commit()
+    con.close()
+    pid = _open(client, root)
+    assert client.get(f"/api/p/{pid}/board/m0").json()["shippable"] is False
+    subprocess.run(["git", "branch", "milestone/m0/main"], cwd=root, check=True, capture_output=True)
+    assert client.get(f"/api/p/{pid}/board/m0").json()["shippable"] is True
 
 
 def test_a_shipped_milestone_shows_its_pr_and_whether_merge_is_granted(client, tmp_path):

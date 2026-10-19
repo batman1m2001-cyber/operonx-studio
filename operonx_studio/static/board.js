@@ -316,7 +316,7 @@ const BoardView = (() => {
     if (m.state === "paused") btn("Resume", "primary", () => act({op: "unpause"}));
     else if (live.includes(m.state)) btn("Pause", null, () => act({op: "pause"}), "Running cards end their round; nothing new starts");
     const sh = data && data.shipped;
-    if (m.state === "done" && !sh) {
+    if (data && data.shippable && !sh) {  // an adopted baseline (m0) has no branch: nothing to ship
       btn("Ship", "primary", () => {
         if (confirm(`Ship ${m.id}? Its branch is pushed and the PR opened (on GitLab: a link to open the MR).`)) {
           act({op: "ship"});
