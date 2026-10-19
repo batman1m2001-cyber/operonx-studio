@@ -782,6 +782,20 @@ def test_a_projects_own_tool_servers_join_the_studios(client, project, fake):
 
 
 
+def test_the_assistant_may_edit_in_the_card_worktrees(client, project, fake, tmp_path, monkeypatch):
+    # tipcalc m1/C6: a taken card is worked in ~/.operonx/worktrees/…, outside the project; Read and Edit were refused
+    trees = tmp_path / "worktrees"
+    trees.mkdir()
+    monkeypatch.setenv("OPERONX_WORKTREES", str(trees))
+    sid = _session(client, _pid(client, project))["id"]
+    _say(client, sid, "take C6")
+    argv = fake()[-1]["argv"]
+    assert argv[argv.index("--add-dir") + 1] == str(trees) and argv.index("--add-dir") < argv.index("--allowedTools")
+    monkeypatch.setenv("OPERONX_WORKTREES", str(tmp_path / "none"))  # no worktrees: no flag
+    _say(client, sid, "hello")
+    assert "--add-dir" not in fake()[-1]["argv"]
+
+
 # ── A4: usage ─────────────────────────────────────────────────────────────
 
 def test_plan_limits_are_kept_with_their_reset_times(client, project, fake):

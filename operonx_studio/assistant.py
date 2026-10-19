@@ -819,6 +819,12 @@ class Relay:
             if turn.deny:
                 cmd += ["--disallowedTools", *turn.deny]
             mode = (turn.reach or os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full")).strip().lower()
+            if mode != "read":
+                # a card the assistant takes is worked in its worktree, outside the project: without
+                # this its Read and Edit are refused there (tipcalc m1/C6 fell back to the shell)
+                trees = _chat.card_worktrees()
+                if trees is not None:
+                    cmd += ["--add-dir", str(trees)]
             cmd += _chat._mode_args(mode)
             # --allowedTools ends the flags: a project server's tools join the
             # list where the reach allows more than reading
