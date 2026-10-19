@@ -405,3 +405,18 @@ def test_the_assistant_sets_every_session_to_sonnet(client, tmp_path, monkeypatc
     assert "refused: not a model: gpt-5" in _tool(s, "board_models", model="gpt-5")
     got = client.post(f"/api/p/{pid}/board/settings", json={"models": {"implementer": "opus"}}).json()
     assert got["effective"]["implementer"] == "opus" and got["effective"]["reviewer"] == "sonnet"
+
+
+def test_an_adopted_baseline_shows_the_checkouts_checklist(client, tmp_path):
+    root = make_project(tmp_path / "calc")
+    req = root / "docs" / "brd" / "requirements"
+    req.mkdir(parents=True)
+    (req / "requirements_traceability.md").write_text(MATRIX, encoding="utf-8")
+    con = sqlite3.connect(root / ".operonx" / "project" / "project.db")
+    con.execute("UPDATE milestones SET id='m0' WHERE id='m1'")
+    con.execute("UPDATE cards SET milestone='m0'")
+    con.commit()
+    con.close()
+    got = client.get(f"/api/p/{_open(client, root)}/board/m0/checklist").json()
+    assert got["branch"] == "main" and got["counts"] == {"implemented_verified": 1, "needs_clarification": 1}, got
+    assert "m0 has no branch" in got["note"]
