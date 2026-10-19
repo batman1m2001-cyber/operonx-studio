@@ -460,7 +460,11 @@ def t_board_take(s: Studio, a: Dict[str, Any]) -> str:
     if not got.get("ok"):
         return f"refused: {got.get('message')}"
     s.show("open_board", mid=mid, card=cid)
-    b = _settle(s, mid, cid, float(a.get("wait") or 60), lambda b: b.get("waiting_for_submit") or b.get("state") in _ENDED)
+    b = _settle(s, mid, cid, float(a.get("wait") or 60),
+                lambda b: b.get("waiting_for_submit") or b.get("state") in _ENDED or b.get("state") == "pending")
+    if b.get("state") == "pending":  # taken ahead: its dependencies first
+        return (f"{cid} is yours, taken ahead: {got.get('message')}. When it is ready the engine starts it and parks "
+                f"it for you; call board_take(milestone={mid!r}, card={cid!r}) again then for its brief.")
     if not b.get("waiting_for_submit"):
         return f"{cid} is {b.get('state')} ({b.get('reason') or got.get('message')}); the daemon has not parked it for you yet"
     return _brief_text(mid, b)
@@ -604,8 +608,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                     "No arguments: read them. Applies to the next session.",
                      "schema": _schema({"model": _S, "models": {"type": "object"}})},
     "board_take": {"fn": t_board_take,
-                   "description": "Take a card to work it yourself instead of the engine's implementer: waits until "
-                                  "the daemon parks it for you, then says where (its worktree), what (criteria, "
+                   "description": "Take a card to work it yourself instead of the engine's implementer (also ahead of "
+                                  "its dependencies: it is reserved). Waits until the daemon parks it for you, then says where (its worktree), what (criteria, "
                                   "acceptance tests) and what the last round found. Then edit there and board_submit.",
                    "schema": _schema({"milestone": _S, "card": _S, "wait": _N}, ["milestone", "card"])},
     "board_submit": {"fn": t_board_submit,
