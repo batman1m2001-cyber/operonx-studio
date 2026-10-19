@@ -409,6 +409,11 @@ def checklist(root: Path, mid: str) -> Dict[str, Any]:
                                                          (mid,))}  # fmt: skip
     finally:
         db.close()
+    known = subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"], cwd=root,
+                           capture_output=True, timeout=20).returncode == 0  # fmt: skip
+    if not known:  # a milestone with no branch of its own (an adopted baseline, m0): the checkout's BRD
+        here = project_checklist(root)
+        return {**here, "note": here.get("note") or f"{mid} has no branch: the checklist as this checkout has it"}
     text = _show(root, branch, f"./{brd}/{MATRIX}")  # ./: from the project's folder, which may be a subfolder
     if text is None:
         return {"branch": branch, "brd": brd, "rows": [], "header": [], "counts": {},

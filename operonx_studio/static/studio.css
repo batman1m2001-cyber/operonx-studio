@@ -4916,7 +4916,7 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 
 /* ── Board: an operonx-project milestone (board.js) ─────────────────── */
 .bdpick { max-width: 320px; }
-.bdctl { display: inline-flex; gap: 6px; }
+.bdctl { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 100%; }
 .bdhead { margin: -6px 0 14px; }
 .bdsum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; font-size: var(--fs-sm); color: var(--text-2); }
 .bdreason { margin-top: 6px; font-size: var(--fs-sm); color: var(--text-2); }
