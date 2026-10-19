@@ -753,6 +753,8 @@ async function performUi(kind, args) {
     else toast(`No op named ${args.op} in this graph`);
   } else if (kind === "open_jobs") {
     state.jobSel = args.job; switchTab("jobs");
+  } else if (kind === "open_board") {
+    BoardView.open(args);
   } else if (kind === "open_tab") {
     switchTab(args.tab);
   } else if (kind === "open_eval") {
@@ -762,7 +764,7 @@ async function performUi(kind, args) {
 
 /* `studio:` links in the assistant's replies (chat.js turns them into
  * buttons): studio:run/<id>, studio:op/<name>, studio:tab/<name>,
- * studio:monitor/<origin>/<name>. */
+ * studio:monitor/<origin>/<name>, studio:board/<milestone>[/<card>]. */
 window.oxStudioLink = (href) => {
   const path = String(href).replace(/^studio:/, "");
   const [kind, ...rest] = path.split("/");
@@ -770,6 +772,7 @@ window.oxStudioLink = (href) => {
   if (kind === "run") return performUi("open_run", {run: arg});
   if (kind === "op") return performUi("select_op", {op: arg});
   if (kind === "tab") return performUi("open_tab", {tab: arg === "runs" ? "traces" : arg});
+  if (kind === "board") return performUi("open_board", {mid: rest[0], card: rest[1] || ""});
   if (kind === "eval") return performUi("open_eval", {name: rest[0], run: rest[1] || ""});
   if (kind === "monitor") return performUi("open_monitor", {target: rest.length > 1 ? `${rest[0]}:${decodeURIComponent(rest.slice(1).join("/"))}` : ""});
   return null;

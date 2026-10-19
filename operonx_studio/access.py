@@ -98,6 +98,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/monitor"): "read",
     ("GET", f"{P}/monitor/scores"): "read",
     ("GET", f"{P}/board"): "read",                                 # an operonx-project milestone, read-only
+    ("GET", f"{P}/brd"): "read",                                   # the project checklist from the checkout
     ("GET", f"{P}/board/{{mid}}"): "read",
     ("GET", f"{P}/board/{{mid}}/checklist"): "read",
     ("GET", f"{P}/board/{{mid}}/card/{{cid}}"): "read",
@@ -184,6 +185,8 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/runs/fork"): "edit",         # a new run from one step, its output changed
     ("POST", f"{P}/play/restart"): "edit",
     ("POST", f"{P}/kb/{{service}}/{{path:path}}"): "edit",     # a query runs the project's code and its answer model
+    ("POST", f"{P}/board/daemon"): "edit",                      # Run / Stop the project's daemon
+    ("POST", f"{P}/board/new"): "edit",                         # a milestone for rows of the checklist
     ("POST", f"{P}/board/{{mid}}/act"): "edit",                # answers, approves, pauses: the engine acts on it
 
     # ── the assistant's hands on your own screen ──

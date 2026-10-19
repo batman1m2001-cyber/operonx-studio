@@ -4958,9 +4958,16 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .bdcard.st-waiting_human, .bdcard.asks { border-left-color: var(--warn); }
 .bdcardtop { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .bdcardtop .chip { margin: 0; }
+.bdcardtop .chip.ctaken { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent-strong); }
 .bdcardtitle { font-size: var(--fs-sm); margin-top: 3px; line-height: 1.35; }
 .bdcardmeta { font-size: 11px; color: var(--text-3); margin-top: 4px; }
 .bdcardwhy { font-size: 11px; color: var(--err); margin-top: 4px; }
+.bdlive { font-size: 11px; color: var(--accent-strong); margin-top: 4px; font-family: var(--mono, ui-monospace, monospace);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bdlive::before { content: "● "; animation: bdpulse 1.6s ease-in-out infinite; }
+@keyframes bdpulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .bdlive::before { animation: none; } }
+.bdbuild { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
 
 .bdpanel { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
   padding: 12px 14px; }
@@ -5009,3 +5016,4 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   .bdwords { flex-direction: column; align-items: stretch; }
   .bdtable { min-width: 600px; }  /* the matrix scrolls sideways, its IDs whole */
 }
+.bdqhead { margin-top: 18px; }

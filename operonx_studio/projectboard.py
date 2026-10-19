@@ -10,9 +10,15 @@ requirement's status is read from the BRD on the milestone's branch
 (``milestone/<id>/main``) with ``git show``, so the studio needs no
 worktree.
 
+A project with a BRD folder (``docs/brd/``, made by ``operonx init``) has a
+board before its first milestone: :func:`project_checklist` reads the
+matrix from the checkout, the project's status as committed work states it.
+
 The studio never changes that store: every action goes through the
 engine's ``operonx-project api`` (:func:`act`), where it is checked the
-same way as from the CLI or Telegram.
+same way as from the CLI or Telegram. The one thing the studio runs itself
+is the project's daemon (:func:`daemon_start`, :func:`daemon_stop`): the
+Board's Run and Stop, for an owner who drives the project from here.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import subprocess
 import time
@@ -32,11 +39,15 @@ from typing import Any, Dict, List, Optional
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-__all__ = ["SCHEMA", "BoardError", "act", "available", "card", "checklist", "milestone", "milestones"]
+__all__ = ["SCHEMA", "BoardError", "act", "available", "card", "checklist", "daemon_start", "daemon_status",
+           "daemon_stop", "milestone", "milestones", "project_checklist"]
 
 #: The newest store layout this reader knows.
 SCHEMA = 2
 STATE_DIR = Path(".operonx") / "project"
+BRD_DIR = "docs/brd"
+MATRIX = "requirements/requirements_traceability.md"
+QUESTIONS = "requirements/open_questions.md"
 #: Board columns, left to right (the engine's ``board.COLUMNS``).
 COLUMNS = [("backlog", "Backlog"), ("ready", "Ready"), ("in_progress", "In progress"), ("review", "Review"),
            ("qa", "QA"), ("done", "Done"), ("blocked", "Stopped")]  # fmt: skip
@@ -52,8 +63,17 @@ def _db(root: Path) -> Path:
     return Path(root) / STATE_DIR / "project.db"
 
 
-def available(root: Path) -> bool:
+def _has_store(root: Path) -> bool:
     return _db(root).is_file()
+
+
+def _has_brd(root: Path) -> bool:
+    return (Path(root) / BRD_DIR / MATRIX).is_file()
+
+
+def available(root: Path) -> bool:
+    """A board: the engine's store, or a BRD folder (a project before its first milestone)."""
+    return _has_store(root) or _has_brd(root)
 
 
 def _connect(root: Path) -> sqlite3.Connection:
@@ -123,7 +143,9 @@ def _card(row: sqlite3.Row) -> Dict[str, Any]:
         "paths": _json(row["paths"], []), "criteria": _json(row["criteria"], []), "reason": row["reason"] or "",
         "reopens": row["reopens"], "run_id": row["run_id"], "cost_usd": round(row["cost_usd"] or 0.0, 4),
         "round": q.get("round") or (runs if isinstance(runs, int) else None),
-        "asks": bool(q) and row["state"] == "waiting_human",
+        "asks": bool(q) and row["state"] == "waiting_human" and q.get("kind") != "taken",
+        "taken": (detail.get("taken") or {}).get("actor"),
+        "waiting_for_submit": row["state"] == "waiting_human" and q.get("kind") == "taken",
         "heldout": len((detail.get("heldout") or {}).get("files") or []),  # a count: never the tests
         "acceptance": sorted((detail.get("acceptance") or {}).get("files") or {}),
         "checks": [{"name": r.get("name"), "ok": r.get("ok")} for r in detail.get("baseline") or []
@@ -151,12 +173,111 @@ def _ms(db: sqlite3.Connection, row: sqlite3.Row) -> Dict[str, Any]:
 
 
 def milestones(root: Path) -> Dict[str, Any]:
+    base = {"schema": SCHEMA, "brd": _has_brd(root), "daemon": daemon_status(root), "sandbox": _sandbox(root)}
+    if not _has_store(root):
+        return {**base, "milestones": [], "engine": False}
     db = _connect(root)
     try:
         rows = db.execute("SELECT * FROM milestones ORDER BY created").fetchall()
-        return {"schema": SCHEMA, "milestones": [_ms(db, r) for r in rows]}
+        return {**base, "milestones": [_ms(db, r) for r in rows], "engine": True}
     finally:
         db.close()
+
+
+def _sandbox(root: Path) -> bool:
+    """``.operonx/project/settings.toml``'s ``sandbox`` (machine-local, default on)."""
+    path = Path(root) / STATE_DIR / "settings.toml"
+    if not path.is_file():
+        return True
+    try:
+        import tomllib
+    except ImportError:  # pragma: no cover - 3.10
+        import tomli as tomllib
+    try:
+        return bool(tomllib.loads(path.read_text(encoding="utf-8")).get("sandbox", True))
+    except ValueError:
+        return True
+
+
+# ── the daemon: Run and Stop on the Board ──────────────────────────────────
+def daemon_status(root: Path) -> Dict[str, Any]:
+    """Whether a daemon drives the project (its lease is live), and which."""
+    path = _db(root)
+    if not path.is_file():
+        return {"running": False}
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+        try:
+            row = db.execute("SELECT owner, until FROM lease WHERE name='daemon'").fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return {"running": False}
+    if row is None or row[1] <= time.time():
+        return {"running": False}
+    parts = str(row[0]).split(":")
+    pid = int(parts[1]) if len(parts) > 2 and parts[1].isdigit() else None
+    return {"running": True, "owner": row[0], "pid": pid, "here": bool(parts) and parts[0] == os.uname().nodename}
+
+
+def daemon_start(root: Path, wait_s: float = 8.0) -> Dict[str, Any]:
+    """Start ``operonx-project daemon`` for the project, detached; its log is
+    ``.operonx/project/daemon.log``. Already running: nothing to do."""
+    now = daemon_status(root)
+    if now["running"]:
+        return {"ok": True, "status": "running", "message": f"a daemon drives it ({now['owner']})", **now}
+    argv = _engine()
+    if argv is None:
+        return {"ok": False, "status": "unavailable", "message": "operonx-project is not installed where the studio "
+                                                                  "runs (or set OPERONX_PROJECT_BIN)"}  # fmt: skip
+    state = Path(root) / STATE_DIR
+    state.mkdir(parents=True, exist_ok=True)
+    log = open(state / "daemon.log", "ab")
+    try:
+        proc = subprocess.Popen([*argv, "daemon", "--repo", str(root)], cwd=root, stdout=log, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, start_new_session=True)  # fmt: skip
+    except OSError as exc:
+        return {"ok": False, "status": "unavailable", "message": f"cannot run {argv[0]}: {exc.strerror}"}
+    finally:
+        log.close()
+    deadline = time.time() + wait_s
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            tail = (state / "daemon.log").read_text(encoding="utf-8", errors="replace")[-600:]
+            return {"ok": False, "status": "error", "message": f"the daemon exited ({proc.returncode}): {tail}"}
+        now = daemon_status(root)
+        if now["running"]:
+            return {"ok": True, "status": "started", "message": "the daemon drives it", **now}
+        time.sleep(0.2)
+    return {"ok": True, "status": "starting", "message": "the daemon is starting", "pid": proc.pid}
+
+
+def daemon_stop(root: Path, wait_s: float = 20.0) -> Dict[str, Any]:
+    """Stop the project's daemon: an interrupt first (running sessions are
+    stopped and the lease released), then a terminate."""
+    now = daemon_status(root)
+    if not now["running"]:
+        return {"ok": True, "status": "stopped", "message": "no daemon drives it"}
+    pid = now.get("pid")
+    if not pid or not now.get("here"):
+        return {"ok": False, "status": "refused", "message": f"the daemon runs elsewhere ({now['owner']}): stop it there"}
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+    except OSError:
+        cmdline = ""
+    if "daemon" not in cmdline:
+        return {"ok": False, "status": "refused", "message": f"process {pid} is not the project's daemon"}
+    for sig, wait in ((signal.SIGINT, wait_s), (signal.SIGTERM, 5.0)):
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            break
+        deadline = time.time() + wait
+        while time.time() < deadline and Path(f"/proc/{pid}").exists():
+            time.sleep(0.2)
+        if not Path(f"/proc/{pid}").exists():
+            break
+    return {"ok": True, "status": "stopped", "message": "the daemon stopped"}
 
 
 def _waves(cards: List[Dict[str, Any]]) -> List[List[str]]:
@@ -213,6 +334,13 @@ def milestone(root: Path, mid: str, events: int = 40) -> Dict[str, Any]:
             col["limit"] = limits.get(col["key"])
         asks = [_question(r) for r in db.execute(
             "SELECT * FROM interactions WHERE milestone=? AND state='open' ORDER BY created", (mid,))]  # fmt: skip
+        # the live line: what each running card's session does now (the engine's throttled activity events)
+        live = {r["card"]: {"text": _json(r["data"], {}).get("text", ""), "at": r["at"]} for r in db.execute(
+            "SELECT card, data, at FROM events WHERE seq IN (SELECT MAX(seq) FROM events WHERE milestone=? "
+            "AND kind='activity' GROUP BY card)", (mid,))}  # fmt: skip
+        for c in cards:
+            if c["state"] == "running" and c["id"] in live:
+                c["activity"] = live[c["id"]]
         plan = _record(db, mid, "plan")
         evs = [{"seq": r["seq"], "at": r["at"], "kind": r["kind"], "card": r["card"], "actor": r["actor"],
                 "data": _json(r["data"], {})}
@@ -262,16 +390,36 @@ def checklist(root: Path, mid: str) -> Dict[str, Any]:
     try:
         if db.execute("SELECT 1 FROM milestones WHERE id=?", (mid,)).fetchone() is None:
             raise KeyError(mid)
-        brd = (_record(db, mid, "intake").get("brd") or "docs/brd").strip("/")
+        intake = _record(db, mid, "intake")
+        brd = (intake.get("brd") or "docs/brd").strip("/")
+        branch = intake.get("branch") or f"milestone/{mid}/main"  # a project in a subfolder has its own names
         asks = {r["qid"]: r["state"] for r in db.execute("SELECT qid, state FROM interactions WHERE milestone=?",
                                                          (mid,))}  # fmt: skip
     finally:
         db.close()
-    branch = f"milestone/{mid}/main"
-    text = _show(root, branch, f"{brd}/requirements/requirements_traceability.md")
+    text = _show(root, branch, f"./{brd}/{MATRIX}")  # ./: from the project's folder, which may be a subfolder
     if text is None:
         return {"branch": branch, "brd": brd, "rows": [], "header": [], "counts": {},
                 "note": "no requirements matrix on the milestone's branch yet (a goal-only milestone has none)"}
+    return {"branch": branch, "brd": brd, **_parse(text, _show(root, branch, f"./{brd}/{QUESTIONS}") or "", asks)}
+
+
+def project_checklist(root: Path) -> Dict[str, Any]:
+    """The project's matrix and questions as the checkout has them (its current branch)."""
+    root = Path(root)
+    got = subprocess.run(["git", "symbolic-ref", "--short", "-q", "HEAD"], cwd=root, capture_output=True, text=True,
+                         timeout=20)  # fmt: skip
+    branch = got.stdout.strip() if got.returncode == 0 else ""
+    brd = root / BRD_DIR
+    if not (brd / MATRIX).is_file():
+        return {"branch": branch, "brd": BRD_DIR, "rows": [], "header": [], "counts": {},
+                "note": "no docs/brd/ here: `operonx-project brd init` makes one"}  # fmt: skip
+    qfile = brd / QUESTIONS
+    qtext = qfile.read_text(encoding="utf-8") if qfile.is_file() else ""
+    return {"branch": branch, "brd": BRD_DIR, **_parse((brd / MATRIX).read_text(encoding="utf-8"), qtext, {})}
+
+
+def _parse(text: str, qtext: str, asks: Dict[str, str]) -> Dict[str, Any]:
     header: List[str] = []
     rows: List[Dict[str, Any]] = []
     for line in text.splitlines():
@@ -285,7 +433,6 @@ def checklist(root: Path, mid: str) -> Dict[str, Any]:
             rows.append({"id": cells[0], "status": status, "cells": cells, "tests": _TEST.findall(line),
                          "questions": re.findall(r"Q-\d{2,3}", line)})  # fmt: skip
     questions = []
-    qtext = _show(root, branch, f"{brd}/requirements/open_questions.md") or ""
     for line in qtext.splitlines():
         m = re.match(r"^\|\s*(Q-\d{2,3})\s*\|", line)
         if m:
@@ -296,7 +443,7 @@ def checklist(root: Path, mid: str) -> Dict[str, Any]:
     counts: Dict[str, int] = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
-    return {"branch": branch, "brd": brd, "header": header, "rows": rows, "counts": counts, "questions": questions}
+    return {"header": header, "rows": rows, "counts": counts, "questions": questions}
 
 
 # ── actions: the engine's own door ──────────────────────────────────────────
@@ -330,6 +477,13 @@ def act(root: Path, request: Dict[str, Any], actor: str) -> Dict[str, Any]:
 
 
 # ── the routes ──────────────────────────────────────────────────────────────
+def _actor(request: Any) -> str:
+    """Who acts: ``studio:<user>``, and ``/assistant`` when the studio's assistant did it."""
+    who = getattr(request.state, "user", None) or {}
+    via = "/assistant" if request.headers.get("x-operonx-via") == "assistant" else ""
+    return f"studio:{who.get('username') or 'local'}{via}"
+
+
 def register(app: Any, *, watcher_of: Any) -> None:
     """The Board routes. ``watcher_of(pid)`` is the project's watcher (its root)."""
 
@@ -357,6 +511,11 @@ def register(app: Any, *, watcher_of: Any) -> None:
         """The project's milestones, when operonx-project drives it (``available``)."""
         return _read(pid, milestones)
 
+    @app.get("/api/p/{pid}/brd")
+    def board_project(pid: str) -> JSONResponse:
+        """The project's checklist from its checkout's ``docs/brd`` (no milestone needed)."""
+        return _read(pid, project_checklist)
+
     @app.get("/api/p/{pid}/board/{mid}")
     def board_milestone(pid: str, mid: str) -> JSONResponse:
         """One milestone: its columns, cards, open questions, plan, waves and last events."""
@@ -371,6 +530,37 @@ def register(app: Any, *, watcher_of: Any) -> None:
     def board_card(pid: str, mid: str, cid: str) -> JSONResponse:
         return _read(pid, card, mid, cid)
 
+    @app.post("/api/p/{pid}/board/daemon")
+    async def board_daemon(pid: str, request: Request) -> JSONResponse:
+        """Run or Stop the project's daemon (``{"action": "start" | "stop"}``)."""
+        import asyncio
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        body = await request.json()
+        action = body.get("action") if isinstance(body, dict) else None
+        if action not in ("start", "stop"):
+            return JSONResponse({"ok": False, "status": "invalid", "message": "action: start or stop"}, status_code=400)
+        out = await asyncio.to_thread(daemon_start if action == "start" else daemon_stop, root)
+        return JSONResponse(out, status_code=200 if out.get("ok") else 409 if out.get("status") != "unavailable"
+                            else 503)  # fmt: skip
+
+    @app.post("/api/p/{pid}/board/new")
+    async def board_new(pid: str, request: Request) -> JSONResponse:
+        """A new milestone for rows of the checklist (or a goal): the engine's ``start``."""
+        import asyncio
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        body = await request.json()
+        if not isinstance(body, dict):
+            return JSONResponse({"ok": False, "status": "invalid", "message": "a JSON object"}, status_code=400)
+        out = await asyncio.to_thread(act, root, {**body, "op": "start"}, _actor(request))
+        return JSONResponse(out, status_code=200 if out.get("ok") else 409 if out.get("status") != "unavailable"
+                            else 503)  # fmt: skip
+
     @app.post("/api/p/{pid}/board/{mid}/act")
     async def board_act(pid: str, mid: str, request: Request) -> JSONResponse:
         """An owner's action, run by the engine (``operonx-project api``): its checks, its answer."""
@@ -382,8 +572,6 @@ def register(app: Any, *, watcher_of: Any) -> None:
         body = await request.json()
         if not isinstance(body, dict):
             return JSONResponse({"ok": False, "status": "invalid", "message": "a JSON object"}, status_code=400)
-        who = getattr(request.state, "user", None) or {}
-        actor = f"studio:{who.get('username') or 'local'}"
-        out = await asyncio.to_thread(act, root, {**body, "milestone": mid}, actor)
+        out = await asyncio.to_thread(act, root, {**body, "milestone": mid}, _actor(request))
         return JSONResponse(out, status_code=200 if out.get("ok") else 409 if out.get("status") != "unavailable"
                             else 503)  # fmt: skip
