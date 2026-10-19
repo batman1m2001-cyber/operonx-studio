@@ -407,6 +407,11 @@ def _question(row: sqlite3.Row) -> Dict[str, Any]:
     }  # fmt: skip
 
 
+def _has_branch(root: Path, branch: str) -> bool:
+    return subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"], cwd=root,
+                          capture_output=True, timeout=20).returncode == 0  # fmt: skip
+
+
 def milestone(root: Path, mid: str, events: int = 40) -> Dict[str, Any]:
     db = _connect(root)
     try:
@@ -441,6 +446,8 @@ def milestone(root: Path, mid: str, events: int = 40) -> Dict[str, Any]:
             "graph": {"waves": _waves(cards), "edges": [[d, c["id"]] for c in cards for d in c["deps"]]},
             "events": evs[::-1], "cursor": evs[0]["seq"] if evs else 0,
             "shipped": _record(db, mid, "shipped") or None, "merge_granted": bool(_settings(root).get("merge")),
+            "shippable": ms["state"] == "done" and _has_branch(root, _record(db, mid, "intake").get("branch")
+                                                               or f"milestone/{mid}/main"),
             **links(root, db, mid),
         }  # fmt: skip
     finally:
@@ -487,9 +494,7 @@ def checklist(root: Path, mid: str) -> Dict[str, Any]:
                                                          (mid,))}  # fmt: skip
     finally:
         db.close()
-    known = subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"], cwd=root,
-                           capture_output=True, timeout=20).returncode == 0  # fmt: skip
-    if not known:  # a milestone with no branch of its own (an adopted baseline, m0): the checkout's BRD
+    if not _has_branch(root, branch):  # a milestone with no branch of its own (an adopted baseline, m0): the checkout's BRD
         here = project_checklist(root)
         return {**here, "note": here.get("note") or f"{mid} has no branch: the checklist as this checkout has it"}
     text = _show(root, branch, f"./{brd}/{MATRIX}")  # ./: from the project's folder, which may be a subfolder
