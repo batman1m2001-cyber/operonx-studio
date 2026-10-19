@@ -2743,6 +2743,17 @@ body.ax-sheet #axstage { position: fixed; inset: 0; z-index: 90; padding: env(sa
 .askbtn .icon { width: 14px; height: 14px; color: var(--accent); }
 
 /* home: projects beside the recent conversations */
+.homeboards { margin: 0 0 28px; }
+.boardlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.boardrow { display: flex; flex-direction: column; gap: 4px; padding: 12px; border: 1px solid var(--border);
+  border-radius: var(--r-md); background: var(--surface-2); color: inherit; text-decoration: none; min-width: 0; }
+.boardrow:hover { border-color: var(--text-3); }
+.boardtop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.boardtop .chip { margin: 0; }
+.boardms, .boardq { font-size: var(--fs-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.boardq { color: var(--warn, var(--text-2)); }
+.bdnotify { margin-left: 10px; }
 .homegrid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }
 .homegrid:has(.homerecent[hidden]) { grid-template-columns: minmax(0, 1fr); }
 .homehead h2 { margin: 0; font-size: var(--fs-lg); font-weight: 650; letter-spacing: -.01em; flex: 1; }
@@ -5017,3 +5028,7 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   .bdtable { min-width: 600px; }  /* the matrix scrolls sideways, its IDs whole */
 }
 .bdqhead { margin-top: 18px; }
+.bdask { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); padding: 12px;
+  margin: 0 0 14px; display: flex; flex-direction: column; gap: 8px; }
+.bdask textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
+.bdask .bdopts { margin: 0; }

@@ -369,7 +369,8 @@ def _board_act(s: Studio, mid: str, body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def t_board_start(s: Studio, a: Dict[str, Any]) -> str:
-    body = {k: a[k] for k in ("title", "rows", "goal", "mode", "max_usd", "from_board") if a.get(k) not in (None, "")}
+    body = {k: a[k] for k in ("title", "rows", "goal", "mode", "max_usd", "from_board", "needs")
+            if a.get(k) not in (None, "", [])}
     try:
         got = s.call("/board/new", body)
     except RuntimeError as exc:
@@ -382,7 +383,20 @@ def t_board_start(s: Studio, a: Dict[str, Any]) -> str:
             "(board_act approve) — it must be running (board_daemon start).")
 
 
-ACTS = ("answer", "approve", "pause", "unpause", "cancel", "replan", "retry", "prioritize", "release")
+def t_board_request(s: Studio, a: Dict[str, Any]) -> str:
+    body = {k: a[k] for k in ("text", "title", "mode", "max_usd", "needs") if a.get(k) not in (None, "", [])}
+    try:
+        got = s.call("/board/request", body)
+    except RuntimeError as exc:
+        return f"refused: {exc}"
+    if not got.get("ok"):
+        return f"refused: {got.get('message')}"
+    s.show("open_board", mid=got["milestone"], view="board")
+    return (f"{got['message']}. The words are {got.get('source')} in the BRD. The daemon must be running "
+            "(board_daemon start); when the plan waits, show it to the owner (board_status) — approving is theirs.")
+
+
+ACTS = ("answer", "approve", "pause", "unpause", "cancel", "replan", "retry", "prioritize", "release", "ship", "merge")
 
 
 def t_board_act(s: Studio, a: Dict[str, Any]) -> str:
@@ -585,16 +599,29 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     "board_start": {"fn": t_board_start,
                     "description": "Start a new milestone for checklist rows (rows: their IDs) and/or a goal in "
                                    "words; mode w2 (default, a few cards at a time) or w1 (all at once); max_usd "
-                                   "caps its spend; from_board seeds it with an earlier milestone's cards. The plan "
-                                   "waits for the owner's approval.",
+                                   "caps its spend; from_board seeds it with an earlier milestone's cards; needs "
+                                   "lists milestones it waits for (\"operonx-studio#m3\" in another project, "
+                                   "\"m2\" here): it starts when they are done. The plan waits for the owner's "
+                                   "approval.",
                     "schema": _schema({"title": _S, "rows": {"type": "array", "items": _S}, "goal": _S, "mode": _S,
-                                       "max_usd": _N, "from_board": _S}, ["title"])},
+                                       "max_usd": _N, "from_board": _S, "needs": {"type": "array", "items": _S}},
+                                      ["title"])},
+    "board_request": {"fn": t_board_request,
+                      "description": "The owner asks for something new in their own words: text is the words as they "
+                                     "gave them (do not rewrite them into requirements; the engine extracts those). "
+                                     "It becomes a BRD source, its requirements continue the checklist's numbering, "
+                                     "and a milestone scoped to them is planned and waits for the owner's approval. "
+                                     "title is optional; mode w1 (default) or w2; max_usd caps it.",
+                      "schema": _schema({"text": _S, "title": _S, "mode": _S, "max_usd": _N,
+                                         "needs": {"type": "array", "items": _S}}, ["text"])},
     "board_act": {"fn": t_board_act,
                   "description": "An owner's action on a milestone, checked by the engine: answer (ref: a question's "
                                  "short id or a card, answer: an option key or words), approve, pause, unpause, cancel, "
                                  "replan (notes), retry (usd or hours of extra budget), prioritize (card, priority; "
-                                 "lower runs first), release (a taken card back to the engine). Approve, cancel and "
-                                 "answers are the owner's calls: do them only when the owner asked for that.",
+                                 "lower runs first), release (a taken card back to the engine), ship (a done milestone: "
+                                 "push its branch, open the PR or the GitLab link), merge (its PR, once checks "
+                                 "pass, where the repo grants it). Approve, cancel, answers, ship and merge are the "
+                                 "owner's calls: do them only when the owner asked for that.",
                   "schema": _schema({"milestone": _S, "op": _S, "ref": _S, "answer": {}, "notes": _S, "card": _S,
                                      "priority": _N, "usd": _N, "hours": _N}, ["milestone", "op"])},
     "board_daemon": {"fn": t_board_daemon,

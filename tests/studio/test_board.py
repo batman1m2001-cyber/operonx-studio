@@ -392,6 +392,28 @@ def test_the_assistant_takes_a_card_and_submits_it(client, tmp_path, monkeypatch
     assert next(r for _, r in seen if r["op"] == "submit")["summary"] == "added double"
 
 
+REQUESTER = """#!/bin/sh
+# a stand-in engine for request: records its stdin, answers with the new milestone
+cat > "{log}.stdin"
+echo '{{"ok": true, "status": "queued", "milestone": "m2", "seq": 3, "source": "sources/owner_requests/x.md", "message": "m2 created from the request"}}'
+"""
+
+
+def test_the_owners_words_go_to_the_engine_as_a_request(client, tmp_path, monkeypatch):
+    root = make_project(tmp_path / "calc")
+    pid = _open(client, root)
+    log = tmp_path / "engine"
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", str(_bin(tmp_path, REQUESTER.format(log=log))))
+    got = client.post(f"/api/p/{pid}/board/request", json={"text": "remember the last tip", "op": "cancel"})
+    assert got.status_code == 200 and got.json()["milestone"] == "m2", got.text
+    assert json.loads((tmp_path / "engine.stdin").read_text()) == {"text": "remember the last tip", "op": "request"}
+    s = BoardStudio(client, pid)
+    text = _tool(s, "board_request", text="halve a number, too")
+    assert text.startswith("m2 created from the request") and "sources/owner_requests/x.md" in text
+    assert json.loads((tmp_path / "engine.stdin").read_text())["text"] == "halve a number, too"
+    assert s.shown[-1]["args"] == {"mid": "m2", "view": "board"}
+
+
 @pytest.mark.skipif(_real_engine() is None, reason="operonx-project is not installed here")
 def test_the_assistant_sets_every_session_to_sonnet(client, tmp_path, monkeypatch):
     monkeypatch.setenv("OPERONX_PROJECT_BIN", _real_engine())
@@ -420,3 +442,48 @@ def test_an_adopted_baseline_shows_the_checkouts_checklist(client, tmp_path):
     got = client.get(f"/api/p/{_open(client, root)}/board/m0/checklist").json()
     assert got["branch"] == "main" and got["counts"] == {"implemented_verified": 1, "needs_clarification": 1}, got
     assert "m0 has no branch" in got["note"]
+
+
+def test_a_shipped_milestone_shows_its_pr_and_whether_merge_is_granted(client, tmp_path):
+    root = make_project(tmp_path / "calc")
+    pid = _open(client, root)
+    assert client.get(f"/api/p/{pid}/board/m1").json()["shipped"] is None
+    shipped = {"branch": "milestone/m1/main", "base": "main", "remote": "github", "pr": "https://github.com/o/r/pull/7"}
+    con = sqlite3.connect(root / ".operonx" / "project" / "project.db")
+    con.execute("INSERT INTO steps VALUES ('ms:m1:shipped', 0, ?)", (json.dumps(shipped),))
+    con.commit()
+    con.close()
+    (root / ".operonx" / "project" / "settings.toml").write_text("merge = true\n", encoding="utf-8")
+    got = client.get(f"/api/p/{pid}/board/m1").json()
+    assert got["shipped"] == shipped and got["merge_granted"] is True
+
+
+def test_what_waits_on_the_owner_across_every_board(client, tmp_path):
+    root = make_project(tmp_path / "calc")
+    _open(client, root)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "operonx.toml").write_text('[project]\nname = "plain"\n', encoding="utf-8")
+    _open(client, plain)  # not a board: not listed
+    got = client.get("/api/boards/waiting").json()
+    assert [b["name"] for b in got["boards"]] == ["calc"]
+    board = got["boards"][0]
+    assert got["count"] == len(board["waiting"]) >= 1
+    assert {"id", "qid", "milestone", "card", "problem"} <= set(board["waiting"][0])
+    assert board["milestones"][0]["id"] == "m1"
+
+
+def test_linked_milestones_show_on_both_boards(client, tmp_path, monkeypatch):
+    calc, other = make_project(tmp_path / "calc"), make_project(tmp_path / "other")
+    index = tmp_path / "projects.json"
+    index.write_text(json.dumps({"calc": str(calc / ".operonx" / "project"),
+                                 "other": str(other / ".operonx" / "project")}), encoding="utf-8")  # fmt: skip
+    monkeypatch.setenv("OPERONX_PROJECTS_INDEX", str(index))
+    con = sqlite3.connect(other / ".operonx" / "project" / "project.db")
+    con.execute("INSERT INTO steps VALUES ('ms:m1:needs', 0, ?)", (json.dumps({"needs": ["calc#m1", "gone#m4"]}),))
+    con.commit()
+    con.close()
+    mine = client.get(f"/api/p/{_open(client, other)}/board/m1").json()
+    state = client.get(f"/api/p/{_open(client, calc)}/board/m1").json()
+    assert mine["needs"] == [{"ref": "calc#m1", "state": state["milestone"]["state"]}, {"ref": "gone#m4", "state": None}]
+    assert state["needed_by"] == [{"ref": "other#m1"}] and mine["needed_by"] == []

@@ -84,9 +84,21 @@ them.
 The owner runs the project from here, in chat. Use the board tools:
 - `board_status`: where things stand. Pass `milestone` for its cards,
   their live lines and the open questions.
-- `board_start`: a new milestone for rows or a goal. When the owner asks
-  for something the checklist has no row for, add the row first, with
-  status `open`.
+- `board_request`: the owner asks for something new ("add a dark mode",
+  "the export must also do CSV"). Pass their words as they gave them;
+  the engine makes them a BRD source, extracts the requirements and plans
+  a milestone for them that waits for approval. Don't write the rows
+  yourself.
+- `board_start`: a new milestone for rows already in the checklist, or
+  from an earlier milestone's board.
+- Work across repos: pass `needs: ["operonx-studio#m3"]` to
+  `board_request` or `board_start`. The milestone waits (state
+  `waiting_dependency`) until that one is done, and both Boards show the
+  link.
+- `board_act ship`: after a milestone is done, and only when the owner
+  says "ship it". It pushes the branch and opens the PR (on GitLab it
+  gives the link instead). `merge` works only where the repo grants it,
+  and only once the PR's checks pass.
 - `board_daemon start`: the daemon plans and works the cards.
 - `board_models`: which model each role's session runs on. When the owner
   says "use Sonnet only", call it with `model: "sonnet"`. It applies to

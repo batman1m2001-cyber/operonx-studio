@@ -1488,6 +1488,25 @@ def build_studio_app(recents: Optional[Recents] = None):
     def projects() -> JSONResponse:
         return JSONResponse({"projects": [r.as_dict() for r in recents.ordered()]})
 
+    @app.get("/api/boards/waiting")
+    def boards_waiting() -> JSONResponse:
+        """Every known project's board at a glance, and what waits on the owner
+        (plan D18): the home's Boards list, the title count, the notifications.
+        One read of each project's store; a broken one is skipped, not fatal."""
+        from operonx_studio import projectboard as _pb
+
+        boards, count = [], 0
+        for ref in recents.ordered():
+            if not ref.exists or not _pb.available(ref.root):
+                continue
+            try:
+                got = _pb.overview(ref.root)
+            except Exception as exc:  # noqa: BLE001 — one project's store must not hide the others
+                got = {"milestones": [], "waiting": [], "error": str(exc)[:200]}
+            count += len(got["waiting"])
+            boards.append({"pid": ref.id, "name": ref.name, **got})
+        return JSONResponse({"count": count, "boards": boards})
+
     @app.get("/api/projects/health")
     def projects_health() -> JSONResponse:
         return JSONResponse({"health": _projects_health()})
