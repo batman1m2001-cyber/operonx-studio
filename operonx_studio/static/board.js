@@ -164,6 +164,14 @@ const BoardView = (() => {
       b.title = "This machine runs the coders without the shell sandbox (.operonx/project/settings.toml)";
       wrap.append(b);
     }
+    const ms = (info && info.models) || {};
+    const roles = Object.entries(ms.models || {});
+    if (ms.model || roles.length) {
+      const m = el("span", "chip", `models: ${ms.model || "default"}${roles.length ? ` +${roles.length}` : ""}`);
+      m.title = "The models the sessions run on (.operonx/project/settings.toml); the assistant changes them"
+        + (roles.length ? `\n${roles.map(([r, x]) => `${r}: ${x}`).join("\n")}` : "");
+      wrap.append(m);
+    }
     wrap.append(el("span", `status ${d.running ? "s-run" : "s-idle"}`, d.running ? "daemon running" : "daemon stopped"));
     const b = el("button", `${d.running ? "" : "primary"} needs-edit`, d.running ? "Stop" : "Run");
     b.type = "button";

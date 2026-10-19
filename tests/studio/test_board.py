@@ -216,7 +216,7 @@ def test_a_brd_folder_alone_is_a_board_its_checklist_from_the_checkout(client, t
     pid = _open(client, root)
     got = client.get(f"/api/p/{pid}/board").json()
     assert got == {"available": True, "schema": 2, "milestones": [], "brd": True, "engine": False,
-                   "daemon": {"running": False}, "sandbox": True}
+                   "daemon": {"running": False}, "sandbox": True, "models": {"model": None, "models": {}}}
     ck = client.get(f"/api/p/{pid}/brd").json()
     assert ck["branch"] == "main" and ck["brd"] == "docs/brd"
     assert ck["counts"] == {"implemented_verified": 1, "needs_clarification": 1}
@@ -390,3 +390,18 @@ def test_the_assistant_takes_a_card_and_submits_it(client, tmp_path, monkeypatch
     assert [r["op"] for _, r in seen if r["op"] != "card"] == ["take", "submit"]
     assert {actor for actor, _ in seen} == {"studio:local/assistant"}
     assert next(r for _, r in seen if r["op"] == "submit")["summary"] == "added double"
+
+
+@pytest.mark.skipif(_real_engine() is None, reason="operonx-project is not installed here")
+def test_the_assistant_sets_every_session_to_sonnet(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", _real_engine())
+    root = make_project(tmp_path / "calc")
+    pid = _open(client, root)
+    s = BoardStudio(client, pid)
+    assert "- fable: " in _tool(s, "board_models")  # the engine's defaults
+    text = _tool(s, "board_models", model="sonnet")
+    assert text.startswith("Changed.") and "- sonnet: " in text and "fable" not in text and "opus" not in text
+    assert client.get(f"/api/p/{pid}/board").json()["models"] == {"model": "sonnet", "models": {}}
+    assert "refused: not a model: gpt-5" in _tool(s, "board_models", model="gpt-5")
+    got = client.post(f"/api/p/{pid}/board/settings", json={"models": {"implementer": "opus"}}).json()
+    assert got["effective"]["implementer"] == "opus" and got["effective"]["reviewer"] == "sonnet"
