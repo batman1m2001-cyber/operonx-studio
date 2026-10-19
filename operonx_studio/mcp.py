@@ -409,6 +409,23 @@ def t_board_daemon(s: Studio, a: Dict[str, Any]) -> str:
     return str(got.get("message") or got.get("status"))
 
 
+def t_board_models(s: Studio, a: Dict[str, Any]) -> str:
+    body = {k: a[k] for k in ("model", "models") if k in a}
+    try:
+        got = s.call("/board/settings", body) if body else s.call("/board/settings")
+    except RuntimeError as exc:
+        return f"refused: {exc}"
+    if not got.get("ok"):
+        return f"refused: {got.get('message')}"
+    by: Dict[str, List[str]] = {}
+    for role, m in (got.get("effective") or {}).items():
+        by.setdefault(m, []).append(role)
+    lines = [("Changed. " if body else "") + "The next sessions run on:"]
+    lines += [f"- {m}: {', '.join(roles)}" for m, roles in sorted(by.items())]
+    lines.append("Running sessions keep their model; the daemon needs no restart.")
+    return "\n".join(lines)
+
+
 def _settle(s: Studio, mid: str, cid: str, wait: float, done: Callable[[Dict[str, Any]], bool]) -> Dict[str, Any]:
     deadline = time.time() + wait
     while True:
@@ -580,6 +597,12 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                      "description": "Run (start), Stop (stop) or check (status) the project's operonx-project daemon, "
                                     "which plans milestones and works their cards.",
                      "schema": _schema({"action": _S}, ["action"])},
+    "board_models": {"fn": t_board_models,
+                     "description": "Read or change the models the project's sessions (planner, reviewers, "
+                                    "implementer…) run on. model: one for every role (sonnet, opus, haiku, fable or a "
+                                    "claude-… id; \"\" back to the defaults); models: {role: model} for one role. "
+                                    "No arguments: read them. Applies to the next session.",
+                     "schema": _schema({"model": _S, "models": {"type": "object"}})},
     "board_take": {"fn": t_board_take,
                    "description": "Take a card to work it yourself instead of the engine's implementer: waits until "
                                   "the daemon parks it for you, then says where (its worktree), what (criteria, "

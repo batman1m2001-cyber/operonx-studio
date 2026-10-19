@@ -76,6 +76,7 @@ def knowledge() -> str:
 STUDIO_READ_TOOLS = ["mcp__studio__list_runs", "mcp__studio__open_run", "mcp__studio__op_values",
                      "mcp__studio__monitor", "mcp__studio__compare_runs", "mcp__studio__select_op",
                      "mcp__studio__board_status", "mcp__studio__board_card"]
+# board_models reads too, but with arguments it writes: an edit tool
 
 
 def viewer_deny(state: Path) -> List[str]:

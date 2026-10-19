@@ -173,7 +173,8 @@ def _ms(db: sqlite3.Connection, row: sqlite3.Row) -> Dict[str, Any]:
 
 
 def milestones(root: Path) -> Dict[str, Any]:
-    base = {"schema": SCHEMA, "brd": _has_brd(root), "daemon": daemon_status(root), "sandbox": _sandbox(root)}
+    base = {"schema": SCHEMA, "brd": _has_brd(root), "daemon": daemon_status(root), "sandbox": _sandbox(root),
+            "models": _models(root)}
     if not _has_store(root):
         return {**base, "milestones": [], "engine": False}
     db = _connect(root)
@@ -184,19 +185,30 @@ def milestones(root: Path) -> Dict[str, Any]:
         db.close()
 
 
-def _sandbox(root: Path) -> bool:
-    """``.operonx/project/settings.toml``'s ``sandbox`` (machine-local, default on)."""
+def _settings(root: Path) -> Dict[str, Any]:
+    """``.operonx/project/settings.toml`` (machine-local); {} when missing or broken."""
     path = Path(root) / STATE_DIR / "settings.toml"
     if not path.is_file():
-        return True
+        return {}
     try:
         import tomllib
     except ImportError:  # pragma: no cover - 3.10
         import tomli as tomllib
     try:
-        return bool(tomllib.loads(path.read_text(encoding="utf-8")).get("sandbox", True))
+        return tomllib.loads(path.read_text(encoding="utf-8"))
     except ValueError:
-        return True
+        return {}
+
+
+def _sandbox(root: Path) -> bool:
+    """``settings.toml``'s ``sandbox`` (default on)."""
+    return bool(_settings(root).get("sandbox", True))
+
+
+def _models(root: Path) -> Dict[str, Any]:
+    """The owner's model choice in ``settings.toml``: every role's, and one role's."""
+    got = _settings(root)
+    return {"model": got.get("model"), "models": got.get("models") or {}}
 
 
 # ── the daemon: Run and Stop on the Board ──────────────────────────────────
@@ -515,6 +527,35 @@ def register(app: Any, *, watcher_of: Any) -> None:
     def board_project(pid: str) -> JSONResponse:
         """The project's checklist from its checkout's ``docs/brd`` (no milestone needed)."""
         return _read(pid, project_checklist)
+
+    # before /board/{mid}: "settings" is no milestone
+    @app.get("/api/p/{pid}/board/settings")
+    async def board_settings(pid: str) -> JSONResponse:
+        """The models each role's session runs on (the engine's ``settings`` op)."""
+        import asyncio
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        out = await asyncio.to_thread(act, root, {"op": "settings"}, "studio")
+        return JSONResponse(out, status_code=200 if out.get("ok") else 503 if out.get("status") == "unavailable"
+                            else 409)  # fmt: skip
+
+    @app.post("/api/p/{pid}/board/settings")
+    async def board_settings_set(pid: str, request: Request) -> JSONResponse:
+        """Change them: ``{"model": "sonnet"}`` for every role, ``{"models": {role: model}}`` for one ("" clears)."""
+        import asyncio
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        body = await request.json()
+        if not isinstance(body, dict):
+            return JSONResponse({"ok": False, "status": "invalid", "message": "a JSON object"}, status_code=400)
+        req = {"op": "settings", **{k: body[k] for k in ("model", "models") if k in body}}
+        out = await asyncio.to_thread(act, root, req, _actor(request))
+        return JSONResponse(out, status_code=200 if out.get("ok") else 503 if out.get("status") == "unavailable"
+                            else 409)  # fmt: skip
 
     @app.get("/api/p/{pid}/board/{mid}")
     def board_milestone(pid: str, mid: str) -> JSONResponse:

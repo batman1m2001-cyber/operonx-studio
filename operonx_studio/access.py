@@ -186,7 +186,9 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/play/restart"): "edit",
     ("POST", f"{P}/kb/{{service}}/{{path:path}}"): "edit",     # a query runs the project's code and its answer model
     ("POST", f"{P}/board/daemon"): "edit",                      # Run / Stop the project's daemon
-    ("POST", f"{P}/board/new"): "edit",                         # a milestone for rows of the checklist
+    ("POST", f"{P}/board/new"): "edit",
+    ("GET", f"{P}/board/settings"): "read",
+    ("POST", f"{P}/board/settings"): "edit",                         # a milestone for rows of the checklist
     ("POST", f"{P}/board/{{mid}}/act"): "edit",                # answers, approves, pauses: the engine acts on it
 
     # ── the assistant's hands on your own screen ──

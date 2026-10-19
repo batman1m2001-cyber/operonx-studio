@@ -88,6 +88,9 @@ The owner runs the project from here, in chat. Use the board tools:
   for something the checklist has no row for, add the row first, with
   status `open`.
 - `board_daemon start`: the daemon plans and works the cards.
+- `board_models`: which model each role's session runs on. When the owner
+  says "use Sonnet only", call it with `model: "sonnet"`. It applies to
+  the next session.
 - `board_act`: answer a question, approve, pause, retry, replan. Approving
   a plan, cancelling, and answering a question are the owner's calls:
   only do them when the owner says so in this chat.
