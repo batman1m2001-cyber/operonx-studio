@@ -594,3 +594,18 @@ def test_the_assistant_reads_the_plan_it_asks_the_owner_to_approve(client, tmp_p
     text = _tool(BoardStudio(client, _open(client, root)), "board_status", milestone="m1")
     assert "  Plan C5 [risky] · Remove the hack — needs C2 — paths ops.py" in text
     assert "    Test first, then delete the class." in text and "    - WHEN ops.py is read" in text
+
+
+def test_the_assistant_reads_what_the_engine_saw_when_it_asked(client, tmp_path):
+    """tipcalc m3/C5: the question named a rewrite of the held-out tests; without the failing names the
+    assistant guessed it was about the acceptance tests."""
+    root = make_project(tmp_path / "calc")
+    db = sqlite3.connect(root / ".operonx/project/project.db")
+    db.row_factory = sqlite3.Row
+    row = dict(db.execute("SELECT * FROM interactions WHERE qid='Q-01'").fetchone())
+    payload = {**json.loads(row["payload"]), "evidence": "The held-out tests failing:\n- test_direct: {} != errors"}
+    db.execute("UPDATE interactions SET payload=? WHERE qid='Q-01'", (json.dumps(payload),))
+    db.commit()
+    db.close()
+    text = _tool(BoardStudio(client, _open(client, root)), "board_status", milestone="m1")
+    assert "    The held-out tests failing:\n    - test_direct: {} != errors" in text

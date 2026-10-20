@@ -387,6 +387,8 @@ def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
             lines.append(f"Open question {q.get('qid') or q.get('short') or q['id']} ({q['kind']}{', card ' + q['card'] if q['card'] else ''}): "
                          f"{q['problem']}" + (f" — options: {opts}" if opts else "")
                          + (f" (recommended {q['recommended']})" if q.get("recommended") else ""))
+            if q.get("evidence"):  # what the engine saw (tipcalc m3/C5: the held-out failures the owner had to know)
+                lines += [f"    {x}" for x in str(q["evidence"]).splitlines()[-12:]]
             if q.get("kind") == "approval":  # the plan being approved: its cards are not on the board until then
                 for c in q.get("plan_cards") or []:
                     lines.append(f"  Plan {c['id']}{' [risky]' if c.get('risk') == 'high' else ''} · {c['title']}"
@@ -696,7 +698,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                          "needs": {"type": "array", "items": _S}}, ["text"])},
     "board_act": {"fn": t_board_act,
                   "description": "An owner's action on a milestone, checked by the engine: answer (ref: a question's "
-                                 "short id or a card, answer: an option key or words), approve, pause, unpause, cancel, "
+                                 "short id or a card, answer: an option key, words, or {\"choice\": key, \"text\": words} for "
+                                 "both; the reply says which option was taken), approve, pause, unpause, cancel, "
                                  "replan (notes), retry (usd or hours of extra budget), prioritize (card, priority; "
                                  "lower runs first), release (a taken card back to the engine), ship (a done milestone: "
                                  "push its branch, open the PR or the GitLab link), merge (its PR, once checks "

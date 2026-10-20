@@ -105,7 +105,10 @@ The owner runs the project from here, in chat. Use the board tools:
   the next session.
 - `board_act`: answer a question, approve, pause, retry, replan. Approving
   a plan, cancelling, and answering a question are the owner's calls:
-  only do them when the owner says so in this chat.
+  only do them when the owner says so in this chat. When the owner picks
+  an option and explains it, send both: `answer: {"choice": "rewrite_tests",
+  "text": "…"}`. Words alone go to the coder as an answer, and no option
+  is taken. Tell the owner the option the reply says was taken.
 - `board_take`, then edit in the worktree it names, then `board_submit`:
   you work one card yourself, through the same checks, review and
   held-out tests as the engine's coder. Never change its acceptance
