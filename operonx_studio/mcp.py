@@ -387,6 +387,14 @@ def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
             lines.append(f"Open question {q.get('qid') or q.get('short') or q['id']} ({q['kind']}{', card ' + q['card'] if q['card'] else ''}): "
                          f"{q['problem']}" + (f" — options: {opts}" if opts else "")
                          + (f" (recommended {q['recommended']})" if q.get("recommended") else ""))
+            if q.get("kind") == "approval":  # the plan being approved: its cards are not on the board until then
+                for c in q.get("plan_cards") or []:
+                    lines.append(f"  Plan {c['id']}{' [risky]' if c.get('risk') == 'high' else ''} · {c['title']}"
+                                 + (f" — needs {', '.join(c['deps'])}" if c.get("deps") else "")
+                                 + (f" — paths {', '.join(c['paths'])}" if c.get("paths") else ""))
+                    if c.get("intent"):
+                        lines.append(f"    {c['intent'][:600]}")
+                    lines += [f"    - {k[:240]}" for k in (c.get("criteria") or [])[:6]]
         arch = got.get("architecture")
         if arch:
             lines.append("Architecture check: " + ("clean on the milestone's base" if arch.get("ok") else

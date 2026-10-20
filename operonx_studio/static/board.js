@@ -473,7 +473,13 @@ const BoardView = (() => {
     }
     if (q.kind === "approval" && q.plan_cards.length) {
       const ul = el("ul", "bdplan");
-      for (const c of q.plan_cards.slice(0, 20)) ul.append(el("li", null, `${c.id} ${c.title}${c.risk === "high" ? "  ⚠ risky" : ""}`));
+      for (const c of q.plan_cards.slice(0, 20)) {
+        const li = el("li", null, `${c.id} ${c.title}${c.risk === "high" ? "  ⚠ risky" : ""}`);
+        li.title = [c.intent, c.deps && c.deps.length ? `Needs ${c.deps.join(", ")}` : "",
+                    c.paths && c.paths.length ? `Paths: ${c.paths.join(", ")}` : "",
+                    ...(c.criteria || []).map((k) => `• ${k}`)].filter(Boolean).join("\n");
+        ul.append(li);
+      }
       card.append(ul);
     }
     if ((q.problems || []).length) {

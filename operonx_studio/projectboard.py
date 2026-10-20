@@ -424,8 +424,12 @@ def _question(row: sqlite3.Row) -> Dict[str, Any]:
         "version": row["version"], "problem": p.get("problem") or p.get("reason") or "", "why": p.get("why") or "",
         "tried": p.get("tried") or "", "evidence": p.get("evidence") or "", "options": options,
         "recommended": p.get("recommended"), "safe_default": bool(p.get("safe_default")),
-        "plan_cards": [{"id": c.get("id"), "title": c.get("title"), "risk": c.get("risk")}
-                       for c in plan.get("cards") or []],
+        # what the owner approves: a W1 plan's cards are only here until it is approved
+        "plan_cards": [{"id": c.get("id"), "title": c.get("title"), "risk": c.get("risk"),
+                        "intent": c.get("intent") or "", "paths": c.get("paths") or [], "deps": c.get("deps") or [],
+                        "rows": c.get("rows") or [],
+                        "criteria": [k.get("text", "") if isinstance(k, dict) else str(k) for k in c.get("criteria") or []]}
+                       for c in plan.get("cards") or [] if isinstance(c, dict)],
         "problems": p.get("problems") or [], "notes": p.get("notes") or [],
         "created": row["created"], "flagged": bool(row["flagged"]), "delivery": row["delivery"],
     }  # fmt: skip

@@ -134,6 +134,9 @@ Which practice, when. Say what each one costs and what it saves:
   It costs one test run per card, and one rewrite when a set passes too
   early. Use it where a card's tests could pass without the change
   (refactors, behaviour changes, a team that wants red-green evidence).
+  It applies to code cards. A refactor's safety net (tests that pin
+  today's behaviour, and must pass before and after) goes in a `test`
+  card, which has no red check.
 - TDD `off`: no test author, no examiner, so it is cheaper. Use it only
   for spikes, docs and config, never for a feature the owner relies on.
 - Architecture rules are a check, not advice. A new violation fails the

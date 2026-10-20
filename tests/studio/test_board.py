@@ -574,3 +574,23 @@ def test_the_assistant_reads_and_sets_the_practices_through_the_engine(client, t
     assert _tool(s, "board_practices", toml='[tdd]\nmode = "red"\n').startswith("refused: docs/brd/practices.toml "
                                                                               "would not be valid")
     assert client.get(f"/api/p/{pid}/board").json()["practices"]["tdd"] == "off"
+
+
+def test_the_assistant_reads_the_plan_it_asks_the_owner_to_approve(client, tmp_path):
+    """A W1 plan's cards are on no board until it is approved: the approval question carries them."""
+    root = make_project(tmp_path / "calc")
+    db = sqlite3.connect(root / ".operonx/project/project.db")
+    db.row_factory = sqlite3.Row
+    row = dict(db.execute("SELECT * FROM interactions WHERE qid='Q-01'").fetchone())
+    plan = {"cards": [{"id": "C5", "title": "Remove the hack", "risk": "high", "deps": ["C2"], "paths": ["ops.py"],
+                       "intent": "Test first, then delete the class.",
+                       "criteria": [{"row": "R1", "text": "WHEN ops.py is read THE SYSTEM SHALL hold no hack"}]}]}
+    row.update(id=row["id"] + "-plan", qid="Q-02", short="Q-02", kind="approval", card=None,
+               payload=json.dumps({"problem": "Approve m1's plan?", "plan": plan,
+                                   "options": [{"key": "approve", "label": "Approve"}]}))  # fmt: skip
+    db.execute(f"INSERT INTO interactions ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
+    db.commit()
+    db.close()
+    text = _tool(BoardStudio(client, _open(client, root)), "board_status", milestone="m1")
+    assert "  Plan C5 [risky] · Remove the hack — needs C2 — paths ops.py" in text
+    assert "    Test first, then delete the class." in text and "    - WHEN ops.py is read" in text
