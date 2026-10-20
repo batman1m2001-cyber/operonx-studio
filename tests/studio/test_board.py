@@ -610,3 +610,23 @@ def test_the_assistant_reads_what_the_engine_saw_when_it_asked(client, tmp_path)
     db.close()
     text = _tool(BoardStudio(client, _open(client, root)), "board_status", milestone="m1")
     assert "    The held-out tests failing:\n    - test_direct: {} != errors" in text
+
+
+def test_a_matrix_of_several_tables_reads_each_row_by_its_own_columns(tmp_path):
+    """OneWealth's matrix has six tables with different columns: read with the first table's header, every row
+    after it took its status from the Features or Notes cell, and the Board showed ~70 nonsense counts. A
+    route with an escaped pipe shifted its row's cells."""
+    from operonx_studio.projectboard import project_checklist
+
+    brd = tmp_path / "docs/brd/requirements"
+    brd.mkdir(parents=True)
+    (brd / "requirements_traceability.md").write_text(
+        "| ID | BRD § | Requirement (short) | Features | Code / API | Tests | Status | Evidence |\n"
+        "|---|---|---|---|---|---|---|---|\n"
+        "| BR-01 | §1 | Three news sources | FEAT-01 | `POST /api/p[/a\\|/b]` | — | implemented_verified | x |\n\n"
+        "| ID | Features | Status | Notes |\n|---|---|---|---|\n"
+        "| RULE-WF-02 | FEAT-04, 05 | planned | the RM sees it first |\n", encoding="utf-8")
+    ck = project_checklist(tmp_path)
+    assert ck["counts"] == {"implemented_verified": 1, "planned": 1}
+    assert [r["text"] for r in ck["rows"]] == ["Three news sources", "the RM sees it first"]
+    assert ck["rows"][0]["cells"][4] == "`POST /api/p[/a|/b]`"

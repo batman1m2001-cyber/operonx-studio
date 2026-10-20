@@ -753,6 +753,9 @@ body.railslim .railtoggle .icon { transform: rotate(180deg); }
 .mlist .mlsearch:focus { background: var(--surface); border-color: var(--accent); outline: none;
   box-shadow: 0 0 0 3px var(--accent-soft); }
 .mlist .mlrows { max-height: min(60vh, 460px); overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+/* a capped flex column shrinks its items to fit: with 143 rows (OneWealth) every row was 12 px and the names
+   lay over their routes. The rows keep their height; the list scrolls. */
+.mlist .mlrows > * { flex: none; }
 .mlist .mlhead { display: flex; align-items: center; gap: 6px; padding: 10px 8px 4px;
   font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
 .mlist .mlhead:first-child { padding-top: 4px; }
@@ -4999,6 +5002,7 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .bdtable th, .bdtable td { text-align: left; vertical-align: top; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 .bdtable th { background: var(--surface-2); color: var(--text-2); font-weight: 600; }
 .bdtable .chip { margin: 0; white-space: nowrap; }
+.bdtable .bdid { white-space: nowrap; }
 .bdtests div, .bdtable td:first-child { white-space: nowrap; }
 .bdqlist { list-style: none; padding: 0; margin: 4px 0; font-size: var(--fs-sm); }
 .bdqlist li { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
