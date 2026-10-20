@@ -710,10 +710,10 @@ const BoardView = (() => {
         }
         tr.append(td);
       }
-      tr.append(el("td", "mono", r.id));
+      tr.append(el("td", "mono bdid", r.id));
       const st = el("td");
       st.append(el("span", `chip ${ROW_OK.has(r.status) ? "cok" : r.status === "needs_clarification" ? "cwarn" : ""}`, r.status.replaceAll("_", " ")));
-      tr.append(st, el("td", null, short >= 0 ? r.cells[short] || "" : ""));
+      tr.append(st, el("td", null, r.text ?? (short >= 0 ? r.cells[short] || "" : "")));  // its own table's text
       const tests = el("td", "mono bdtests");
       for (const t of r.tests) tests.append(el("div", null, t));
       tr.append(tests, el("td", "mono", r.questions.join(", ")));

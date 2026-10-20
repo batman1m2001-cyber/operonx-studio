@@ -514,7 +514,8 @@ _TEST = re.compile(r"tests/(?:[\w.-]+/)*test_\w+\.py::test_\w+")
 
 
 def _cells(line: str) -> List[str]:
-    return [c.strip() for c in line.strip().strip("|").split("|")]
+    """A table row's cells; an escaped ``\\|`` inside a cell (a route like ``/api/policy[/verify\\|/status]``) is text."""
+    return [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
 
 
 def _show(root: Path, ref: str, path: str) -> Optional[str]:
@@ -560,17 +561,21 @@ def project_checklist(root: Path) -> Dict[str, Any]:
 
 
 def _parse(text: str, qtext: str, asks: Dict[str, str]) -> Dict[str, Any]:
-    header: List[str] = []
+    header: List[str] = []  # the first table's, for the API's callers
+    here: List[str] = []  # the table this row is in: a matrix may hold several, each with its own columns
     rows: List[Dict[str, Any]] = []
     for line in text.splitlines():
-        if not header and line.startswith("|") and re.search(r"\|\s*ID\s*\|", line, re.I):
-            header = _cells(line)
+        if line.startswith("|") and re.search(r"\|\s*ID\s*\|", line, re.I):
+            here = _cells(line)
+            header = header or here
             continue
         if _ROW.match(line):
             cells = _cells(line)
-            named = {h.lower(): cells[i] for i, h in enumerate(header) if i < len(cells)} if header else {}
+            named = {h.lower(): cells[i] for i, h in enumerate(here) if i < len(cells)}
             status = named.get("status") or (cells[1] if len(cells) > 1 else "")
+            text_col = next((h for pre in ("requirement", "metric", "notes") for h in named if h.startswith(pre)), None)
             rows.append({"id": cells[0], "status": status, "cells": cells, "tests": _TEST.findall(line),
+                         "text": named.get(text_col, "") if text_col else "",
                          "questions": re.findall(r"Q-\d{2,3}", line)})  # fmt: skip
     questions = []
     for line in qtext.splitlines():
