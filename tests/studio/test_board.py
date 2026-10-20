@@ -523,7 +523,8 @@ def test_the_board_shows_the_practices_the_architecture_and_the_retrospective(cl
                                                   "answer": "numbers only"}]}]},
              "lessons": [{"rule": "add() takes numbers only", "evidence": "C1, Q-01"}], "file": "docs/brd/LESSONS.md"}
     base = {"results": [{"name": "architecture", "ok": False, "failures": ["arch:private:x.py->y._z"]}]}
-    for key, data in (("retro", retro), ("baseline", base)):
+    end = {"results": [{"name": "architecture", "ok": True, "failures": []}], "fixed": ["architecture"]}
+    for key, data in (("retro", retro), ("baseline", base), ("final_checks", end)):
         db.execute("INSERT OR REPLACE INTO steps (key, data) VALUES (?, ?)", (f"ms:m1:{key}", json.dumps(data)))
     detail = json.loads(db.execute("SELECT detail FROM cards WHERE id='C1'").fetchone()[0])
     detail["red"] = {"red": True, "rewritten": True, "passed": 0, "failed": ["t"]}
@@ -535,13 +536,13 @@ def test_the_board_shows_the_practices_the_architecture_and_the_retrospective(cl
         "tdd": "strict", "style": "clean", "layers": 2, "contexts": 0, "private": "forbid", "forbid": 0,
         "command": False, "done": 0, "lessons": ""}
     ms = client.get(f"/api/p/{pid}/board/m1").json()
-    assert ms["architecture"] == {"ok": False, "violations": 1}
+    assert ms["architecture"] == {"ok": False, "violations": 1, "after": {"ok": True, "violations": 0}}
     assert ms["retro"]["lessons"][0]["rule"] == "add() takes numbers only"
     c1 = next(c for c in ms["cards"] if c["id"] == "C1")
     assert c1["red"] == {"red": True, "rewritten": True, "passed": 0}
     text = _tool(BoardStudio(client, pid), "board_status", milestone="m1")
     assert "red before the code (written again: the first set passed already)" in text
-    assert "1 violation(s) already on the milestone's base" in text
+    assert "1 violation(s) already on the milestone's base" in text and "  At final verification: clean" in text
     assert "Retrospective: $1.50 over 1 card(s), 3 round(s); stages plan $0.40" in text
     assert "the owner decided: does add accept strings? → a numbers only" in text
     assert "Lesson (docs/brd/LESSONS.md): add() takes numbers only — C1, Q-01" in text

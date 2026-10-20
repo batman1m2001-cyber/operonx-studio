@@ -465,6 +465,8 @@ def milestone(root: Path, mid: str, events: int = 40) -> Dict[str, Any]:
         plan = _record(db, mid, "plan")
         base = _record(db, mid, "baseline")
         arch = next((r for r in base.get("results") or [] if r.get("name") == "architecture"), None)
+        end = next((r for r in _record(db, mid, "final_checks").get("results") or []
+                    if r.get("name") == "architecture"), None)  # fmt: skip
         retro = _record(db, mid, "retro")
         evs = [{"seq": r["seq"], "at": r["at"], "kind": r["kind"], "card": r["card"], "actor": r["actor"],
                 "data": _json(r["data"], {})}
@@ -477,8 +479,11 @@ def milestone(root: Path, mid: str, events: int = 40) -> Dict[str, Any]:
             "graph": {"waves": _waves(cards), "edges": [[d, c["id"]] for c in cards for d in c["deps"]]},
             "events": evs[::-1], "cursor": evs[0]["seq"] if evs else 0,
             "shipped": _record(db, mid, "shipped") or None, "merge_granted": bool(_settings(root).get("merge")),
-            # the architecture check on the milestone's base: what was there before it (never its cards' fault)
-            "architecture": {"ok": arch.get("ok"), "violations": len(arch.get("failures") or [])} if arch else None,
+            # the architecture check on the milestone's base (what was there before it, never its cards' fault),
+            # and at final verification: what the milestone left
+            "architecture": {"ok": arch.get("ok"), "violations": len(arch.get("failures") or []),
+                             "after": {"ok": end.get("ok"), "violations": len(end.get("failures") or [])}
+                             if end else None} if arch else None,
             "retro": {"report": retro.get("report") or {}, "lessons": retro.get("lessons") or [],
                       "file": retro.get("file") or ""} if retro else None,
             "shippable": ms["state"] == "done" and _has_branch(root, _record(db, mid, "intake").get("branch")

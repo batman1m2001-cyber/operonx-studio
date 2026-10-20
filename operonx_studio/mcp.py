@@ -402,6 +402,10 @@ def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
             lines.append("Architecture check: " + ("clean on the milestone's base" if arch.get("ok") else
                                                    f"{arch['violations']} violation(s) already on the milestone's "
                                                    "base (they cost its cards nothing; a new one fails a round)"))
+            end = arch.get("after")
+            if end:
+                lines.append("  At final verification: " + ("clean" if end.get("ok") else
+                                                            f"{end['violations']} violation(s)"))
         lines += _retro_lines(got.get("retro"))
         return "\n".join(lines)
     got = s.call("/board")

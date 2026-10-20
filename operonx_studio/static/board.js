@@ -394,8 +394,14 @@ const BoardView = (() => {
     }
     const arch = data.architecture;
     if (arch) {
-      const c = el("span", `chip ${arch.ok ? "cok" : ""}`, arch.ok ? "architecture clean" : `${arch.violations} architecture violation${arch.violations === 1 ? "" : "s"} before it`);
-      c.title = arch.ok ? "The architecture check passed on the milestone's base: every round keeps it so"
+      const n = (k) => `${k} architecture violation${k === 1 ? "" : "s"}`;
+      const end = arch.after;
+      const ok = end ? end.ok : arch.ok;
+      const text = end && !arch.ok ? `${n(arch.violations)} before it, ${end.ok ? "clean now" : `${end.violations} now`}`
+        : ok ? "architecture clean" : `${n(arch.violations)} before it`;
+      const c = el("span", `chip ${ok ? "cok" : ""}`, text);
+      c.title = end ? "The architecture check on the milestone's base, and at its final verification"
+        : arch.ok ? "The architecture check passed on the milestone's base: every round keeps it so"
         : "Already in the code when the milestone started: they cost its cards nothing; a new one fails a round";
       s.append(c);
     }
