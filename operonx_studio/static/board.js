@@ -177,6 +177,8 @@ const BoardView = (() => {
         + (roles.length ? `\n${roles.map(([r, x]) => `${r}: ${x}`).join("\n")}` : "");
       wrap.append(m);
     }
+    const pr = info && info.practices;
+    if (pr) wrap.append(practicesChip(pr));
     wrap.append(el("span", `status ${d.running ? "s-run" : "s-idle"}`, d.running ? "daemon running" : "daemon stopped"));
     const b = el("button", `${d.running ? "" : "primary"} needs-edit`, d.running ? "Stop" : "Run");
     b.type = "button";
@@ -192,6 +194,24 @@ const BoardView = (() => {
     };
     wrap.append(b);
     return wrap;
+  }
+
+  /* how the project is built (docs/brd/practices.toml): one chip, the details on hover */
+  function practicesChip(pr) {
+    if (pr.error) {
+      const c = el("span", "chip cwarn", "practices: broken");
+      c.title = `${pr.error}: a milestone will not start until it parses (ask the assistant to fix it)`;
+      return c;
+    }
+    const arch = [pr.style, pr.layers ? `${pr.layers} layers` : "", pr.contexts ? `${pr.contexts} contexts` : "",
+                  pr.private === "forbid" ? "no private access" : ""].filter(Boolean);
+    const c = el("span", "chip", [`TDD ${pr.tdd}`, ...(arch.length ? [arch.join(", ")] : [])].join(" · "));
+    c.title = "How the project is built (docs/brd/practices.toml, committed); the assistant reads and sets it"
+      + `\nTests: ${pr.tdd}${pr.tdd === "strict" ? " (they must fail before the code)" : pr.tdd === "off" ? " (none written)" : ""}`
+      + (arch.length || pr.forbid || pr.command ? `\nArchitecture, checked every round: ${[...arch, pr.forbid ? `${pr.forbid} forbidden import rule(s)` : "", pr.command ? "its own command" : ""].filter(Boolean).join(", ")}` : "")
+      + (pr.done ? `\nDone means ${pr.done} more check(s) pass` : "")
+      + (pr.lessons ? `\nLessons: ${pr.lessons}` : "");
+    return c;
   }
 
   /* New request: the owner's words become rows (the engine extracts them into
@@ -372,10 +392,18 @@ const BoardView = (() => {
       c.title = "That milestone waits until this one is delivered";
       s.append(c);
     }
+    const arch = data.architecture;
+    if (arch) {
+      const c = el("span", `chip ${arch.ok ? "cok" : ""}`, arch.ok ? "architecture clean" : `${arch.violations} architecture violation${arch.violations === 1 ? "" : "s"} before it`);
+      c.title = arch.ok ? "The architecture check passed on the milestone's base: every round keeps it so"
+        : "Already in the code when the milestone started: they cost its cards nothing; a new one fails a round";
+      s.append(c);
+    }
     const wrap = el("div", "bdhead");
     wrap.append(s);
     if (m.reason) wrap.append(el("div", "bdreason", m.resume_at
       ? `${m.reason} (it goes on by itself ${fmtAgo(m.resume_at * 1000).replace(" ago", "")})` : m.reason));
+    if (data.retro) wrap.append(retroView(data.retro));
     if (data.plan && (data.plan.notes || []).length && m.state === "awaiting_approval") {
       const notes = el("div", "bdnotes");
       notes.append(el("b", null, "The plan's review still says:"));
@@ -385,6 +413,34 @@ const BoardView = (() => {
       wrap.append(notes);
     }
     return wrap;
+  }
+
+  /* a delivered milestone's retrospective: where the rounds and the money went, and what it taught */
+  function retroView(retro) {
+    const rep = retro.report || {};
+    const cards = rep.cards || [];
+    const box = el("div", "bdnotes");
+    const stages = Object.entries(rep.by_stage || {}).map(([k, x]) => `${k} ${money(x)}`).join(" · ");
+    box.append(el("b", null, "Retrospective"), el("span", null,
+      ` ${money(rep.cost_usd)} over ${cards.length} card${cards.length === 1 ? "" : "s"}, ${rep.rounds} round${rep.rounds === 1 ? "" : "s"}`
+      + (stages ? ` · ${stages}` : "")));
+    const costly = cards.filter((c) => c.rounds > 1 || (c.questions || []).length || (c.rewritten || []).length);
+    const ul = el("ul");
+    for (const c of costly.slice(0, 6)) {
+      const bits = [`${c.rounds} rounds`, money(c.cost_usd)];
+      if ((c.failed_checks || []).length) bits.push(`failed on ${c.failed_checks.join(", ")}`);
+      if ((c.questions || []).length) bits.push(`${c.questions.length} question${c.questions.length > 1 ? "s" : ""} for you`);
+      if ((c.rewritten || []).length) bits.push(`tests written again ${c.rewritten.length}×`);
+      ul.append(el("li", null, `${c.id} ${c.title}: ${bits.join(" · ")}`));
+    }
+    for (const x of retro.lessons || []) {
+      const li = el("li");
+      li.append(el("b", null, "Lesson: "), el("span", null, `${x.rule} `), el("span", "note", `(${x.evidence})`));
+      ul.append(li);
+    }
+    if (ul.childNodes.length) box.append(ul);
+    if ((retro.lessons || []).length) box.append(el("div", "note", `Added to ${retro.file} on the milestone's branch: every later session reads them; edit or drop any in the PR.`));
+    return box;
   }
 
   /* ── waiting on you ───────────────────────────────────────────────── */
@@ -482,6 +538,12 @@ const BoardView = (() => {
     if (c.kind === "init") top.append(el("span", "chip", "init"));
     if (c.risk === "high") top.append(el("span", "chip cwarn", "risky"));
     if (c.asks) top.append(el("span", "chip cwarn", "asks you"));
+    if (c.red && c.red.red) {
+      const r = el("span", "chip cok", "red first");
+      r.title = "Strict TDD: its acceptance tests failed before the code" + (c.red.rewritten ? " (written again: the first set passed already)" : "");
+      top.append(r);
+    } else if (c.red) top.append(el("span", "chip cwarn", "tests passed early"));
+    if (c.tdd === "off") top.append(el("span", "chip", "no tests"));
     if (c.taken) {
       // short on the tile: who (the assistant, or a name), the full actor on hover
       const who = /\/assistant$/.test(c.taken) ? "assistant" : c.taken.replace(/^[a-z]+:/, "");
@@ -540,6 +602,9 @@ const BoardView = (() => {
     fact("Paths", c.paths);
     fact("Acceptance tests", c.acceptance);
     fact("Held-out tests", c.heldout ? `${c.heldout} file(s), hidden from the implementer` : "");
+    fact("Test first", c.tdd === "off" ? "off: no tests written; the checks and the review judge it"
+      : !c.red ? "" : c.red.red ? `failed before the code${c.red.rewritten ? " (the first set passed already: written again)" : ""}`
+      : `${c.red.passed} passed before the code, after a rewrite`);
     fact("Last checks", c.checks.map((x) => `${x.name} ${x.ok ? "✓" : "✗"}`));
     fact("Cost", c.cost_usd ? money(c.cost_usd) : "");
     fact("Why", c.reason);

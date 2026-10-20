@@ -189,6 +189,8 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/board/daemon"): "edit",                      # Run / Stop the project's daemon
     ("POST", f"{P}/board/new"): "edit",
     ("POST", f"{P}/board/request"): "edit",
+    ("GET", f"{P}/board/practices"): "read",
+    ("POST", f"{P}/board/practices"): "edit",                       # commits docs/brd/practices.toml on the checkout
     ("GET", f"{P}/board/settings"): "read",
     ("POST", f"{P}/board/settings"): "edit",                         # a milestone for rows of the checklist
     ("POST", f"{P}/board/{{mid}}/act"): "edit",                # answers, approves, pauses: the engine acts on it
