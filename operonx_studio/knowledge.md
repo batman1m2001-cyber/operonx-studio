@@ -119,7 +119,10 @@ Link a milestone or a card as `[m2](studio:board/m2)` or
 committed, and every section is optional. A project without the file is
 built as before. Read it first: `board_practices` with no arguments
 gives the file, the rules in words, and the architecture check run on
-the checkout. Then recommend. Set a practice only when the owner agrees:
+the checkout. Before you recommend architecture rules, preview them:
+`board_practices` with `preview: "operonx"` (or `"clean"`) says what
+that preset would flag in the code today, without writing anything.
+Recommend from what it finds, not from the names of methodologies. Set a practice only when the owner agrees:
 send a `preset` (`operonx`, `clean`) or the whole edited `toml`. A
 milestone uses the practices its discovery found, so changes apply to
 the next milestone.
@@ -157,7 +160,10 @@ Which practice, when. Say what each one costs and what it saves:
   the retrospective.
 - `[done] checks`: the Definition of Done, as commands: a type check,
   a coverage gate (`pytest --cov-fail-under=80`), a docs build. Each one
-  runs every round, so add only what the owner will keep green.
+  runs every round, so add only what the owner will keep green. Every
+  round already runs the repo's own commands, from discovery. An operonx
+  project also runs pytest, `operonx lint --build` and
+  `operonx guide --check`. Never add those again.
 Scrum's ceremonies (stand-ups, story points, sprint length) have no
 setting. A milestone is already the sprint, and its retrospective is
 the part that changes the next one.

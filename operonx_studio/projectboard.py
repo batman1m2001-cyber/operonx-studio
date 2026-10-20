@@ -650,15 +650,16 @@ def register(app: Any, *, watcher_of: Any) -> None:
 
     # before /board/{mid}: "practices" is no milestone
     @app.get("/api/p/{pid}/board/practices")
-    async def board_practices(pid: str) -> JSONResponse:
+    async def board_practices(pid: str, preview: str = "") -> JSONResponse:
         """How the project is built (the engine's ``practices`` op): the file, in words, and the
-        architecture check on the checkout."""
+        architecture check on the checkout; ``?preview=<preset>``: what that preset would flag."""
         import asyncio
 
         root, bad = _root(pid)
         if bad is not None:
             return bad
-        out = await asyncio.to_thread(act, root, {"op": "practices"}, "studio")
+        req = {"op": "practices", **({"preview": preview} if preview else {})}
+        out = await asyncio.to_thread(act, root, req, "studio")
         return JSONResponse(out, status_code=200 if out.get("ok") else 503 if out.get("status") == "unavailable"
                             else 409)  # fmt: skip
 

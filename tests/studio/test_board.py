@@ -559,6 +559,9 @@ def test_the_assistant_reads_and_sets_the_practices_through_the_engine(client, t
     s = BoardStudio(client, pid)
     text = _tool(s, "board_practices")
     assert "no architecture rules" in text and "Presets: operonx, clean." in text
+    text = _tool(s, "board_practices", preview="operonx")
+    assert "The operonx preset would flag 1 on the checkout today" in text and "json._default_decoder" in text
+    assert not (root / "docs/brd/practices.toml").exists()
     text = _tool(s, "board_practices", preset="operonx")
     assert text.startswith("Changed: wrote docs/brd/practices.toml (commit ")
     assert "src/calc/ops.py:3 src/calc/ops.py touches json._default_decoder" in text

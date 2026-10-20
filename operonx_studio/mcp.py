@@ -335,7 +335,7 @@ def _retro_lines(retro: Optional[Dict[str, Any]]) -> List[str]:
 def t_board_practices(s: Studio, a: Dict[str, Any]) -> str:
     body = {k: a[k] for k in ("preset", "force", "toml") if k in a and a[k] not in (None, "")}
     try:
-        got = s.call("/board/practices", body) if body else s.call("/board/practices")
+        got = s.call("/board/practices", body) if body else s.call("/board/practices", preview=a.get("preview"))
     except RuntimeError as exc:
         return f"refused: {exc}"
     if not got.get("ok"):
@@ -348,6 +348,11 @@ def t_board_practices(s: Studio, a: Dict[str, Any]) -> str:
         lines += [f"- {v['file']}:{v['line']} {v['message']}" for v in found[:30]]
         if got.get("violation_count", 0) > 30:
             lines.append("- …")
+    seen = got.get("preview")
+    if seen:
+        lines += ["", f"The {seen['preset']} preset would flag {seen['violation_count']} on the checkout today "
+                      "(nothing written; they would be the baseline, costing no card anything):"]  # fmt: skip
+        lines += [f"- {v['file']}:{v['line']} {v['message']}" for v in seen["violations"][:30]]
     if got.get("text"):
         lines += ["", f"The file ({got.get('file')}):", got["text"]]
     else:
@@ -706,12 +711,14 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                        "(acceptance | strict | off), the architecture the engine checks on every "
                                        "round (layers, forbidden imports, bounded contexts, private access), the "
                                        "glossary and lessons every session reads, and Definition-of-Done checks. "
-                                       "No arguments: read it, with the architecture check run on the checkout. "
+                                       "No arguments: read it, with the architecture check run on the checkout; "
+                                       "preview (a preset): also what that preset's rules would flag today, "
+                                       "nothing written — the evidence for a recommendation. "
                                        "preset (operonx | clean; force over an existing file) or toml (the whole "
                                        "file, edited from what a read returned): the engine validates it and commits "
                                        "that file alone. Milestones discovered after it use it. Recommend from the "
                                        "decision guide and set it only when the owner agreed.",
-                        "schema": _schema({"preset": _S, "force": {"type": "boolean"}, "toml": _S})},
+                        "schema": _schema({"preview": _S, "preset": _S, "force": {"type": "boolean"}, "toml": _S})},
     "board_take": {"fn": t_board_take,
                    "description": "Take a card to work it yourself instead of the engine's implementer (also ahead of "
                                   "its dependencies: it is reserved). Waits until the daemon parks it for you, then says where (its worktree), what (criteria, "
