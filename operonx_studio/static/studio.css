@@ -4931,7 +4931,7 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .bdhead { margin: -6px 0 14px; }
 .bdsum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; font-size: var(--fs-sm); color: var(--text-2); }
 .bdreason { margin-top: 6px; font-size: var(--fs-sm); color: var(--text-2); }
-.bdnotes { margin-top: 8px; font-size: var(--fs-sm); }
+.bdnotes { margin-top: 8px; font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .bdnotes ul { margin: 4px 0 0 18px; padding: 0; }
 
 .bdwait { border: 1px solid var(--warn); background: var(--warn-soft); border-radius: var(--r-md);

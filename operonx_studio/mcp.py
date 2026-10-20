@@ -295,6 +295,71 @@ def _ms_line(m: Dict[str, Any]) -> str:
             f"{m['done']}/{m['cards']} cards done; ${m['cost_usd']:.2f}{budget}{asks}")
 
 
+def _tdd_note(c: Dict[str, Any]) -> str:
+    """What test-first showed for a card: nothing to say, no tests (off), or strict's red evidence."""
+    if c.get("tdd") == "off":
+        return "no tests written (TDD off)"
+    red = c.get("red")
+    if not red:
+        return ""
+    if not red.get("red"):
+        return f"its tests passed before the code ({red.get('passed')} passed)"
+    return "red before the code" + (" (written again: the first set passed already)" if red.get("rewritten") else "")
+
+
+def _retro_lines(retro: Optional[Dict[str, Any]]) -> List[str]:
+    """A delivered milestone's retrospective: where its money and rounds went, and what it taught."""
+    if not retro:
+        return []
+    rep = retro.get("report") or {}
+    cards = rep.get("cards") or []
+    costly = sorted((c for c in cards if c.get("rounds", 0) > 1 or c.get("questions") or c.get("rewritten")),
+                    key=lambda c: -c.get("cost_usd", 0))  # fmt: skip
+    stages = ", ".join(f"{k} ${v:.2f}" for k, v in (rep.get("by_stage") or {}).items())
+    lines = [f"Retrospective: ${rep.get('cost_usd', 0):.2f} over {len(cards)} card(s), {rep.get('rounds', 0)} "
+             f"round(s)" + (f"; stages {stages}" if stages else "")]  # fmt: skip
+    for c in costly[:8]:
+        bits = [f"{c['rounds']} rounds", f"${c['cost_usd']:.2f}"]
+        if c.get("failed_checks"):
+            bits.append("failed on " + ", ".join(c["failed_checks"]))
+        bits += [f"the owner decided: {(q.get('question') or '')[:120]} → {q.get('choice') or ''} {q.get('answer') or ''}".rstrip()
+                 for q in c.get("questions") or []]  # fmt: skip
+        if c.get("rewritten"):
+            bits.append(f"tests written again {len(c['rewritten'])}×")
+        lines.append(f"  {c['id']} · {c.get('title', '')}: " + "; ".join(bits))
+    for x in retro.get("lessons") or []:
+        lines.append(f"  Lesson ({retro.get('file')}): {x.get('rule')} — {x.get('evidence')}")
+    return lines
+
+
+def t_board_practices(s: Studio, a: Dict[str, Any]) -> str:
+    body = {k: a[k] for k in ("preset", "force", "toml") if k in a and a[k] not in (None, "")}
+    try:
+        got = s.call("/board/practices", body) if body else s.call("/board/practices", preview=a.get("preview"))
+    except RuntimeError as exc:
+        return f"refused: {exc}"
+    if not got.get("ok"):
+        return f"refused: {got.get('message')}" + (f"\nThe file now:\n{got['text']}" if got.get("text") else "")
+    s.show("open_board", view="board")
+    lines = [("Changed: " if body else "") + str(got.get("message")) + ".", "", str(got.get("summary") or "")]
+    found = got.get("violations") or []
+    if found:
+        lines += ["", f"Architecture check on the checkout ({got.get('violation_count')}):"]
+        lines += [f"- {v['file']}:{v['line']} {v['message']}" for v in found[:30]]
+        if got.get("violation_count", 0) > 30:
+            lines.append("- …")
+    seen = got.get("preview")
+    if seen:
+        lines += ["", f"The {seen['preset']} preset would flag {seen['violation_count']} on the checkout today "
+                      "(nothing written; they would be the baseline, costing no card anything):"]  # fmt: skip
+        lines += [f"- {v['file']}:{v['line']} {v['message']}" for v in seen["violations"][:30]]
+    if got.get("text"):
+        lines += ["", f"The file ({got.get('file')}):", got["text"]]
+    else:
+        lines += ["", f"No {got.get('file')} yet. Presets: {', '.join(got.get('presets') or [])}."]
+    return "\n".join(lines)
+
+
 def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
     mid = str(a.get("milestone") or "")
     if mid:
@@ -314,6 +379,7 @@ def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
                          "waits for a submit" if c.get("waiting_for_submit") else "",
                          "asks the owner" if c.get("asks") else "", (c.get("activity") or {}).get("text", ""),
                          c["reason"] if c["state"] in ("failed", "blocked") else ""]  # fmt: skip
+                extra.append(_tdd_note(c))
                 lines.append(f"  {cid} · {c['title']} [{c['state']}] rows {', '.join(c['rows']) or '—'}"
                              + "".join(f" — {x}" for x in extra if x))
         for q in got["questions"]:
@@ -321,6 +387,26 @@ def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
             lines.append(f"Open question {q.get('qid') or q.get('short') or q['id']} ({q['kind']}{', card ' + q['card'] if q['card'] else ''}): "
                          f"{q['problem']}" + (f" — options: {opts}" if opts else "")
                          + (f" (recommended {q['recommended']})" if q.get("recommended") else ""))
+            if q.get("evidence"):  # what the engine saw (tipcalc m3/C5: the held-out failures the owner had to know)
+                lines += [f"    {x}" for x in str(q["evidence"]).splitlines()[-12:]]
+            if q.get("kind") == "approval":  # the plan being approved: its cards are not on the board until then
+                for c in q.get("plan_cards") or []:
+                    lines.append(f"  Plan {c['id']}{' [risky]' if c.get('risk') == 'high' else ''} · {c['title']}"
+                                 + (f" — needs {', '.join(c['deps'])}" if c.get("deps") else "")
+                                 + (f" — paths {', '.join(c['paths'])}" if c.get("paths") else ""))
+                    if c.get("intent"):
+                        lines.append(f"    {c['intent'][:600]}")
+                    lines += [f"    - {k[:240]}" for k in (c.get("criteria") or [])[:6]]
+        arch = got.get("architecture")
+        if arch:
+            lines.append("Architecture check: " + ("clean on the milestone's base" if arch.get("ok") else
+                                                   f"{arch['violations']} violation(s) already on the milestone's "
+                                                   "base (they cost its cards nothing; a new one fails a round)"))
+            end = arch.get("after")
+            if end:
+                lines.append("  At final verification: " + ("clean" if end.get("ok") else
+                                                            f"{end['violations']} violation(s)"))
+        lines += _retro_lines(got.get("retro"))
         return "\n".join(lines)
     got = s.call("/board")
     if not got.get("available"):
@@ -616,7 +702,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                          "needs": {"type": "array", "items": _S}}, ["text"])},
     "board_act": {"fn": t_board_act,
                   "description": "An owner's action on a milestone, checked by the engine: answer (ref: a question's "
-                                 "short id or a card, answer: an option key or words), approve, pause, unpause, cancel, "
+                                 "short id or a card, answer: an option key, words, or {\"choice\": key, \"text\": words} for "
+                                 "both; the reply says which option was taken), approve, pause, unpause, cancel, "
                                  "replan (notes), retry (usd or hours of extra budget), prioritize (card, priority; "
                                  "lower runs first), release (a taken card back to the engine), ship (a done milestone: "
                                  "push its branch, open the PR or the GitLab link), merge (its PR, once checks "
@@ -634,6 +721,19 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                     "claude-… id; \"\" back to the defaults); models: {role: model} for one role. "
                                     "No arguments: read them. Applies to the next session.",
                      "schema": _schema({"model": _S, "models": {"type": "object"}})},
+    "board_practices": {"fn": t_board_practices,
+                        "description": "How the project is built (docs/brd/practices.toml, committed): TDD mode "
+                                       "(acceptance | strict | off), the architecture the engine checks on every "
+                                       "round (layers, forbidden imports, bounded contexts, private access), the "
+                                       "glossary and lessons every session reads, and Definition-of-Done checks. "
+                                       "No arguments: read it, with the architecture check run on the checkout; "
+                                       "preview (a preset): also what that preset's rules would flag today, "
+                                       "nothing written — the evidence for a recommendation. "
+                                       "preset (operonx | clean; force over an existing file) or toml (the whole "
+                                       "file, edited from what a read returned): the engine validates it and commits "
+                                       "that file alone. Milestones discovered after it use it. Recommend from the "
+                                       "decision guide and set it only when the owner agreed.",
+                        "schema": _schema({"preview": _S, "preset": _S, "force": {"type": "boolean"}, "toml": _S})},
     "board_take": {"fn": t_board_take,
                    "description": "Take a card to work it yourself instead of the engine's implementer (also ahead of "
                                   "its dependencies: it is reserved). Waits until the daemon parks it for you, then says where (its worktree), what (criteria, "

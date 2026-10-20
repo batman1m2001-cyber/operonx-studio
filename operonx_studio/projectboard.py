@@ -48,6 +48,7 @@ STATE_DIR = Path(".operonx") / "project"
 BRD_DIR = "docs/brd"
 MATRIX = "requirements/requirements_traceability.md"
 QUESTIONS = "requirements/open_questions.md"
+PRACTICES = "docs/brd/practices.toml"
 #: Board columns, left to right (the engine's ``board.COLUMNS``).
 COLUMNS = [("backlog", "Backlog"), ("ready", "Ready"), ("in_progress", "In progress"), ("review", "Review"),
            ("qa", "QA"), ("done", "Done"), ("blocked", "Stopped")]  # fmt: skip
@@ -150,6 +151,8 @@ def _card(row: sqlite3.Row) -> Dict[str, Any]:
         "acceptance": sorted((detail.get("acceptance") or {}).get("files") or {}),
         "checks": [{"name": r.get("name"), "ok": r.get("ok")} for r in detail.get("baseline") or []
                    if isinstance(r, dict)],
+        "tdd": (detail.get("acceptance") or {}).get("tdd") or "",  # "off": no tests written for it
+        "red": {k: (detail.get("red") or {}).get(k) for k in ("red", "rewritten", "passed")} if detail.get("red") else None,
         "updated": row["updated"],
     }  # fmt: skip
 
@@ -174,7 +177,7 @@ def _ms(db: sqlite3.Connection, row: sqlite3.Row) -> Dict[str, Any]:
 
 def milestones(root: Path) -> Dict[str, Any]:
     base = {"schema": SCHEMA, "brd": _has_brd(root), "daemon": daemon_status(root), "sandbox": _sandbox(root),
-            "models": _models(root)}
+            "models": _models(root), "practices": _practices(root)}
     if not _has_store(root):
         return {**base, "milestones": [], "engine": False}
     db = _connect(root)
@@ -261,19 +264,40 @@ def overview(root: Path) -> Dict[str, Any]:
         db.close()
 
 
-def _settings(root: Path) -> Dict[str, Any]:
-    """``.operonx/project/settings.toml`` (machine-local); {} when missing or broken."""
-    path = Path(root) / STATE_DIR / "settings.toml"
+def _toml(path: Path) -> Optional[Dict[str, Any]]:
+    """A TOML file; None when missing or broken."""
     if not path.is_file():
-        return {}
+        return None
     try:
         import tomllib
     except ImportError:  # pragma: no cover - 3.10
         import tomli as tomllib
     try:
         return tomllib.loads(path.read_text(encoding="utf-8"))
-    except ValueError:
-        return {}
+    except (ValueError, OSError):
+        return None
+
+
+def _settings(root: Path) -> Dict[str, Any]:
+    """``.operonx/project/settings.toml`` (machine-local); {} when missing or broken."""
+    return _toml(Path(root) / STATE_DIR / "settings.toml") or {}
+
+
+def _practices(root: Path) -> Optional[Dict[str, Any]]:
+    """The Board's chips from ``docs/brd/practices.toml`` (committed: how the project is built). A read
+    for the chips only; the engine validates the file (``practices`` op), and None means no file."""
+    path = Path(root) / PRACTICES
+    if not path.is_file():
+        return None
+    got = _toml(path)
+    if got is None:
+        return {"error": f"{PRACTICES} does not parse"}
+    arch = got.get("architecture") or {}
+    return {"tdd": (got.get("tdd") or {}).get("mode") or "acceptance", "style": arch.get("style") or "",
+            "layers": len(arch.get("layers") or []), "contexts": len(got.get("contexts") or []),
+            "private": arch.get("private") or "allow", "forbid": len(arch.get("forbid") or []),
+            "command": bool(arch.get("command")), "done": len((got.get("done") or {}).get("checks") or []),
+            "lessons": (got.get("lessons") or {}).get("file") or ""}  # fmt: skip
 
 
 def _sandbox(root: Path) -> bool:
@@ -400,8 +424,12 @@ def _question(row: sqlite3.Row) -> Dict[str, Any]:
         "version": row["version"], "problem": p.get("problem") or p.get("reason") or "", "why": p.get("why") or "",
         "tried": p.get("tried") or "", "evidence": p.get("evidence") or "", "options": options,
         "recommended": p.get("recommended"), "safe_default": bool(p.get("safe_default")),
-        "plan_cards": [{"id": c.get("id"), "title": c.get("title"), "risk": c.get("risk")}
-                       for c in plan.get("cards") or []],
+        # what the owner approves: a W1 plan's cards are only here until it is approved
+        "plan_cards": [{"id": c.get("id"), "title": c.get("title"), "risk": c.get("risk"),
+                        "intent": c.get("intent") or "", "paths": c.get("paths") or [], "deps": c.get("deps") or [],
+                        "rows": c.get("rows") or [],
+                        "criteria": [k.get("text", "") if isinstance(k, dict) else str(k) for k in c.get("criteria") or []]}
+                       for c in plan.get("cards") or [] if isinstance(c, dict)],
         "problems": p.get("problems") or [], "notes": p.get("notes") or [],
         "created": row["created"], "flagged": bool(row["flagged"]), "delivery": row["delivery"],
     }  # fmt: skip
@@ -435,6 +463,11 @@ def milestone(root: Path, mid: str, events: int = 40) -> Dict[str, Any]:
             if c["state"] == "running" and c["id"] in live:
                 c["activity"] = live[c["id"]]
         plan = _record(db, mid, "plan")
+        base = _record(db, mid, "baseline")
+        arch = next((r for r in base.get("results") or [] if r.get("name") == "architecture"), None)
+        end = next((r for r in _record(db, mid, "final_checks").get("results") or []
+                    if r.get("name") == "architecture"), None)  # fmt: skip
+        retro = _record(db, mid, "retro")
         evs = [{"seq": r["seq"], "at": r["at"], "kind": r["kind"], "card": r["card"], "actor": r["actor"],
                 "data": _json(r["data"], {})}
                for r in db.execute("SELECT * FROM events WHERE milestone=? ORDER BY seq DESC LIMIT ?", (mid, events))]
@@ -446,6 +479,13 @@ def milestone(root: Path, mid: str, events: int = 40) -> Dict[str, Any]:
             "graph": {"waves": _waves(cards), "edges": [[d, c["id"]] for c in cards for d in c["deps"]]},
             "events": evs[::-1], "cursor": evs[0]["seq"] if evs else 0,
             "shipped": _record(db, mid, "shipped") or None, "merge_granted": bool(_settings(root).get("merge")),
+            # the architecture check on the milestone's base (what was there before it, never its cards' fault),
+            # and at final verification: what the milestone left
+            "architecture": {"ok": arch.get("ok"), "violations": len(arch.get("failures") or []),
+                             "after": {"ok": end.get("ok"), "violations": len(end.get("failures") or [])}
+                             if end else None} if arch else None,
+            "retro": {"report": retro.get("report") or {}, "lessons": retro.get("lessons") or [],
+                      "file": retro.get("file") or ""} if retro else None,
             "shippable": ms["state"] == "done" and _has_branch(root, _record(db, mid, "intake").get("branch")
                                                                or f"milestone/{mid}/main"),
             **links(root, db, mid),
@@ -616,6 +656,38 @@ def register(app: Any, *, watcher_of: Any) -> None:
     def board_project(pid: str) -> JSONResponse:
         """The project's checklist from its checkout's ``docs/brd`` (no milestone needed)."""
         return _read(pid, project_checklist)
+
+    # before /board/{mid}: "practices" is no milestone
+    @app.get("/api/p/{pid}/board/practices")
+    async def board_practices(pid: str, preview: str = "") -> JSONResponse:
+        """How the project is built (the engine's ``practices`` op): the file, in words, and the
+        architecture check on the checkout; ``?preview=<preset>``: what that preset would flag."""
+        import asyncio
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        req = {"op": "practices", **({"preview": preview} if preview else {})}
+        out = await asyncio.to_thread(act, root, req, "studio")
+        return JSONResponse(out, status_code=200 if out.get("ok") else 503 if out.get("status") == "unavailable"
+                            else 409)  # fmt: skip
+
+    @app.post("/api/p/{pid}/board/practices")
+    async def board_practices_set(pid: str, request: Request) -> JSONResponse:
+        """Set them: ``{"preset": "operonx"}`` (``force``: over the file) or ``{"toml": "…"}``; the engine
+        validates, writes and commits that file alone on the checkout's branch."""
+        import asyncio
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        body = await request.json()
+        if not isinstance(body, dict):
+            return JSONResponse({"ok": False, "status": "invalid", "message": "a JSON object"}, status_code=400)
+        req = {"op": "practices", **{k: body[k] for k in ("preset", "force", "toml") if k in body}}
+        out = await asyncio.to_thread(act, root, req, _actor(request))
+        return JSONResponse(out, status_code=200 if out.get("ok") else 503 if out.get("status") == "unavailable"
+                            else 409)  # fmt: skip
 
     # before /board/{mid}: "settings" is no milestone
     @app.get("/api/p/{pid}/board/settings")

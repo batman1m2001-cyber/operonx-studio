@@ -216,7 +216,8 @@ def test_a_brd_folder_alone_is_a_board_its_checklist_from_the_checkout(client, t
     pid = _open(client, root)
     got = client.get(f"/api/p/{pid}/board").json()
     assert got == {"available": True, "schema": 2, "milestones": [], "brd": True, "engine": False,
-                   "daemon": {"running": False}, "sandbox": True, "models": {"model": None, "models": {}}}
+                   "daemon": {"running": False}, "sandbox": True, "models": {"model": None, "models": {}},
+                   "practices": None}
     ck = client.get(f"/api/p/{pid}/brd").json()
     assert ck["branch"] == "main" and ck["brd"] == "docs/brd"
     assert ck["counts"] == {"implemented_verified": 1, "needs_clarification": 1}
@@ -496,3 +497,116 @@ def test_linked_milestones_show_on_both_boards(client, tmp_path, monkeypatch):
     state = client.get(f"/api/p/{_open(client, calc)}/board/m1").json()
     assert mine["needs"] == [{"ref": "calc#m1", "state": state["milestone"]["state"]}, {"ref": "gone#m4", "state": None}]
     assert state["needed_by"] == [{"ref": "other#m1"}] and mine["needed_by"] == []
+
+
+def _engine_knows(op: str) -> bool:
+    """The installed engine answers *op* (an older one says it does not know it)."""
+    eng = _real_engine()
+    if eng is None:
+        return False
+    got = subprocess.run([*eng.split(), "api", "--repo", ".", "-"], input=json.dumps({"op": op}),
+                         capture_output=True, text=True, cwd=Path(__file__).parent)  # fmt: skip
+    return f"unknown op {op!r}" not in got.stdout
+
+
+def test_the_board_shows_the_practices_the_architecture_and_the_retrospective(client, tmp_path):
+    root = make_project(tmp_path / "calc")
+    (root / "docs" / "brd").mkdir(parents=True)
+    (root / "docs/brd/practices.toml").write_text('[tdd]\nmode = "strict"\n\n[architecture]\nstyle = "clean"\n'
+                                                  'private = "forbid"\nlayers = [{ name = "a", paths = ["a/**"] }, '
+                                                  '{ name = "b", paths = ["b/**"] }]\n')  # fmt: skip
+    db = sqlite3.connect(root / ".operonx/project/project.db")
+    retro = {"report": {"cost_usd": 1.5, "rounds": 3, "by_stage": {"plan": 0.4},
+                        "cards": [{"id": "C1", "title": "add", "state": "done", "rounds": 3, "cost_usd": 1.1,
+                                   "failed_checks": ["acceptance"], "rewritten": [], "vacuous": 0, "reopens": 0,
+                                   "questions": [{"question": "does add accept strings?", "choice": "a",
+                                                  "answer": "numbers only"}]}]},
+             "lessons": [{"rule": "add() takes numbers only", "evidence": "C1, Q-01"}], "file": "docs/brd/LESSONS.md"}
+    base = {"results": [{"name": "architecture", "ok": False, "failures": ["arch:private:x.py->y._z"]}]}
+    end = {"results": [{"name": "architecture", "ok": True, "failures": []}], "fixed": ["architecture"]}
+    for key, data in (("retro", retro), ("baseline", base), ("final_checks", end)):
+        db.execute("INSERT OR REPLACE INTO steps (key, data) VALUES (?, ?)", (f"ms:m1:{key}", json.dumps(data)))
+    detail = json.loads(db.execute("SELECT detail FROM cards WHERE id='C1'").fetchone()[0])
+    detail["red"] = {"red": True, "rewritten": True, "passed": 0, "failed": ["t"]}
+    db.execute("UPDATE cards SET detail=? WHERE id='C1'", (json.dumps(detail),))
+    db.commit()
+    db.close()
+    pid = _open(client, root)
+    assert client.get(f"/api/p/{pid}/board").json()["practices"] == {
+        "tdd": "strict", "style": "clean", "layers": 2, "contexts": 0, "private": "forbid", "forbid": 0,
+        "command": False, "done": 0, "lessons": ""}
+    ms = client.get(f"/api/p/{pid}/board/m1").json()
+    assert ms["architecture"] == {"ok": False, "violations": 1, "after": {"ok": True, "violations": 0}}
+    assert ms["retro"]["lessons"][0]["rule"] == "add() takes numbers only"
+    c1 = next(c for c in ms["cards"] if c["id"] == "C1")
+    assert c1["red"] == {"red": True, "rewritten": True, "passed": 0}
+    text = _tool(BoardStudio(client, pid), "board_status", milestone="m1")
+    assert "red before the code (written again: the first set passed already)" in text
+    assert "1 violation(s) already on the milestone's base" in text and "  At final verification: clean" in text
+    assert "Retrospective: $1.50 over 1 card(s), 3 round(s); stages plan $0.40" in text
+    assert "the owner decided: does add accept strings? → a numbers only" in text
+    assert "Lesson (docs/brd/LESSONS.md): add() takes numbers only — C1, Q-01" in text
+    (root / "docs/brd/practices.toml").write_text("[tdd\n")
+    assert client.get(f"/api/p/{pid}/board").json()["practices"] == {"error": "docs/brd/practices.toml does not parse"}
+
+
+@pytest.mark.skipif(not _engine_knows("practices"), reason="the installed operonx-project has no practices op")
+def test_the_assistant_reads_and_sets_the_practices_through_the_engine(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", _real_engine())
+    root = make_project(tmp_path / "calc")
+    (root / "src/calc").mkdir(parents=True)
+    (root / "src/calc/ops.py").write_text("import json\n\nD = json._default_decoder\n")
+    pid = _open(client, root)
+    s = BoardStudio(client, pid)
+    text = _tool(s, "board_practices")
+    assert "no architecture rules" in text and "Presets: operonx, clean." in text
+    text = _tool(s, "board_practices", preview="operonx")
+    assert "The operonx preset would flag 1 on the checkout today" in text and "json._default_decoder" in text
+    assert not (root / "docs/brd/practices.toml").exists()
+    text = _tool(s, "board_practices", preset="operonx")
+    assert text.startswith("Changed: wrote docs/brd/practices.toml (commit ")
+    assert "src/calc/ops.py:3 src/calc/ops.py touches json._default_decoder" in text
+    assert 'mode = "acceptance"' in text  # the file, to edit from
+    log = subprocess.run(["git", "log", "-1", "--name-only", "--format=%s"], cwd=root, capture_output=True,
+                         text=True).stdout.split()  # fmt: skip
+    assert log == ["practices:", "operonx", "(studio:local/assistant)", "docs/brd/practices.toml"]
+    edited = text.split("The file (docs/brd/practices.toml):\n", 1)[1].replace('mode = "acceptance"', 'mode = "off"')
+    assert "TDD off" not in text and "No acceptance tests are written" in _tool(s, "board_practices", toml=edited)
+    assert _tool(s, "board_practices", toml='[tdd]\nmode = "red"\n').startswith("refused: docs/brd/practices.toml "
+                                                                              "would not be valid")
+    assert client.get(f"/api/p/{pid}/board").json()["practices"]["tdd"] == "off"
+
+
+def test_the_assistant_reads_the_plan_it_asks_the_owner_to_approve(client, tmp_path):
+    """A W1 plan's cards are on no board until it is approved: the approval question carries them."""
+    root = make_project(tmp_path / "calc")
+    db = sqlite3.connect(root / ".operonx/project/project.db")
+    db.row_factory = sqlite3.Row
+    row = dict(db.execute("SELECT * FROM interactions WHERE qid='Q-01'").fetchone())
+    plan = {"cards": [{"id": "C5", "title": "Remove the hack", "risk": "high", "deps": ["C2"], "paths": ["ops.py"],
+                       "intent": "Test first, then delete the class.",
+                       "criteria": [{"row": "R1", "text": "WHEN ops.py is read THE SYSTEM SHALL hold no hack"}]}]}
+    row.update(id=row["id"] + "-plan", qid="Q-02", short="Q-02", kind="approval", card=None,
+               payload=json.dumps({"problem": "Approve m1's plan?", "plan": plan,
+                                   "options": [{"key": "approve", "label": "Approve"}]}))  # fmt: skip
+    db.execute(f"INSERT INTO interactions ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
+    db.commit()
+    db.close()
+    text = _tool(BoardStudio(client, _open(client, root)), "board_status", milestone="m1")
+    assert "  Plan C5 [risky] · Remove the hack — needs C2 — paths ops.py" in text
+    assert "    Test first, then delete the class." in text and "    - WHEN ops.py is read" in text
+
+
+def test_the_assistant_reads_what_the_engine_saw_when_it_asked(client, tmp_path):
+    """tipcalc m3/C5: the question named a rewrite of the held-out tests; without the failing names the
+    assistant guessed it was about the acceptance tests."""
+    root = make_project(tmp_path / "calc")
+    db = sqlite3.connect(root / ".operonx/project/project.db")
+    db.row_factory = sqlite3.Row
+    row = dict(db.execute("SELECT * FROM interactions WHERE qid='Q-01'").fetchone())
+    payload = {**json.loads(row["payload"]), "evidence": "The held-out tests failing:\n- test_direct: {} != errors"}
+    db.execute("UPDATE interactions SET payload=? WHERE qid='Q-01'", (json.dumps(payload),))
+    db.commit()
+    db.close()
+    text = _tool(BoardStudio(client, _open(client, root)), "board_status", milestone="m1")
+    assert "    The held-out tests failing:\n    - test_direct: {} != errors" in text
