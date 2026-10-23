@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -170,6 +171,19 @@ def t_compare(s: Studio, a: Dict[str, Any]) -> str:
 def t_select_op(s: Studio, a: Dict[str, Any]) -> str:
     s.show("select_op", op=str(a["op"]))
     return f"{a['op']} is selected on the user's Flow canvas."
+
+
+_POINTABLE = re.compile(r"^(?:status|q|qopt|plan|phase|ms|row|commit|setting|page|tab|op|run|job|eval):\S")
+
+
+def t_point(s: Studio, a: Dict[str, Any]) -> str:
+    """Point at one thing on the owner's screen (docs/ALIVE_ASSISTANT_PLAN.md D5): the screen goes there and rings it."""
+    target = str(a.get("target") or "").strip()
+    if not _POINTABLE.match(target):
+        return (f"not a target: {target!r}. Use plan:docs/X_PLAN.md, phase:docs/X_PLAN.md#P2, row:<id>, q:<id>, "
+                "commit:<sha>, setting:<name>, status:<needs|working|checklist|plans|changes>, op:<name>, run:<id>")
+    s.show("point", target=target, words=str(a.get("words") or a.get("label") or "")[:40])
+    return f"pointed at {target} on the owner's screen"
 
 
 def t_run_job(s: Studio, a: Dict[str, Any]) -> str:
@@ -660,6 +674,14 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     "select_op": {"fn": t_select_op,
                   "description": "Select an op on the user's Flow canvas, to point at it.",
                   "schema": _schema({"op": _S}, ["op"])},
+    "point": {"fn": t_point,
+              "description": "Point at the one thing your answer is about, on the owner's screen: it goes to that page "
+                             "and rings it with your two or three words. Targets: plan:docs/X_PLAN.md, "
+                             "phase:docs/X_PLAN.md#P2, row:<requirement id>, q:<question id>, commit:<sha>, "
+                             "setting:<name>, status:<needs|working|checklist|plans|changes>, op:<op name>, run:<run id>. "
+                             "Once per answer at most; never as decoration. It only shows where: the answer "
+                             "still says everything in words.",
+              "schema": _schema({"target": _S, "words": _S}, ["target"])},
     "run_job": {"fn": t_run_job,
                 "description": "Start one of the application's jobs (or a job of steps); resume=true reruns only "
                                "what the last run did not finish.",

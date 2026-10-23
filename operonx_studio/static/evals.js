@@ -155,6 +155,7 @@ const EvalsView = (() => {
     for (const e of data.evals) {
       const last = (e.experiments || [])[0];
       const card = el("button", "evcard" + (e.name === v.name && !v.dataset ? " sel" : ""));
+      card.dataset.oxTarget = `eval:${e.name}`;   // the assistant's hand reaches it (hand.js)
       card.type = "button";
       const top = el("div", "evcard-top");
       top.append(el("span", "evname", e.name));

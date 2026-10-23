@@ -71,6 +71,7 @@ const Icons = (() => {
     flow: '<path d="M4 19c7 0 5-14 16-14"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/>',
     // Project mode's bar (docs/PROJECT_MODE_PLAN D3)
     target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/>',
+    pointer: '<path d="M5 3.5l13 7.4-5.8 1.5-2.9 5.6Z"/><path d="m13 13 5 5"/>',
     roadmap: '<path d="M4 6h9M4 12h13M4 18h6"/><circle cx="17" cy="6" r="1.6"/><circle cx="20" cy="12" r="1.6"/><circle cx="13" cy="18" r="1.6"/>',
     checksq: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="m8 12.2 2.8 2.8L16.5 9"/>',
     history: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/><path d="M12 7.5V12l3 2"/>',
