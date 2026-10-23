@@ -1,6 +1,7 @@
 /* Every screen has an address (docs/STUDIO_EXPERIENCE_PLAN.md §2.3).
  *
  *   /p/<pid>/<screen>[/<run>][?view=conversation|timeline|workflow|data][&step=<op id>][&op=<flow op>]
+ *   /p/<pid>/project[/<page>]   Project mode and its page (projectmode.js)
  *
  * (no view is the Tree)
  *
@@ -37,6 +38,7 @@ const Router = (() => {
       if (VIEWS.has(v.mode) && v.mode !== "tree") q.set("view", v.mode);
       if (v.exec_id) q.set("step", v.exec_id);
     }
+    if (v.tab === "project" && v.page && v.page !== "now") path += `/${encodeURIComponent(v.page)}`;
     if (v.tab === "flow" && v.node) q.set("op", v.node);
     if (v.tab === "yaml" && v.file) q.set("file", v.file);
     const qs = q.toString();
@@ -84,6 +86,8 @@ const Router = (() => {
         await performUi("open_run", {run: t.run, mode: t.mode, op: t.step || undefined, quiet: true});
       } else if (t.tab === "flow" && t.op) {
         await performUi("select_op", {op: t.op});
+      } else if (t.tab === "project") {
+        switchTab("project", {page: t.run || "now"});
       } else if (t.tab === "yaml" && t.file) {
         state.yamlFile = t.file;
         switchTab("yaml", {file: t.file});

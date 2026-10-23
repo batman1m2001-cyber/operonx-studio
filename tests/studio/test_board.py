@@ -646,3 +646,43 @@ def test_the_engine_is_found_beside_the_studios_python_or_said_missing(tmp_path,
     assert pb.act(root, {"op": "settings"}, "studio")["status"] == "unavailable"
     (tmp_path / "venv/bin/operonx-project").write_text("#!/bin/sh\n")
     assert pb._engine() == [str(tmp_path / "venv/bin/operonx-project")] and pb.milestones(root)["installed"] is True
+
+
+def _engine_here() -> str | None:
+    """The engine as the studio finds it: explicit, on PATH, or beside this Python."""
+    beside = Path(sys.executable).parent / "operonx-project"
+    return _real_engine() or (str(beside) if beside.is_file() else None)
+
+
+@pytest.mark.skipif(_engine_here() is None, reason="operonx-project is not installed here")
+def test_project_mode_reads_the_engines_status_and_makes_no_store(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", _engine_here())
+    root = make_project(tmp_path / "calc", store=False)
+    req = root / "docs" / "brd" / "requirements"
+    req.mkdir(parents=True)
+    (req / "requirements_traceability.md").write_text(MATRIX, encoding="utf-8")
+    (req / "open_questions.md").write_text(QUESTIONS, encoding="utf-8")
+    (root / "docs" / "EXPORT_PLAN.md").write_text(
+        "---\ntitle: CSV export\nstatus: in_progress\nphases:\n  - {id: E1, title: Rows, status: in_progress}\n---\n",
+        encoding="utf-8")  # fmt: skip
+    (root / "docs" / "OLD_PLAN.md").write_text("# no block\n", encoding="utf-8")
+    pid = _open(client, root)
+    got = client.get(f"/api/p/{pid}/project/status")
+    assert got.status_code == 200, got.text
+    doc = got.json()["project"]
+    assert doc["checklist"]["total"] > 0 and [w["sentence"] for w in doc["working_on"]] == ["E1, phase 1 of 1: Rows"]
+    assert doc["unmarked"] == ["docs/OLD_PLAN.md"]
+    assert not (root / ".operonx" / "project").exists()  # Project mode only reads
+
+
+def test_project_mode_says_plainly_when_the_engine_is_missing_or_too_old(client, tmp_path, monkeypatch):
+    root = make_project(tmp_path / "calc", store=False)
+    pid = _open(client, root)
+    old = _bin(tmp_path, "#!/bin/sh\ncat > /dev/null\n"
+               "echo '{\"ok\": false, \"status\": \"invalid\", \"message\": \"unknown op \\x27status\\x27; one of answer\"}'\n")
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", str(old))
+    got = client.get(f"/api/p/{pid}/project/status")
+    assert got.status_code == 503 and "too old for Project mode" in got.json()["message"]
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", str(tmp_path / "missing"))
+    got = client.get(f"/api/p/{pid}/project/status")
+    assert got.status_code == 503 and got.json()["status"] == "unavailable"
