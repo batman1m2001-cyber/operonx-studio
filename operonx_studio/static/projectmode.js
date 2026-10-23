@@ -589,7 +589,8 @@ const ProjectMode = (() => {
 
   /* ── the standard (PROJECT_STANDARD_PLAN D1, D3) ─────────────────── */
   const STANDARD_ASK = "Bring this project up to the standard: start with project_status, then follow "
-    + "\"Bringing a project up to the standard\" in your knowledge, item by item, and commit.";
+    + "\"Bringing a project up to the standard\" in your knowledge, item by item, and commit. "
+    + "Then reply in under 150 words: the details go in the commit message.";
   const standardOf = () => (doc && doc.standard) || [];
   function standardRows(group, row) {
     const std = standardOf();
