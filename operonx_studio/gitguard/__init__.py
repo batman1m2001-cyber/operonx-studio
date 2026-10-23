@@ -5,7 +5,8 @@
 - ``git``: refuses ``--no-verify`` and a ``core.hooksPath`` or identity of the command's own, then runs the real
   git with the studio's hooks (``hooks/``) and the policy's identity added to its config;
 - the hooks: ``pre-commit`` checks the level and the author, ``pre-push`` the level and the branches pushed to;
-  every hook then runs the repo's own hook of the same name, with the same input;
+  every hook then runs the repo's own hook of the same name, with the same input (not reference-transaction
+  and post-index-change, which fire on every ref and index write: a process each would slow every command);
 - ``gh``: ``pr create`` needs the level ``pr``, ``pr merge`` and a write through ``gh api`` need ``merge``;
   deleting, archiving or renaming the repo is never the assistant's.
 
