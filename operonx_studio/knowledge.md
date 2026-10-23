@@ -136,14 +136,21 @@ what is missing, in this order, and change nothing else:
    only when its commits are there); `updated` is the plan's last change.
 4. `practices`: `docs/brd/practices.toml` describing the project as it
    is: `[tdd] mode = "acceptance"`; the project's real test command as
-   `[done] checks = [{ name = "tests", cmd = "<that command>" }]`, run
-   once to see it pass; architecture rules only if
+   `[done] checks = [{ name = "tests", cmd = "<that command>" }]`, which
+   must pass now: tests that fail only for something outside the code (a
+   database, a key, data not in the repo) are left out by name
+   (`--deselect`, `--ignore`) with a comment saying why, never a check that
+   fails; architecture rules only if
    `operonx-project arch` passes with them. Validate with
    `operonx-project practices --repo .`.
-Then run `operonx-project brd check` and each `[done]` check, call
-`project_status` again, and commit by path in one commit. Report in a
-few lines: what was missing, what you did, the standard before and
-after.
+Then run `operonx-project brd check` and each `[done]` check, put back
+any tracked file a check rewrote (`git status`; a run index or a cache is
+restored with `git restore`, never committed), call `project_status`
+again, and commit by path in one commit. The commit is the owner's (made
+as Commit as): no `Co-Authored-By` line. Reply in at most eight short
+lines: the standard before and after, what you added, and anything the
+owner must know or decide (a check that leaves tests out, a phase you
+could not date). Details belong in the commit message, not the reply.
 
 The owner's screen follows your work by itself: an edit to a plan opens
 Plans and rings that plan, a commit rings Changes, an answer through

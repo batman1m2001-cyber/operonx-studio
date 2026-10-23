@@ -724,3 +724,10 @@ def test_the_assistants_bash_finds_the_studios_own_commands():
     from operonx_studio.chat import base_env
 
     assert str(Path(sys.executable).parent) in base_env()["PATH"].split(os.pathsep)
+
+
+def test_the_assistant_never_inherits_the_studios_virtualenv(monkeypatch):
+    from operonx_studio.chat import base_env
+
+    monkeypatch.setenv("VIRTUAL_ENV", "/elsewhere/.venv")  # the shell that started the studio
+    assert "VIRTUAL_ENV" not in base_env()
