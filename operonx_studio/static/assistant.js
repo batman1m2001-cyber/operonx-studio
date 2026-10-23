@@ -983,12 +983,9 @@
   ];
   // Project mode: building the project by its conventions (docs/PROJECT_MODE_PLAN.md D5)
   const PROJECT_STARTS = [
-    {kind: "learn", label: "Where are we?", why: "What needs me, what is in progress, what is next",
-     prompt: "Where does the project stand? What needs me, what is in progress, and what should come next?"},
-    {kind: "setup", label: "Build the next thing", why: "From the open checklist rows and plans",
-     prompt: "What should we build next? Look at the open checklist rows and the plans, propose the next step, and wait for my go."},
-    {kind: "setup", label: "Plan something new", why: "A plan doc that says where it stands",
-     prompt: "I want to build something new. Ask me what it is, then write a plan doc with a status block before changing any code."},
+    {kind: "learn", label: "Where are we?", prompt: "Where does the project stand? What needs me, what is in progress, and what should come next?"},
+    {kind: "setup", label: "Build the next thing", prompt: "What should we build next? Look at the open checklist rows and the plans, propose the next step, and wait for my go."},
+    {kind: "setup", label: "Plan something new", prompt: "I want to build something new. Ask me what it is, then write a plan doc with a status block before changing any code."},
   ];
   const START_ICON = {failure: "alert", eval: "evals", setup: "wand", try: "play", learn: "book", op: "graph"};
 
@@ -1012,10 +1009,9 @@
     const mark = el("span", "ax-mark");
     mark.append(icon("spark"));
     const pm = A.mode === "center";
-    hello.append(mark, el("h2", null, pm ? "What are we building?" : PROJECT ? "What should we work on?" : VIEWER ? "What do you want to know?" : "What do you want to build?"),
-      el("p", null, pm
-        ? "Tell me in your own words. I work in this project by its conventions: the checklist, plans that say where they stand, its tests and practices. Beside us is where it stands."
-        : PROJECT
+    hello.append(mark, el("h2", null, pm ? "What are we building?" : PROJECT ? "What should we work on?" : VIEWER ? "What do you want to know?" : "What do you want to build?"));
+    // Project mode says no more than its question: the starters and the state beside it do the rest
+    if (!pm) hello.append(el("p", null, PROJECT
         ? "Describe a task in your own words. I can read and change this project, run its services and jobs, and dig through its runs."
         : "Describe it in your own words — I'll set up a working project from a template, or answer questions about the ones you have."));
     box.append(hello);
@@ -1042,6 +1038,7 @@
       for (let i = 0; i < 3; i += 1) grid.append(el("div", "ax-start ax-skel"));
       loadSuggestions().then((s) => { A.suggestions = s; if (!A.items.length) fill(s); });
     }
+    if (pm) { log.append(box); return; }
     const tip = el("div", "ax-tip");
     tip.append(el("kbd", null, "/"), document.createTextNode(" commands"),
       el("span", "ax-dotsep", "·"), el("kbd", null, "Shift ↵"), document.createTextNode(" new line"));

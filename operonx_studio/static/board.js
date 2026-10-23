@@ -11,10 +11,10 @@
  *   Graph      what depends on what, in waves
  *   Project    the whole project's checklist, from the checkout's docs/brd
  *
- * "Waiting on you" sits above them. The tab appears when the project has a
- * store or a BRD folder (docs/brd, made by `operonx init`); before the first
- * milestone it is the project's checklist alone. It follows the milestone
- * by its event cursor.
+ * "Waiting on you" sits above them. It lives inside Project mode
+ * (projectmode.js): a milestone on its Plans page opens here, mounted in
+ * the page; `/board` and the assistant's "open_board" land there too.
+ * It follows the milestone by its event cursor.
  */
 
 "use strict";
@@ -29,6 +29,9 @@ const BoardView = (() => {
   let last = null;     // the milestone as last drawn: {cursor, questions}
   let drafts = {};     // words being typed into a question, kept across redraws
   let asking = false;  // the New request box is open
+  let host = null;     // Project mode's slot, while the board is mounted there
+  const home = box.parentElement;
+  const live = () => state.tab === "board" || (!!host && state.tab === "project" && box.parentElement === host);
 
   const save = () => store(K, v);
   const go = (patch) => { Object.assign(v, patch); save(); show(); };
@@ -128,11 +131,11 @@ const BoardView = (() => {
    * redraw only when the event cursor moved */
   function schedule() {
     clearTimeout(timer);
-    if (state.tab !== "board" || document.hidden) return;
+    if (!live() || document.hidden) return;
     timer = setTimeout(() => refresh(false), 3000);
   }
   async function refresh(force) {
-    if (state.tab !== "board") return;
+    if (!live()) return;
     if (force || !last) { show(); return; }
     try {
       const d = await api(`${base()}/${enc(v.mid)}`);
@@ -140,7 +143,7 @@ const BoardView = (() => {
     } catch { /* the next tick tries again */ }
     schedule();
   }
-  document.addEventListener("visibilitychange", () => { if (!document.hidden && state.tab === "board") refresh(false); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && live()) refresh(false); });
 
   /* ── the page ─────────────────────────────────────────────────────── */
   /* a project with a BRD and no milestone yet: its checklist is the board */
@@ -433,11 +436,15 @@ const BoardView = (() => {
   function retroView(retro) {
     const rep = retro.report || {};
     const cards = rep.cards || [];
-    const box = el("div", "bdnotes");
+    // one line; what it found opens on a click (no wall of text on the board)
+    const box = el("details", "bdnotes bdretro");
     const stages = Object.entries(rep.by_stage || {}).map(([k, x]) => `${k} ${money(x)}`).join(" · ");
-    box.append(el("b", null, "Retrospective"), el("span", null,
-      ` ${money(rep.cost_usd)} over ${cards.length} card${cards.length === 1 ? "" : "s"}, ${rep.rounds} round${rep.rounds === 1 ? "" : "s"}`
-      + (stages ? ` · ${stages}` : "")));
+    const n = (retro.lessons || []).length;
+    const sum = el("summary");
+    sum.append(el("b", null, "Retrospective"), el("span", null,
+      ` ${money(rep.cost_usd)} · ${rep.rounds} round${rep.rounds === 1 ? "" : "s"}${n ? ` · ${n} lesson${n > 1 ? "s" : ""}` : ""}`));
+    box.append(sum);
+    if (stages) box.append(el("div", "note", stages));
     const costly = cards.filter((c) => c.rounds > 1 || (c.questions || []).length || (c.rewritten || []).length);
     const ul = el("ul");
     for (const c of costly.slice(0, 6)) {
@@ -792,10 +799,26 @@ const BoardView = (() => {
     const keep = Object.fromEntries(Object.entries(patch || {}).filter(([k, x]) => ["mid", "card", "view"].includes(k) && x));
     if (keep.mid && keep.mid !== v.mid && !keep.card) keep.card = "";
     Object.assign(v, keep); save();
-    if (state.tab !== "board") switchTab("board"); else show();
+    switchTab("project", {page: "plans", mid: v.mid || ""});
+  }
+
+  /* Project mode shows a milestone's board inside its Plans page */
+  function mount(slot, patch) {
+    if (patch && patch.mid && patch.mid !== v.mid) { v.mid = patch.mid; v.card = ""; save(); }
+    host = slot;
+    slot.append(box);
+    box.hidden = false;
+    show();
+  }
+  function unmount() {
+    if (!host) return;
+    host = null;
+    clearTimeout(timer);
+    box.hidden = true;
+    if (home) home.append(box);
   }
 
   probe();
   registerPane("board", {el: box, show});
-  return {show, probe, open};
+  return {show, probe, open, mount, unmount};
 })();

@@ -686,3 +686,17 @@ def test_project_mode_says_plainly_when_the_engine_is_missing_or_too_old(client,
     monkeypatch.setenv("OPERONX_PROJECT_BIN", str(tmp_path / "missing"))
     got = client.get(f"/api/p/{pid}/project/status")
     assert got.status_code == 503 and got.json()["status"] == "unavailable"
+
+
+def test_project_mode_has_its_pages_and_the_board_lives_inside_it(client, tmp_path):
+    root = make_project(tmp_path / "calc", store=False)
+    pid = _open(client, root)
+    page = client.get(f"/p/{pid}/project/plans")
+    assert page.status_code == 200
+    html = page.text
+    pages = [p for p in ("now", "plans", "checklist", "questions", "changes", "settings") if f'data-ppage="{p}"' in html]
+    assert pages == ["now", "plans", "checklist", "questions", "changes", "settings"]
+    assert 'data-tab="project"' in html and 'data-tab="board"' not in html  # the rail's Board became Project
+    static = Path(__file__).resolve().parents[2] / "operonx_studio" / "static"
+    shell = (static / "shell.js").read_text(encoding="utf-8")
+    assert 'if (name === "board") { switchTab("project", {page: "plans"' in shell  # /board and open_board land there

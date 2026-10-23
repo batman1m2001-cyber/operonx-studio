@@ -57,6 +57,8 @@ function coverWhileFresh(elm) {
 }
 
 function switchTab(name, opts) {
+  // the Board lives in Project mode now: a milestone opens on its Plans page (docs/PROJECT_MODE_PLAN.md P4)
+  if (name === "board") { switchTab("project", {page: "plans", mid: (opts && opts.mid) || recall(`board:${PID}`, {}).mid || ""}); return; }
   // the playground runs a service's code: not a viewer's (D11); every way in stops here
   if (name === "playground" && window.Account && Account.viewOnly) { Account.toast(Account.VIEW_ONLY, true); return; }
   // where the Flow tab was: a run's pane borrows the canvas, and moving
