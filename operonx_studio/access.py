@@ -103,6 +103,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/board/{{mid}}"): "read",
     ("GET", f"{P}/board/{{mid}}/checklist"): "read",
     ("GET", f"{P}/board/{{mid}}/card/{{cid}}"): "read",
+    ("GET", f"{P}/project/status"): "read",                        # Project mode: the engine's status document
     ("GET", f"{P}/trace/{{run}}"): "read",
     ("GET", f"{P}/trace/{{run}}/flow"): "read",
     ("GET", f"{P}/trace/{{run}}/tree"): "read",

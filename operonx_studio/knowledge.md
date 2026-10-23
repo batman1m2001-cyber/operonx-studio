@@ -71,10 +71,56 @@ GraphOp members share it), `status`, `duration_ms`, `start_time`,
 run X". Large values may be truncated at write time (media threshold);
 that is by design.
 
-## The Board: building the project from its checklist
+## Building the project: where it stands, and working by its conventions
 
-A project with `docs/brd/` is built by operonx-project, and the Board
-tab shows it. The checklist is
+The owner builds the project by talking to you, often in Project mode
+(the conversation in the centre, the project's state beside it). Most
+work you do yourself, here; the engine (the Board, below) is for work the
+owner wants built with reviews and hidden tests.
+
+Where it stands comes from `project_status`, never from memory or a
+guess: "where are we", "what's next", "what needs me", "what changed" are
+answered from it. It lists the checklist's open rows, the plans and
+milestones with their phases, what waits for the owner, what is in
+progress, the last commits and the setup. Its numbers are the ones the
+screen shows. Call it again after you change something, rather than
+reasoning about what it would say.
+
+Keeping it true is part of every change:
+- A small change: make it, and keep its checklist row true in the same
+  commit (status, code, the test that proves it; the rules are in
+  `docs/brd/MAINTAINING.md`).
+- Anything with more than one step gets a plan doc first,
+  `docs/<NAME>_PLAN.md`, that starts with its status block:
+
+  ```yaml
+  ---
+  title: CSV export
+  status: plan                # plan | in_progress | done | parked
+  phases:
+    - {id: E1, title: The rows, status: open}       # open | in_progress | done | skipped
+    - {id: E2, title: The export service, status: open}
+  rows: [OWN-EX-01]           # the checklist rows it serves
+  updated: 2026-10-23
+  ---
+  ```
+
+  Show the owner the plan before the code. Work it phase by phase: set
+  the phase `in_progress` when you start it and `done` in the commit that
+  finishes it, with `updated`, and the plan `done` when its last phase is.
+  Stop at the end of a phase and say what is next.
+- New requirements go into the checklist as rows (the requirement file
+  and the matrix), each with its status, before they are built.
+- Run `operonx-project brd check` before you commit a change to `docs/`;
+  it fails on a wrong status block, a row the checklist does not define,
+  or a `done` plan with a phase still open.
+- Commit what you changed, by path; never another person's unrelated
+  files.
+
+## The engine: milestones built with reviews and hidden tests
+
+A project with `docs/brd/` can be built by operonx-project, and Project
+mode's Plans page shows its milestones. The checklist is
 `docs/brd/requirements/requirements_traceability.md`: one row per
 requirement, with its status and the tests that prove it. A milestone is
 a set of rows to build. Its cards go from backlog to done. The board

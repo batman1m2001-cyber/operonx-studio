@@ -728,6 +728,23 @@ def register(app: Any, *, watcher_of: Any) -> None:
         return JSONResponse(out, status_code=200 if out.get("ok") else 503 if out.get("status") == "unavailable"
                             else 409)  # fmt: skip
 
+    @app.get("/api/p/{pid}/project/status")
+    async def project_status(pid: str, changes: int = 15) -> JSONResponse:
+        """Where the project stands (the engine's ``status`` op, PROJECT_MODE_PLAN D2): the checklist, the
+        plans and milestones, what needs the owner, what is in progress, the last commits, the setup. The
+        engine only reads for it; a project it never ran keeps no store because of it."""
+        import asyncio
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        out = await asyncio.to_thread(act, root, {"op": "status", "changes": max(1, min(changes, 100))}, "studio")
+        if not out.get("ok") and "unknown op" in str(out.get("message")):
+            out = {**out, "status": "unavailable", "message": "the installed operonx-project is too old for Project "
+                   "mode: install the one beside this studio (install.sh)"}  # fmt: skip
+        return JSONResponse(out, status_code=200 if out.get("ok") else 503 if out.get("status") == "unavailable"
+                            else 409)  # fmt: skip
+
     @app.get("/api/p/{pid}/board/{mid}")
     def board_milestone(pid: str, mid: str) -> JSONResponse:
         """One milestone: its columns, cards, open questions, plan, waves and last events."""

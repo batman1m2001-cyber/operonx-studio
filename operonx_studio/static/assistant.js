@@ -15,6 +15,7 @@
  *   focus  the whole stage, with the session list beside (Ctrl/⌘ J)
  *   sheet  full screen on a phone, opened from the Ask bar
  *   hero   the home page: a composer first, a conversation once started
+ *   center Project mode's centre, beside the project's state (projectmode.js)
  *
  * Nothing the model writes is ever parsed as HTML: markdown is rendered
  * with textContent and a small block/inline tokenizer.
@@ -980,6 +981,12 @@
     {kind: "failure", label: "Which of my projects had failures today?",
      prompt: "Go through my projects and tell me which had failing runs in the last day, and why."},
   ];
+  // Project mode: building the project by its conventions (docs/PROJECT_MODE_PLAN.md D5)
+  const PROJECT_STARTS = [
+    {kind: "learn", label: "Where are we?", prompt: "Where does the project stand? What needs me, what is in progress, and what should come next?"},
+    {kind: "setup", label: "Build the next thing", prompt: "What should we build next? Look at the open checklist rows and the plans, propose the next step, and wait for my go."},
+    {kind: "setup", label: "Plan something new", prompt: "I want to build something new. Ask me what it is, then write a plan doc with a status block before changing any code."},
+  ];
   const START_ICON = {failure: "alert", eval: "evals", setup: "wand", try: "play", learn: "book", op: "graph"};
 
   // a viewer's assistant only reads (the server filters project starters too)
@@ -1001,8 +1008,10 @@
     const hello = el("div", "ax-hello");
     const mark = el("span", "ax-mark");
     mark.append(icon("spark"));
-    hello.append(mark, el("h2", null, PROJECT ? "What should we work on?" : VIEWER ? "What do you want to know?" : "What do you want to build?"),
-      el("p", null, PROJECT
+    const pm = A.mode === "center";
+    hello.append(mark, el("h2", null, pm ? "What are we building?" : PROJECT ? "What should we work on?" : VIEWER ? "What do you want to know?" : "What do you want to build?"));
+    // Project mode says no more than its question: the starters and the state beside it do the rest
+    if (!pm) hello.append(el("p", null, PROJECT
         ? "Describe a task in your own words. I can read and change this project, run its services and jobs, and dig through its runs."
         : "Describe it in your own words — I'll set up a working project from a template, or answer questions about the ones you have."));
     box.append(hello);
@@ -1023,15 +1032,17 @@
         grid.append(c);
       }
     };
-    if (A.suggestions) fill(A.suggestions);
+    if (pm) fill(VIEWER ? PROJECT_STARTS.slice(0, 1) : PROJECT_STARTS);
+    else if (A.suggestions) fill(A.suggestions);
     else {
       for (let i = 0; i < 3; i += 1) grid.append(el("div", "ax-start ax-skel"));
       loadSuggestions().then((s) => { A.suggestions = s; if (!A.items.length) fill(s); });
     }
+    if (pm) { log.append(box); return; }
     const tip = el("div", "ax-tip");
     tip.append(el("kbd", null, "/"), document.createTextNode(" commands"),
       el("span", "ax-dotsep", "·"), el("kbd", null, "Shift ↵"), document.createTextNode(" new line"));
-    if (A.mode !== "sheet") tip.append(el("span", "ax-dotsep", "·"), el("kbd", null, "Ctrl J"), document.createTextNode(" focus"));
+    if (A.mode !== "sheet" && !pm) tip.append(el("span", "ax-dotsep", "·"), el("kbd", null, "Ctrl J"), document.createTextNode(" focus"));
     box.append(tip);
     log.append(box);
   }
@@ -2676,19 +2687,22 @@
     home: null,
     set(mode) {
       setExpanded(false);
+      const prevMode = A.mode;
       A.mode = mode;
-      root.classList.remove("dock", "focus", "sheet", "hero");
+      root.classList.remove("dock", "focus", "sheet", "hero", "center");
       root.classList.add(mode);
       document.body.classList.toggle("ax-focus", mode === "focus");
       document.body.classList.toggle("ax-sheet", mode === "sheet");
       bFocus.replaceChildren(icon(mode === "focus" ? "collapse" : "expand"));
       bFocus.title = mode === "focus" ? "Leave focus  ( Esc )" : "Focus  ( Ctrl J )";
-      bFocus.hidden = mode === "sheet";
+      bFocus.hidden = mode === "sheet" || mode === "center";
       // docked in the side panel, the panel's own toggle (and Esc) close it,
-      // and Inspect is the tab beside it: no second ×
-      bClose.hidden = mode === "hero" || mode === "dock";
+      // and Inspect is the tab beside it: no second ×; in Project mode it is the screen
+      bClose.hidden = mode === "hero" || mode === "dock" || mode === "center";
       if (mode === "focus" && !PHONE.matches) { root.classList.add("side-open"); refreshList(); }
       if (mode === "dock") root.classList.remove("side-open");
+      // the empty conversation speaks to where it is (Project mode has its own starters)
+      if (!A.items.length && (mode === "center" || prevMode === "center")) renderEmpty();
       requestAnimationFrame(() => { autosize(); toBottom(); });
     },
     enterFocus() {
@@ -2734,7 +2748,17 @@
         if (st.tab === "assistant") W.oxSide.hide("inspect");
       }
     },
-    toggleFocus() { if (A.mode === "focus" || A.mode === "sheet") this.leave(); else this.enterFocus(); },
+    toggleFocus() {
+      if (A.mode === "center") return;   // Project mode: the conversation already has the screen
+      if (A.mode === "focus" || A.mode === "sheet") this.leave(); else this.enterFocus();
+    },
+    center(slot) {
+      if (!slot) return;
+      const s = document.getElementById("axstage");
+      if (s) s.hidden = true;
+      slot.append(root);
+      if (A.mode !== "center") this.set("center");
+    },
     placeHero() {
       const slot = document.getElementById("axhero");
       if (slot) slot.append(root);
@@ -2763,7 +2787,8 @@
 
   // another screen hands the assistant a task (the prompt workbench)
   W.oxAsk = (text) => {
-    if (PHONE.matches) placement.openSheet();
+    if (A.mode === "center") { /* already on screen */ }
+    else if (PHONE.matches) placement.openSheet();
     else if (A.mode === "dock" && W.oxSide) W.oxSide.show("assistant");
     if (A.running) { A.queue = {text, images: []}; paintQueue(); toast("Queued — it goes when the current answer is done"); return; }
     submit(text);
@@ -2771,7 +2796,8 @@
   // the inspector's "Ask about this": the selection rides along; start typing
   W.oxAssistant = {
     focus() {
-      if (PHONE.matches) placement.openSheet();
+      if (A.mode === "center") { /* already on screen */ }
+      else if (PHONE.matches) placement.openSheet();
       else if (A.mode === "dock" && W.oxSide) W.oxSide.show("assistant");
       A.dropped.delete("node");
       paintChips();
@@ -2779,6 +2805,9 @@
     },
     open(id, focus) { openSession(id); if (focus && A.mode === "hero") placement.enterFocus(); },
     busy: () => !!A.running,
+    // Project mode takes the conversation into its centre, and gives it back on leaving
+    center(slot) { placement.center(slot); },
+    uncenter() { if (A.mode === "center") placement.leave(); },
   };
 
   /* ── boot ─────────────────────────────────────────────────────────── */
@@ -2815,13 +2844,16 @@
     if (fromHash) history.replaceState(null, "", location.pathname + location.search);
     if (id) await openSession(id);
     else { renderAll(); loadDraft(); }
-    if (fromHash && !PHONE.matches) placement.enterFocus();
+    if (fromHash && A.mode === "center") { /* Project mode: already the screen */ }
+    else if (fromHash && !PHONE.matches) placement.enterFocus();
     else if (fromHash) placement.openSheet();
   }
 
   if (PROJECT) {
     if (dock) dock.append(root);
     placement.set("dock");
+    // the page opened in Project mode (its address) before this file ran
+    if (document.body.classList.contains("pmode")) placement.center(document.getElementById("pmchat"));
     document.body.append(askbar);
     // the side panel's Assistant tab: the dock on a desktop, the full sheet on a phone
     const sync = (detail) => {
@@ -2842,6 +2874,7 @@
     if (!m) return;
     history.replaceState(null, "", location.pathname + location.search);
     openSession(m[1]);
+    if (A.mode === "center") return;
     if (PHONE.matches) placement.openSheet(); else placement.enterFocus();
   });
   boot();

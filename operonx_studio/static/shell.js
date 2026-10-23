@@ -57,6 +57,8 @@ function coverWhileFresh(elm) {
 }
 
 function switchTab(name, opts) {
+  // the Board lives in Project mode now: a milestone opens on its Plans page (docs/PROJECT_MODE_PLAN.md P4)
+  if (name === "board") { switchTab("project", {page: "plans", mid: (opts && opts.mid) || recall(`board:${PID}`, {}).mid || ""}); return; }
   // the playground runs a service's code: not a viewer's (D11); every way in stops here
   if (name === "playground" && window.Account && Account.viewOnly) { Account.toast(Account.VIEW_ONLY, true); return; }
   // where the Flow tab was: a run's pane borrows the canvas, and moving
@@ -295,21 +297,20 @@ document.addEventListener("click", (ev) => {
 for (const b of document.querySelectorAll(".tabs button[data-tab]"))
   b.onclick = () => switchTab(b.dataset.tab);
 
-/* The rail: the screens grouped by what they are for. Slim (icons) below
- * 1200px unless the user chose; on a phone a drawer the header's screen
+/* The rail: the screens grouped by what they are for. Slim (icons, the
+ * name on hover, the groups as thin lines) unless the user widened it
+ * (docs/PROJECT_MODE_PLAN.md D4); on a phone a drawer the header's screen
  * button opens, which closes again once a screen is picked. */
 (function rail() {
   const r = $("#rail"), shade = $("#railshade"), btn = $("#btn-screen");
-  const SLIM = window.matchMedia("(max-width: 1199px)");
   const apply = () => {
     const pref = recall("railSlim", null);
-    document.body.classList.toggle("railslim", !MOBILE.matches && (pref ?? SLIM.matches));
+    document.body.classList.toggle("railslim", !MOBILE.matches && (pref ?? true));
     const slim = document.body.classList.contains("railslim");
     $("#rail-slim").title = slim ? "Expand the menu" : "Collapse the menu";
     $("#rail-slim").setAttribute("aria-label", $("#rail-slim").title);
   };
   $("#rail-slim").onclick = () => { store("railSlim", !document.body.classList.contains("railslim")); apply(); };
-  SLIM.addEventListener("change", apply);
   MOBILE.addEventListener("change", apply);
   apply();
   const close = () => { document.body.classList.remove("railopen"); shade.hidden = true; btn.setAttribute("aria-expanded", "false"); };
@@ -321,9 +322,28 @@ for (const b of document.querySelectorAll(".tabs button[data-tab]"))
   };
   shade.onclick = close;
   for (const b of r.querySelectorAll(".tabs button[data-tab]")) b.addEventListener("click", close);
+  // slim, each icon says its name on hover, beside it (the rail scrolls, so the label floats over the page)
+  const tip = el("div");
+  tip.id = "railtip";
+  tip.hidden = true;
+  document.body.append(tip);
+  const slimNow = (b) => !MOBILE.matches && (b.closest("#prail") || document.body.classList.contains("railslim"));
+  for (const b of document.querySelectorAll("#rail .tabs button, #rail .railtoggle, #prail .tabs button")) {
+    b.addEventListener("mouseenter", () => {
+      const name = b.querySelector("span");
+      if (!slimNow(b) || !name) return;
+      const box = b.getBoundingClientRect();
+      tip.textContent = name.textContent;
+      tip.style.left = `${box.right + 8}px`;
+      tip.style.top = `${box.top + box.height / 2}px`;
+      tip.hidden = false;
+    });
+    b.addEventListener("mouseleave", () => { tip.hidden = true; });
+    b.addEventListener("click", () => { tip.hidden = true; });
+  }
   window.oxRailLabel = (name) => {
     const b = r.querySelector(`.tabs button[data-tab="${name}"] span`);
-    $("#screen-label").textContent = b ? b.textContent : name === "settings" ? "Settings" : name;
+    $("#screen-label").textContent = b ? b.textContent : name ? name[0].toUpperCase() + name.slice(1) : "";
   };
 })();
 

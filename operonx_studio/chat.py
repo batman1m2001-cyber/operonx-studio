@@ -28,6 +28,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -75,7 +76,7 @@ def knowledge() -> str:
 #: The studio's own tools (operonx_studio.mcp) a read-only agent may use.
 STUDIO_READ_TOOLS = ["mcp__studio__list_runs", "mcp__studio__open_run", "mcp__studio__op_values",
                      "mcp__studio__monitor", "mcp__studio__compare_runs", "mcp__studio__select_op",
-                     "mcp__studio__board_status", "mcp__studio__board_card"]
+                     "mcp__studio__board_status", "mcp__studio__board_card", "mcp__studio__project_status"]
 # board_models and board_practices read too, but with arguments they write: edit tools
 
 
@@ -226,9 +227,15 @@ def base_env(*, keep_anthropic: bool = False) -> Dict[str, str]:
     # it is a nested/SDK session and misbehave. HOME must survive — the
     # OAuth credentials live under it. ANTHROPIC_* is the host's own key:
     # only the machine login's owner runs with it.
-    return {k: v for k, v in os.environ.items()
-            if not k.startswith("CLAUDE") and k not in ("CLAUDECODE", "AI_AGENT")
-            and (keep_anthropic or not k.startswith("ANTHROPIC"))}
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("CLAUDE") and k not in ("CLAUDECODE", "AI_AGENT")
+           and (keep_anthropic or not k.startswith("ANTHROPIC"))}
+    # the studio's own commands (operonx-project, operonx) for the assistant's Bash, after the project's own:
+    # a studio started as .venv/bin/python has its scripts off PATH (PROJECT_MODE_PLAN D5)
+    scripts = str(Path(sys.executable).parent)
+    if scripts not in env.get("PATH", "").split(os.pathsep):
+        env["PATH"] = os.pathsep.join(p for p in (env.get("PATH", ""), scripts) if p)
+    return env
 
 
 def _status(home: Optional[Path]) -> Dict[str, Any]:

@@ -121,6 +121,7 @@ function pushView() {
     mode: state.run ? (canvasView === "data" ? "data" : "workflow")
       : ((typeof RunTree !== "undefined" && RunTree.current() && RunTree.current().mode) || "tree"),
     file: state.tab === "yaml" ? (state.yamlFile || null) : null,
+    page: state.tab === "project" && typeof ProjectMode !== "undefined" ? ProjectMode.page() : null,
     runs_filter: state.tab === "traces" ? (recall(`runsView:${PID}`, null) ? JSON.stringify(recall(`runsView:${PID}`, null)) : null) : null,
     monitor: state.tab === "monitor" ? JSON.stringify(recall(`monitor:${PID}`, {})) : null,
   };
