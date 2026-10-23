@@ -145,7 +145,11 @@ what is missing, in this order, and change nothing else:
    the reply for the owner; architecture rules only if
    `operonx-project arch` passes with them. Validate with
    `operonx-project practices --repo .`.
-Then run `operonx-project brd check` and each `[done]` check, put back
+Then run `operonx-project brd check` and each `[done]` check (a long
+suite in the foreground with a long enough timeout, its output in the
+repo's ignored files or your scratch space, never `/tmp`; never wait on it
+with a `pgrep -f`/`pkill -f` loop, whose pattern matches the loop itself,
+so it never ends), put back
 any tracked file a check rewrote (`git status`; a run index or a cache is
 restored with `git restore`, never committed), call `project_status`
 again, and commit by path in one commit. The commit is the owner's (made
