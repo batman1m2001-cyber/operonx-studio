@@ -360,6 +360,22 @@ def t_board_practices(s: Studio, a: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def t_project_status(s: Studio, a: Dict[str, Any]) -> str:
+    """The engine's one status document as plain lines (PROJECT_MODE_PLAN D2): what the owner's screen shows."""
+    try:
+        got = s.call("/project/status", changes=int(a.get("changes") or 15))
+    except RuntimeError as exc:
+        return f"unavailable: {exc}"
+    if got.get("text"):
+        return got["text"]
+    doc = got.get("project") or {}  # an engine that sends only the document
+    c = doc.get("checklist") or {}
+    return json.dumps({"checklist": {"verified": c.get("verified"), "total": c.get("total"), "open": c.get("open")},
+                       "working_on": doc.get("working_on"), "needs_you": doc.get("needs_you"),
+                       "unmarked_plans": doc.get("unmarked"), "changes": (doc.get("changes") or [])[:5]},
+                      ensure_ascii=False, indent=1)  # fmt: skip
+
+
 def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
     mid = str(a.get("milestone") or "")
     if mid:
@@ -673,6 +689,13 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                      "(in-house) model; leave a model unpriced rather than guessing.",
                       "schema": _schema({"resource": _S, "input_per_1m": _N, "output_per_1m": _N,
                                          "apply": {"type": "boolean"}}, ["resource", "input_per_1m", "output_per_1m"])},
+    "project_status": {"fn": t_project_status,
+                       "description": "Where the project stands, as the owner's screen shows it: the checklist (verified "
+                                      "of total, the open rows), the plans and milestones with their phases, what "
+                                      "waits for the owner, what is in progress, the last commits, the setup, and the "
+                                      "plan docs with no status block. Answer \"where are we\", \"what's next\", "
+                                      "\"what needs me\" from it, never from memory; call it again after a change.",
+                       "schema": _schema({"changes": _N})},
     "board_status": {"fn": t_board_status,
                      "description": "The project's Board (operonx-project): the daemon, each milestone's state, cards "
                                     "and spend, and the checklist's rows not built yet. With milestone: its cards by "

@@ -700,3 +700,27 @@ def test_project_mode_has_its_pages_and_the_board_lives_inside_it(client, tmp_pa
     static = Path(__file__).resolve().parents[2] / "operonx_studio" / "static"
     shell = (static / "shell.js").read_text(encoding="utf-8")
     assert 'if (name === "board") { switchTab("project", {page: "plans"' in shell  # /board and open_board land there
+
+
+@pytest.mark.skipif(_engine_here() is None, reason="operonx-project is not installed here")
+def test_the_assistant_reads_where_the_project_stands_from_the_engine(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", _engine_here())
+    root = make_project(tmp_path / "calc", store=False)
+    req = root / "docs" / "brd" / "requirements"
+    req.mkdir(parents=True)
+    (req / "requirements_traceability.md").write_text(MATRIX, encoding="utf-8")
+    (req / "open_questions.md").write_text(QUESTIONS, encoding="utf-8")
+    (root / "docs" / "EXPORT_PLAN.md").write_text(
+        "---\ntitle: CSV export\nstatus: in_progress\nphases:\n  - {id: E1, title: Rows, status: in_progress}\n---\n",
+        encoding="utf-8")  # fmt: skip
+    from operonx_studio.chat import STUDIO_READ_TOOLS
+
+    text = _tool(BoardStudio(client, _open(client, root)), "project_status")
+    assert text.startswith("Checklist: ") and "  CSV export — E1, phase 1 of 1: Rows" in text  # the screen's words
+    assert "mcp__studio__project_status" in STUDIO_READ_TOOLS  # a viewer's assistant may read it too
+
+
+def test_the_assistants_bash_finds_the_studios_own_commands():
+    from operonx_studio.chat import base_env
+
+    assert str(Path(sys.executable).parent) in base_env()["PATH"].split(os.pathsep)
