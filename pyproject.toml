@@ -42,6 +42,11 @@ dev = [
 redis = [
     "redis>=4.5",
 ]
+# the project builder the Board and Project mode act through (operonx-project api); installed from an
+# Operon checkout (install.sh does it when ../Operon is there), not from PyPI
+builder = [
+    "operonx-project>=0.1.0",
+]
 
 [project.scripts]
 operonx-studio = "operonx_studio.cli:main"
@@ -58,6 +63,7 @@ packages = ["operonx_studio_toolkit", "operonx_studio"]
 
 [tool.uv.sources]
 operonx = { path = "../Operon", editable = true }
+operonx-project = { path = "../Operon/packages/operonx-project", editable = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

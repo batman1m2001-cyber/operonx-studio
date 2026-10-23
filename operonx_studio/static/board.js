@@ -179,6 +179,14 @@ const BoardView = (() => {
     }
     const pr = info && info.practices;
     if (pr) wrap.append(practicesChip(pr));
+    if (info && info.installed === false) {  // every action goes through operonx-project: say so, not a failed click
+      const w = el("span", "chip cwarn", "builder not installed");
+      w.title = "operonx-project is not installed where the studio runs, so Run, New request and answers cannot reach it."
+        + "\nInstall it: the studio's install.sh beside an Operon checkout, or"
+        + "\npip install <Operon>/packages/operonx-project into the studio's environment.";
+      wrap.append(w);
+      return wrap;
+    }
     wrap.append(el("span", `status ${d.running ? "s-run" : "s-idle"}`, d.running ? "daemon running" : "daemon stopped"));
     const b = el("button", `${d.running ? "" : "primary"} needs-edit`, d.running ? "Stop" : "Run");
     b.type = "button";

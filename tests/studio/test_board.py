@@ -215,6 +215,7 @@ def test_a_brd_folder_alone_is_a_board_its_checklist_from_the_checkout(client, t
     (req / "open_questions.md").write_text(QUESTIONS, encoding="utf-8")
     pid = _open(client, root)
     got = client.get(f"/api/p/{pid}/board").json()
+    assert isinstance(got.pop("installed"), bool)  # whether this machine has the engine: not the folder's business
     assert got == {"available": True, "schema": 2, "milestones": [], "brd": True, "engine": False,
                    "daemon": {"running": False}, "sandbox": True, "models": {"model": None, "models": {}},
                    "practices": None}
@@ -630,3 +631,18 @@ def test_a_matrix_of_several_tables_reads_each_row_by_its_own_columns(tmp_path):
     assert ck["counts"] == {"implemented_verified": 1, "planned": 1}
     assert [r["text"] for r in ck["rows"]] == ["Three news sources", "the RM sees it first"]
     assert ck["rows"][0]["cells"][4] == "`POST /api/p[/a|/b]`"
+
+
+def test_the_engine_is_found_beside_the_studios_python_or_said_missing(tmp_path, monkeypatch):
+    """The live studio ran as .venv/bin/python with its venv off PATH: no Board action could reach the engine."""
+    from operonx_studio import projectboard as pb
+
+    root = make_project(tmp_path / "calc")
+    monkeypatch.delenv("OPERONX_PROJECT_BIN", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "nowhere"))
+    (tmp_path / "venv/bin").mkdir(parents=True)
+    monkeypatch.setattr(pb.sys, "executable", str(tmp_path / "venv/bin/python"))
+    assert pb._engine() is None and pb.milestones(root)["installed"] is False
+    assert pb.act(root, {"op": "settings"}, "studio")["status"] == "unavailable"
+    (tmp_path / "venv/bin/operonx-project").write_text("#!/bin/sh\n")
+    assert pb._engine() == [str(tmp_path / "venv/bin/operonx-project")] and pb.milestones(root)["installed"] is True
