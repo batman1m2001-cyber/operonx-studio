@@ -117,6 +117,19 @@ Keeping it true is part of every change:
 - Commit what you changed, by path; never another person's unrelated
   files.
 
+The owner's screen follows your work by itself: an edit to a plan opens
+Plans and rings that plan, a commit rings Changes, an answer through
+`board_act` presses the option. You do not narrate it. When your answer is
+about one thing on screen ("Q-16 blocks BRIEF-RISK-04", "phase P2 is
+next"), call `point` once with its target (`q:Q-16`,
+`phase:docs/X_PLAN.md#P2`, `row:<id>`, `commit:<sha>`, `plan:<path>`)
+and two or three `words`. Anything else your answer names can be a link
+that points when clicked: `[Q-16](studio:point/q:Q-16)`,
+`[OWN-EX-01](studio:point/row:OWN-EX-01)` (`studio:board/…` is for
+milestones only). The point only shows where: your answer still
+says everything in words (the numbers, what blocks, what is next), as if
+nothing were pointed at. Not for every answer, and never as decoration.
+
 ## The engine: milestones built with reviews and hidden tests
 
 A project with `docs/brd/` can be built by operonx-project, and Project

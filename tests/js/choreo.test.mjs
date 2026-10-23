@@ -82,7 +82,7 @@ test("what changed between two status documents", () => {
   const after = {
     plans: [{path: "docs/A_PLAN.md", status: "in_progress", done: 2, total: 3}, {path: "docs/B_PLAN.md", status: "plan", done: 0, total: 2}],
     changes: [{sha: "bbb"}, {sha: "aaa"}],
-    checklist: {open: [{id: "R-1", status: "in_progress"}]},
+    checklist: {open: [{id: "R-1", status: "in_progress"}, {id: "R-9", status: "planned"}]},
   };
   assert.deepEqual(C.changed(before, after), [
     {point: "plan:docs/A_PLAN.md", words: "2/3"},
@@ -90,6 +90,59 @@ test("what changed between two status documents", () => {
     {point: "commit:bbb", words: "new"},
     {point: "row:R-1", words: "in progress"},
   ]);
+  // a row the turn added is lit too (cut at four: the newest first come from the plans and commits)
+  assert.deepEqual(C.changed({...before, plans: after.plans, changes: after.changes}, after),
+    [{point: "row:R-1", words: "in progress"}, {point: "row:R-9", words: "new"}, {point: "status:checklist", words: "1 closed"}]);
   assert.deepEqual(C.changed(after, after), []);
   assert.deepEqual(C.changed(null, after), []);
+});
+
+test("where a target lives: the page to go to before pointing", () => {
+  assert.deepEqual(C.where("q:Q-16"), {tab: "project", page: "questions"});
+  assert.deepEqual(C.where("phase:docs/X_PLAN.md#P2"), {tab: "project", page: "plans"});
+  assert.deepEqual(C.where("commit:abc"), {tab: "project", page: "changes"});
+  assert.deepEqual(C.where("status:needs"), {tab: "project", page: "now"});
+  assert.deepEqual(C.where("op:stt"), {tab: "flow"});
+  assert.equal(C.where("pagehead"), null);
+});
+
+test("on Flow, an edit to an op's file rings that op", () => {
+  const ops = [{name: "count", file: "src/textstats/ops.py", fn: "count"}, {name: "clean", file: "src/textstats/ops.py", fn: "clean_text"},
+               {name: "solo", file: "src/other.py", fn: "solo"}];
+  const edit = (file, old, phase = "start", status = "running") => ({kind: "tool", name: "Edit", status, input: {file_path: file, old_string: old, new_string: ""}});
+  assert.deepEqual(C.opSteps(edit("/r/src/textstats/ops.py", "def clean_text(s):"), "start", ops), [{point: "op:clean", words: "editing"}]);
+  // a file of several ops, the edit names none: nothing to guess
+  assert.deepEqual(C.opSteps(edit("/r/src/textstats/ops.py", "import re"), "start", ops), []);
+  // the file's only op
+  assert.deepEqual(C.opSteps(edit("/r/src/other.py", "x = 1"), "start", ops), [{point: "op:solo", words: "editing"}]);
+  assert.equal(C.opSteps(edit("/r/src/other.py", "x = 1", "end", "ok"), "end", ops)[0].words, "saved");
+  assert.deepEqual(C.opSteps(edit("/r/README.md", "def solo("), "start", ops), []);
+  assert.deepEqual(C.opSteps({kind: "tool", name: "Read", input: {file_path: "/r/src/other.py"}}, "start", ops), []);
+});
+
+// A real Sonnet turn on a OneWealth clone (2026-10-23) wrote every file with the shell, and the page got each
+// tool's input as the server clipped it: JSON text, cut short after 4000 characters.
+test("the shell: a heredoc into a plan, sed -i on the matrix, git -c … commit; inputs as clipped JSON text", () => {
+  const bash = (command, clip) => {
+    const text = JSON.stringify({command});
+    return {kind: "tool", name: "Bash", status: "running", input: clip ? text.slice(0, clip) + "\n… (900 more characters)" : text};
+  };
+  const heredoc = bash("cd /x/pm/ow && cat > docs/CSV_EXPORT_PLAN.md <<'EOF'\n---\ntitle: CSV export\nstatus: plan\n" + "x".repeat(200), 120);
+  assert.equal(C.inputOf(heredoc).command.slice(0, 16), "cd /x/pm/ow && c");
+  assert.deepEqual(C.steps(heredoc, "start", NOW),
+    [{go: {tab: "project", page: "plans"}}, {point: "plan:docs/CSV_EXPORT_PLAN.md", words: "editing", or: "pagehead"}]);
+  const sed = bash("sed -i 's/| 120 |/| 123 |/' docs/brd/requirements/requirements_traceability.md && uv run python scripts/check_brd_docs.py");
+  assert.deepEqual(C.steps(sed, "start", NOW).slice(0, 2), [{go: {tab: "project", page: "checklist"}}, {point: "page:checklist", words: "editing rows"}]);
+  const commit = bash("git add docs/CSV_EXPORT_PLAN.md docs/brd/requirements/requirements_traceability.md && git -c user.email=a@b -c user.name=a commit -q -m 'plan'");
+  assert.deepEqual(C.steps(commit, "start", NOW), [{point: "status:changes", words: "committing"}]);
+  // reading with the shell moves nothing; a bare name after `cd docs` is still the plan
+  assert.deepEqual(C.steps(bash("cd docs && head -20 WEALTH_NAMES_PLAN.md 2>/dev/null"), "start", NOW), []);
+  assert.deepEqual(C.steps(bash("cd docs && head -20 WEALTH_NAMES_PLAN.md"), "start", PLANS), [{point: "plan:docs/WEALTH_NAMES_PLAN.md", words: "reading"}]);
+  assert.deepEqual(C.steps(bash("grep -q x docs/A_PLAN.md >/dev/null"), "start", NOW), []);
+  // an Edit's input clipped mid-string still names its file
+  const edit = {kind: "tool", name: "Edit", status: "running", input: '{"file_path": "/r/docs/X_PLAN.md", "old_string": "abc'};
+  assert.equal(C.steps(edit, "start", PLANS)[0].point, "plan:docs/X_PLAN.md");
+  // an answer through board_act, as text
+  const ans = {kind: "tool", name: "mcp__studio__board_act", status: "running", input: '{"op": "answer", "ref": "Q3", "answer": {"choice": "b", "text": ""}}'};
+  assert.equal(C.steps(ans, "start", NOW)[1].press, "qopt:Q3:b");
 });

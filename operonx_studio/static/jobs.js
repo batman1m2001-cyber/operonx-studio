@@ -116,6 +116,7 @@ async function showJobs(sel, runId) {
   state.jobSel = picked.name;
   for (const j of data.jobs) {
     const r = el("div", "jrow" + (j.name === picked.name ? " sel" : ""));
+    r.dataset.oxTarget = `job:${j.name}`;      // the assistant's hand reaches it (hand.js)
     r.tabIndex = 0;
     r.setAttribute("role", "option");
     r.setAttribute("aria-selected", String(j.name === picked.name));

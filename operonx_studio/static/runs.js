@@ -265,6 +265,7 @@ const RunsView = (() => {
   function row(r) {
     const tr = el("tr", "clickable" + (r.status === "error" ? " failed" : ""));
     tr.dataset.key = r.run;            // a revisit marks the rows it had not seen
+    tr.dataset.oxTarget = `run:${r.run}`;  // the assistant's hand reaches it (hand.js)
     const st = el("td", "stcell");
     // a live store lists a run that has not ended (or whose process died) as running
     const dot = el("span", "stdot " + (r.status === "error" ? "bad" : r.status === "running" ? "run"

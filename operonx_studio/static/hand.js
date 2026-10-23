@@ -89,6 +89,8 @@ const Hand = (() => {
     if (!lit || !visible(lit)) { ring.classList.remove("on"); return; }
     const r = lit.getBoundingClientRect();
     Object.assign(ring.style, {left: `${r.left - 4}px`, top: `${r.top - 4}px`, width: `${r.width + 8}px`, height: `${r.height + 8}px`});
+    // a small element (an icon in a bar) keeps its words beside it, not cut off above it
+    ring.classList.toggle("side", r.width < 90);
     requestAnimationFrame(place);
   }
   function light(n, target, words) {
@@ -109,11 +111,13 @@ const Hand = (() => {
     opts = opts || {};
     // a soft gesture gives way to one on the same element lit after it was asked for ("2/5" before "saved")
     if (opts.soft && (lastLit.get(target) || 0) > (opts.asked || 0)) return false;
+    if (typeof ProjectMode !== "undefined" && ProjectMode.reveal) ProjectMode.reveal(target);
     let n = await wait(target, opts.or ? 1200 : WAIT);
     if (!n && opts.or) { n = await wait(opts.or, 600); target = opts.or; }
-    if (!n || !active()) return false;
+    if (!n || (!active() && !opts.force)) return false;
     lastLit.set(target, Date.now());
-    n.scrollIntoView({block: "nearest", inline: "nearest", behavior: REDUCED.matches ? "auto" : "smooth"});
+    // the canvas pans itself (select_op centres the op); scrolling its plane would shift the picture
+    if (!n.closest("#plane")) n.scrollIntoView({block: "nearest", inline: "nearest", behavior: REDUCED.matches ? "auto" : "smooth"});
     await sleep(REDUCED.matches ? 0 : 160);
     const r = n.getBoundingClientRect();
     await moveTo(r.left + Math.min(28, r.width / 2), r.top + Math.min(r.height / 2, 18), opts.quick);
@@ -156,10 +160,12 @@ const Hand = (() => {
     try {
       while (queue.length) {
         const s = queue.shift();
-        if (!active()) { queue = []; break; }
+        // the user's own click (a link that points) plays though following is off
+        if (!active() && !s.force) { queue = queue.filter((x) => x.force); continue; }
         if (s.refresh && typeof ProjectMode !== "undefined") { await ProjectMode.refresh(); continue; }
         if (s.go) { await go(s.go); continue; }
-        const done = await point(s.point || s.press, s.words, {press: !!s.press, quick: s.quick, or: s.or, soft: s.soft, asked: s.asked});
+        if (s.run) { try { await s.run(); } catch { /* the action's own error shows where it ran */ } continue; }
+        const done = await point(s.point || s.press, s.words, {press: !!s.press, quick: s.quick, or: s.or, soft: s.soft, asked: s.asked, force: s.force});
         if (done) await sleep(s.quick ? 380 : DWELL);
       }
     } finally { running = false; }
@@ -167,9 +173,10 @@ const Hand = (() => {
 
   /* gestures to play, in order; a long backlog keeps its newest. `front`: before what waits (what just happened) */
   function play(steps, opts) {
-    if (!steps || !steps.length || !active()) return;
+    const force = !!(opts && opts.force);
+    if (!steps || !steps.length || (!active() && !force)) return;
     const asked = Date.now();
-    steps = steps.map((s) => ({asked, ...s}));
+    steps = steps.map((s) => ({asked, force, ...s}));
     if (opts && opts.front) queue.unshift(...steps);
     else queue.push(...steps);
     if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
@@ -206,5 +213,5 @@ const Hand = (() => {
   }
 
   return {play, point: (t, w) => play([{point: t, words: w}]), go: (w) => play([{go: w}]),
-          follow: () => follow, setFollow, busy: () => running || queue.length > 0};
+          follow: () => follow, setFollow, active, busy: () => running || queue.length > 0};
 })();

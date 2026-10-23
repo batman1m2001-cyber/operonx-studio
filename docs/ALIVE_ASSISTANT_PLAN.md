@@ -1,13 +1,13 @@
 ---
 title: The assistant works the screen
-status: in_progress
+status: done
 phases:
   - {id: L1, title: The hand — go, point, press, status: done}
   - {id: L2, title: Project mode's targets, status: done}
-  - {id: L3, title: Project mode follows the assistant's work, status: in_progress}
-  - {id: L4, title: The assistant points on purpose, status: open}
-  - {id: L5, title: The rest of the studio, status: open}
-  - {id: L6, title: Gate, status: open}
+  - {id: L3, title: Project mode follows the assistant's work, status: done}
+  - {id: L4, title: The assistant points on purpose, status: done}
+  - {id: L5, title: The rest of the studio, status: done}
+  - {id: L6, title: Gate, status: done}
 updated: 2026-10-23
 ---
 
@@ -89,3 +89,31 @@ recorded replay after the turn; the owner asked to see it happen.
 | L4 | `studio_point` MCP tool and its knowledge | studio test: the tool queues the gesture |
 | L5 | `performUi` through the hand; targets and choreography on Flow, Runs, Jobs, Evals, Prompts, Monitor | JS tests per screen; screenshots |
 | L6 | On a OneWealth clone, Sonnet in Project mode: "plan a CSV export of the wealth report" and "where are we?"; on tipcalc, a fix on an op | frames of the screen following each turn; every suite green; live studio restarted |
+
+## 4. What the gate found (2026-10-23, Sonnet on a OneWealth clone)
+
+The first real turn ("plan a CSV export…") wrote the plan, ran the checks and committed in 92 s, and the screen
+did not move once. Three causes, each fixed and now covered by `tests/js/choreo.test.mjs`:
+
+1. **The assistant writes with the shell.** Every file went through Bash (`cat > docs/X_PLAN.md <<EOF`,
+   `sed -i`), never Edit or Write. The choreographer reads shell commands: writes (`>`, `tee`, `sed -i`,
+   `perl -i`, `python - <<`), plan names (`docs/X_PLAN.md`, or a bare `X_PLAN.md` after `cd docs`), and
+   commits written as `git -c user.email=… commit`.
+2. **A tool's input reaches the page as clipped JSON text**, not an object (`assistant.py` `_clip`), so
+   `input.file_path` was always undefined. `Choreo.inputOf` parses it, and reads the fields from the text when
+   the clip cut it mid-string.
+3. **"What just happened" lost a race.** A turn's end starts two refreshes (the turn's own and the pulse's);
+   the superseded one returned early and still cleared the turn's starting status document. That document now
+   stays until the next turn (30 s at most); `played` keeps each change lit once.
+
+Also found on the way: `open_board` was never on `/ui/action`'s allowed list, so every board tool's
+"show the board" had been a silent 400 since the board tools existed. It is allowed now, and skipped
+without a milestone in Project mode, where the overview is Plans.
+
+The second turn ("plan a PDF of the monthly statement…", 71 s): Plans opened and the page head was ringed
+"editing" while the heredoc ran, then the new plan was ringed "new plan", Checklist "editing rows" and
+"checking", Changes "committing" then "committed". "Where are we?": the status column swept section by
+section while `project_status` ran. With `point` available, the first answer leaned on the highlight
+("Q-16 is highlighted on your screen") and dropped the numbers; the knowledge and the tool's description
+now say that the point only shows where and the words still say everything, and the rerun answered in full.
+Replies may also link `studio:point/<target>`; a click points even with Follow off.

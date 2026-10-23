@@ -2153,6 +2153,7 @@ function containerCard(it) {
   const n = it.node;
   const card = el("div", "node container");
   card.dataset.name = n.name;
+  card.dataset.oxTarget = `op:${n.name}`;   // the assistant's hand reaches it (hand.js)
   card.style.left = `${it.x}px`;
   card.style.top = `${it.y}px`;
   card.style.width = `${it.w}px`;
@@ -2564,6 +2565,7 @@ function boundaryCard(it) {
   const n = it.node;
   const card = el("div", `node bnode b-${n.boundary}`);
   card.dataset.name = n.name;
+  card.dataset.oxTarget = `op:${n.name}`;   // the assistant's hand reaches it (hand.js)
   card.style.left = `${it.x}px`;
   card.style.top = `${it.y}px`;
   card.style.width = `${it.w}px`;
@@ -2895,6 +2897,7 @@ function opCard(it) {
   if (n.kind === "__boundary__") return boundaryCard(it);
   const card = el("div", "node");
   card.dataset.name = n.name;
+  card.dataset.oxTarget = `op:${n.name}`;   // the assistant's hand reaches it (hand.js)
   card.style.left = `${it.x}px`;
   card.style.top = `${it.y}px`;
   card.style.setProperty("--kind", kindColor(n));

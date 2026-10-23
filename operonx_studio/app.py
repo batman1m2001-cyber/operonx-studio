@@ -4200,7 +4200,8 @@ def build_studio_app(recents: Optional[Recents] = None):
     @app.post("/api/p/{pid}/ui/action")
     async def ui_action(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         kind = str(body.get("kind") or "")
-        if kind not in ("open_run", "open_monitor", "compare", "select_op", "open_jobs", "open_tab", "open_eval"):
+        if kind not in ("open_run", "open_monitor", "compare", "select_op", "open_jobs", "open_tab", "open_eval",
+                        "open_board", "point"):
             return JSONResponse({"error": f"unknown action {kind!r}"}, status_code=400)
         queue = ui_actions.setdefault((pid, request.state.user["id"]), [])
         seq = (queue[-1]["seq"] + 1) if queue else 1

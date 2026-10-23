@@ -606,6 +606,7 @@ const ProjectMode = (() => {
 
   /* ── the screen follows the assistant's work (choreo.js, hand.js) ── */
   let base = null;            // the status document when the assistant's turn began
+  let baseEnd = null;
   const played = new Set();   // what this turn already lit
   const CAN = () => typeof Hand !== "undefined" && typeof Choreo !== "undefined";
   function whatHappened(before) {
@@ -680,10 +681,13 @@ const ProjectMode = (() => {
   // a turn that ended may have changed the project: read it again
   document.addEventListener("oxassistant", (ev) => {
     const now = !!(ev.detail && ev.detail.busy);
-    if (!busy && now) { base = doc; played.clear(); }
-    if (busy && !now && on) {
-      refresh().then(() => { base = null; });
-      if (v.page === "checklist" || v.page === "changes") drawPage();
+    // the turn's start is what "what just happened" compares with, until a while after it ends (two refreshes
+    // race at the end: the turn's own and the pulse's; whichever lands compares, `played` keeps it to once)
+    if (!busy && now) { clearTimeout(baseEnd); base = doc; played.clear(); }
+    if (busy && !now) {
+      clearTimeout(baseEnd);
+      baseEnd = setTimeout(() => { base = null; }, 30000);
+      if (on) { refresh(); if (v.page === "checklist" || v.page === "changes") drawPage(); }
     }
     busy = now;
   });
@@ -691,6 +695,15 @@ const ProjectMode = (() => {
   document.addEventListener("visibilitychange", () => { if (on && !document.hidden) refresh(); });
   MOBILE.addEventListener("change", () => { if (on) drawSide(); });
 
+  /* open what holds a target the hand is about to point at: a plan's phases are drawn once it is unfolded */
+  function reveal(target) {
+    const m = /^phase:(.+)#[^#]+$/.exec(target || "");
+    if (!m || v.page !== "plans" || v.open[m[1]]) return;
+    v.open[m[1]] = true;
+    save();
+    drawPlans();
+  }
+
   registerPane("project", {el: box, show});
-  return {page: () => v.page, status: () => doc, refresh, go};
+  return {page: () => v.page, status: () => doc, refresh, go, reveal};
 })();

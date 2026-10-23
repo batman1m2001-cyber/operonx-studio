@@ -712,7 +712,7 @@ async function pulse() {
       if (got.assistant_rate) document.dispatchEvent(new CustomEvent("oxrate", {detail: got.assistant_rate}));
       for (const a of got.actions || []) {
         state.uiSeq = a.seq;
-        try { await performUi(a.kind, a.args || {}); } catch { /* a stale action is not an error */ }
+        try { await assistantUi(a.kind, a.args || {}); } catch { /* a stale action is not an error */ }
       }
       if (state.follow && got.newest && (!state.run || state.run.run !== got.newest)) {
         await showRunWorkflow(got.newest);
@@ -737,6 +737,38 @@ function setLinkState(up) {
   $("#live-text").textContent = up ? "Live" : "Reconnecting…";
   live.title = up ? "Watching the project's code: the studio redraws when it changes"
     : "Lost the studio: reconnecting…";
+}
+
+/* On Flow the canvas follows the assistant's edits: the op whose code it changes, ringed (choreo.js) */
+document.addEventListener("oxtool", (ev) => {
+  if (state.tab !== "flow" || typeof Hand === "undefined" || typeof Choreo === "undefined" || !state.rendered) return;
+  const ops = [...state.rendered.values()].map((x) => {
+    const at = ((x.node.source || {}).defined_at || {});
+    const fn = /\bdef (\w+)\(/.exec(x.node.code || "");
+    return {name: x.node.name, file: at.file || "", fn: fn ? fn[1] : ""};
+  });
+  Hand.play(Choreo.opSteps(ev.detail.item, ev.detail.phase, ops));
+});
+
+/* The assistant's own actions, through its hand when the screen follows it
+ * (docs/ALIVE_ASSISTANT_PLAN.md D6): the menu's icon pressed, the action,
+ * then the thing it is about, ringed. A click of the user's runs performUi
+ * at once. */
+function assistantUi(kind, args) {
+  if (kind === "point" || typeof Hand === "undefined" || !Hand.active()) return performUi(kind, args);
+  const TAB = {open_run: "traces", compare: "traces", open_monitor: "monitor", select_op: "flow", open_jobs: "jobs",
+               open_eval: "evals", open_tab: args.tab};
+  const steps = [];
+  // the board's overview is Plans: reading the project's state is no reason to leave the conversation for it
+  if (kind === "open_board" && !args.mid && state.tab === "project") return Promise.resolve();
+  if (kind === "open_board") steps.push({go: {tab: "project", page: "plans"}});
+  else if (TAB[kind]) steps.push({go: {tab: TAB[kind], opts: {quiet: true}}});
+  steps.push({run: () => performUi(kind, args)});
+  const what = kind === "select_op" ? `op:${args.op}` : kind === "open_jobs" ? `job:${args.job}`
+    : kind === "open_eval" && args.name ? `eval:${args.name}` : kind === "open_board" && args.mid ? `ms:${args.mid}` : null;
+  if (what) steps.push({point: what, words: args.words || ""});
+  Hand.play(steps);
+  return Promise.resolve();
 }
 
 async function performUi(kind, args) {
@@ -779,11 +811,16 @@ async function performUi(kind, args) {
     switchTab(args.tab);
   } else if (kind === "open_eval") {
     switchTab("evals", {name: args.name, run: args.run, exp: args.exp});
+  } else if (kind === "point") {
+    // the assistant points on purpose (docs/ALIVE_ASSISTANT_PLAN.md D5): the hand goes there and rings it
+    if (typeof Hand === "undefined" || typeof Choreo === "undefined") return;
+    const to = Choreo.where(args.target);
+    Hand.play([...(to ? [{go: to}] : []), {point: args.target, words: args.words || ""}], {force: !!args.byUser});
   }
 }
 
 /* `studio:` links in the assistant's replies (chat.js turns them into
- * buttons): studio:run/<id>, studio:op/<name>, studio:tab/<name>,
+ * buttons): studio:run/<id>, studio:op/<name>, studio:tab/<name>, studio:point/<target>,
  * studio:monitor/<origin>/<name>, studio:board/<milestone>[/<card>]. */
 window.oxStudioLink = (href) => {
   const path = String(href).replace(/^studio:/, "");
@@ -794,6 +831,8 @@ window.oxStudioLink = (href) => {
   if (kind === "tab") return performUi("open_tab", {tab: arg === "runs" ? "traces" : arg});
   if (kind === "board") return performUi("open_board", {mid: rest[0], card: rest[1] || ""});
   if (kind === "eval") return performUi("open_eval", {name: rest[0], run: rest[1] || ""});
+  // studio:point/q:Q-16 — the hand goes to it and rings it, as when the assistant points
+  if (kind === "point") return performUi("point", {target: arg, byUser: true});
   if (kind === "monitor") return performUi("open_monitor", {target: rest.length > 1 ? `${rest[0]}:${decodeURIComponent(rest.slice(1).join("/"))}` : ""});
   return null;
 };

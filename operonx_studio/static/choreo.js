@@ -28,6 +28,41 @@ const Choreo = (() => {
   const PLAN = /(?:^|\/)(docs\/(?:[^/]+\/)*[^/]+\.md)$/;
 
   const COLUMN = {needs: "questions", working: "plans", checklist: "checklist", plans: "plans", changes: "changes"};
+  // the shell: what writes a file, a commit (`git -c user.email=… commit`), the files a command names
+  const WRITES = /(?:^|[^<>&2])>>?\s*(?!\/dev\/null)[^\s&|;>]|\btee\b|\bsed\s+(?:-\w*\s+)*-i|\bperl\s+-\w*i|\bpython3?\b[^|;&]*(?:<<|-c\b)|\bmv\b|\bcp\b/;
+  const COMMIT = /\bgit\b(?:\s+-[cC]\s+\S+)*\s+commit\b/;
+  const MATRIX_NAME = /requirements_traceability\.md/;
+  const QUESTIONS_NAME = /open_questions\.md/;
+  function shellPlans(cmd) {
+    const out = [];
+    for (const m of cmd.matchAll(/[\w./-]*?([\w.-]+_PLAN\.md)\b/g)) {
+      const full = m[0];
+      if (/docs\/brd\//.test(full)) continue;
+      const at = full.lastIndexOf("docs/");
+      const plan = at >= 0 ? full.slice(at) : `docs/${m[1]}`;
+      if (!out.includes(plan)) out.push(plan);
+    }
+    return out;
+  }
+  /* A tool's input reaches the page as the server clipped it: JSON text, cut off when long (a heredoc). The
+   * fields that matter are read from the text when it no longer parses. */
+  const FIELDS = ["file_path", "notebook_path", "command", "old_string", "new_string", "content", "op", "ref", "milestone"];
+  function inputOf(item) {
+    const raw = item && item.input;
+    if (raw && typeof raw === "object") return raw;
+    const text = String(raw || "");
+    try { const got = JSON.parse(text); if (got && typeof got === "object") return got; } catch { /* clipped */ }
+    const out = {};
+    for (const k of FIELDS) {
+      const m = new RegExp(`"${k}":\\s*"((?:[^"\\\\]|\\\\.)*)`).exec(text);
+      if (!m) continue;
+      try { out[k] = JSON.parse(`"${m[1]}"`); } catch { out[k] = m[1].replace(/\\n/g, "\n").replace(/\\"/g, '"'); }
+    }
+    const choice = /"choice":\s*"([^"]*)"/.exec(text);
+    if (choice) out.answer = {choice: choice[1]};
+    return out;
+  }
+
   const tool = (name) => String(name || "").replace(/^mcp__studio__/, "studio:");
 
   /* `docs/X_PLAN.md`, relative to the project, from any path that ends in it */
@@ -40,7 +75,7 @@ const Choreo = (() => {
 
   function steps(item, phase, where) {
     const name = tool(item && item.name);
-    const input = (item && item.input) || {};
+    const input = inputOf(item);
     const ok = phase === "end" && item.status !== "error";
     const pm = where && where.tab === "project";
     // the status column shows on Now only; elsewhere the Project bar's icon stands for its section
@@ -76,10 +111,28 @@ const Choreo = (() => {
     }
     if (name === "Bash") {
       const cmd = String(input.command || "");
-      if (/\bgit\s+commit\b/.test(cmd)) {
+      // an assistant often writes with the shell: a heredoc, sed -i, a python script
+      // a commit names the files it adds: it is a commit, nothing else
+      const commit = COMMIT.test(cmd);
+      const plans = commit ? [] : shellPlans(cmd);
+      const writes = !commit && WRITES.test(cmd);
+      for (const plan of plans) {
+        if (writes && phase === "start") { goPage("plans"); out.push({point: `plan:${plan}`, words: "editing", or: "pagehead"}); }
+        else if (writes && ok) out.push({refresh: true}, {point: `plan:${plan}`, words: "saved", soft: true, or: "pagehead"});
+        else if (!writes && pm && where.page === "plans" && phase === "start") out.push({point: `plan:${plan}`, words: "reading"});
+        break;   // one plan is enough to follow
+      }
+      if (writes && !plans.length && MATRIX_NAME.test(cmd)) {
+        if (phase === "start") { goPage("checklist"); out.push({point: "page:checklist", words: "editing rows"}); }
+        else if (ok) out.push({refresh: true});
+      } else if (writes && !plans.length && QUESTIONS_NAME.test(cmd)) {
+        if (phase === "start") { goPage("questions"); out.push({point: "page:questions", words: "editing"}); }
+        else if (ok) out.push({refresh: true});
+      }
+      if (commit) {
         if (phase === "start") out.push({point: col("changes"), words: "committing"});
         else if (ok) out.push({refresh: true}, {point: "commit:new", words: "committed", soft: true, or: col("changes")});
-      } else if (/\b(pytest|brd\s+check|operonx-project\s+plans)\b/.test(cmd)) {
+      } else if (/\b(pytest|brd\s+check|check_brd\w*|operonx-project\s+plans)\b/.test(cmd)) {
         if (phase === "start") out.push({point: col("checklist"), words: "checking"});
       }
       return out;
@@ -116,13 +169,43 @@ const Choreo = (() => {
     const seen = new Set((before.changes || []).map((c) => c.sha));
     for (const c of (after.changes || []).slice(0, 3)) if (!seen.has(c.sha)) out.push({point: `commit:${c.sha}`, words: "new"});
     const rows = new Map(((before.checklist || {}).open || []).map((r) => [r.id, r.status]));
-    for (const r of (after.checklist || {}).open || []) if (rows.has(r.id) && rows.get(r.id) !== r.status) out.push({point: `row:${r.id}`, words: r.status.replace(/_/g, " ")});
+    for (const r of (after.checklist || {}).open || []) {
+      if (!rows.has(r.id)) out.push({point: `row:${r.id}`, words: "new"});
+      else if (rows.get(r.id) !== r.status) out.push({point: `row:${r.id}`, words: r.status.replace(/_/g, " ")});
+    }
     const closed = [...rows.keys()].filter((id) => !((after.checklist || {}).open || []).some((r) => r.id === id));
     if (closed.length) out.push({point: "status:checklist", words: `${closed.length} closed`});
     return out.slice(0, 4);
   }
 
-  const api = {steps, changed, planPath};
+  /* On Flow: an edit to the file an op is defined in rings that op. `ops`: [{name, file, code}], the canvas's.
+   * The op is the one whose `def` the edit touches, or the file's only op. */
+  function opSteps(item, phase, ops) {
+    const name = tool(item && item.name);
+    if (!EDITS.has(name) || (phase === "end" && item.status === "error")) return [];
+    const input = inputOf(item);
+    const file = String(input.file_path || "");
+    const mine = (ops || []).filter((o) => o.file && (file === o.file || file.endsWith(`/${o.file}`)));
+    if (!mine.length) return [];
+    const text = `${input.old_string || ""}\n${input.new_string || ""}\n${input.content || ""}`;
+    const touched = mine.filter((o) => new RegExp(`\\bdef ${o.fn || o.name}\\(`).test(text));
+    const op = touched[0] || (mine.length === 1 ? mine[0] : null);
+    if (!op) return [];
+    return phase === "start" ? [{point: `op:${op.name}`, words: "editing"}] : [{point: `op:${op.name}`, words: "saved", soft: true}];
+  }
+
+  /* where a target lives: the screen to go to before pointing at it (null: anywhere, as it is) */
+  const PAGE_OF = {status: "now", q: "questions", qopt: "questions", plan: "plans", phase: "plans", ms: "plans",
+                   row: "checklist", commit: "changes", setting: "settings"};
+  const TAB_OF = {op: "flow", run: "traces", job: "jobs", eval: "evals"};
+  function where(target) {
+    const kind = String(target || "").split(":")[0];
+    if (PAGE_OF[kind]) return {tab: "project", page: PAGE_OF[kind]};
+    if (TAB_OF[kind]) return {tab: TAB_OF[kind]};
+    return null;
+  }
+
+  const api = {steps, changed, planPath, where, opSteps, inputOf};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   return api;
 })();
