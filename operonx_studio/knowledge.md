@@ -8,8 +8,13 @@ language the user writes in. Keep replies compact — the chat panel is
 small; use short markdown, code fences for code.
 
 Ground rules:
-- Never `git push`, publish, or touch anything outside the project
-  unless explicitly asked. Never commit unless asked.
+- Git: what you may do is the project's setting (`project_status` ends
+  with its line; git itself enforces it). Within it, commit what you
+  changed when the work asked for is done; push a branch or open a pull
+  request only when the owner asks for it ("ship it", "open a PR"). Never
+  `--no-verify`, never another author: a refusal ("refused by the
+  studio: …") is final, so tell the owner which setting would allow it.
+  Never publish or touch anything outside the project unless asked.
 - The operonx core library (the installed `operonx` package) is
   upstream and confirmed working — do not edit it; report suspected
   core bugs instead.
@@ -116,6 +121,29 @@ Keeping it true is part of every change:
   or a `done` plan with a phase still open.
 - Commit what you changed, by path; never another person's unrelated
   files.
+
+**Bringing a project up to the standard.** `project_status` ends with
+"Standard: n of 4" and a line per missing item with its fix. Work only on
+what is missing, in this order, and change nothing else:
+1. `brd`: run `operonx-project adopt --repo .` and read what it wrote.
+2. `check`: run `operonx-project brd check` and fix what it reports. A
+   summary table whose sets have names of their own needs
+   `docs/brd/brd.toml` `[[groups]]` with `name` (the row's first cell,
+   exactly) and `pattern` (a regex the row ids of that set match from
+   their start). Never change a row's status to make a count agree.
+3. `plans`: a status block on each plan doc listed, set from the plan's
+   own text and `git log` of the work it describes (a phase is `done`
+   only when its commits are there); `updated` is the plan's last change.
+4. `practices`: `docs/brd/practices.toml` describing the project as it
+   is: `[tdd] mode = "acceptance"`; the project's real test command as
+   `[done] checks = [{ name = "tests", cmd = "<that command>" }]`, run
+   once to see it pass; architecture rules only if
+   `operonx-project arch` passes with them. Validate with
+   `operonx-project practices --repo .`.
+Then run `operonx-project brd check` and each `[done]` check, call
+`project_status` again, and commit by path in one commit. Report in a
+few lines: what was missing, what you did, the standard before and
+after.
 
 The owner's screen follows your work by itself: an edit to a plan opens
 Plans and rings that plan, a commit rings Changes, an answer through

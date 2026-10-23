@@ -1,0 +1,3 @@
+#!/bin/sh
+# the studio's hook: its check, then the repo's own (operonx_studio/gitguard)
+exec "${OPERONX_STUDIO_PY:-python3}" -c 'import sys; del sys.path[0]; from operonx_studio.gitguard import main; sys.exit(main(sys.argv[1:]))' hook applypatch-msg "$@"

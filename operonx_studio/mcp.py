@@ -380,8 +380,12 @@ def t_project_status(s: Studio, a: Dict[str, Any]) -> str:
         got = s.call("/project/status", changes=int(a.get("changes") or 15))
     except RuntimeError as exc:
         return f"unavailable: {exc}"
+    try:  # what the assistant may do with git, from the studio (PROJECT_STANDARD_PLAN D6)
+        git_line = "\n" + str(s.call("/git").get("line") or "")
+    except RuntimeError:
+        git_line = ""
     if got.get("text"):
-        return got["text"]
+        return got["text"] + git_line
     doc = got.get("project") or {}  # an engine that sends only the document
     c = doc.get("checklist") or {}
     return json.dumps({"checklist": {"verified": c.get("verified"), "total": c.get("total"), "open": c.get("open")},

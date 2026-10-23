@@ -704,7 +704,8 @@ class Relay:
               view: Optional[Dict[str, Any]] = None, attachments: Optional[List[Dict[str, Any]]] = None,
               extra_mcp: Optional[Dict[str, Any]] = None, owner: Optional[str] = None,
               on_end: Optional[List[Any]] = None, claude: Optional[Dict[str, Any]] = None,
-              reach: Optional[str] = None, deny: Optional[List[str]] = None) -> Turn:
+              reach: Optional[str] = None, deny: Optional[List[str]] = None,
+              wrap_env: Optional[Any] = None) -> Turn:
         """Begin a turn in session *sid*; returns at once (call from a loop).
 
         ``fork_from`` is the Claude session to continue: ``""`` means the
@@ -724,6 +725,8 @@ class Relay:
         # switch, a fresh one, seeded with what was said (the transcript stays)
         claude = dict(claude or {"home": _chat.claude_home(), "machine": True})
         env = _chat._spawn_env(**claude)
+        if env is not None and wrap_env is not None:
+            env = wrap_env(env)   # the project's git policy, enforced (gitpolicy.assistant_env)
         account = _chat.account_key(**claude) or "none"
         reseed = bool(before) and (sess.get("claude_home") or "machine") != account and kind == "message"
         if reseed:

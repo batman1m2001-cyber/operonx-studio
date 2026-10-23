@@ -4178,6 +4178,32 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     _projectboard.register(app, watcher_of=_watcher)
 
+    # what the assistant may do with git, per project: operonx_studio/gitpolicy.py
+    from operonx_studio import gitpolicy as _gitpolicy
+
+    def _git_root(pid: str) -> Optional[Path]:
+        w = _watcher(pid)
+        return Path(w.root) if w is not None else None
+
+    @app.get("/api/p/{pid}/git")
+    async def git_policy(pid: str) -> JSONResponse:
+        root = _git_root(pid)
+        if root is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        policy = await asyncio.to_thread(_gitpolicy.load, recents.state_file.parent, pid, root)
+        return JSONResponse(await asyncio.to_thread(_gitpolicy.routes, policy, root))
+
+    @app.post("/api/p/{pid}/git")
+    async def git_policy_set(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        root = _git_root(pid)
+        if root is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        try:
+            policy = _gitpolicy.save(recents.state_file.parent, pid, root, body if isinstance(body, dict) else {})
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(await asyncio.to_thread(_gitpolicy.routes, policy, root))
+
     # the run queue of a durable service: operonx_studio/runqueue.py
     from operonx_studio import runqueue as _runqueue
 
@@ -4820,6 +4846,13 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": "unknown project"}, status_code=404)
         return cwd, context + _view_lines(view or {}), _studio_mcp(scope, request)
 
+    def _git_env(scope: str) -> Any:
+        """The project's git policy around the assistant's processes (PROJECT_STANDARD_PLAN D6)."""
+        root = _git_root(scope) if scope != "home" else None
+        if root is None:
+            return None
+        return lambda env: _gitpolicy.assistant_env(recents.state_file.parent, scope, root, env)
+
     def _project_mcp(scope: str) -> Dict[str, Any]:
         """A project's own tool servers, from its ``.mcp.json``: they join the
         studio's in a turn. The host's personal connectors never do
@@ -5318,7 +5351,8 @@ def build_studio_app(recents: Optional[Recents] = None):
                                view=body.get("view") if isinstance(body.get("view"), dict) else None,
                                attachments=refs, extra_mcp={} if _viewer(request) else _project_mcp(sess["scope"]),
                                owner=request.state.user["id"], on_end=[_revoker(mcp)],
-                               claude=_claude_of(request.state.user["id"]), **_limits(request))
+                               claude=_claude_of(request.state.user["id"]), wrap_env=_git_env(sess["scope"]),
+                               **_limits(request))
         except RuntimeError as exc:
             _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
@@ -5342,7 +5376,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         try:
             turn = relay.start(sid, "/compact", cwd=cwd, context=context, mcp=mcp, kind="compact",
                                owner=request.state.user["id"], on_end=[_revoker(mcp)],
-                               claude=_claude_of(request.state.user["id"]), **_limits(request))
+                               claude=_claude_of(request.state.user["id"]), wrap_env=_git_env(sess["scope"]),
+                               **_limits(request))
         except RuntimeError as exc:
             _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
