@@ -12,10 +12,19 @@
 # override is for working on both at once, so it is ignored here).
 set -e
 cd "$(dirname "$0")"
+# the project builder (operonx-project) is not on PyPI: it comes from an Operon checkout beside this one,
+# installed into the same environment so the Board and Project mode can act through it
+BUILDER=""
+[ -d ../Operon/packages/operonx-project ] && BUILDER="../Operon/packages/operonx-project"
 if command -v uv >/dev/null 2>&1; then
-  uv tool install --no-sources --reinstall .
+  if [ -n "$BUILDER" ]; then
+    uv tool install --no-sources --reinstall . --with "$BUILDER"
+  else
+    uv tool install --no-sources --reinstall .
+  fi
 else
-  python3 -m pip install --upgrade .
+  python3 -m pip install --upgrade . ${BUILDER:+"$BUILDER"}
 fi
+[ -n "$BUILDER" ] || echo "note: no ../Operon checkout, so no project builder: clone Operon beside this repo and run this again for the Board"
 echo
 echo "installed: run \`operonx-studio\` (or \`operonx studio\` inside a project)"

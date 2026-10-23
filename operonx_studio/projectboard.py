@@ -30,6 +30,7 @@ import shutil
 import signal
 import sqlite3
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -177,7 +178,7 @@ def _ms(db: sqlite3.Connection, row: sqlite3.Row) -> Dict[str, Any]:
 
 def milestones(root: Path) -> Dict[str, Any]:
     base = {"schema": SCHEMA, "brd": _has_brd(root), "daemon": daemon_status(root), "sandbox": _sandbox(root),
-            "models": _models(root), "practices": _practices(root)}
+            "models": _models(root), "practices": _practices(root), "installed": _engine() is not None}
     if not _has_store(root):
         return {**base, "milestones": [], "engine": False}
     db = _connect(root)
@@ -593,12 +594,16 @@ def _parse(text: str, qtext: str, asks: Dict[str, str]) -> Dict[str, Any]:
 
 # ── actions: the engine's own door ──────────────────────────────────────────
 def _engine() -> Optional[List[str]]:
-    """How to run ``operonx-project``: ``OPERONX_PROJECT_BIN``, or on PATH."""
+    """How to run ``operonx-project``: ``OPERONX_PROJECT_BIN``, on PATH, or beside the studio's own Python (a
+    studio started as ``.venv/bin/python -m operonx_studio.cli`` has its venv's scripts off PATH)."""
     explicit = os.environ.get("OPERONX_PROJECT_BIN")
     if explicit:
         return explicit.split()
     found = shutil.which("operonx-project")
-    return [found] if found else None
+    if found:
+        return [found]
+    beside = Path(sys.executable).parent / "operonx-project"
+    return [str(beside)] if beside.is_file() else None
 
 
 def act(root: Path, request: Dict[str, Any], actor: str) -> Dict[str, Any]:
