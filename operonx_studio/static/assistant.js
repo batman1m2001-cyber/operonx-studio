@@ -497,7 +497,20 @@
   fileInput.hidden = true;
   // images, and the text files that become cards; a phone offers its photos and camera
   fileInput.accept = "image/png,image/jpeg,image/gif,image/webp,image/*,.py,.json,.jsonl,.csv,.md,.txt,.log,.yaml,.yml,.toml,.js,.ts,.sql,.sh";
-  tools.append(bAttach, fileInput, modelPick, el("span", "ax-spacer"), meter, bExpand, send);
+  // the screen follows the work (hand.js): on, or off for good
+  const bFollow = ibtn("pointer", "", "ax-follow");
+  const paintFollow = () => {
+    const on = typeof Hand !== "undefined" && Hand.follow();
+    bFollow.classList.toggle("on", on);
+    bFollow.setAttribute("aria-pressed", String(on));
+    bFollow.title = on ? "The screen follows the assistant's work: click to stop" : "Let the screen follow the assistant's work";
+    bFollow.setAttribute("aria-label", "Follow the assistant's work");
+  };
+  bFollow.hidden = typeof Hand === "undefined" || !PROJECT;
+  bFollow.onclick = () => { Hand.setFollow(!Hand.follow()); paintFollow(); };
+  document.addEventListener("oxhandfollow", paintFollow);
+  paintFollow();
+  tools.append(bAttach, fileInput, modelPick, bFollow, el("span", "ax-spacer"), meter, bExpand, send);
   inputWrap.append(grip, tray, input, tools);
   // signing in: this card takes the box's place while it is needed
   const signin = el("div", "ax-signin");
@@ -1782,8 +1795,14 @@
       const it = ev.item;
       const stick = nearBottom();
       if (it.kind === "user" && pendingUser) { pendingUser.remove(); pendingUser = null; }
+      // the screen follows the work (choreo.js): a tool starting, and the same tool ending
+      const was = A.bySeq.get(it.seq);
+      const phase = it.kind !== "tool" ? null
+        : !was ? (it.status === "running" ? "start" : null)
+        : was.status === "running" && it.status !== "running" ? "end" : null;
       if (A.bySeq.has(it.seq)) replace(it);
       else { A.items.push(it); append(it); markLast(); }
+      if (phase) document.dispatchEvent(new CustomEvent("oxtool", {detail: {item: A.bySeq.get(it.seq) || it, phase}}));
       if (stick) toBottom(); else jump.hidden = false;
     } else if (ev.t === "delta") delta(ev.seq, ev.text);
     if (ev.t === "item" && ev.item.kind === "error" && ev.item.auth) {

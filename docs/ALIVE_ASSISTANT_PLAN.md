@@ -2,9 +2,9 @@
 title: The assistant works the screen
 status: in_progress
 phases:
-  - {id: L1, title: The hand — go, point, press, status: open}
-  - {id: L2, title: Project mode's targets, status: open}
-  - {id: L3, title: Project mode follows the assistant's work, status: open}
+  - {id: L1, title: The hand — go, point, press, status: done}
+  - {id: L2, title: Project mode's targets, status: done}
+  - {id: L3, title: Project mode follows the assistant's work, status: in_progress}
   - {id: L4, title: The assistant points on purpose, status: open}
   - {id: L5, title: The rest of the studio, status: open}
   - {id: L6, title: Gate, status: open}

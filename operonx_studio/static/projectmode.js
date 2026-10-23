@@ -47,6 +47,8 @@ const ProjectMode = (() => {
   const save = () => store(K, v);
   const enc = encodeURIComponent;
   const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
+  // a name the assistant's hand can reach (hand.js, docs/ALIVE_ASSISTANT_PLAN.md D2)
+  const tgt = (n, name) => { n.dataset.oxTarget = name; return n; };
   const ask = (text) => { if (window.oxAsk) window.oxAsk(text); if (MOBILE.matches) go("now"); };
 
   function ago(iso) {
@@ -78,7 +80,7 @@ const ProjectMode = (() => {
 
   /* ── the status column ─────────────────────────────────────────── */
   function section(key, title, count, body, opts) {
-    const s = el("section", "pm-sec");
+    const s = tgt(el("section", "pm-sec"), `status:${key}`);
     s.dataset.key = key;
     const h = el("h3", "pm-h");
     const name = opts && opts.page ? button("pm-hlink", title, () => go(opts.page), `Open ${PAGES[opts.page]}`) : el("span", null, title);
@@ -117,6 +119,7 @@ const ProjectMode = (() => {
     return capped("more-needs", items, 3, (q) => {
       const row = button("pm-item pm-q pm-one", null, () => go("questions"), `${q.id} · ${q.text}\nAnswer it on the Questions page`);
       row.dataset.key = `q:${q.source}:${q.milestone || ""}:${q.id}`;
+      tgt(row, `q:${q.id}`);
       row.append(el("span", "pm-id", q.id), el("span", "pm-text", q.text || q.kind));
       return row;
     });
@@ -128,6 +131,7 @@ const ProjectMode = (() => {
     for (const w of items) {
       const row = button("pm-item pm-w", null, () => { if (w.milestone) v.mid = w.milestone; go("plans"); }, w.path || `milestone ${w.milestone}`);
       row.dataset.key = `w:${w.path || w.milestone}`;
+      tgt(row, w.path ? `plan:${w.path}` : `ms:${w.milestone}`);
       row.append(el("span", "pm-title", w.title), el("span", "pm-sentence", w.sentence));
       list.append(row);
     }
@@ -157,6 +161,7 @@ const ProjectMode = (() => {
         for (const r of c.open) {
           const row = el("div", "pm-item pm-row pm-one");
           row.dataset.key = `r:${r.id}`;
+          tgt(row, `row:${r.id}`);
           row.title = `${r.id} · ${r.status.replace(/_/g, " ")}\n${r.what || r.note || ""}`;
           row.append(el("span", "pm-id", r.id), el("span", "pm-text", r.what || r.note || ""));
           l.append(row);
@@ -195,6 +200,7 @@ const ProjectMode = (() => {
     for (const ch of list.slice(0, 3)) {
       const row = el("div", "pm-item pm-commit pm-one");
       row.dataset.key = `c:${ch.sha}`;
+      tgt(row, `commit:${ch.sha}`);
       row.title = `${ch.sha} · ${ch.author} · ${ch.at}`;
       row.append(el("span", "pm-text", ch.subject), el("span", "pm-where", ago(ch.at)));
       l.append(row);
@@ -236,7 +242,7 @@ const ProjectMode = (() => {
 
   /* ── the pages ──────────────────────────────────────────────────── */
   function pageHead(title, sub) {
-    const h = el("div", "panehead pm-pagehead");
+    const h = tgt(el("div", "panehead pm-pagehead"), "pagehead");
     h.append(el("h2", null, title));
     if (sub) h.append(el("span", "count", sub));
     return h;
@@ -269,6 +275,7 @@ const ProjectMode = (() => {
       const key = p.path || `m:${p.milestone}`;
       const card = el("div", `pm-plan st-${p.status}`);
       card.dataset.key = key;
+      tgt(card, p.path ? `plan:${p.path}` : `ms:${p.milestone}`);
       const top = button("pm-plantop", null, () => {
         if (p.source === "engine") { v.mid = p.milestone; save(); drawPlans(); return; }
         v.open[key] = !v.open[key]; save(); drawPlans();
@@ -286,7 +293,7 @@ const ProjectMode = (() => {
       if (v.open[key] && p.source !== "engine") {
         const list = el("ol", "pm-phaselist");
         for (const ph of p.phases) {
-          const li = el("li", `ph-${ph.status}`);
+          const li = tgt(el("li", `ph-${ph.status}`), `phase:${p.path}#${ph.id}`);
           li.append(el("span", "pm-id", ph.id), el("span", null, ph.title || ""), el("span", "pm-where", ph.status.replace(/_/g, " ")));
           list.append(li);
         }
@@ -308,7 +315,7 @@ const ProjectMode = (() => {
       sec.append(addBlocksNote(d));
       sec.append(fold("unmarked", "Which ones", () => {
         const ul = el("ul", "pm-paths");
-        for (const path of d.unmarked) ul.append(el("li", "mono", path));
+        for (const path of d.unmarked) ul.append(tgt(el("li", "mono", path), `plan:${path}`));
         return ul;
       }));
       page.append(sec);
@@ -364,6 +371,7 @@ const ProjectMode = (() => {
         const key = `row:${r.id}`;
         const item = el("div", `pm-reqrow${CLOSED.has(r.status) ? "" : " open"}`);
         item.dataset.key = key;
+        tgt(item, key);
         const top = button("pm-reqtop", null, () => { v.open[key] = !v.open[key]; save(); paint(); });
         top.append(el("span", "pm-id", r.id), el("span", "pm-text", r.text || r.cells.slice(1, 3).join(" · ")),
           el("span", `pm-pill rs-${r.status}`, r.status.replace(/_/g, " ")),
@@ -424,6 +432,7 @@ const ProjectMode = (() => {
   function engineQuestion(q, f) {
     const card = el("section", "pm-qcard");
     card.dataset.key = `q:${q.milestone}:${q.id}`;
+    tgt(card, `q:${q.id}`);
     const head = el("div", "pm-qhead");
     head.append(el("span", "pm-id", q.id), el("span", "pm-where", `${q.milestone}${q.card ? " · " + q.card : ""} · ${q.kind}`));
     head.append(button("linkbtn", "Open the board", () => { v.mid = q.milestone; go("plans"); }));
@@ -434,6 +443,7 @@ const ProjectMode = (() => {
       const rec = (f ? f.recommended : q.recommended) === o.key;
       const b = button(`${rec ? "primary" : ""} needs-edit`, `${o.label}${rec ? " (recommended)" : ""}`,
         () => answer(q, {choice: o.key, text: ""}), o.description || "");
+      tgt(b, `qopt:${q.id}:${o.key}`);
       opts.append(b);
     }
     const key = `${q.milestone}:${q.id}`;
@@ -448,6 +458,7 @@ const ProjectMode = (() => {
   function brdQuestion(q) {
     const card = el("section", "pm-qcard");
     card.dataset.key = `q:brd:${q.id}`;
+    tgt(card, `q:${q.id}`);
     const head = el("div", "pm-qhead");
     head.title = `${q.kind} · ${q.state} · docs/brd/requirements/open_questions.md`;
     head.append(el("span", "pm-id", q.id), el("span", "pm-qtext", q.text));
@@ -487,6 +498,7 @@ const ProjectMode = (() => {
       if (d !== day) { day = d; page.append(el("h3", "pm-h pm-day", d)); }
       const row = el("div", "pm-change");
       row.dataset.key = `c:${ch.sha}`;
+      tgt(row, `commit:${ch.sha}`);
       row.append(el("span", "pm-text", ch.subject),
         el("span", "pm-where", `${ch.sha} · ${ch.author} · ${(ch.at || "").slice(11, 16)}`));
       page.append(row);
@@ -507,7 +519,7 @@ const ProjectMode = (() => {
     const rows = el("div", "pm-setrows");
     page.append(rows);
     const row = (name, why, value, ...acts) => {
-      const r = el("div", "pm-setrow");
+      const r = tgt(el("div", "pm-setrow"), `setting:${name.toLowerCase().replace(/\W+/g, "-")}`);
       r.title = why;
       r.append(el("span", "pm-setname", name), value, ...acts);
       rows.append(r);
@@ -567,8 +579,10 @@ const ProjectMode = (() => {
     try {
       const got = await api(`/api/p/${PID}/project/status`);
       if (mine !== token) return;
+      const before = doc;
       doc = got.project;
       failed = null;
+      if (base) whatHappened(before);
     } catch (err) {
       if (mine !== token) return;
       const d = err.data || {};
@@ -579,7 +593,8 @@ const ProjectMode = (() => {
       paintBar();
       // the pages drawn from the document follow it; a page being typed into is left alone
       const typing = page.contains(document.activeElement) && /TEXTAREA|INPUT|SELECT/.test(document.activeElement.tagName);
-      if (!typing && (v.page === "questions" || v.page === "settings" || (v.page === "plans" && !v.mid))) drawPage();
+      if (!typing && (v.page === "questions" || v.page === "settings" || (v.page === "plans" && !v.mid)
+        || (base && (v.page === "changes" || v.page === "checklist")))) drawPage();
     }
     schedule();
   }
@@ -588,6 +603,22 @@ const ProjectMode = (() => {
     if (!on || document.hidden) return;
     timer = setTimeout(refresh, 15000);
   }
+
+  /* ── the screen follows the assistant's work (choreo.js, hand.js) ── */
+  let base = null;            // the status document when the assistant's turn began
+  const played = new Set();   // what this turn already lit
+  const CAN = () => typeof Hand !== "undefined" && typeof Choreo !== "undefined";
+  function whatHappened(before) {
+    if (!CAN() || !on) return;
+    const fresh = Choreo.changed(base || before, doc).filter((s) => !played.has(`${s.point}|${s.words}`));
+    for (const s of fresh) played.add(`${s.point}|${s.words}`);
+    Hand.play(fresh, {front: true});
+  }
+  document.addEventListener("oxtool", (ev) => {
+    if (!CAN() || !on) return;
+    const {item, phase} = ev.detail;
+    Hand.play(Choreo.steps(item, phase, {tab: state.tab, page: v.page}));
+  });
 
   /* ── the bar ───────────────────────────────────────────────────── */
   function paintBar() {
@@ -649,7 +680,11 @@ const ProjectMode = (() => {
   // a turn that ended may have changed the project: read it again
   document.addEventListener("oxassistant", (ev) => {
     const now = !!(ev.detail && ev.detail.busy);
-    if (busy && !now && on) { refresh(); if (v.page === "checklist" || v.page === "changes") drawPage(); }
+    if (!busy && now) { base = doc; played.clear(); }
+    if (busy && !now && on) {
+      refresh().then(() => { base = null; });
+      if (v.page === "checklist" || v.page === "changes") drawPage();
+    }
     busy = now;
   });
   document.addEventListener("oxturnended", () => { if (on) refresh(); });
