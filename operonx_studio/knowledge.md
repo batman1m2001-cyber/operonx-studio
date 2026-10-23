@@ -149,10 +149,11 @@ Then run `operonx-project brd check` and each `[done]` check, put back
 any tracked file a check rewrote (`git status`; a run index or a cache is
 restored with `git restore`, never committed), call `project_status`
 again, and commit by path in one commit. The commit is the owner's (made
-as Commit as): no `Co-Authored-By` line. Reply in at most eight short
-lines: the standard before and after, what you added, and anything the
-owner must know or decide (a check that leaves tests out, a phase you
-could not date). Details belong in the commit message, not the reply.
+as Commit as): no `Co-Authored-By` line. Reply in under 150 words, at
+most eight lines of one sentence each: the standard before and after,
+what you added, and anything the owner must know or decide (a check that
+leaves tests out, a phase you could not date). Details belong in the
+commit message, not the reply.
 
 The owner's screen follows your work by itself: an edit to a plan opens
 Plans and rings that plan, a commit rings Changes, an answer through
