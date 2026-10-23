@@ -4,6 +4,7 @@ status: in_progress
 phases:
   - {id: S1, title: The engine says what the standard is and where a project stands against it, status: open}
   - {id: S2, title: The studio shows it and offers one action, status: open}
+  - {id: G1, title: Git per project — who commits, what the assistant may do, enforced, status: open}
   - {id: S3, title: The assistant does it on clones; fix and retry until every project passes, status: open}
   - {id: S4, title: The passing work lands in the real repos, status: open}
   - {id: S5, title: Live studio and the report, status: open}
@@ -72,14 +73,34 @@ repo and merged on its working branch: mr-finance `main` (docs only; the live ap
 educa-reminder-agent `refactor/operonx-studio` (that branch only), meeting-prep-projects `main`, qc-snatcher
 `main`, tipcalc `main`. The owner's untracked files are never added.
 
+**D6. Git per project, enforced in git, not in words** (asked by the owner the same day). Measured: the assistant
+has free Bash and this machine's `gh` is signed in as batman1m2001-cyber, so only one sentence of knowledge kept
+it from pushing; mr-finance has no git identity and the gate's assistant committed as the owner by copying an
+email from the log; the callbot is on GitLab with no API token. So each project gets, in Project mode Settings:
+- **Commit as**: a name and email, written to the repo's own git config by the owner's action;
+- **Remote**: read from the repo, with the account it pushes as (the machine's `gh`, or "the machine's git
+  credentials" for another host);
+- **The assistant may**: off · commit · push branches · open PRs · merge PRs (a ladder; default: commit);
+- **Protected branches**: never pushed to by the assistant (default: the remote's default branch, `production`).
+
+The policy lives in the studio's state (`<state>/git/<pid>.json`): it is this studio's rule for its assistant,
+not the project's. It is enforced for the assistant's processes only, however a command is spelled:
+`GIT_CONFIG_*` in the assistant's environment points `core.hooksPath` at the studio's hooks, which check the
+policy (commit: the level and the author is the "commit as" identity; push: the level and no protected ref) and
+then run the repo's own hooks; a `gh` guard first on the assistant's PATH checks `pr create` and `pr merge`
+against the level. A refusal says why ("main is protected in this project: push a branch"). Viewers get no git.
+This replaces the "separate git tools" first described to the owner: tools could be bypassed by spelling the
+command differently; hooks cannot.
+
 ## 3. Phases
 
 | Phase | What | Gate |
 |---|---|---|
 | S1 | Operon: `status()["standard"]`, the text line, the guide's "The standard" with `brd.toml` groups; core release | tests for each item, ok and missing; the six projects read as in §1 |
 | S2 | Studio: the line on Now, the four items on Settings, the action, the knowledge section, `project_status` text | studio tests; desktop and phone screenshots |
+| G1 | Studio: the policy store and API, Settings rows, the hooks and the `gh` guard in the assistant's environment, the knowledge | tests: each level allows and refuses what it should through real `git` and a fake `gh`; a commit as anyone else is refused |
 | S3 | The loop: each project's clone, the action, the scorecard; fix the assistant, retry | all six score every line of D4 |
-| S4 | Fetch the passing commits into the real repos, merge per D5, push | `standard` 4/4 on every real repo |
+| S4 | On the real repos, the assistant itself, under each project's git policy: commit, push a branch, open a PR (GitHub); I merge per D5 | `standard` 4/4 on every real repo |
 | S5 | Live studio restarted, memory, the report | the six projects in the live studio, 4/4 |
 
 ## 4. Rounds
