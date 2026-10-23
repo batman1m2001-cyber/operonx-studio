@@ -5308,3 +5308,11 @@ button.pm-w { cursor: pointer; }
   .ox-hand { display: none; }
   .ox-ring.on, .ox-pressed, .ox-hand.click::after { animation: none; }
 }
+
+/* Settings: the standard and git (PROJECT_STANDARD_PLAN) */
+.pm-setgroup { margin: 18px 0 6px; }
+.pm-setgroup:first-of-type { margin-top: 4px; }
+.pm-setval.pm-ok { color: var(--ok); }
+.pm-setval.pm-bad { margin: 0; }
+.pm-gitid { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
+.pm-gitid input { flex: 1 1 160px; min-width: 0; }

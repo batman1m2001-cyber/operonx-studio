@@ -237,6 +237,16 @@ const ProjectMode = (() => {
       section("checklist", "Checklist", null, checklistBox(d.checklist), {page: "checklist"}),
       section("plans", "Plans", d.plans.length || null, plansBox(d), {page: "plans"}),
       section("changes", "Recent changes", null, changesBox(d.changes), {page: "changes"}));
+    // the standard, only while something is missing: one line, the rest on Settings
+    const std = d.standard || [];
+    const missing = std.filter((x) => !x.ok);
+    if (missing.length) {
+      const body = el("div", "pm-note");
+      body.title = missing.map((x) => `${x.name}: ${x.line}`).join("\n");
+      body.append(el("span", null, `Missing: ${missing.map((x) => x.name).join(", ")}`),
+        button("linkbtn needs-edit", "Bring it up", () => ask(STANDARD_ASK)));
+      wrap.append(section("standard", "Standard", `${std.length - missing.length}/${std.length}`, body, {page: "settings"}));
+    }
     side.append(wrap);
   }
 
@@ -510,20 +520,35 @@ const ProjectMode = (() => {
     page.textContent = "";
     page.append(pageHead("Settings", ""));
     let info = {};
-    try { info = await api(`/api/p/${PID}/board`); } catch (err) { info = {error: err.message}; }
+    let git = null;
+    await Promise.all([
+      api(`/api/p/${PID}/board`).then((x) => { info = x; }, (err) => { info = {error: err.message}; }),
+      api(`/api/p/${PID}/git`).then((x) => { git = x; }, (err) => { git = {error: err.message}; }),
+    ]);
     if (mine !== pageToken || v.page !== "settings") return;
+    keepDrafts();
     page.textContent = "";
     page.append(pageHead("Settings", ""));
     const s = doc ? doc.setup : null;
     // one row per setting: its name, its value, its action; the why is on hover
-    const rows = el("div", "pm-setrows");
-    page.append(rows);
+    let rows = null;
+    const group = (title) => {
+      page.append(el("h3", "pm-h pm-setgroup", title));
+      rows = el("div", "pm-setrows");
+      page.append(rows);
+      return rows;
+    };
     const row = (name, why, value, ...acts) => {
       const r = tgt(el("div", "pm-setrow"), `setting:${name.toLowerCase().replace(/\W+/g, "-")}`);
       r.title = why;
       r.append(el("span", "pm-setname", name), value, ...acts);
       rows.append(r);
+      return r;
     };
+
+    standardRows(group, row);
+    gitRows(group, row, git);
+    group("Building");
     row("How it is built", s && s.practices.file ? `From ${s.practices.file}, committed: tests, architecture rules, the checks a change must pass`
       : "No docs/brd/practices.toml: the defaults", el("span", "pm-setval", s ? s.practices.line.replace(/^no practices file /, "defaults ") : "…"),
       button("needs-edit", "Change", () => ask("Show me the project's practices (docs/brd/practices.toml) "
@@ -560,6 +585,76 @@ const ProjectMode = (() => {
     row("Engine daemon", "It drives the milestones the engine builds; work done in the conversation does not need it",
       el("span", `pm-setval ${dmn.running ? "" : "pm-quiet"}`, dmn.running ? "running" : "stopped"), run);
     if (info.sandbox === false) row("Sandbox", "This machine runs the engine's coders without the shell sandbox", el("span", "pm-bad", "off"));
+  }
+
+  /* ── the standard (PROJECT_STANDARD_PLAN D1, D3) ─────────────────── */
+  const STANDARD_ASK = "Bring this project up to the standard: start with project_status, then follow "
+    + "\"Bringing a project up to the standard\" in your knowledge, item by item, and commit. "
+    + "Then reply in under 150 words: the details go in the commit message.";
+  const standardOf = () => (doc && doc.standard) || [];
+  function standardRows(group, row) {
+    const std = standardOf();
+    if (!std.length) return;
+    const met = std.filter((x) => x.ok).length;
+    const box = group(`Standard · ${met} of ${std.length}`);
+    for (const x of std) {
+      const val = el("span", `pm-setval ${x.ok ? "pm-ok" : "pm-bad"}`, `${x.ok ? "✓" : "✗"} ${x.line}`);
+      row(x.name[0].toUpperCase() + x.name.slice(1), x.ok ? x.line : `${x.line}\nFix: ${x.fix}`, val);
+    }
+    if (met < std.length) {
+      const r = el("div", "pm-acts");
+      r.append(button("primary needs-edit", "Bring it up to the standard", () => ask(STANDARD_ASK)));
+      box.after(r);
+    }
+  }
+
+  /* ── git: what the assistant may do (PROJECT_STANDARD_PLAN D6) ───── */
+  const LEVEL_WORDS = {off: "Nothing", commit: "Commit", push: "Commit, push branches", pr: "… and open pull requests",
+                       merge: "… and merge pull requests"};
+  async function saveGit(body) {
+    try { await api(`/api/p/${PID}/git`, body); toast("Saved"); }
+    catch (err) { toast((err.data || {}).error || err.message, true); }
+    drawSettings();
+  }
+  function gitRows(group, row, git) {
+    group("Git");
+    if (!git || git.error) { row("Git", "", el("span", "pm-bad", (git && git.error) || "…")); return; }
+    // who commits
+    const id = git.identity;
+    const who = el("span", `pm-setval ${id ? "" : "pm-bad"}`, id ? `${id.name} <${id.email}>` : "not set: the assistant cannot commit");
+    const form = el("div", "pm-words pm-gitid needs-edit");
+    form.hidden = !drafts["git:name"] && !drafts["git:email"];
+    const nm = el("input"); nm.placeholder = "Name"; nm.value = drafts["git:name"] ?? (id ? id.name : "");
+    const em = el("input"); em.placeholder = "Email"; em.type = "email"; em.value = drafts["git:email"] ?? (id ? id.email : "");
+    nm.oninput = () => { drafts["git:name"] = nm.value; };
+    em.oninput = () => { drafts["git:email"] = em.value; };
+    form.append(nm, em, button("primary", "Save", () => {
+      delete drafts["git:name"]; delete drafts["git:email"];
+      saveGit({identity: {name: nm.value, email: em.value}});
+    }));
+    const r = row("Commit as", "The name and email every commit is made with, yours and the assistant's; "
+      + "also written to the repo's own git config", who, button("needs-edit", "Change", () => { form.hidden = false; nm.focus(); }));
+    r.after(form);
+    // where it pushes
+    row("Remote", git.remote ? `${git.remote}\nPushes as ${git.push_as}` : "No remote named origin",
+      el("span", "pm-setval", git.remote ? `${git.host || git.remote} · as ${git.push_as}` : "none"));
+    // what the assistant may do
+    const pick = el("select", "needs-edit");
+    for (const l of git.levels) {
+      const o = el("option", null, LEVEL_WORDS[l] || l);
+      o.value = l;
+      o.selected = git.level === l;
+      pick.append(o);
+    }
+    pick.onchange = () => saveGit({level: pick.value});
+    row("The assistant may", "Enforced in git for the assistant: a step past this is refused, with the reason", pick);
+    // never pushed to
+    const prot = el("input", "pm-search needs-edit");
+    prot.value = (git.protected || []).join(", ");
+    prot.placeholder = "main, production";
+    prot.onchange = () => saveGit({protected: prot.value});
+    row("Protected branches", "The assistant never pushes to these (comma-separated); it pushes a branch and opens "
+      + "a pull request instead", prot);
   }
 
   function drawPage() {

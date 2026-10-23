@@ -228,8 +228,10 @@ def base_env(*, keep_anthropic: bool = False) -> Dict[str, str]:
     # it is a nested/SDK session and misbehave. HOME must survive — the
     # OAuth credentials live under it. ANTHROPIC_* is the host's own key:
     # only the machine login's owner runs with it.
+    # VIRTUAL_ENV is the shell's that started the studio: in a project the assistant uses the project's own
+    # .venv (uv warned on every `uv run`, PROJECT_STANDARD_PLAN round 1)
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith("CLAUDE") and k not in ("CLAUDECODE", "AI_AGENT")
+           if not k.startswith("CLAUDE") and k not in ("CLAUDECODE", "AI_AGENT", "VIRTUAL_ENV")
            and (keep_anthropic or not k.startswith("ANTHROPIC"))}
     # the studio's own commands (operonx-project, operonx) for the assistant's Bash, after the project's own:
     # a studio started as .venv/bin/python has its scripts off PATH (PROJECT_MODE_PLAN D5)
