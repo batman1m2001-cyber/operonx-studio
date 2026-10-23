@@ -140,7 +140,9 @@ what is missing, in this order, and change nothing else:
    must pass now: tests that fail only for something outside the code (a
    database, a key, data not in the repo) are left out by name
    (`--deselect`, `--ignore`) with a comment saying why, never a check that
-   fails; architecture rules only if
+   fails. A test that fails because of the code is not fixed here (this
+   work changes `docs/` only): leave it out the same way and name it in
+   the reply for the owner; architecture rules only if
    `operonx-project arch` passes with them. Validate with
    `operonx-project practices --repo .`.
 Then run `operonx-project brd check` and each `[done]` check, put back
