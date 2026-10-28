@@ -363,14 +363,18 @@
 :root[data-theme="dark"] #stacks .genghost.g1 { filter: none; opacity: .95; }
 :root[data-theme="dark"] #stacks .genghost.g2 { filter: none; opacity: .75; }
 
-/* glass at night: a dark tint, and the rim light carries the shape (a
-   near-black page shows little blur) */
+/* glass at night: a smoke-grey tint lighter than the page, and the rim
+   light carries the shape (a near-black page shows little blur) */
 :root[data-theme="dark"] {
-  --glass-clear: rgba(22, 26, 32, .62);
-  --glass-frost: rgba(22, 26, 32, .82);
+  --glass-clear: rgba(44, 50, 60, .55);
+  --glass-frost: rgba(40, 46, 56, .80);
+  --glass-menu: rgba(40, 46, 56, .66);
   --glass-line: rgba(255, 255, 255, .09);
+  --glass-outline: rgba(0, 0, 0, .55);
+  --glass-edge: rgba(255, 255, 255, .16);
+  --glass-text-3: #a2acb8;
   --edge-shade: rgba(0, 0, 0, .28);
-  --glass-rim: rgba(255, 255, 255, .10);
+  --glass-rim: rgba(255, 255, 255, .22);
   --glass-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 12px 36px rgba(0, 0, 0, .45);
   --glass-drop: rgba(255, 255, 255, .12);
   --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, .04), rgba(255, 255, 255, 0) 60%);

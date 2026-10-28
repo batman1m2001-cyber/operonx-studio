@@ -129,7 +129,10 @@ const Glass = (() => {
     const add = () => document.body.insertAdjacentHTML("beforeend",
       '<svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="ox-refract" x="0" y="0" width="100%" height="100%">' +
       '<feTurbulence type="fractalNoise" baseFrequency="0.012 0.03" numOctaves="1" seed="7" result="n"/>' +
-      '<feDisplacementMap in="SourceGraphic" in2="n" scale="14" xChannelSelector="R" yChannelSelector="G"/></filter></svg>');
+      '<feDisplacementMap in="SourceGraphic" in2="n" scale="14" xChannelSelector="R" yChannelSelector="G"/></filter>' +
+      '<filter id="ox-lens" x="0" y="0" width="100%" height="100%">' +
+      '<feTurbulence type="fractalNoise" baseFrequency="0.005 0.011" numOctaves="2" seed="3" result="n"/>' +
+      '<feDisplacementMap in="SourceGraphic" in2="n" scale="34" xChannelSelector="R" yChannelSelector="G"/></filter></svg>');
     if (document.body) add(); else document.addEventListener("DOMContentLoaded", add);
   }
   // a menu grows out of the button that opened it: the last pressed control

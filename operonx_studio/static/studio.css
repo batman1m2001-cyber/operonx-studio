@@ -5328,14 +5328,24 @@ button.pm-w { cursor: pointer; }
 :root {
   --glass-clear: rgba(255, 255, 255, .50);
   --glass-frost: rgba(255, 255, 255, .72);
+  /* a menu is up for a moment: thinner, so the lens shows what it opened over */
+  --glass-menu: rgba(255, 255, 255, .60);
   --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, .35), rgba(255, 255, 255, 0) 60%);
   --glass-line: rgba(15, 20, 25, .08);
   --edge-shade: rgba(15, 20, 25, .05);
   --glass-rim: rgba(255, 255, 255, 1);
+  /* the light caught all round the edge */
+  --glass-edge: rgba(255, 255, 255, .7);
+  --glass-outline: rgba(15, 20, 25, .10);
+  /* the faint text, a step stronger on glass: it reads over whatever is behind */
+  --glass-text-3: #56606c;
   /* tight: a wide soft shadow smears grey over a white canvas */
   --glass-shadow: 0 1px 1px rgba(15, 20, 25, .04), 0 3px 12px rgba(15, 20, 25, .07);
   --glass-drop: rgba(255, 255, 255, .95);
-  --glass-blur-clear: 18px;
+  /* little blur where there is no text to read through: what is behind
+     stays itself, bent by the lens, not smeared */
+  --glass-blur-clear: 6px;
+  --glass-blur-menu: 10px;
   --glass-blur-frost: 24px;
   --glass-sat: 190%;
   --glass-still: rgba(250, 251, 253, .94);
@@ -5364,8 +5374,11 @@ body.floatframe:not(.ax-focus) #sidebar {
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   border-color: transparent;
-  box-shadow: inset 0 0 0 1px var(--glass-line), inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+  box-shadow: inset 0 0 0 1px var(--glass-edge), inset 0 1px 0 var(--glass-rim), 0 0 0 .5px var(--glass-outline), var(--glass-shadow);
 }
+/* menus: thin glass, the lens shows what they open over */
+.popover, .ax-pop, .ax-slash { --glass-tint: var(--glass-menu); --glass-blur: var(--glass-blur-menu); }
+:root[data-glass="glass"] :is(.glass, .canvasbar, .livebar, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, .pm-island, .pm-qtoast) { --text-3: var(--glass-text-3); }
 /* reduce transparency: each piece is its solid surface again, with the
    edge and shadow every floating surface has */
 :root[data-glass="solid"] .glass, :root[data-glass="solid"] .canvasbar, :root[data-glass="solid"] .livebar,
@@ -5450,6 +5463,11 @@ body.floatframe:not(.ax-focus) .findbox, body.floatframe:not(.ax-focus) #legend 
   /* blur first, then bend: the other order drops the blur in Chromium */
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) url(#ox-refract);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) url(#ox-refract);
+}
+/* menus and the builder's island and toast bend through a wider lens */
+:root.refract[data-glass="glass"] :is(.popover, .ax-pop, .ax-slash, .pm-island, .pm-qtoast) {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) url(#ox-lens);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) url(#ox-lens);
 }
 /* zooming: the glass over the canvas holds still (canvas.js stillGlass) */
 body.zooming .canvasbar, body.zooming .livebar, body.zooming.floatframe header.bar,
