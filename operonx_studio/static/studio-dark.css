@@ -369,6 +369,7 @@
   --glass-clear: rgba(22, 26, 32, .62);
   --glass-frost: rgba(22, 26, 32, .82);
   --glass-line: rgba(255, 255, 255, .09);
+  --edge-shade: rgba(0, 0, 0, .28);
   --glass-rim: rgba(255, 255, 255, .10);
   --glass-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 12px 36px rgba(0, 0, 0, .45);
   --glass-drop: rgba(255, 255, 255, .12);
