@@ -141,13 +141,15 @@ const Glass = (() => {
   document.addEventListener("pointerdown", (e) => { pressed = e.target.closest("button, [role=button], a, input"); }, true);
   document.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pressed = document.activeElement; }, true);
   const still = window.matchMedia ? matchMedia("(prefers-reduced-motion: reduce)") : null;
-  function grow(el) {
+  // `from` is where it grows out of: a rect, null for its own top centre, or (left out) the pressed control
+  function grow(el, from) {
     if ((still && still.matches) || !el.getClientRects().length || el.dataset.grown) return;
     el.dataset.grown = "";
     const r = el.getBoundingClientRect();
     let ox = r.width / 2, oy = 0;
-    if (pressed && pressed.isConnected && !el.contains(pressed)) {
-      const b = pressed.getBoundingClientRect();
+    if (from === undefined && pressed && pressed.isConnected && !el.contains(pressed)) from = pressed.getBoundingClientRect();
+    if (from) {
+      const b = from;
       ox = Math.min(r.width, Math.max(0, b.left + b.width / 2 - r.left));
       oy = Math.min(r.height, Math.max(0, b.top + b.height / 2 - r.top));
     }
@@ -167,5 +169,7 @@ const Glass = (() => {
       else delete m.target.dataset.grown;
     }
   }).observe(document.documentElement, {subtree: true, childList: true, attributes: true, attributeFilter: ["hidden"]});
-  return {get: read, set, resolve, picker};
+  // a piece shown in place (not a menu): grow it now, out of `from`
+  const growFrom = (el, from) => { delete el.dataset.grown; grow(el, from); delete el.dataset.grown; };
+  return {get: read, set, resolve, picker, growFrom};
 })();

@@ -532,6 +532,8 @@
   const foot = el("div", "ax-foot");
   foot.append(jump, status, composer);
   main.append(log, foot, peek);
+  // the foot's height: where the log scrolls under a floating composer (Project mode's glass)
+  new ResizeObserver(() => main.style.setProperty("--ax-foot-h", `${foot.offsetHeight}px`)).observe(foot);
   const body = el("div", "ax-body");
   body.append(side, main);
   root.append(head, body, pop, dropzone);

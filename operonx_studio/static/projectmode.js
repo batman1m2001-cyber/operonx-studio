@@ -78,6 +78,66 @@ const ProjectMode = (() => {
   main.append(page, chat, side);
   box.append(main);
 
+  /* ── the builder island and a question's toast ────────────────────
+   * Glass over the conversation (docs/LIQUID_GLASS_PLAN.md G5). While a
+   * milestone is being built, a capsule says the card and what it has cost,
+   * and grows into the plan; a question that arrives says so once, and grows
+   * into Questions. At the top: the composer has the bottom. */
+  const floats = el("div", "pm-floats");
+  const island = button("pm-island", null, () => {
+    const from = island.getBoundingClientRect();
+    v.mid = island.dataset.mid || "";
+    go("plans");
+    Glass.growFrom(page, from);
+  });
+  island.hidden = true;
+  tgt(island, "island");
+  const qtoast = el("div", "pm-qtoast");
+  qtoast.hidden = true;
+  qtoast.setAttribute("role", "status");
+  floats.append(island, qtoast);
+  chat.append(floats);
+  const STATES = {waiting_human: "waits for you", running: "building", in_progress: "building", review: "in review", qa: "in QA"};
+  const usd = (n) => `$${(+n || 0).toFixed(2).replace(/\.00$/, "")}`;
+
+  function paintIsland() {
+    const runs = doc ? doc.plans.filter((p) => p.source === "engine" && p.status === "in_progress" && p.current) : [];
+    island.hidden = !runs.length;
+    if (!runs.length) return;
+    const p = runs[0];
+    island.textContent = "";
+    island.dataset.mid = p.milestone || "";
+    island.dataset.state = p.state || "";
+    island.title = `${p.title}${p.reason ? ` · ${p.reason}` : ""}\nOpen its plan`;
+    island.append(el("span", "pm-island-dot"), el("b", null, p.current),
+      el("span", "pm-island-state", STATES[p.state] || String(p.state || "").replace(/_/g, " ")),
+      el("span", "pm-island-cost", p.budget_usd ? `${usd(p.cost_usd)} of ${usd(p.budget_usd)}` : usd(p.cost_usd)));
+    if (runs.length > 1) island.append(el("span", "pm-island-more", `+${runs.length - 1}`));
+  }
+
+  // only a question that arrived while the mode shows: the rail's badge has the rest
+  function noticeQuestions(before) {
+    if (!before || !doc || v.page === "questions") return;
+    const had = new Set(before.needs_you.map((q) => q.id));
+    const fresh = doc.needs_you.filter((q) => !had.has(q.id));
+    if (!fresh.length) return;
+    const q = fresh[0];
+    qtoast.textContent = "";
+    const open = button("pm-qtoast-open", null, () => {
+      const from = qtoast.getBoundingClientRect();
+      qtoast.hidden = true;
+      go("questions");
+      Glass.growFrom(page, from);
+    }, "Answer it on the Questions page");
+    open.append(el("b", null, fresh.length > 1 ? `${q.id} and ${fresh.length - 1} more need you` : `${q.id} needs you`),
+      el("span", null, q.text));
+    const close = button("pm-qtoast-x", "×", () => { qtoast.hidden = true; }, "Dismiss");
+    close.setAttribute("aria-label", "Dismiss");
+    qtoast.append(open, close);
+    qtoast.hidden = false;
+    Glass.growFrom(qtoast, island.hidden ? null : island.getBoundingClientRect());
+  }
+
   /* ── the status column ─────────────────────────────────────────── */
   function section(key, title, count, body, opts) {
     const s = tgt(el("section", "pm-sec"), `status:${key}`);
@@ -671,10 +731,11 @@ const ProjectMode = (() => {
   /* ── reading the status ─────────────────────────────────────────── */
   async function refresh() {
     const mine = ++token;
+    let before = null;
     try {
       const got = await api(`/api/p/${PID}/project/status`);
       if (mine !== token) return;
-      const before = doc;
+      before = doc;
       doc = got.project;
       failed = null;
       if (base) whatHappened(before);
@@ -686,6 +747,8 @@ const ProjectMode = (() => {
     if (on) {
       drawSide();
       paintBar();
+      paintIsland();
+      noticeQuestions(before);
       // the pages drawn from the document follow it; a page being typed into is left alone
       const typing = page.contains(document.activeElement) && /TEXTAREA|INPUT|SELECT/.test(document.activeElement.tagName);
       if (!typing && (v.page === "questions" || v.page === "settings" || (v.page === "plans" && !v.mid)
@@ -731,6 +794,7 @@ const ProjectMode = (() => {
 
   function go(name) {
     v.page = PAGES[name] ? name : "now";
+    if (v.page === "questions") qtoast.hidden = true;
     save();
     paintBar();
     drawPage();
@@ -762,6 +826,7 @@ const ProjectMode = (() => {
     save();
     enter();
     paintBar();
+    paintIsland();
     drawSide();
     drawPage();
     refresh();
