@@ -5476,3 +5476,26 @@ body.zooming .canvasbar .popover {
   #toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
   body.floatframe #toast { bottom: calc(124px + env(safe-area-inset-bottom)); }
 }
+
+/* ── G3: the side panel — a glass frame, a solid reading area ───────
+   On the Flow screen the panel floats as glass, but what it holds
+   (messages, values) is content: it sits on a solid, rounded page inset
+   in the frame, and the canvas shows round its edges, not under the
+   text. The tabs stay on the glass. On a phone the inspector's sheet
+   (70% high) is the same; the assistant opens full height, solid. */
+body.floatframe:not(.ax-focus) #sidetabs { border-bottom: none; }
+body.floatframe:not(.ax-focus) #sidebar > #inspector,
+body.floatframe:not(.ax-focus) #sidebar > #chatdock {
+  margin: 0 6px 6px; border-radius: calc(var(--glass-r) - 5px); overflow: hidden auto;
+  background: var(--surface); box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+body.floatframe:not(.ax-focus) #sidebar > #chatdock { overflow: hidden; }
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar > #inspector,
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar > #chatdock {
+  margin: 0; border-radius: 0; box-shadow: none;
+}
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidetabs { border-bottom: 1px solid var(--border); }
+@media (max-width: 760px) {
+  body.floatframe:not(.ax-focus) #sidebar > #inspector,
+  body.floatframe:not(.ax-focus) #sidebar > #chatdock { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
+}
