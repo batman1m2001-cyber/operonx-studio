@@ -1511,6 +1511,30 @@ def build_studio_app(recents: Optional[Recents] = None):
     def projects_health() -> JSONResponse:
         return JSONResponse({"health": _projects_health()})
 
+    walking: set = set()
+
+    def _indexed_newest(store):
+        """The newest run as the index has it, the walk that brings the
+        index up to date done in the background: list_runs walks every run
+        directory first (313k in OneWealth — minutes cold, seconds warm).
+        An index still empty is walked now: there is nothing to show yet."""
+        index = getattr(store, "index", None)
+        if index is None:
+            return store.list_runs(limit=1)
+        page = index.list(None, "started_desc", 1, None)
+        if not page.items:
+            return store.list_runs(limit=1)
+        if id(store) not in walking:
+            walking.add(id(store))
+
+            def walk() -> None:
+                try:
+                    store._maybe_refresh()
+                finally:
+                    walking.discard(id(store))
+            threading.Thread(target=walk, name="studio-run-walk", daemon=True).start()
+        return page
+
     def _projects_health() -> Dict[str, Any]:
         """Per-card signal for the home page: is the project extractable,
         how big is it, has it run lately. Reads only what is already
@@ -1537,7 +1561,7 @@ def build_studio_app(recents: Optional[Recents] = None):
                 from operonx_studio.runs import project_runs as _pr
 
                 store = _pr(ref.root, sweep=False).store
-                newest = store.list_runs(limit=1)
+                newest = _indexed_newest(store)
                 if newest.items:
                     info["runs"] = newest.total if newest.total is not None else store.count()
                     info["newest"] = newest.items[0].started_at
