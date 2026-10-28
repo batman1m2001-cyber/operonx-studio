@@ -220,6 +220,8 @@
     look.append(el("h3", "setsectitle", "Appearance"));
     look.append(el("p", "setintro", "Light, dark, or as this device's system says. Kept in this browser."));
     look.append(Theme.picker());
+    look.append(el("p", "setintro", "The bars and menus over the canvas: glass, or solid to read in bright light. System follows this device's Reduce Transparency."));
+    look.append(Glass.picker());
     box.append(look);
 
     // the Claude account the assistant works as (assistant.js draws it)

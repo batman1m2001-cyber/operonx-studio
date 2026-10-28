@@ -4034,7 +4034,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dfport.out { justify-content: flex-start; }
 
 .viewseg .vshort, .runviews .vshort { display: none; }
-.runviews .vlong { margin: 0; padding: 0; background: none; border-radius: 0; }
+.runviews .vlong, .viewseg .vlong { margin: 0; padding: 0; background: none; border-radius: 0; }
 @media (max-width: 640px) {
   .runviews .vlong { display: none; }
   .runviews .vshort { display: inline; }
@@ -5316,3 +5316,302 @@ button.pm-w { cursor: pointer; }
 .pm-setval.pm-bad { margin: 0; }
 .pm-gitid { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
 .pm-gitid input { flex: 1 1 160px; min-width: 0; }
+
+/* ── Liquid glass (docs/LIQUID_GLASS_PLAN.md) ──────────────────────────
+   Glass is the layer of controls that floats over moving content: it
+   blurs what is behind it and lets its colour through. Content is never
+   glass, and glass never sits on glass. Two strengths: clear for the
+   small controls over the canvas, frost for menus, bars and panels (a
+   heavier tint, so their text reads over anything). <html data-glass=
+   "solid"> (Settings → Transparency, or the device's Reduce
+   Transparency) turns every piece back into its solid surface. */
+:root {
+  --glass-clear: rgba(255, 255, 255, .50);
+  --glass-frost: rgba(255, 255, 255, .72);
+  /* a menu is up for a moment: thinner, so the lens shows what it opened over */
+  --glass-menu: rgba(255, 255, 255, .60);
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, .35), rgba(255, 255, 255, 0) 60%);
+  --glass-line: rgba(15, 20, 25, .08);
+  --edge-shade: rgba(15, 20, 25, .05);
+  --glass-rim: rgba(255, 255, 255, 1);
+  /* the light caught all round the edge */
+  --glass-edge: rgba(255, 255, 255, .7);
+  --glass-outline: rgba(15, 20, 25, .10);
+  /* the faint text, a step stronger on glass: it reads over whatever is behind */
+  --glass-text-3: #56606c;
+  /* tight: a wide soft shadow smears grey over a white canvas */
+  --glass-shadow: 0 1px 1px rgba(15, 20, 25, .04), 0 3px 12px rgba(15, 20, 25, .07);
+  --glass-drop: rgba(255, 255, 255, .95);
+  /* little blur where there is no text to read through: what is behind
+     stays itself, bent by the lens, not smeared */
+  --glass-blur-clear: 6px;
+  --glass-blur-menu: 10px;
+  --glass-blur-frost: 24px;
+  --glass-sat: 190%;
+  --glass-still: rgba(250, 251, 253, .94);
+  /* the canvas under the glass, a step down from white so white glass reads as a layer */
+  --glass-under: #eef1f5;
+  --glass-r: 14px;
+  --glass-gap: 8px;
+}
+
+/* the clear pieces: small controls over the canvas */
+.glass, .canvasbar, .livebar {
+  --glass-tint: var(--glass-clear); --glass-blur: var(--glass-blur-clear);
+}
+/* the frosted pieces: what holds text to read */
+.glass.frost, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip,
+.pm-island, .pm-qtoast, body.pmode .ax-input,
+body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail,
+body.floatframe:not(.ax-focus) #sidebar {
+  --glass-tint: var(--glass-frost); --glass-blur: var(--glass-blur-frost);
+}
+.glass, .canvasbar, .livebar, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip,
+.pm-island, .pm-qtoast, body.pmode .ax-input,
+body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail,
+body.floatframe:not(.ax-focus) #sidebar {
+  background: var(--glass-sheen), var(--glass-tint);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px var(--glass-edge), inset 0 1px 0 var(--glass-rim), 0 0 0 .5px var(--glass-outline), var(--glass-shadow);
+}
+/* menus: thin glass, the lens shows what they open over */
+.popover, .ax-pop, .ax-slash { --glass-tint: var(--glass-menu); --glass-blur: var(--glass-blur-menu); }
+:root[data-glass="glass"] :is(.glass, .canvasbar, .livebar, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, .pm-island, .pm-qtoast) { --text-3: var(--glass-text-3); }
+/* reduce transparency: each piece is its solid surface again, with the
+   edge and shadow every floating surface has */
+:root[data-glass="solid"] .glass, :root[data-glass="solid"] .canvasbar, :root[data-glass="solid"] .livebar,
+:root[data-glass="solid"] .popover, :root[data-glass="solid"] .ax-askbar,
+:root[data-glass="solid"] .ax-pop, :root[data-glass="solid"] .ax-slash, :root[data-glass="solid"] .viztip,
+:root[data-glass="solid"] .pm-island, :root[data-glass="solid"] .pm-qtoast,
+:root[data-glass="solid"] body.pmode .ax-input,
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) header.bar,
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) .rail,
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar {
+  background: var(--surface);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  box-shadow: inset 0 0 0 1px var(--float-edge), var(--sh-2);
+}
+
+/* ── G1: the Flow screen — the canvas runs under its chrome ──────────
+   The top bar, the rail and the side panel float over the canvas, inset
+   by --glass-gap, and the flow pans under them (canvas.js stageInset
+   lays the flow out in the open part). Only on the Flow screen: on the
+   other screens nothing moves under the chrome, and it stays solid. */
+body.floatframe:not(.ax-focus) .shell { position: relative; }
+body.floatframe:not(.ax-focus) header.bar {
+  position: absolute; top: var(--glass-gap); left: var(--glass-gap); right: var(--glass-gap);
+  border-bottom: none; border-radius: var(--glass-r);
+}
+body.floatframe:not(.ax-focus) .main {
+  padding: calc(var(--bar-h) + 2 * var(--glass-gap)) var(--glass-gap) var(--glass-gap);
+}
+body.floatframe:not(.ax-focus) .main > #stage { position: absolute; inset: 0; scrollbar-width: none;
+  background-color: var(--glass-under); }
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) .main > #stage { background-color: var(--rt-bay); }
+body.floatframe:not(.ax-focus) .main > #stage::-webkit-scrollbar { display: none; }
+body.floatframe:not(.ax-focus) .rail { border-right: none; border-radius: var(--glass-r); margin-right: auto; }
+body.floatframe:not(.ax-focus) #sidebar {
+  position: relative; z-index: 20; border-left: none; border-radius: var(--glass-r); overflow: hidden;
+}
+body.floatframe:not(.ax-focus) #dragbar { margin-left: auto; margin-right: 2px; border-radius: 3px; }
+body.floatframe:not(.ax-focus) .main > #stage > .errbox {
+  margin: calc(var(--bar-h) + 3 * var(--glass-gap)) 16px 16px calc(var(--rail-w) + 3 * var(--glass-gap));
+}
+body.floatframe:not(.ax-focus) .livebar {
+  top: calc(var(--bar-h) + 3 * var(--glass-gap)); left: calc(var(--rail-w) + 3 * var(--glass-gap));
+}
+body.floatframe:not(.ax-focus) .canvasbar { left: calc(var(--rail-w) + 3 * var(--glass-gap)); bottom: calc(3 * var(--glass-gap)); }
+body.floatframe:not(.ax-focus) .findbox, body.floatframe:not(.ax-focus) #legend {
+  left: calc(var(--rail-w) + 3 * var(--glass-gap)); bottom: calc(3 * var(--glass-gap) + 52px);
+}
+/* a tablet's panel already floated: now inside the frame */
+@media (min-width: 761px) and (max-width: 1099px) {
+  body.floatframe:not(.ax-focus) #sidebar {
+    position: absolute; top: calc(var(--bar-h) + 2 * var(--glass-gap)); right: var(--glass-gap); bottom: var(--glass-gap);
+  }
+}
+/* a phone: the bar floats; the rail is still the drawer, the panel the sheet */
+@media (max-width: 760px) {
+  body.floatframe:not(.ax-focus) .main { padding: 0; }
+  body.floatframe:not(.ax-focus) .rail { margin-right: 0; border-radius: 0 var(--glass-r) var(--glass-r) 0; }
+  body.floatframe:not(.ax-focus) #sidebar { position: fixed; z-index: 70; border-radius: 16px 16px 0 0; }
+  body.floatframe:not(.ax-focus) .livebar { left: 12px; }
+  /* the canvas bar sits on the Ask bar, one cluster 8 px apart */
+  body.floatframe:not(.ax-focus) .canvasbar { left: 12px; bottom: calc(68px + env(safe-area-inset-bottom)); }
+  body.floatframe:not(.ax-focus) .findbox, body.floatframe:not(.ax-focus) #legend {
+    left: 12px; bottom: calc(120px + env(safe-area-inset-bottom)); }
+}
+
+/* the canvas bar's view switch: the picked view is a lighter drop that
+ * slides between Workflow and Data Flow (canvas.js placeDrop) */
+.canvasbar .viewseg[data-drop] { position: relative; background: transparent;
+  box-shadow: inset 0 0 0 1px var(--glass-line); }
+.canvasbar .viewseg[data-drop]::before { content: ""; position: absolute; top: 2px; bottom: 2px; left: 0;
+  width: var(--drop-w); transform: translateX(var(--drop-x)); border-radius: 999px;
+  background: var(--glass-drop); box-shadow: inset 0 1px 0 var(--glass-rim), 0 1px 4px rgba(15,20,25,.14);
+  transition: transform .32s cubic-bezier(.3,1.35,.5,1), width .32s cubic-bezier(.3,1.35,.5,1); }
+.canvasbar .viewseg[data-drop] button { position: relative; z-index: 1; }
+.canvasbar .viewseg[data-drop] button.on,
+:root[data-theme="dark"] .canvasbar .viewseg[data-drop] button.on { background: transparent; box-shadow: none; }
+:root[data-theme="dark"] .canvasbar .viewseg[data-drop] { background: transparent; }
+:root[data-glass="solid"] .canvasbar .viewseg[data-drop]::before { background: var(--panel); }
+@media (prefers-reduced-motion: reduce) { .canvasbar .viewseg[data-drop]::before { transition: none; } }
+/* the bending (Chromium: theme.js adds .refract and the #ox-refract filter) */
+:root.refract[data-glass="glass"] .canvasbar {
+  /* blur first, then bend: the other order drops the blur in Chromium */
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) url(#ox-refract);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) url(#ox-refract);
+}
+/* menus and the builder's island and toast bend through a wider lens */
+:root.refract[data-glass="glass"] :is(.popover, .ax-pop, .ax-slash, .pm-island, .pm-qtoast) {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) url(#ox-lens);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) url(#ox-lens);
+}
+/* zooming: the glass over the canvas holds still (canvas.js stillGlass) */
+body.zooming .canvasbar, body.zooming .livebar, body.zooming.floatframe header.bar,
+body.zooming.floatframe .rail, body.zooming.floatframe #sidebar {
+  background: var(--glass-still); -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+
+/* ── G2: floating surfaces — menus, tooltips, the toast ─────────────
+   Frost glass, each grown out of its button (theme.js). A menu inside a
+   glass piece (the switcher in the top bar, the zoom menu in the canvas
+   bar, the assistant's menus in the floating panel) is not glass again:
+   the glass around it would be all it could blur. */
+body.floatframe:not(.ax-focus) header.bar .popover, .canvasbar .popover,
+body.floatframe:not(.ax-focus) #sidebar .ax-pop, body.floatframe:not(.ax-focus) #sidebar .ax-slash,
+body.zooming .canvasbar .popover {
+  background: var(--glass-still); -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+/* the toast and the rail's names were inverted chips: now glass, in the page's ink */
+#toast, #railtip { color: var(--text); }
+#toast.bad { background: var(--bg-red39); color: var(--on-strong); }
+:root[data-glass="solid"] #toast, :root[data-glass="solid"] #railtip {
+  background: var(--text); color: var(--on-strong); -webkit-backdrop-filter: none; backdrop-filter: none;
+  box-shadow: var(--sh-3);
+}
+:root[data-glass="solid"] #toast.bad { background: var(--bg-red39); }
+.popover.mlist { border-color: transparent; }
+/* a phone or tablet: the toast sits above the Ask bar (and the canvas bar on Flow), not on it */
+@media (max-width: 1099px) {
+  #toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
+  body.floatframe #toast { bottom: calc(124px + env(safe-area-inset-bottom)); }
+}
+
+/* ── G3: the side panel — a glass frame, a solid reading area ───────
+   On the Flow screen the panel floats as glass, but what it holds
+   (messages, values) is content: it sits on a solid, rounded page inset
+   in the frame, and the canvas shows round its edges, not under the
+   text. The tabs stay on the glass. On a phone the inspector's sheet
+   (70% high) is the same; the assistant opens full height, solid. */
+body.floatframe:not(.ax-focus) #sidetabs { border-bottom: none; }
+body.floatframe:not(.ax-focus) #sidebar > #inspector,
+body.floatframe:not(.ax-focus) #sidebar > #chatdock {
+  margin: 0 6px 6px; border-radius: calc(var(--glass-r) - 5px); overflow: hidden auto;
+  background: var(--surface); box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+body.floatframe:not(.ax-focus) #sidebar > #chatdock { overflow: hidden; }
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar > #inspector,
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar > #chatdock {
+  margin: 0; border-radius: 0; box-shadow: none;
+}
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidetabs { border-bottom: 1px solid var(--border); }
+@media (max-width: 760px) {
+  body.floatframe:not(.ax-focus) #sidebar > #inspector,
+  body.floatframe:not(.ax-focus) #sidebar > #chatdock { margin-bottom: calc(6px + env(safe-area-inset-bottom)); }
+}
+
+/* ── G4: the scroll edge — instead of a hairline ────────────────────
+   Where content scrolls under a head, the head gets a glass boundary:
+   a crisp line and a soft shade below it (no blur on the rows: smeared
+   text read as a mess), shown only once something has gone under (a
+   scroll timeline). Without scroll timelines the edge just stays on, the way
+   the hairline did. The page's scroll (each screen's pane) is named
+   --page on the shell; the step tree's list is --steps. */
+@keyframes ox-edge { from { opacity: 0; } to { opacity: 1; } }
+.shell { timeline-scope: --page; }
+.main > .pane, .main > #traces, .main > #jobs, .main > #resources { scroll-timeline: --page block; }
+.rt-left { timeline-scope: --steps; }
+.rt-list { scroll-timeline: --steps block; }
+
+header.bar, .phead { border-bottom: none; }
+.rt-axis { position: relative; z-index: 2; }
+header.bar::after, .phead::after, .rt-axis::after, .runstable th::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 10px;
+  border-top: 1px solid var(--glass-line);
+  background: linear-gradient(var(--edge-shade), transparent);
+  pointer-events: none;
+}
+/* the inspector's head was see-through (blur 8px): solid now, the boundary marks it */
+.phead { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+@supports (animation-timeline: scroll()) {
+  header.bar::after, .phead::after, .rt-axis::after { opacity: 0; animation: ox-edge linear both; animation-range: 0 24px; }
+  header.bar::after { animation-timeline: --page; }
+  .phead::after { animation-timeline: scroll(nearest); }
+  .rt-axis::after { animation-timeline: --steps; }
+}
+/* below a desk the Runs head keeps its hairline (it scrolls away sideways with the table) */
+@media (max-width: 1099px) { .runstable th::after { content: none; } }
+/* on the Flow screen the bar floats as glass: no edge */
+body.floatframe:not(.ax-focus) header.bar::after { content: none; }
+/* the home page is flat: its top bar is the page, with the edge once the list scrolls under */
+.topbar { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; border-bottom: none; }
+.topbar::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 10px;
+  border-top: 1px solid var(--glass-line); background: linear-gradient(var(--edge-shade), transparent); pointer-events: none; }
+@supports (animation-timeline: scroll()) {
+  .topbar::after { opacity: 0; animation: ox-edge linear both; animation-range: 0 24px; animation-timeline: scroll(root); }
+}
+
+/* the Runs table's head: its wrap scrolled sideways only, but caught the
+   sticky too, so the head never stuck. On a desk it sticks to the page. */
+@media (min-width: 1100px) {
+  .runsmain .tablewrap { overflow: visible; }
+  .runstable th { border-bottom: none; top: -24px; }   /* flush under the bar, past the pane's padding */
+  @supports (animation-timeline: scroll()) {
+    .runstable th::after { opacity: 0; animation: ox-edge linear both; animation-range: 150px 180px; animation-timeline: --page; }
+  }
+}
+
+/* ── G5: the project builder ────────────────────────────────────────
+   The conversation scrolls under a glass composer (assistant.js measures
+   the foot into --ax-foot-h); send is the one tinted control. Above the
+   conversation, the builder island and a question's toast (projectmode.js). */
+body.pmode .ax:not(.hero) .ax-foot { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; }
+body.pmode .ax:not(.hero) .ax-log { padding-bottom: var(--ax-foot-h, 150px); }
+body.pmode .ax-input:focus-within {
+  box-shadow: inset 0 0 0 1px var(--signal), 0 0 0 3px var(--signal-ring), var(--glass-shadow);
+}
+body.pmode .ax-status { background: var(--glass-still); border-radius: 10px; padding: 6px 10px; }
+body.pmode .ax-send:not(.stop):not(:disabled) { background: var(--accent); color: var(--on-accent); }
+body.pmode .ax-send:not(.stop):not(:disabled):hover { background: var(--accent-hover); }
+
+.pm-chat { position: relative; }
+.pm-floats { position: absolute; z-index: 5; top: calc(var(--ax-head-h, 44px) + 10px); left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 24px);
+  pointer-events: none; }
+.pm-floats > * { pointer-events: auto; }
+.pm-island, .pm-qtoast { border: none; border-radius: 999px; color: var(--text); }
+.pm-island { display: inline-flex; align-items: center; gap: 8px; min-height: 0; height: 34px; padding: 0 14px 0 12px;
+  font-size: var(--fs-sm); font-weight: 450; white-space: nowrap; cursor: pointer; }
+.pm-island:hover { --glass-tint: var(--glass-still); }
+.pm-island b { font: 600 var(--fs-sm) var(--mono); }
+.pm-island-state { color: var(--text-2); }
+.pm-island-cost, .pm-island-more { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.pm-island-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  animation: pm-breathe 1.6s ease-in-out infinite; }
+.pm-island[data-state="waiting_human"] .pm-island-dot { background: var(--err); animation: none; }
+@keyframes pm-breathe { 50% { opacity: .35; } }
+.pm-qtoast { display: flex; align-items: center; gap: 2px; max-width: min(520px, 100%); padding: 4px 6px 4px 4px; border-radius: 18px; }
+.pm-qtoast-open { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; min-height: 0;
+  padding: 6px 10px; border: none; background: none; border-radius: 14px; text-align: left; cursor: pointer; }
+.pm-qtoast-open:hover { background: var(--glass-line); }
+.pm-qtoast-open b { font-size: var(--fs-sm); font-weight: 650; color: var(--err); }
+.pm-qtoast-open span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-sm); color: var(--text); }
+.pm-qtoast-x { flex: none; width: 28px; min-width: 28px; height: 28px; min-height: 0; padding: 0; border: none;
+  background: none; border-radius: 50%; color: var(--text-3); font-size: 16px; }
+.pm-qtoast-x:hover { background: var(--glass-line); color: var(--text); }
+.pm-island[hidden], .pm-qtoast[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .pm-island-dot { animation: none; } }
