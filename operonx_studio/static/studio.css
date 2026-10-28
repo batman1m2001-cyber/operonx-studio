@@ -5349,12 +5349,12 @@ button.pm-w { cursor: pointer; }
   --glass-tint: var(--glass-clear); --glass-blur: var(--glass-blur-clear);
 }
 /* the frosted pieces: what holds text to read */
-.glass.frost, .popover, .ax-askbar,
+.glass.frost, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip,
 body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail,
 body.floatframe:not(.ax-focus) #sidebar {
   --glass-tint: var(--glass-frost); --glass-blur: var(--glass-blur-frost);
 }
-.glass, .canvasbar, .livebar, .popover, .ax-askbar,
+.glass, .canvasbar, .livebar, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip,
 body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail,
 body.floatframe:not(.ax-focus) #sidebar {
   background: var(--glass-sheen), var(--glass-tint);
@@ -5367,6 +5367,7 @@ body.floatframe:not(.ax-focus) #sidebar {
    edge and shadow every floating surface has */
 :root[data-glass="solid"] .glass, :root[data-glass="solid"] .canvasbar, :root[data-glass="solid"] .livebar,
 :root[data-glass="solid"] .popover, :root[data-glass="solid"] .ax-askbar,
+:root[data-glass="solid"] .ax-pop, :root[data-glass="solid"] .ax-slash, :root[data-glass="solid"] .viztip,
 :root[data-glass="solid"] body.floatframe:not(.ax-focus) header.bar,
 :root[data-glass="solid"] body.floatframe:not(.ax-focus) .rail,
 :root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar {
@@ -5449,4 +5450,29 @@ body.floatframe:not(.ax-focus) .findbox, body.floatframe:not(.ax-focus) #legend 
 body.zooming .canvasbar, body.zooming .livebar, body.zooming.floatframe header.bar,
 body.zooming.floatframe .rail, body.zooming.floatframe #sidebar {
   background: var(--glass-still); -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+
+/* ── G2: floating surfaces — menus, tooltips, the toast ─────────────
+   Frost glass, each grown out of its button (theme.js). A menu inside a
+   glass piece (the switcher in the top bar, the zoom menu in the canvas
+   bar, the assistant's menus in the floating panel) is not glass again:
+   the glass around it would be all it could blur. */
+body.floatframe:not(.ax-focus) header.bar .popover, .canvasbar .popover,
+body.floatframe:not(.ax-focus) #sidebar .ax-pop, body.floatframe:not(.ax-focus) #sidebar .ax-slash,
+body.zooming .canvasbar .popover {
+  background: var(--glass-still); -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+/* the toast and the rail's names were inverted chips: now glass, in the page's ink */
+#toast, #railtip { color: var(--text); }
+#toast.bad { background: var(--bg-red39); color: var(--on-strong); }
+:root[data-glass="solid"] #toast, :root[data-glass="solid"] #railtip {
+  background: var(--text); color: var(--on-strong); -webkit-backdrop-filter: none; backdrop-filter: none;
+  box-shadow: var(--sh-3);
+}
+:root[data-glass="solid"] #toast.bad { background: var(--bg-red39); }
+.popover.mlist { border-color: transparent; }
+/* a phone or tablet: the toast sits above the Ask bar (and the canvas bar on Flow), not on it */
+@media (max-width: 1099px) {
+  #toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
+  body.floatframe #toast { bottom: calc(124px + env(safe-area-inset-bottom)); }
 }

@@ -132,5 +132,40 @@ const Glass = (() => {
       '<feDisplacementMap in="SourceGraphic" in2="n" scale="14" xChannelSelector="R" yChannelSelector="G"/></filter></svg>');
     if (document.body) add(); else document.addEventListener("DOMContentLoaded", add);
   }
+  // a menu grows out of the button that opened it: the last pressed control
+  // is remembered, and a floating piece that appears scales up from that
+  // point. Menus come and go by [hidden] or by being added (only [hidden]
+  // is watched: the canvas toggles classes every frame it animates).
+  const FLOATS = ".popover, .ax-pop, .ax-slash";
+  let pressed = null;
+  document.addEventListener("pointerdown", (e) => { pressed = e.target.closest("button, [role=button], a, input"); }, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pressed = document.activeElement; }, true);
+  const still = window.matchMedia ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+  function grow(el) {
+    if ((still && still.matches) || !el.getClientRects().length || el.dataset.grown) return;
+    el.dataset.grown = "";
+    const r = el.getBoundingClientRect();
+    let ox = r.width / 2, oy = 0;
+    if (pressed && pressed.isConnected && !el.contains(pressed)) {
+      const b = pressed.getBoundingClientRect();
+      ox = Math.min(r.width, Math.max(0, b.left + b.width / 2 - r.left));
+      oy = Math.min(r.height, Math.max(0, b.top + b.height / 2 - r.top));
+    }
+    el.style.transformOrigin = `${ox}px ${oy}px`;
+    el.animate([{transform: "scale(.86)", opacity: 0}, {transform: "scale(1.012)", opacity: 1, offset: .7}, {transform: "none", opacity: 1}],
+      {duration: 260, easing: "cubic-bezier(.2,.9,.3,1)"});
+  }
+  function seen(node) {
+    if (node.nodeType !== 1) return;
+    if (node.matches(FLOATS) && !node.hidden) grow(node);
+    for (const f of node.querySelectorAll(FLOATS)) if (!f.hidden) grow(f);
+  }
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      if (m.type === "childList") m.addedNodes.forEach(seen);
+      else if (m.target.matches(FLOATS) && !m.target.hidden) grow(m.target);
+      else delete m.target.dataset.grown;
+    }
+  }).observe(document.documentElement, {subtree: true, childList: true, attributes: true, attributeFilter: ["hidden"]});
   return {get: read, set, resolve, picker};
 })();
