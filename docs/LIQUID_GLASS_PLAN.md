@@ -1,7 +1,10 @@
 # Liquid glass — which parts of studio, and which not (2026-10-28)
 
 A proposal. Apple's Liquid Glass (WWDC 2025, iOS/macOS 26) applied to studio:
-every screen looked at, the project builder included. Nothing is built yet.
+every screen looked at, the project builder included.
+
+**Status: built, G0–G5 (2026-10-28).** What changed on the way is under
+[Progress](#progress-2026-10-28).
 
 ## What Liquid Glass is, and its one rule
 
@@ -111,8 +114,10 @@ nothing would show through — it keeps the scroll edge only).
   under `prefers-reduced-transparency` and `prefers-contrast: more`: every
   glass piece becomes its solid surface. `prefers-reduced-motion` turns off
   the growing and sliding.
-- **Bending only on small controls, only in Chromium.** The SVG displacement
-  is on the canvas bar and the view switch; panels and menus get blur only.
+- **Bending only on small or brief pieces, only in Chromium.** The SVG
+  displacement is on the canvas bar, and (after the owner's reference, see
+  Progress) a wider lens on menus, the builder island and the question toast;
+  the large panels get blur only.
 - **No frame-rate cost.** Pan and zoom on the callbot graph, energy flows on,
   measured with glass on and off: the frame time may not get worse. If it does,
   glass pieces over the canvas freeze their blur while it pans.
@@ -143,6 +148,64 @@ nothing would show through — it keeps the scroll edge only).
   opaque on every shot);
 - shots desktop and phone, light and dark, every screen, before and after;
 - the JS and studio tests pass.
+
+## Progress (2026-10-28)
+
+All six phases built on `plan/liquid-glass`. Where the build left the text above:
+
+- **Grow from the button: WAAPI, not View Transitions.** `theme.js` (Glass)
+  scales a menu up from the last pressed control (`grow`, `growFrom` with a
+  rect); View Transitions snapshot the whole page and would freeze the canvas.
+- **Refraction order.** `blur() saturate() url(#filter)`: the other order
+  drops the blur in Chromium.
+- **Frame time.** Glass over the panning canvas cost nothing on pan; zoom cost
+  ~4 ms/frame until the glass holds still while zooming (`canvas.js`
+  stillGlass, `body.zooming`). Idle +0.6–1.0 ms/frame (the energy flows under
+  the glass) — accepted. Numbers below.
+- **The light theme.** The first light glass read as grey boxes (owner:
+  "quite shitty"). Now: white glass at 50/72 % over a canvas a step down from
+  white (`--glass-under`), a full white top rim, a tight shadow.
+- **The owner's reference** (a menu over a landscape: little blur, the scene
+  bent, a light rim all round). Glass now has a light edge all round
+  (`--glass-edge`) and an outer outline; the canvas controls blur 6 px, menus
+  10 px with a thinner tint (`--glass-menu`) and a wider lens (`#ox-lens`);
+  night glass is smoke grey, lighter than the page. Faint text on glass is a
+  step stronger (`--glass-text-3`). The reading surfaces (composer, the Flow
+  panel) keep the 24 px frost: text behind text is noise.
+- **Contrast, measured.** Each text box's own pixels behind it (text made
+  transparent, shot, worst 1 %): every piece ≥ 4.5:1, light and dark — the
+  switcher over Runs, the model menu and composer over a conversation, the
+  island, the canvas bar over the flow. The faint text was 4.29–4.48 before
+  `--glass-text-3`; now ≥ 5.4 on menus.
+- **G4, the scroll edge: a boundary, not a blur.** The blurred fade was messy
+  (owner); the head now gets a crisp line and a soft shade below it, shown
+  only once something has scrolled under (scroll-driven animation; a static
+  edge where unsupported). The owner may revisit this.
+  The Runs table head now really sticks (its wrapper's overflow had captured
+  it). The home top bar's old blur is gone: flat, with the edge.
+- **G5, the island at the top, not the bottom.** The composer owns the
+  bottom; the island (working card · state · cost of budget) sits at the top of
+  the conversation, the question toast under it. Both grow into their page.
+
+**Gates (all met):**
+
+- glass DOM count, 23 screens × desk/phone × light/dark (92 shots): at most 4
+  glass pieces on a screen (Flow: bar, rail, panel, canvas bar), 0 on the
+  list screens, 2 in the builder (composer, island); nothing off the list.
+- solid mode: no `backdrop-filter` anywhere and every glass piece opaque, on
+  all 92.
+- JS tests 138/138; studio pytest 723 passed, 8 skipped.
+- frame time, callbot graph, energy flows on (ms/frame mean, p95):
+
+  | run | idle light / dark | pan light / dark | zoom light / dark |
+  |---|---|---|---|
+  | G0, before | 8.1 / 8.8 | 14.2 / 14.5 | 10.6 / 10.6 |
+  | final, glass (2 runs) | 9.6–9.8 / 8.9–9.7 | 14.5–14.8 / 14.9 | 11.4 / 11.3–11.4 |
+  | final, solid | 8.0 / 8.4 | 15.3 / 15.2 | 11.4 / 10.8 |
+
+  Pan and zoom: no worse than G0 within run-to-run noise, and equal to solid on
+  the same build. Idle: +1.2–1.6 ms with glass (the energy flows animate under
+  it; still ~10 ms/frame, inside the 16.7 ms budget) — accepted, not hidden.
 
 ## Sources
 

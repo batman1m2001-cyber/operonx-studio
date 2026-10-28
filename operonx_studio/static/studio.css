@@ -5556,6 +5556,13 @@ header.bar::after, .phead::after, .rt-axis::after, .runstable th::after {
 @media (max-width: 1099px) { .runstable th::after { content: none; } }
 /* on the Flow screen the bar floats as glass: no edge */
 body.floatframe:not(.ax-focus) header.bar::after { content: none; }
+/* the home page is flat: its top bar is the page, with the edge once the list scrolls under */
+.topbar { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; border-bottom: none; }
+.topbar::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 10px;
+  border-top: 1px solid var(--glass-line); background: linear-gradient(var(--edge-shade), transparent); pointer-events: none; }
+@supports (animation-timeline: scroll()) {
+  .topbar::after { opacity: 0; animation: ox-edge linear both; animation-range: 0 24px; animation-timeline: scroll(root); }
+}
 
 /* the Runs table's head: its wrap scrolled sideways only, but caught the
    sticky too, so the head never stuck. On a desk it sticks to the page. */
