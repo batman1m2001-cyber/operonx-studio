@@ -4034,7 +4034,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dfport.out { justify-content: flex-start; }
 
 .viewseg .vshort, .runviews .vshort { display: none; }
-.runviews .vlong { margin: 0; padding: 0; background: none; border-radius: 0; }
+.runviews .vlong, .viewseg .vlong { margin: 0; padding: 0; background: none; border-radius: 0; }
 @media (max-width: 640px) {
   .runviews .vlong { display: none; }
   .runviews .vshort { display: inline; }
@@ -5316,3 +5316,137 @@ button.pm-w { cursor: pointer; }
 .pm-setval.pm-bad { margin: 0; }
 .pm-gitid { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
 .pm-gitid input { flex: 1 1 160px; min-width: 0; }
+
+/* ── Liquid glass (docs/LIQUID_GLASS_PLAN.md) ──────────────────────────
+   Glass is the layer of controls that floats over moving content: it
+   blurs what is behind it and lets its colour through. Content is never
+   glass, and glass never sits on glass. Two strengths: clear for the
+   small controls over the canvas, frost for menus, bars and panels (a
+   heavier tint, so their text reads over anything). <html data-glass=
+   "solid"> (Settings → Transparency, or the device's Reduce
+   Transparency) turns every piece back into its solid surface. */
+:root {
+  --glass-clear: rgba(255, 255, 255, .50);
+  --glass-frost: rgba(255, 255, 255, .72);
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, .35), rgba(255, 255, 255, 0) 60%);
+  --glass-line: rgba(15, 20, 25, .08);
+  --glass-rim: rgba(255, 255, 255, 1);
+  /* tight: a wide soft shadow smears grey over a white canvas */
+  --glass-shadow: 0 1px 1px rgba(15, 20, 25, .04), 0 3px 12px rgba(15, 20, 25, .07);
+  --glass-drop: rgba(255, 255, 255, .95);
+  --glass-blur-clear: 18px;
+  --glass-blur-frost: 24px;
+  --glass-sat: 190%;
+  --glass-still: rgba(250, 251, 253, .94);
+  /* the canvas under the glass, a step down from white so white glass reads as a layer */
+  --glass-under: #eef1f5;
+  --glass-r: 14px;
+  --glass-gap: 8px;
+}
+
+/* the clear pieces: small controls over the canvas */
+.glass, .canvasbar, .livebar {
+  --glass-tint: var(--glass-clear); --glass-blur: var(--glass-blur-clear);
+}
+/* the frosted pieces: what holds text to read */
+.glass.frost, .popover, .ax-askbar,
+body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail,
+body.floatframe:not(.ax-focus) #sidebar {
+  --glass-tint: var(--glass-frost); --glass-blur: var(--glass-blur-frost);
+}
+.glass, .canvasbar, .livebar, .popover, .ax-askbar,
+body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail,
+body.floatframe:not(.ax-focus) #sidebar {
+  background: var(--glass-sheen), var(--glass-tint);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px var(--glass-line), inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+}
+/* reduce transparency: each piece is its solid surface again, with the
+   edge and shadow every floating surface has */
+:root[data-glass="solid"] .glass, :root[data-glass="solid"] .canvasbar, :root[data-glass="solid"] .livebar,
+:root[data-glass="solid"] .popover, :root[data-glass="solid"] .ax-askbar,
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) header.bar,
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) .rail,
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar {
+  background: var(--surface);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  box-shadow: inset 0 0 0 1px var(--float-edge), var(--sh-2);
+}
+
+/* ── G1: the Flow screen — the canvas runs under its chrome ──────────
+   The top bar, the rail and the side panel float over the canvas, inset
+   by --glass-gap, and the flow pans under them (canvas.js stageInset
+   lays the flow out in the open part). Only on the Flow screen: on the
+   other screens nothing moves under the chrome, and it stays solid. */
+body.floatframe:not(.ax-focus) .shell { position: relative; }
+body.floatframe:not(.ax-focus) header.bar {
+  position: absolute; top: var(--glass-gap); left: var(--glass-gap); right: var(--glass-gap);
+  border-bottom: none; border-radius: var(--glass-r);
+}
+body.floatframe:not(.ax-focus) .main {
+  padding: calc(var(--bar-h) + 2 * var(--glass-gap)) var(--glass-gap) var(--glass-gap);
+}
+body.floatframe:not(.ax-focus) .main > #stage { position: absolute; inset: 0; scrollbar-width: none;
+  background-color: var(--glass-under); }
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) .main > #stage { background-color: var(--rt-bay); }
+body.floatframe:not(.ax-focus) .main > #stage::-webkit-scrollbar { display: none; }
+body.floatframe:not(.ax-focus) .rail { border-right: none; border-radius: var(--glass-r); margin-right: auto; }
+body.floatframe:not(.ax-focus) #sidebar {
+  position: relative; z-index: 20; border-left: none; border-radius: var(--glass-r); overflow: hidden;
+}
+body.floatframe:not(.ax-focus) #dragbar { margin-left: auto; margin-right: 2px; border-radius: 3px; }
+body.floatframe:not(.ax-focus) .main > #stage > .errbox {
+  margin: calc(var(--bar-h) + 3 * var(--glass-gap)) 16px 16px calc(var(--rail-w) + 3 * var(--glass-gap));
+}
+body.floatframe:not(.ax-focus) .livebar {
+  top: calc(var(--bar-h) + 3 * var(--glass-gap)); left: calc(var(--rail-w) + 3 * var(--glass-gap));
+}
+body.floatframe:not(.ax-focus) .canvasbar { left: calc(var(--rail-w) + 3 * var(--glass-gap)); bottom: calc(3 * var(--glass-gap)); }
+body.floatframe:not(.ax-focus) .findbox, body.floatframe:not(.ax-focus) #legend {
+  left: calc(var(--rail-w) + 3 * var(--glass-gap)); bottom: calc(3 * var(--glass-gap) + 52px);
+}
+/* a tablet's panel already floated: now inside the frame */
+@media (min-width: 761px) and (max-width: 1099px) {
+  body.floatframe:not(.ax-focus) #sidebar {
+    position: absolute; top: calc(var(--bar-h) + 2 * var(--glass-gap)); right: var(--glass-gap); bottom: var(--glass-gap);
+  }
+}
+/* a phone: the bar floats; the rail is still the drawer, the panel the sheet */
+@media (max-width: 760px) {
+  body.floatframe:not(.ax-focus) .main { padding: 0; }
+  body.floatframe:not(.ax-focus) .rail { margin-right: 0; border-radius: 0 var(--glass-r) var(--glass-r) 0; }
+  body.floatframe:not(.ax-focus) #sidebar { position: fixed; z-index: 70; border-radius: 16px 16px 0 0; }
+  body.floatframe:not(.ax-focus) .livebar { left: 12px; }
+  /* the canvas bar sits on the Ask bar, one cluster 8 px apart */
+  body.floatframe:not(.ax-focus) .canvasbar { left: 12px; bottom: calc(68px + env(safe-area-inset-bottom)); }
+  body.floatframe:not(.ax-focus) .findbox, body.floatframe:not(.ax-focus) #legend {
+    left: 12px; bottom: calc(120px + env(safe-area-inset-bottom)); }
+}
+
+/* the canvas bar's view switch: the picked view is a lighter drop that
+ * slides between Workflow and Data Flow (canvas.js placeDrop) */
+.canvasbar .viewseg[data-drop] { position: relative; background: transparent;
+  box-shadow: inset 0 0 0 1px var(--glass-line); }
+.canvasbar .viewseg[data-drop]::before { content: ""; position: absolute; top: 2px; bottom: 2px; left: 0;
+  width: var(--drop-w); transform: translateX(var(--drop-x)); border-radius: 999px;
+  background: var(--glass-drop); box-shadow: inset 0 1px 0 var(--glass-rim), 0 1px 4px rgba(15,20,25,.14);
+  transition: transform .32s cubic-bezier(.3,1.35,.5,1), width .32s cubic-bezier(.3,1.35,.5,1); }
+.canvasbar .viewseg[data-drop] button { position: relative; z-index: 1; }
+.canvasbar .viewseg[data-drop] button.on,
+:root[data-theme="dark"] .canvasbar .viewseg[data-drop] button.on { background: transparent; box-shadow: none; }
+:root[data-theme="dark"] .canvasbar .viewseg[data-drop] { background: transparent; }
+:root[data-glass="solid"] .canvasbar .viewseg[data-drop]::before { background: var(--panel); }
+@media (prefers-reduced-motion: reduce) { .canvasbar .viewseg[data-drop]::before { transition: none; } }
+/* the bending (Chromium: theme.js adds .refract and the #ox-refract filter) */
+:root.refract[data-glass="glass"] .canvasbar {
+  /* blur first, then bend: the other order drops the blur in Chromium */
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) url(#ox-refract);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) url(#ox-refract);
+}
+/* zooming: the glass over the canvas holds still (canvas.js stillGlass) */
+body.zooming .canvasbar, body.zooming .livebar, body.zooming.floatframe header.bar,
+body.zooming.floatframe .rail, body.zooming.floatframe #sidebar {
+  background: var(--glass-still); -webkit-backdrop-filter: none; backdrop-filter: none;
+}

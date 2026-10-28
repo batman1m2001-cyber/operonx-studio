@@ -46,7 +46,20 @@ function showViewSeg() {
     b.classList.toggle("on", on);
     b.setAttribute("aria-checked", String(on));
   }
+  placeDrop($(".canvasbar .viewseg"));
 }
+/* the canvas bar's switch: the picked view is a lighter drop of glass
+ * that slides to the other one (studio.css .viewseg::before) */
+function placeDrop(seg) {
+  const on = seg && seg.querySelector("button.on");
+  if (!on || !on.offsetWidth) return;
+  seg.style.setProperty("--drop-x", `${on.getBoundingClientRect().left - seg.getBoundingClientRect().left}px`);
+  seg.style.setProperty("--drop-w", `${on.offsetWidth}px`);
+  seg.dataset.drop = "";
+}
+// it is measured once it shows (the bar is hidden off the canvas)
+if (window.ResizeObserver && $(".canvasbar .viewseg"))
+  new ResizeObserver(() => placeDrop($(".canvasbar .viewseg"))).observe($(".canvasbar .viewseg"));
 
 // a binding's source, in words: "rank.top", "START.question", "scratch.clock"
 function dfSourceLabel(b) {
@@ -3085,16 +3098,38 @@ const VIEW_PAD = 36;
 
 const BIG_GRAPH_CELLS = 120;
 
+/* The Flow screen's chrome floats over the stage as glass (the top bar,
+ * the rail, the side panel — docs/LIQUID_GLASS_PLAN.md G1): how far each
+ * reaches into it. The world grows by these, so the flow lands in the open
+ * part and still pans clear of every piece. A drawer or a sheet (a phone)
+ * covers the canvas for a moment and is not counted. */
+function stageInset() {
+  const i = {l: 0, t: 0, r: 0, b: 0};
+  const stage = $("#stage");
+  if (!document.body.classList.contains("floatframe") || document.body.classList.contains("ax-focus")) return i;
+  const s = stage.getBoundingClientRect();
+  if (!s.width) return i;
+  const docked = (el) => el && el.offsetWidth && getComputedStyle(el).position !== "fixed";
+  const bar = $("header.bar").getBoundingClientRect();
+  i.t = Math.max(0, bar.bottom - s.top);
+  const rail = $("#rail");
+  if (docked(rail)) i.l = Math.max(0, rail.getBoundingClientRect().right - s.left);
+  const side = $("#sidebar");
+  if (docked(side) && !side.classList.contains("off")) i.r = Math.max(0, s.right - side.getBoundingClientRect().left);
+  return i;
+}
+
 function applyView() {
   const s = state.view.scale, ex = state.extent;
   if (!ex) return;
-  const w = (ex.maxX - ex.minX) * s + VIEW_PAD * 2;
-  const h = (ex.maxY - ex.minY) * s + VIEW_PAD * 2;
+  const i = stageInset();
+  const w = (ex.maxX - ex.minX) * s + VIEW_PAD * 2 + i.l + i.r;
+  const h = (ex.maxY - ex.minY) * s + VIEW_PAD * 2 + i.t + i.b;
   const world = $("#world");
   world.style.width = `${w}px`;
   world.style.height = `${h}px`;
   $("#plane").style.transform =
-    `translate(${-ex.minX * s + VIEW_PAD}px, ${-ex.minY * s + VIEW_PAD}px) scale(${s})`;
+    `translate(${-ex.minX * s + VIEW_PAD + i.l}px, ${-ex.minY * s + VIEW_PAD + i.t}px) scale(${s})`;
   $("#zoom-pct").textContent = `${Math.round(s * 100)}%`;
 
   // no semantic zoom: a card is the same at every zoom (its detail shows
@@ -3112,6 +3147,17 @@ function zoomAt(mx, my, factor) {
   applyView();
   stage.scrollLeft = cx * next - mx;
   stage.scrollTop = cy * next - my;
+  stillGlass();
+}
+
+// while the flow zooms, every node under the glass repaints each frame and
+// the blur with it (+3.5 ms a frame, measured): the glass holds still —
+// a near-opaque tint, no blur — until the zoom stops (studio.css body.zooming)
+let stillTimer = 0;
+function stillGlass() {
+  document.body.classList.add("zooming");
+  clearTimeout(stillTimer);
+  stillTimer = setTimeout(() => document.body.classList.remove("zooming"), 180);
 }
 
 function stageCenter() {
@@ -3148,16 +3194,18 @@ function initView(fresh) {
     return;
   }
   const w = Math.max(1, ex.maxX - ex.minX), h = Math.max(1, ex.maxY - ex.minY);
+  // the open part of the box: clear of the chrome floating over it
+  const i = stageInset(), ow = r.width - i.l - i.r, oh = r.height - i.t - i.b;
   const room = (n) => n - VIEW_PAD * 2 - 24;
-  const all = Math.min(room(r.width) / w, room(r.height) / h);
-  state.view.scale = all >= 0.7 ? Math.min(1, all) : Math.min(1, Math.max(0.7, room(r.width) / w));
+  const all = Math.min(room(ow) / w, room(oh) / h);
+  state.view.scale = all >= 0.7 ? Math.min(1, all) : Math.min(1, Math.max(0.7, room(ow) / w));
   applyView();
-  const wide = w * state.view.scale + VIEW_PAD * 2;
+  const inner = w * state.view.scale + VIEW_PAD * 2, wide = inner + i.l + i.r;
   // a flow wider than the box lands on its START, where reading begins
   // (a phone at the readable 70% used to open on the middle, sides cut)
   const start = state.startAt;
-  const x = start && wide > r.width ? (start.x - ex.minX) * state.view.scale + VIEW_PAD - r.width / 2
-    : (wide - r.width) / 2;
+  const x = start && inner > ow ? (start.x - ex.minX) * state.view.scale + VIEW_PAD - ow / 2
+    : (inner - ow) / 2;
   stage.scrollLeft = Math.max(0, Math.min(wide - r.width, x));
   stage.scrollTop = 0;
 }
@@ -3176,4 +3224,16 @@ $("#stage").addEventListener("scroll", () => {
 // however the canvas comes back (leaving the assistant's focus, say), a
 // stale one is drawn as it shows — the tab switch flushes on its own
 new ResizeObserver(() => flushCanvas()).observe($("#stage"));
+// the floating chrome opening, closing or slimming moves the open part:
+// the world takes the new insets (the stage itself keeps its size)
+{
+  let last = "";
+  const reinset = () => {
+    if (!state.extent || state.tab !== "flow" || state.workflowOn) return;
+    const i = stageInset(), key = `${i.l}|${i.t}|${i.r}|${i.b}`;
+    if (key !== last) { last = key; applyView(); }
+  };
+  const ro = new ResizeObserver(reinset);
+  for (const el of [$("header.bar"), $("#rail"), $("#sidebar")]) if (el) ro.observe(el);
+}
 

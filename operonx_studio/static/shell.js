@@ -114,6 +114,9 @@ function syncChrome() {
   const stageOn = state.tab === "flow" || !!state.workflowOn;
   if (stageOn) document.body.dataset.stage = "";
   else delete document.body.dataset.stage;
+  // the Flow screen's chrome floats over the canvas as glass (a run's
+  // canvas sits in its pane, under a solid head)
+  document.body.classList.toggle("floatframe", state.tab === "flow" && !state.workflowOn);
   if (!stageOn) { $("#find").hidden = true; $("#legend").hidden = true; }
 }
 
@@ -522,10 +525,11 @@ function closeFind() {
 
 function centerOn(item) {
   const stage = $("#stage");
-  const r = stage.getBoundingClientRect();
+  const r = stage.getBoundingClientRect(), i = stageInset();
   const s = state.view.scale, ex = state.extent;
-  stage.scrollLeft = (item.x + item.w / 2 - ex.minX) * s + VIEW_PAD - r.width / 2;
-  stage.scrollTop = (item.y + item.h / 2 - ex.minY) * s + VIEW_PAD - r.height / 2;
+  // the middle of the open part, clear of the floating chrome
+  stage.scrollLeft = (item.x + item.w / 2 - ex.minX) * s + VIEW_PAD - (r.width - i.l - i.r) / 2;
+  stage.scrollTop = (item.y + item.h / 2 - ex.minY) * s + VIEW_PAD - (r.height - i.t - i.b) / 2;
 }
 
 (() => {
