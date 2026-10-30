@@ -989,19 +989,6 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
               0 0 0 6px color-mix(in srgb, var(--kind, var(--k-func)) 12%, transparent),
               inset 0 0 16px var(--sh-gray100-a55);
 }
-.node.cell.selected {
-  border-color: var(--line-cyan76);
-  background:
-    /* keep the icon band's pastel above the cyber wash */
-    linear-gradient(90deg,
-      color-mix(in srgb, var(--kind, var(--k-func)) 11%, transparent) 0 56px,
-      transparent 56px),
-    radial-gradient(80% 120% at 50% 35%,
-      var(--rt-bay) 0%, var(--bg-cyan96) 45%, var(--bg-cyan90) 100%);
-  box-shadow: 0 0 0 1.5px var(--sh-cyan77-a45),
-              0 0 26px var(--sh-cyan79-a55),
-              inset 0 0 16px var(--sh-gray100-a55);
-}
 .node.cell::before {
   /* no nucleus halo on the white ground — its soft square bounding
      box read as a dirty rectangle shadow behind every icon */
@@ -1037,20 +1024,22 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
               var(--og-drop),
               0 0 26px color-mix(in srgb, var(--kind, var(--k-func)) 26%, transparent);
 }
+/* selected: the same glass, lit lavender — a click only marks the op */
+.node.selected, .node.cell.selected, .node.cell.selected:hover {
+  border-color: var(--flow-accent);
+  box-shadow: inset 0 1.5px 0 var(--og-rim-top),
+              inset 0 -1.5px 0 var(--og-rim-bottom),
+              0 0 0 3px var(--flow-accent),
+              0 0 0 7px var(--flow-accent-ring),
+              0 0 26px 8px var(--flow-glow);
+}
+.node.selected:not(.cell) {
+  background: linear-gradient(180deg, var(--surface), var(--flow-accent-soft));
+}
 .node.cell .badges { margin-top: 3px; }
 .node.cell .nname { margin-left: 0; }
 .node.dimmed { opacity: .18; }
 .node.heated { border-color: color-mix(in srgb, var(--warn) calc(var(--heat, 0) * 100%), var(--line)); }
-/* selection: the card itself LIGHTS UP — an electric cyan wash across
-   the body with a neon glow. Background does the talking, not border. */
-.node.selected {
-  border-color: var(--line-cyan76);
-  background: radial-gradient(80% 120% at 50% 35%,
-    var(--rt-bay) 0%, var(--bg-cyan96) 45%, var(--bg-cyan90) 100%);
-  box-shadow: 0 0 0 1.5px var(--sh-cyan77-a45),
-              0 0 26px var(--sh-cyan79-a55),
-              0 6px 18px var(--sh-blue58-a22);
-}
 .node::before {
   content: ""; position: absolute; left: 7px; top: 13px; bottom: 13px; width: 4px;
   border-radius: 4px; background: var(--kind, var(--k-func));
@@ -1154,22 +1143,22 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 .wires circle.espark.cond { stroke: var(--rt-wire); }
 /* soft merge edges: the same family, a quieter voice — never gray */
 .wires path.soft { stroke: var(--stroke-blue78); opacity: .8; }
-.node.serve-node { background: linear-gradient(180deg, var(--bg-yellow97-2), var(--bg-yellow95));
-  border-color: var(--line-yellow82); width: 190px; }
+.node.serve-node { background: linear-gradient(180deg, var(--surface), var(--flow-accent-soft));
+  border-color: color-mix(in srgb, var(--flow-accent) 60%, var(--border)); width: 190px; }
 .node.serve-node::before { background: var(--k-serve); }
 .node.errorlit { border-color: var(--err);
   box-shadow: 0 0 0 3px var(--sh-red58-a12), var(--sh-1); }
 
-/* ingress/egress — the serve boundary, drawn as doors in the brand
-   gold, visually apart from compute ops */
+/* ingress/egress — the serve boundary, drawn as doors in the flow
+   lavender, visually apart from compute ops */
 .node.gate {
-  background: linear-gradient(180deg, var(--bg-yellow97-2), var(--bg-yellow95));
-  border: 1.5px dashed var(--line-yellow78); border-radius: 22px;
+  background: linear-gradient(180deg, var(--surface), var(--flow-accent-soft));
+  border: 1.5px dashed color-mix(in srgb, var(--flow-accent) 75%, var(--border)); border-radius: 22px;
   min-height: 52px;
 }
 .node.gate::before { background: var(--k-serve); }
 .node.gate .nname { color: var(--flow-accent-deep); }
-.node.gate .nkind { color: var(--ink-amber67); }
+.node.gate .nkind { color: color-mix(in srgb, var(--flow-accent-deep) 70%, var(--muted)); }
 
 /* an opened GraphOp — a container whose members are real nodes on the
    canvas; the box itself is just the boundary and a title strip */
@@ -1267,13 +1256,13 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 
 /* the client's doors: a frame hugging each gate, nothing more */
 #edges rect.zoneband {
-  fill: var(--fill-amber70-a6);
-  stroke: var(--stroke-amber64-a38); stroke-dasharray: 5 6; stroke-width: 1;
+  fill: color-mix(in srgb, var(--flow-accent) 6%, transparent);
+  stroke: color-mix(in srgb, var(--flow-accent) 45%, transparent); stroke-dasharray: 5 6; stroke-width: 1;
 }
 .badge.start { color: var(--ink-amber49); border-color: var(--line-amber64-a40);
   background: var(--bg-amber70-a8); }
 .wires text.zonelabel {
-  fill: var(--fill-amber60); font-size: 10px; font-weight: 700; letter-spacing: .12em;
+  fill: var(--flow-accent-deep); font-size: 10px; font-weight: 700; letter-spacing: .12em;
   text-anchor: start;
 }
 .bouton.b-serve { fill: var(--k-serve); }

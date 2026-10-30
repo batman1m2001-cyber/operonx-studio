@@ -435,7 +435,7 @@ function jumpToOp(graph, node) {
       && (state.ir.graphs || []).includes(graph)) {
     state.graph = graph;
     $("#graph-pick").value = graph.name;
-    state.sel = null;
+    state.sel = state.dfFocus = null;
     state.expanded.clear();
     render();
     fit();

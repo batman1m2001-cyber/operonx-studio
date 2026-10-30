@@ -13,12 +13,14 @@
 function select(key) {
   dfPlatePin = null;
   state.route = null;
+  const before = state.sel, open = state.dfFocus || state.dfTerm;
   state.dfTerm = null;
   state.dfTermPort = state.dfTermHover = null;
-  const before = state.sel;
   state.sel = (state.sel === key) ? null : key;
-  // Workflow opens the selected op in place: a re-layout round the card
-  if (canvasView === "workflow" && before !== state.sel) renderKeeping(before && !state.sel ? before : state.sel);
+  // a click only marks the op; what a double click opened closes when the
+  // pick moves off it (a re-layout, held round the card)
+  if (state.dfFocus !== state.sel) state.dfFocus = null;
+  if (canvasView === "workflow" && open && !state.dfFocus) renderKeeping(state.sel || before);
   refreshSelection();
   pushView();
   const panel = $("#inspector");
