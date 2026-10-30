@@ -9,14 +9,14 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
   --float-edge: var(--border);
-  /* surfaces — deep graphite, never pure black */
-  --bg: #0e1115;
-  --surface: #161a20;
-  --surface-2: #1b2027;
-  --surface-3: #242a33;
-  --border: #2b323c;
-  --border-soft: #222831;
-  --border-strong: #3b4451;
+  /* surfaces — deep graphite with the logo's violet in it, never pure black */
+  --bg: #0f0d16;
+  --surface: #181521;
+  --surface-2: #1d1a28;
+  --surface-3: #262334;
+  --border: #2e2a3d;
+  --border-soft: #242132;
+  --border-strong: #3e3953;
   /* text */
   --text: #e6e9ee;
   --text-2: #b4bdc8;
@@ -27,10 +27,11 @@
   --accent-strong: #cbbefc;
   --accent-soft: #231e38;
   --accent-ring: rgba(164, 143, 247, .36);
-  --flow-accent: #d9a526;
-  --flow-accent-deep: #f0c862;
-  --flow-accent-ring: rgba(217, 165, 38, .36);
-  --flow-accent-soft: #2b2413;
+  --flow-accent: #c4b5ff;
+  --flow-accent-deep: #d9cfff;
+  --flow-accent-ring: rgba(196, 181, 255, .34);
+  --flow-accent-soft: #262040;
+  --flow-glow: rgba(196, 181, 255, .55);
   /* signal */
   --signal: #4d8eff;
   --signal-strong: #85b3ff;
@@ -51,7 +52,7 @@
      band, chroma, CVD ΔE ≥ 8.1, normal-vision ΔE ≥ 15.1, contrast) and
      ≥ 4.5:1 as text (the kind chip). The default is the neutral "other":
      a light grey that stays apart from every hue, colour-blind or not
-     (CVD ΔE ≥ 9.5). Serve is the flow's gold (--flow-accent), not a kind */
+     (CVD ΔE ≥ 9.5). Serve is the flow's glowing lavender (--flow-accent), not a kind */
   --k-func: #318aff;
   --k-llm: #a665d2;
   --k-graph: #00964a;
@@ -80,7 +81,7 @@
   --k-audio: #ee518a;
   --k-res: #0ba7b6;
   --k-default: #b4bdc8;
-  --k-serve: #d9a526;
+  --k-serve: var(--flow-accent);
   /* the energy */
   --wire: #6f96c6;
   --wire-deep: #a0c2ea;
