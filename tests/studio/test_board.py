@@ -593,9 +593,14 @@ def test_the_assistant_reads_the_plan_it_asks_the_owner_to_approve(client, tmp_p
     db.execute(f"INSERT INTO interactions ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
     db.commit()
     db.close()
-    text = _tool(BoardStudio(client, _open(client, root)), "board_status", milestone="m1")
+    s = BoardStudio(client, _open(client, root))
+    text = _tool(s, "board_status", milestone="m1")
     assert "  Plan C5 [risky] · Remove the hack — needs C2 — paths ops.py" in text
     assert "    Test first, then delete the class." in text and "    - WHEN ops.py is read" in text
+    # board_card reads a proposed card in full: it is not on the board until the plan is approved
+    text = _tool(s, "board_card", milestone="m1", card="C5")
+    assert text.startswith("C5 · Remove the hack [proposed, waits for approval, risky] — Test first")
+    assert "deps C2; files ops.py" in text and "  - WHEN ops.py is read THE SYSTEM SHALL hold no hack" in text
 
 
 def test_the_assistant_reads_what_the_engine_saw_when_it_asked(client, tmp_path):

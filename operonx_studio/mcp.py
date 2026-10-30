@@ -464,7 +464,10 @@ def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
 
 def t_board_card(s: Studio, a: Dict[str, Any]) -> str:
     mid, cid = str(a["milestone"]), str(a["card"])
-    got = s.call(f"/board/{urllib.parse.quote(mid)}/card/{urllib.parse.quote(cid)}")
+    try:
+        got = s.call(f"/board/{urllib.parse.quote(mid)}/card/{urllib.parse.quote(cid)}")
+    except RuntimeError as exc:  # not on the board: a plan waiting for approval holds its cards until then
+        return _proposed_card(s, mid, cid) or f"failed: {exc}"
     if got.get("error"):
         return f"failed: {got['error']}"
     s.show("open_board", mid=mid, card=cid)
@@ -479,6 +482,20 @@ def t_board_card(s: Studio, a: Dict[str, Any]) -> str:
         text = e["data"].get("text") or e["data"].get("message") or e["data"].get("to") or ""
         lines.append(f"  {e['kind']}{' (' + e['actor'] + ')' if e.get('actor') else ''}{': ' + str(text) if text else ''}")
     return "\n".join(lines)
+
+
+def _proposed_card(s: Studio, mid: str, cid: str) -> str:
+    """A card of the plan waiting for the owner's approval, in full (board_status shortens them)."""
+    got = s.call(f"/board/{urllib.parse.quote(mid)}")
+    for q in got.get("questions") or []:
+        for c in q.get("plan_cards") or [] if q.get("kind") == "approval" else []:
+            if c.get("id") == cid:
+                lines = [f"{c['id']} · {c['title']} [proposed, waits for approval{', risky' if c.get('risk') == 'high' else ''}]"
+                         f" — {c['intent']}",
+                         f"rows {', '.join(c['rows']) or '—'}; deps {', '.join(c['deps']) or '—'}; "
+                         f"files {', '.join(c['paths']) or 'anywhere'}"]  # fmt: skip
+                return "\n".join(lines + [f"  - {x}" for x in c["criteria"]])
+    return ""
 
 
 def _board_act(s: Studio, mid: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -729,7 +746,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                     "Opens the Board on the user's screen.",
                      "schema": _schema({"milestone": _S})},
     "board_card": {"fn": t_board_card,
-                   "description": "One card of a milestone: intent, rows, criteria, files, and its last events.",
+                   "description": "One card of a milestone: intent, rows, criteria, files, and its last events. "
+                                  "A card of a plan waiting for approval is shown in full too.",
                    "schema": _schema({"milestone": _S, "card": _S, "events": _N}, ["milestone", "card"])},
     "board_start": {"fn": t_board_start,
                     "description": "Start a new milestone for checklist rows (rows: their IDs) and/or a goal in "
