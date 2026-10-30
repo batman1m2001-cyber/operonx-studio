@@ -5,7 +5,8 @@
  *   - a browser notification fires for each question this browser has not
  *     seen, while any studio tab is open (foreground or not), once the
  *     owner allowed it ("Notify me");
- *   - the home page draws its Boards list from the same answer (#boards).
+ *   - each project card on the home page carries its board's line, and
+ *     the project page's Project tab the count waiting in that project.
  *
  * A closed phone is Telegram's job, not this file's. Self-contained: the
  * home page has none of studio.js's helpers. */
@@ -97,34 +98,50 @@ const Waiting = (() => {
     return b;
   }
 
-  /* the home page's Boards list */
-  function draw() {
-    const box = document.getElementById("boards");
-    if (!box) return;
-    const sec = box.closest("section");
-    if (sec) sec.hidden = !data.boards.length;
-    box.textContent = "";
-    const head = document.getElementById("boards-actions");
-    if (head) { head.textContent = ""; const b = button(); if (b) head.append(b); }
-    for (const board of data.boards) {
-      const row = mk("a", "boardrow");
-      row.href = `/p/${board.pid}/board`;
-      const top = mk("div", "boardtop");
-      top.append(mk("b", null, board.name));
-      if (board.waiting.length) top.append(mk("span", "chip cwarn", `${board.waiting.length} waiting on you`));
-      row.append(top);
-      for (const m of board.milestones.slice(-3)) {
-        row.append(mk("div", "boardms", `${m.id} · ${m.title} — ${STATE[m.state] || m.state}`
-          + (m.cards ? ` · ${m.done}/${m.cards} cards` : "")));
-      }
-      for (const q of board.waiting.slice(0, 3)) {
-        row.append(mk("div", "boardq", `${q.qid || "?"} ${q.milestone}${q.card ? `/${q.card}` : ""}: ${q.problem}`));
-      }
-      if (board.error) row.append(mk("div", "boardq", board.error));
-      box.append(row);
+  /* a board's line: its newest milestone, and what waits on the owner */
+  function line(board) {
+    const box = mk("div", "projboard");
+    const m = board.milestones[board.milestones.length - 1];
+    if (m) box.append(mk("span", null, `board ${m.id} · ${m.title} — ${STATE[m.state] || m.state}`
+      + (m.cards ? ` · ${m.done}/${m.cards} cards` : "")));
+    else if (board.error) box.append(mk("span", null, board.error));
+    else box.append(mk("span", null, "board: no milestones yet"));
+    if (board.waiting.length) {
+      const q = mk("a", "chip cwarn", `${board.waiting.length} waiting on you`);
+      q.href = `/p/${board.pid}/board`;
+      q.title = board.waiting.slice(0, 3).map((w) => `${w.qid || "?"} ${w.problem}`).join("\n");
+      q.onclick = (ev) => ev.stopPropagation();  // the row opens the project; this opens its board
+      box.append(q);
     }
+    return box;
   }
 
+  function draw() {
+    // the home page: "Notify me" by the projects, a board line on each card
+    const slot = document.getElementById("notify-slot");
+    if (slot && !slot.firstChild) { const b = button(); if (b) slot.append(b); }
+    const byPid = new Map(data.boards.map((b) => [b.pid, b]));
+    for (const row of document.querySelectorAll("#projects .projrow")) {
+      const old = row.querySelector(".projboard");
+      const board = byPid.get(row.dataset.pid);
+      const now = board ? line(board) : null;
+      if (old) old.remove();
+      if (now) row.querySelector(".projmain").append(now);
+    }
+    // a project page: the count on its Project tab
+    const pid = (location.pathname.match(/^\/p\/([^/]+)/) || [])[1];
+    const tab = document.querySelector('.tabs button[data-tab="project"]');
+    if (pid && tab) {
+      const n = (byPid.get(pid) || {waiting: []}).waiting.length;
+      let badge = tab.querySelector(".tabbadge");
+      if (n && !badge) { badge = mk("span", "tabbadge"); tab.append(badge); }
+      if (badge) { badge.hidden = !n; badge.textContent = String(n); }
+      tab.title = n ? `Project — ${n > 1 ? `${n} questions wait` : "a question waits"} for you` : "Project — build it by talking to the assistant";
+    }
+  }
+  // the home page draws its rows after this file: draw again when they land
+  document.addEventListener("ox:projects", draw);
+
   poll();
-  return {poll, button, get data() { return data; }};
+  return {poll, button, draw, get data() { return data; }};
 })();

@@ -135,6 +135,7 @@ async function loadProjects() {
   }
   paintHealth(boot && boot.health);
   if (boot) paintRecent(boot.sessions);
+  document.dispatchEvent(new Event("ox:projects"));
 }
 
 /* The conversations people had with the assistant, newest first: one
