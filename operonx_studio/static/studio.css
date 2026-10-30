@@ -1097,21 +1097,21 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 .wires path.loop-head { fill: var(--loop); stroke: none; }
 .wires circle.bouton.b-serve { fill: var(--k-serve); }
 .wires path.eglow {
-  stroke: var(--wire-glow); stroke-width: 6;
+  stroke: var(--wire-glow); stroke-width: 4;
   stroke-linecap: round; pointer-events: none;
 }
-.wires path.ecore { stroke: var(--wire); stroke-width: 2.5; stroke-linecap: round;
+.wires path.ecore { stroke: var(--wire); stroke-width: 1.6; stroke-linecap: round;
   pointer-events: stroke; }
 .wires path.eray {
-  stroke: var(--rt-bay); stroke-width: 1; stroke-linecap: round;
+  stroke: var(--rt-bay); stroke-width: .6; stroke-linecap: round;
   pointer-events: none;
 }
-.wires path.eglow.back { stroke: color-mix(in srgb, var(--loop) 18%, transparent); stroke-width: 7; }
-.wires path.ecore.back { stroke: var(--loop); stroke-width: 2.5; stroke-dasharray: 10 6; }
+.wires path.eglow.back { stroke: color-mix(in srgb, var(--loop) 18%, transparent); stroke-width: 5; }
+.wires path.ecore.back { stroke: var(--loop); stroke-width: 1.6; stroke-dasharray: 10 6; }
 .wires path.eray.back { display: none; }
 .wires path.eglow.hot { stroke: var(--stroke-blue54-a30); }
-.wires path.ecore.hot { stroke: var(--wire-deep); stroke-width: 3.5; }
-.wires path.eray.hot { stroke-width: 1.3; }
+.wires path.ecore.hot { stroke: var(--wire-deep); stroke-width: 2.4; }
+.wires path.eray.hot { stroke-width: .9; }
 .wires circle.espark { fill: var(--rt-bay); stroke: var(--wire); stroke-width: 1.6; }
 .wires circle.espark.tailspark { fill: var(--fill-blue85); opacity: .7; stroke: none; }
 .wires circle.espark.back { stroke: var(--loop); }
@@ -1126,7 +1126,7 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 .wires path.eglow.cond { stroke: color-mix(in srgb, var(--rt-wire) 13%, transparent); }
 .wires path.ecore.cond { stroke: var(--rt-wire); }
 .wires path.ecore.cond.relse { stroke: var(--rt-wire-else); }
-.wires path.eray.cond { stroke-width: .8; opacity: .85; }
+.wires path.eray.cond { stroke-width: .5; opacity: .85; }
 .wires path.ecore.cond.relse { stroke-dasharray: 9 7; opacity: .75; }
 .wires path.eglow.cond.relse { opacity: .5; }
 .wires path.eray.cond.relse { display: none; }
