@@ -45,15 +45,10 @@
   --flow-glow: rgba(157, 137, 245, .55);
   --flow-on: #1d1442;
   /* op glass (the flow view's liquid-glass ops) */
-  --og-fill: rgba(255, 255, 255, .55);
-  --og-tint: 11%;
-  --og-line: 58%;
-  --og-sheen: rgba(255, 255, 255, .95);
-  --og-glint: rgba(255, 255, 255, .55);
-  --og-rim-top: rgba(255, 255, 255, 1);
-  --og-rim-bottom: rgba(40, 40, 110, .16);
-  --og-edge: rgba(255, 255, 255, .75);
-  --og-drop: 0 1px 2px rgba(20, 24, 60, .08), 0 10px 24px rgba(20, 24, 60, .16);
+  --og-fill: rgba(255, 255, 255, .42); --og-tint: 4%; --og-band: 7%; --og-blur: 8px;
+  --og-line: 24%; --og-line-hover: 46%; --og-edge: rgba(52, 62, 102, .16);
+  --og-spec: rgba(255, 255, 255, .55); --og-spec-hover: rgba(255, 255, 255, .8); --og-rim: rgba(255, 255, 255, .9);
+  --og-drop: 0 1px 2px rgba(20, 24, 50, .05), 0 4px 14px rgba(20, 24, 50, .06);
   /* signal — the one colour of things happening now: live runs, the
      assistant at work, focus. Nothing static wears it. */
   --signal: #1f6fe0;
@@ -994,44 +989,40 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
      box read as a dirty rectangle shadow behind every icon */
   display: none;
 }
-/* liquid glass ops: the cell keeps its membrane and kind colour, but is
-   drawn as glass — a kind-tinted, see-through body, a lens sheen across
-   the top, a bright rim above and a shaded one below, floating on a soft
-   drop. No backdrop blur: a dot grid has nothing to refract, and a blur
-   per op would cost every pan and zoom. */
+/* liquid glass ops: the cell keeps its membrane and kind colour, drawn as
+   glass — a near-clear body that softly blurs what runs behind it (wires,
+   the grid), ONE thin edge, one specular line along the top, a soft
+   ambient shadow. The kind reads as a faint tint and the icon band, never
+   as a painted fill. Hover and selection change the edge, not the body. */
 .node.cell {
   border: 1px solid color-mix(in srgb, var(--kind, var(--k-func)) var(--og-line), var(--og-edge));
   background:
-    radial-gradient(70% 55% at 50% 0%, var(--og-sheen), transparent 72%),
-    radial-gradient(45% 40% at 78% 100%, var(--og-glint), transparent 70%),
+    linear-gradient(180deg, var(--og-spec) 0, transparent 42%),
     linear-gradient(90deg,
-      color-mix(in srgb, var(--kind, var(--k-func)) 12%, transparent) 0 56px,
+      color-mix(in srgb, var(--kind, var(--k-func)) var(--og-band), transparent) 0 56px,
       transparent 56px),
-    linear-gradient(180deg,
-      color-mix(in srgb, var(--kind, var(--k-func)) var(--og-tint), var(--og-fill)),
-      color-mix(in srgb, var(--kind, var(--k-func)) calc(var(--og-tint) * 1.8), var(--og-fill)));
-  box-shadow: inset 0 1.5px 0 var(--og-rim-top),
-              inset 0 -1.5px 0 var(--og-rim-bottom),
-              inset 0 0 0 1px var(--og-edge),
-              var(--og-drop),
-              0 0 18px color-mix(in srgb, var(--kind, var(--k-func)) 14%, transparent);
+    color-mix(in srgb, var(--kind, var(--k-func)) var(--og-tint), var(--og-fill));
+  -webkit-backdrop-filter: blur(var(--og-blur)) saturate(140%);
+  backdrop-filter: blur(var(--og-blur)) saturate(140%);
+  box-shadow: inset 0 1px 0 var(--og-rim), var(--og-drop);
 }
+/* the blur is the costly part: off while the canvas is dragged and on a
+   big flow (143 blurred ops panned at ~1.3x the frame time of clear ones) */
+#stage.panning .node.cell, #world.big .node.cell { -webkit-backdrop-filter: none; backdrop-filter: none; }
 .node.cell:hover {
-  border-color: color-mix(in srgb, var(--kind, var(--k-func)) 60%, var(--og-edge));
-  box-shadow: inset 0 1.5px 0 var(--og-rim-top),
-              inset 0 -1.5px 0 var(--og-rim-bottom),
-              inset 0 0 0 1px var(--og-edge),
-              var(--og-drop),
-              0 0 26px color-mix(in srgb, var(--kind, var(--k-func)) 26%, transparent);
+  --og-spec: var(--og-spec-hover);
+  border-color: color-mix(in srgb, var(--kind, var(--k-func)) var(--og-line-hover), var(--og-edge));
+  box-shadow: inset 0 1px 0 var(--og-rim), var(--og-drop);
 }
-/* selected: the same glass, lit lavender — a click only marks the op */
+/* selected: the edge lights lavender with a controlled glow round it —
+   the body stays glass. A click only marks the op. */
 .node.selected, .node.cell.selected, .node.cell.selected:hover {
   border-color: var(--flow-accent);
-  box-shadow: inset 0 1.5px 0 var(--og-rim-top),
-              inset 0 -1.5px 0 var(--og-rim-bottom),
-              0 0 0 3px var(--flow-accent),
-              0 0 0 7px var(--flow-accent-ring),
-              0 0 26px 8px var(--flow-glow);
+  box-shadow: inset 0 1px 0 var(--og-rim),
+              0 0 0 1px var(--flow-accent),
+              0 0 0 4px var(--flow-accent-ring),
+              0 0 18px 2px var(--flow-glow),
+              var(--og-drop);
 }
 .node.selected:not(.cell) {
   background: linear-gradient(180deg, var(--surface), var(--flow-accent-soft));
@@ -1065,10 +1056,9 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
   color: var(--kind, var(--k-default));
   border-color: color-mix(in srgb, var(--kind, var(--k-default)) 35%, var(--rt-bay));
   background: color-mix(in srgb, var(--kind, var(--k-default)) 7%, var(--rt-bay)); }
-/* the overview card is its name: the chips show on the op that is clicked
-   (in the Workflow view, where a click lays the canvas out again) */
+/* the overview card is its name: a click only lights it — its chips,
+   detail and badges are the inspector's */
 .node .nchips { display: none; }
-#world:not(.dfview) .node.selected .nchips { display: inline-flex; }
 .node .nkind { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .node .agtools { color: var(--muted); font-size: 10.5px; margin-top: 3px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
@@ -1277,7 +1267,6 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
    side insets so it stays inside the cell's curved membrane */
 .node .detail { display: none; margin-top: 5px; padding: 5px 18px 0;
   border-top: 1px dashed var(--line); text-align: center; }
-#world:not(.dfview) .node.selected .detail { display: block; }
 /* the show line: the output that stands for the op, and with a run
    painted, its last value — one line, cut, never a payload */
 .detail .dshow { font-size: 9.5px; margin-top: 2px; text-align: left;
@@ -1286,14 +1275,7 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 .detail .dshow .dval { color: var(--ink-blue48-2); }
 /* and so are badges, but a run's chip, an error, and a nested graph's
    open button (▣ n ▸) */
-.node:not(.selected) .badges .badge:not(.run):not(.err):not(.sub),
-#world.dfview .node .badges .badge:not(.run):not(.err):not(.sub) { display: none; }
-/* close up, the cell relaxes: gentler pixel radii and more padding so
-   the grown card never pushes its icon into the membrane */
-#world:not(.dfview) .node.cell.selected:has(> .detail) {
-  border-radius: 42px 54px 46px 50px / 34px 40px 36px 42px;
-  padding: 13px 12px 11px 70px;
-}
+.node .badges .badge:not(.run):not(.err):not(.sub) { display: none; }
 /* ── the router as a decision card: one row per condition ─────────── */
 .node.branch {
   border-radius: 14px; padding: 9px 12px 8px 12px;
@@ -1398,10 +1380,9 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 /* a very big graph (studio.js BIG_GRAPH_CELLS): the membranes keep their
    ring and their light, not the soft blurred shadows, which every zoom
    frame would re-raster; a selected or running cell still glows */
-#world.big .node.cell:not(.selected):not(.live-active):not(.live-done):not(.live-failed) {
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--kind, var(--k-func)) 7%, transparent); }
+#world.big .node.cell:not(.selected):not(.live-active):not(.live-done):not(.live-failed),
 #world.big .node.cell:not(.selected):not(.live-active):not(.live-done):not(.live-failed):hover {
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--kind, var(--k-func)) 12%, transparent); }
+  box-shadow: inset 0 1px 0 var(--og-rim); }
 
 /* one card at every zoom (no semantic zoom: the layout never changes as
    you zoom): a name big enough to read at a fit-the-graph zoom (16px at
@@ -1421,16 +1402,15 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 @keyframes nodepulse { from { transform: scale(1); opacity: .55; } to { transform: scale(1.07); opacity: 0; } }
 .node.live-done { border-color: color-mix(in srgb, var(--ok) 50%, var(--border-strong)); }
 .node.live-failed { border-color: var(--err); box-shadow: 0 0 0 3px var(--sh-red56-a14); }
-/* on a cell the same states read as light: the op at work glows cyan from
-   its membrane, a finished one settles green, a failed one burns red */
-.node.cell.live-active { border-color: var(--line-cyan76);
-  box-shadow: 0 0 0 1.5px var(--sh-cyan77-a45), 0 0 24px var(--sh-cyan79-a50), inset 0 0 16px var(--sh-gray100-a55); }
-.node.cell.live-active::after { border-color: var(--line-cyan76); }
-.node.cell.live-done { border-color: color-mix(in srgb, var(--ok) 60%, var(--border));
-  box-shadow: 0 3px 12px var(--sh-blue50-a12), 0 0 0 5px color-mix(in srgb, var(--ok) 12%, transparent),
-    inset 0 0 16px var(--sh-gray100-a55); }
+/* on a cell the same states are a status edge, not a new material: the
+   op at work carries a thin signal ring (and the pulse above), a finished
+   one a green edge, a failed one a red edge and ring */
+.node.cell.live-active { border-color: var(--signal);
+  box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 2px var(--signal-ring), var(--og-drop); }
+.node.cell.live-active::after { border-color: var(--signal); }
+.node.cell.live-done { border-color: color-mix(in srgb, var(--ok) 55%, var(--og-edge)); }
 .node.cell.live-failed { border-color: var(--err);
-  box-shadow: 0 0 0 1.5px var(--sh-red56-a35), 0 0 22px var(--sh-red56-a35), inset 0 0 16px var(--sh-gray100-a55); }
+  box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 2px var(--sh-red56-a14), var(--og-drop); }
 .wires path.particle { fill: none; stroke: var(--signal); stroke-width: 5; stroke-linecap: round;
   stroke-dasharray: .01 100; stroke-dashoffset: 0; animation: particle var(--dur, .6s) cubic-bezier(.45, 0, .55, 1) forwards;
   pointer-events: none; }
