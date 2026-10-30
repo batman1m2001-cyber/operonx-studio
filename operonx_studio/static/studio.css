@@ -1,7 +1,7 @@
 /* operonx studio — one stylesheet for every page.
 
    The system: white surfaces on cool graphite neutrals, one ramp for text
-   and lines, the brand gold for exactly three things — the primary
+   and lines, the brand lavender (the logo's) for exactly three things — the primary
    action, where you are (the active tab, the selected row), the mark —
    and one signal blue for what is happening NOW (a live run, the
    assistant at work).
@@ -30,12 +30,18 @@
   --text: #0f1419;
   --text-2: #475260;
   --text-3: #66717e;
-  /* brand — gold for the mark, the primary action and where you are */
-  --accent: #c8930e;
-  --accent-hover: #b4830b;
-  --accent-strong: #845f05;
-  --accent-soft: #fbf5e4;
-  --accent-ring: rgba(200, 147, 14, .30);
+  /* brand — the logo's lavender for the primary action and where you are
+     (white on it 5.0:1, --accent-strong on the page 9.0:1) */
+  --accent: #7357e0;
+  --accent-hover: #6446d0;
+  --accent-strong: #4c32a8;
+  --accent-soft: #f1eefd;
+  --accent-ring: rgba(115, 87, 224, .28);
+  /* the flow view keeps its own gold: gates, the promoter, a changed op */
+  --flow-accent: #c8930e;
+  --flow-accent-deep: #845f05;
+  --flow-accent-ring: rgba(200, 147, 14, .30);
+  --flow-accent-soft: #fbf5e4;
   /* signal — the one colour of things happening now: live runs, the
      assistant at work, focus. Nothing static wears it. */
   --signal: #1f6fe0;
@@ -54,7 +60,7 @@
   --sel-line: #3b86e0;
 
   /* inks that sit on a fill, not on the page: they follow the fill */
-  --on-accent: #1c1603;          /* on the gold (primary buttons) */
+  --on-accent: #ffffff;          /* on the lavender (primary buttons) */
   --on-strong: #ffffff;          /* on the inverted surface (var(--text): Send, the toast) */
   --on-fill: #ffffff;            /* on a status or kind colour */
   --mark-bg: var(--text);        /* the dark squares that carry a mark */
@@ -115,10 +121,10 @@
   /* the monitor's charts (monitor.js reads these) */
   --chart-ok: #2a78d6;
   --chart-failed: #d03b3b;
-  --chart-grid: #ecebe6;
-  --chart-axis: #c3c2b7;
-  --chart-ink: #52514e;
-  --chart-muted: #898781;
+  --chart-grid: #e9ecf1;
+  --chart-axis: #c2c8d1;
+  --chart-ink: #4d5562;
+  --chart-muted: #858d99;
 
   /* shape and motion */
   --r-xs: 6px;
@@ -192,7 +198,7 @@
   --bg-gray19-a38: rgba(15, 20, 25, 0.38);
   --bg-gray19-a62: rgba(15, 20, 25, 0.62);
   --bg-gray19-a82: rgba(15, 20, 25, 0.82);
-  --bg-gray22: #1f1b13;
+  --bg-gray22: #151a21;
   --bg-gray79: #b3bcc7;
   --bg-gray86: #cdd3db;
   --bg-gray89: #d6dce3;
@@ -301,7 +307,7 @@
   --ink-violet54-2: #7c3aed;
   --ink-violet56: #8250df;
   --ink-yellow20: #1c1603;
-  --ink-yellow94: #f2ead6;
+  --ink-yellow94: #dfe4ea;
   --line-amber57: #a5691f;
   --line-amber64-a40: rgba(178, 132, 20, 0.4);
   --line-amber73: #d89a4c;
@@ -459,7 +465,7 @@ input[type=text], input[type=password], input:where(:not([type]), [type=number])
   min-height: 36px; padding: 7px 11px; font: var(--fs-base) var(--font); width: 100%;
   transition: border-color var(--tr), box-shadow var(--tr);
 }
-input[type=text]:hover, input[type=password]:hover, input:where(:not([type]), [type=number]):hover, select:hover { border-color: var(--line-amber78); }
+input[type=text]:hover, input[type=password]:hover, input:where(:not([type]), [type=number]):hover, select:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border-strong)); }
 input[type=text]:focus, input[type=password]:focus, input:where(:not([type]), [type=number]):focus, select:focus, textarea:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
 }
@@ -814,7 +820,7 @@ body:not([data-stage]) .canvasbar { display: none; }
 .zoommenu button span:not(.zm-pad) { flex: 1; text-align: left; }
 .zoommenu kbd { font: 500 11px var(--mono, ui-monospace, monospace); color: var(--text-3); }
 .canvasbar .tsep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
-.canvasbar #btn-expand.active { color: var(--accent-strong); background: var(--accent-soft); }
+.canvasbar #btn-expand.active { color: var(--flow-accent-deep); background: var(--flow-accent-soft); }
 .canvasbar #btn-live.active { color: var(--signal); background: var(--signal-soft); }
 
 /* what is moving on the canvas: a pill pinned to the stage's top-left
@@ -860,7 +866,7 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
   display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 12px; color: var(--text-3);
 }
 .findbox input[type=text] { border: none; box-shadow: none !important; padding: 6px 0; min-height: 34px; background: none; }
-#find:not([hidden]) ~ .canvasbar #btn-find { color: var(--accent-strong); }
+#find:not([hidden]) ~ .canvasbar #btn-find { color: var(--flow-accent-deep); }
 
 #legend { left: calc(var(--rail-w) + 16px); bottom: 68px; width: 400px; max-width: calc(100% - 32px);
   max-height: calc(100% - 96px); overflow-y: auto; padding: 14px 16px 16px; }
@@ -1120,7 +1126,7 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
   min-height: 52px;
 }
 .node.gate::before { background: var(--k-serve); }
-.node.gate .nname { color: var(--accent-deep); }
+.node.gate .nname { color: var(--flow-accent-deep); }
 .node.gate .nkind { color: var(--ink-amber67); }
 
 /* an opened GraphOp — a container whose members are real nodes on the
@@ -1145,7 +1151,7 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 }
 .node.container .chead .nname { font-weight: 650; font-size: 13px; }
 /* the operon nod: one promoter, the genes inside transcribed together */
-.node.container .chead .promoter { color: var(--accent); font-weight: 800; font-size: 13px; }
+.node.container .chead .promoter { color: var(--flow-accent); font-weight: 800; font-size: 13px; }
 .node.container .chead .nkind { color: var(--muted); font-size: 11px; }
 /* a narrow box keeps its name whole: the kind line gives way first */
 .node.container .chead .nname { flex: none; }
@@ -1497,7 +1503,8 @@ body.resizing { user-select: none; cursor: col-resize; }
 .chip.cfired, .chip.cok { color: var(--ok); background: var(--ok-soft); }
 .chip.cfired { margin-left: auto; }
 .chip.cbad { color: var(--err); background: var(--err-soft); }
-.chip.crun, .chip.cwarn { color: var(--ink-amber51); background: var(--bg-yellow97-3); }
+.chip.crun { color: var(--signal-strong); background: var(--signal-soft); }
+.chip.cwarn { color: var(--ink-amber51); background: var(--bg-yellow97-3); }
 
 /* an op's own description, or a note about its role: plain text with a
    rule, not a coloured box */
@@ -1719,7 +1726,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
 .status.s-ok { color: var(--ok); } .status.s-ok::before { background: var(--ok); }
 .status.s-bad { color: var(--err); } .status.s-bad::before { background: var(--err); }
-.status.s-run { color: var(--ink-amber51); } .status.s-run::before { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.status.s-run { color: var(--signal-strong); } .status.s-run::before { background: var(--signal); animation: pulse 1.2s ease-in-out infinite; }
 .status.s-wait { color: var(--warn); } .status.s-wait::before { background: var(--warn); }
 .status.s-skip { color: var(--text-3); }
 @keyframes pulse { 50% { opacity: .35; } }
@@ -1779,7 +1786,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .jrow { border: 1px solid transparent; border-radius: var(--r-md); padding: 10px 12px; cursor: pointer;
   transition: background var(--tr); }
 .jrow:hover { background: var(--surface-2); }
-.jrow.sel { background: var(--accent-soft); border-color: var(--line-yellow91); }
+.jrow.sel { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .jhead { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
 .jn { font-weight: 600; font-size: var(--fs-base); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jkind { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
@@ -1943,8 +1950,8 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 #traces.workflow .tlstrip { padding-right: 4px; }
 
 /* ops an edit just changed */
-.node.changed { box-shadow: 0 0 0 3px var(--accent), 0 0 0 7px var(--accent-ring) !important; }
-.badge.changedbadge { background: var(--accent); color: var(--ink-yellow20); border-color: var(--accent); font-weight: 700; }
+.node.changed { box-shadow: 0 0 0 3px var(--flow-accent), 0 0 0 7px var(--flow-accent-ring) !important; }
+.badge.changedbadge { background: var(--flow-accent); color: var(--ink-yellow20); border-color: var(--flow-accent); font-weight: 700; }
 
 /* the canvas under a lens */
 .node.quiet { opacity: .28; filter: saturate(.3); }
@@ -2147,7 +2154,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 /* empty and stuck screens: the one action that fixes it, first */
 .panenote .noteacts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .panenote .noteacts button { min-height: 34px; }
-.panenote .noteask .icon { color: var(--ink-yellow20); }
+.panenote .noteask .icon { color: var(--on-accent); }
 .panenote .notehand { margin-top: 12px; }
 .panenote .notehand summary { cursor: pointer; color: var(--text-3); font-size: var(--fs-sm); }
 .panenote .notehand summary:hover { color: var(--text); }
@@ -2751,7 +2758,7 @@ body.ax-sheet #axstage { position: fixed; inset: 0; z-index: 90; padding: env(sa
 .projrow .projboard > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .projrow .projboard .chip { margin: 0; flex: none; text-decoration: none; }
 .tabs button .tabbadge { margin-left: auto; min-width: 18px; padding: 0 5px; border-radius: 9px; text-align: center;
-  font-size: 11px; font-weight: 600; line-height: 18px; color: var(--ink-amber51); background: var(--bg-yellow97-3); }
+  font-size: 11px; font-weight: 600; line-height: 18px; color: var(--accent-strong); background: var(--accent-soft); }
 body.railslim .rail .tabs button[data-tab="project"] { position: relative; }
 body.railslim .rail .tabs button .tabbadge:not([hidden]) { display: block; position: absolute; top: 2px; right: 2px;
   min-width: 15px; padding: 0 3px; font-size: 10px; line-height: 15px; }
@@ -2891,7 +2898,7 @@ body.railslim .rail .tabs button .tabbadge:not([hidden]) { display: block; posit
 .playvoice { border-radius: var(--r-md); display: flex; flex-direction: column; min-height: 360px; }
 .voicetop { display: flex; align-items: center; gap: 16px; padding: 16px; flex-wrap: wrap; }
 .voicemic { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 20px; border-radius: 999px;
-  font-weight: 600; background: var(--accent); border-color: var(--accent); color: var(--ink-yellow20); }
+  font-weight: 600; background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .voicemic .icon { width: 16px; height: 16px; }
 .voicemic:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .voicemic.live { background: var(--err); border-color: var(--err); color: var(--on-fill); }
@@ -3818,12 +3825,12 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   box-shadow: inset 3px 0 0 var(--role, var(--border-strong)); }
 .iomsg.role-system, .iomsg.role-developer { --role: var(--c-blue66); background: var(--surface-2); }
 .iomsg.role-user { --role: var(--c-blue59); }
-.iomsg.role-assistant { --role: var(--c-amber70); background: var(--bg-gray99); }
+.iomsg.role-assistant { --role: var(--accent); background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
 .iomsg.role-tool, .iomsg.role-function { --role: var(--c-violet54); }
 .iomsghead { display: flex; align-items: center; gap: 8px; padding: 5px 6px 0 12px; }
 .iorole { font-size: var(--fs-xs); font-weight: 650; color: var(--text-2); }
 .iomsg.role-user .iorole { color: var(--ink-blue51); }
-.iomsg.role-assistant .iorole { color: var(--ink-amber51-2); }
+.iomsg.role-assistant .iorole { color: var(--accent-strong); }
 .iomsg.role-tool .iorole { color: var(--ink-violet48-2); }
 .iomsgname { font-size: var(--fs-xs); color: var(--text-3); }
 /* a call id is long and says little: it shortens, never wraps the head */
@@ -3847,7 +3854,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .ioclamp::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2.4em;
   background: linear-gradient(to bottom, transparent, var(--fade, var(--surface))); pointer-events: none; }
 .iomsg.role-system .ioclamp, .iomsg.role-developer .ioclamp { --fade: var(--surface-2); }
-.iomsg.role-assistant .ioclamp { --fade: var(--c-gray99); }
+.iomsg.role-assistant .ioclamp { --fade: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
 .ioclamp.open { max-height: none; }
 .ioclamp.open::after { display: none; }
 .iomore { margin-top: 4px; min-height: 24px; padding: 0 8px; font-size: var(--fs-xs); border-radius: 6px;
