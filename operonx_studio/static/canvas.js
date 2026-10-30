@@ -1998,7 +1998,7 @@ function renderFlowInfo() {
   head.append(el("h3", null, g.name || "flow"));
   const chips = el("div", "chips");
   const flowChip = el("span", "chip kindchip", "main flow");
-  flowChip.style.setProperty("--kind", "var(--accent)");
+  flowChip.style.setProperty("--kind", "var(--flow-accent)");
   chips.append(flowChip);
   chips.append(el("span", "chip", `${(g.nodes || []).length} ops`));
   const nested = (g.nodes || []).filter(n => n.graph).length;

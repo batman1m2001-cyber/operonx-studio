@@ -22,11 +22,15 @@
   --text-2: #b4bdc8;
   --text-3: #8f99a6;
   /* brand */
-  --accent: #d9a526;
-  --accent-hover: #e6b43a;
-  --accent-strong: #f0c862;
-  --accent-soft: #2b2413;
-  --accent-ring: rgba(217, 165, 38, .36);
+  --accent: #a48ff7;
+  --accent-hover: #b4a3fa;
+  --accent-strong: #cbbefc;
+  --accent-soft: #231e38;
+  --accent-ring: rgba(164, 143, 247, .36);
+  --flow-accent: #d9a526;
+  --flow-accent-deep: #f0c862;
+  --flow-accent-ring: rgba(217, 165, 38, .36);
+  --flow-accent-soft: #2b2413;
   /* signal */
   --signal: #4d8eff;
   --signal-strong: #85b3ff;
@@ -47,7 +51,7 @@
      band, chroma, CVD ΔE ≥ 8.1, normal-vision ΔE ≥ 15.1, contrast) and
      ≥ 4.5:1 as text (the kind chip). The default is the neutral "other":
      a light grey that stays apart from every hue, colour-blind or not
-     (CVD ΔE ≥ 9.5). Serve is the brand's gold (the accent), not a kind */
+     (CVD ΔE ≥ 9.5). Serve is the flow's gold (--flow-accent), not a kind */
   --k-func: #318aff;
   --k-llm: #a665d2;
   --k-graph: #00964a;
@@ -87,7 +91,7 @@
   --sh-3: 0 2px 6px rgba(0, 0, 0, .45), 0 24px 56px rgba(0, 0, 0, .65);
   /* inks on fills: they follow the fill (a bright gold, a light "inverted"
      surface, the lit status colours all take dark ink here) */
-  --on-accent: #1c1603;
+  --on-accent: #140e26;
   --on-strong: #0e1115;
   --on-fill: #0e1115;
   --mark-bg: #262d37;
@@ -131,7 +135,7 @@
   --bg-gray19-a38: rgba(189, 190, 191, 0.38);
   --bg-gray19-a62: rgba(15, 20, 25, 0.62);
   --bg-gray19-a82: rgba(15, 20, 25, 0.82);
-  --bg-gray22: #1f1b13;
+  --bg-gray22: #0f1318;
   --bg-gray79: #383c40;
   --bg-gray86: #3b3e41;
   --bg-gray89: #26292e;
@@ -240,7 +244,7 @@
   --ink-violet54-2: #af7eff;
   --ink-violet56: #b78dff;
   --ink-yellow20: #babbbc;
-  --ink-yellow94: #353229;
+  --ink-yellow94: #c9d0d9;
   --line-amber57: #dea161;
   --line-amber64-a40: rgba(235, 189, 99, 0.4);
   --line-amber73: #6a4200;
