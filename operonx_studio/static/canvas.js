@@ -1065,14 +1065,14 @@ function drawDataLayer() {
     return;
   }
 
-  // Workflow. A click opens the op (its plates are part of the card, the
+  // Workflow. A double click opens the op (its plates are part of the card, the
   // flow laid out again round it) and every partner shows a plug tag with
   // its own hole on the matching side; the rest steps back. A hover only
   // peeks: faint wires to the op's sides, nothing moves.
   /* An open terminal lights every op its values reach and their holes,
    * but wires ONE variable at a time: the one under the pointer, or the
    * one clicked (pinned) — a whole terminal wired at once is a hairball. */
-  if (canvasView === "workflow" && !state.sel && state.dfTerm && termIds) {
+  if (canvasView === "workflow" && !state.dfFocus && state.dfTerm && termIds) {
     world.classList.add("dfpin");
     const pick = state.dfTermHover ?? state.dfTermPort ?? null;
     const portOf = (b) => state.dfTerm === "end" ? b.to.port : b.from.port;
@@ -1100,8 +1100,8 @@ function drawDataLayer() {
     over.querySelector(`.dfterm.${state.dfTerm}`)?.classList.add("picked");
     return;
   }
-  const pinned = !!state.sel;
-  const key = state.sel || state.dfHover || null;
+  const pinned = !!state.dfFocus;
+  const key = state.dfFocus || state.dfHover || null;
   const it = key && R(key);
   if (it && it.inner && pinned) {
     // a selected opened GraphOp: into its frame, through it, and out
@@ -1252,7 +1252,7 @@ function dfWireLabelMove(ev) {
 // a hover's peek ends a beat after the pointer leaves the op
 function dfHoverEnter(key) {
   clearTimeout(state.dfHoverOff);
-  if (canvasView !== "workflow" || state.sel || state.dfHover === key) return;
+  if (canvasView !== "workflow" || state.dfFocus || state.dfHover === key) return;
   state.dfHover = key;
   drawDataLayer();
 }
@@ -1383,11 +1383,11 @@ function render() {
   state.edgeEls = [];
   state.dfB = g ? DataFlow.dataBindings(g, state.expanded) : [];
   state.dfHover = null;
-  // Workflow: a click opens the op AND its partners — each partner showing
+  // Workflow: a double click opens the op AND its partners — each partner showing
   // only the variables it shares with the op — so every wire runs from a
   // hole on one open op to a hole on another
   state.dfOpen = new Map();
-  if (canvasView === "workflow" && !state.sel && state.dfTerm) {
+  if (canvasView === "workflow" && !state.dfFocus && state.dfTerm) {
     for (const b of state.dfB) {
       const hit = state.dfTerm === "start" ? (b.from.kind === "input" && !b.from.key)
         : state.dfTerm === "scratch" ? b.from.kind === "scratch" : !!b.to.end;
@@ -1398,15 +1398,15 @@ function render() {
       state.dfOpen.get(k).add(b.id);
     }
   }
-  if (canvasView === "workflow" && state.sel) {
+  if (canvasView === "workflow" && state.dfFocus) {
     // every binding touching the selection — for an opened GraphOp that is
     // what crosses its frame both ways and what its own ops read and export
-    state.dfOpen.set(state.sel, null);   // null: every bound variable
+    state.dfOpen.set(state.dfFocus, null);   // null: every bound variable
     for (const b of state.dfB) {
       if (DataFlow.isBroadcast(b)) continue;
-      if (b.to.key !== state.sel && b.from.key !== state.sel) continue;
-      const pk = b.to.key === state.sel ? b.from.key : b.to.key;
-      if (!pk || pk === state.sel) continue;
+      if (b.to.key !== state.dfFocus && b.from.key !== state.dfFocus) continue;
+      const pk = b.to.key === state.dfFocus ? b.from.key : b.to.key;
+      if (!pk || pk === state.dfFocus) continue;
       if (!state.dfOpen.has(pk)) state.dfOpen.set(pk, new Set());
       state.dfOpen.get(pk).add(b.id);
     }
@@ -1513,9 +1513,9 @@ function render() {
     const B = state.dfB || [];
     const wants = new Set();
     if (canvasView === "data") for (const k of state.expanded) wants.add(k);
-    else if (state.sel) {
-      if (state.expanded.has(state.sel)) wants.add(state.sel);
-      for (const b of B) if (b.to.key === state.sel || b.from.key === state.sel)
+    else if (state.dfFocus) {
+      if (state.expanded.has(state.dfFocus)) wants.add(state.dfFocus);
+      for (const b of B) if (b.to.key === state.dfFocus || b.from.key === state.dfFocus)
         for (const k of [b.from.key, b.to.key]) if (state.expanded.has(k)) wants.add(k);
     }
     for (const k of wants) {
@@ -1527,7 +1527,7 @@ function render() {
       if (names.length) platePad.set(k, Math.max(...names.map(n => n.length)) * 6.6 + 52 + 8 * Math.max(ins, outs));
     }
   }
-  const dataShown = canvasView === "data" || !!state.sel || !!state.dfTerm;
+  const dataShown = canvasView === "data" || !!state.dfFocus || !!state.dfTerm;
   const L = FlowLayout.layout(g, {
     expanded: state.expanded,
     padOf: (key) => platePad.get(key) || 0,
@@ -1875,7 +1875,7 @@ function render() {
  * flow must not blink the whole canvas. */
 function refreshSelection() {
   for (const [k, c] of state.cardEls) c.classList.toggle("selected", k === state.sel);
-  if (canvasView === "workflow" && dfPort && dfPort.key !== state.sel) dfPort = null;
+  if (canvasView === "workflow" && dfPort && dfPort.key !== state.dfFocus) dfPort = null;
   state.dfHover = null;
   drawDataLayer();
   paintEdges();
@@ -1962,9 +1962,9 @@ function renderKeeping(key) {
 function deselect() {
   dfPlatePin = null;
   state.route = null;
-  const before = state.sel;
-  state.sel = null;
-  if (canvasView === "workflow" && before) renderKeeping(before);
+  const open = state.dfFocus;
+  state.sel = state.dfFocus = null;
+  if (canvasView === "workflow" && open) renderKeeping(open);
   refreshSelection();
   pushView();
   renderFlowInfo();
@@ -2057,7 +2057,7 @@ function renderFlowInfo() {
   panel.append(sec);
 }
 
-function toggleExpand(key) {
+function toggleExpand(key, draw = true) {
   if (state.expanded.has(key)) {
     state.expanded.delete(key);
     // children of a closed box close with it, or reopening later surprises
@@ -2065,7 +2065,7 @@ function toggleExpand(key) {
   } else {
     state.expanded.add(key);
   }
-  render();
+  if (draw) render();
 }
 
 /* ── loops, in plain words ──
@@ -2623,6 +2623,7 @@ function toggleTerm(kind) {
   state.dfTerm = state.dfTerm === kind ? null : kind;
   state.dfTermPort = state.dfTermHover = null;
   dfPort = null;
+  state.dfFocus = null;
   if (state.sel) { state.sel = null; renderFlowInfo(); }
   render();
 }
@@ -2905,6 +2906,19 @@ function opensInPlace(key) {
   return !!(it && (it.node.graph || it.node.parts));
 }
 
+/* A click only selects; a double click opens. In Workflow that is the op's
+ * data, in place — its plugs and the ops it trades with (a GraphOp opens its
+ * members too); again closes it. Elsewhere it opens a GraphOp's members. */
+function openOp(key) {
+  if (!key) return;
+  if (canvasView !== "workflow") { if (opensInPlace(key)) toggleExpand(key); return; }
+  const open = state.dfFocus !== key;
+  state.dfFocus = open ? key : null;
+  if (state.sel !== key) select(key);
+  if (opensInPlace(key) && open !== state.expanded.has(key)) toggleExpand(key, false);
+  renderKeeping(key);
+}
+
 function opCard(it) {
   const n = it.node;
   if (n.kind === "__boundary__") return boundaryCard(it);
@@ -3075,15 +3089,17 @@ function opCard(it) {
   }
   card.onclick = (ev) => {
     ev.stopPropagation();
-    if (ev.detail <= 1) firstClick = {key: it.key, at: ev.timeStamp};
-    select(it.key);
+    // the second press of a double click is the double click's, and a
+    // click on the selected op keeps it: Esc or the canvas lets it go
+    if (ev.detail > 1) return;
+    firstClick = {key: it.key, at: ev.timeStamp};
+    if (state.sel !== it.key) select(it.key);
   };
   card.onmouseenter = () => { dfHoverEnter(it.key); if (n.part) partHover(it.key, true); };
   card.onmouseleave = () => { dfHoverLeave(it.key); if (n.part) partHover(it.key, false); };
   card.ondblclick = (ev) => {
     ev.stopPropagation();
-    const key = doubleClickKey(it.key, ev);
-    if (opensInPlace(key)) toggleExpand(key);
+    openOp(doubleClickKey(it.key, ev));
   };
   return card;
 }

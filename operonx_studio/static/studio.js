@@ -84,6 +84,7 @@ const state = {
   graph: null,       // current graph object
   sel: null,         // selected render key
   expanded: new Set(), // render keys of opened GraphOp containers
+  dfFocus: null,       // Workflow: the op whose data a double click opened
   rendered: new Map(), // render key -> placed item {node, x, y, w, h, depth}
   extent: null,      // {minX, minY, maxX, maxY} of the last render
   view: {scale: 1},  // pan lives in the stage's own scrollbars

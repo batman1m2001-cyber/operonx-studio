@@ -603,7 +603,7 @@ async function showRunWorkflow(run) {
     if (!state.flowHome) state.flowHome = {graph: state.graph, sel: state.sel, expanded: new Set(state.expanded)};
     state.graph = ranGraph;
     $("#graph-pick").value = ranGraph.name;
-    state.sel = null;
+    state.sel = state.dfFocus = null;
     state.expanded.clear();
   }
   // an agent op opens onto the steps this run recorded under it

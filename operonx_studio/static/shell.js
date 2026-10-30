@@ -99,7 +99,7 @@ function switchTab(name, opts) {
   if (name === "flow") flushCanvas();
   // the inspector speaks about what is on screen: a canvas selection
   // does not follow the user into the Traces list
-  if (name !== "flow" && state.sel) { state.sel = null; refreshSelection(); }
+  if (name !== "flow" && state.sel) { state.sel = state.dfFocus = null; refreshSelection(); }
   renderFlowInfo();
   pushView();
 }
@@ -353,7 +353,7 @@ for (const b of document.querySelectorAll(".tabs button[data-tab]"))
 $("#graph-pick").onchange = (ev) => {
   state.flowHome = null;   // a graph picked by hand is the one to come back to
   state.graph = state.ir.graphs.find(g => g.name === ev.target.value);
-  state.sel = null;
+  state.sel = state.dfFocus = null;
   state.expanded.clear();
   $("#inspector").classList.remove("open");
   // the side panel speaks about the graph on screen, not the last one
@@ -504,8 +504,7 @@ showViewSeg();
   // moved (canvas.js doubleClickKey): it still opens that card
   stage.addEventListener("dblclick", (ev) => {
     if (ev.target.closest(".node")) return;
-    const key = doubleClickKey(null, ev);
-    if (opensInPlace(key)) toggleExpand(key);
+    openOp(doubleClickKey(null, ev));
   });
 })();
 

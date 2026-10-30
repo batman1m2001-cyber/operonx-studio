@@ -44,6 +44,11 @@
   --flow-accent-soft: #f3f0fe;
   --flow-glow: rgba(157, 137, 245, .55);
   --flow-on: #1d1442;
+  /* op glass (the flow view's liquid-glass ops) */
+  --og-fill: rgba(255, 255, 255, .42); --og-tint: 4%; --og-band: 7%; --og-blur: 8px;
+  --og-line: 24%; --og-line-hover: 46%; --og-edge: rgba(52, 62, 102, .16);
+  --og-spec: rgba(255, 255, 255, .55); --og-spec-hover: rgba(255, 255, 255, .8); --og-rim: rgba(255, 255, 255, .9);
+  --og-drop: 0 1px 2px rgba(20, 24, 50, .05), 0 4px 14px rgba(20, 24, 50, .06);
   /* signal — the one colour of things happening now: live runs, the
      assistant at work, focus. Nothing static wears it. */
   --signal: #1f6fe0;
@@ -718,16 +723,16 @@ body.railslim .railtoggle .icon { transform: rotate(180deg); }
 /* the project's status: a dot beside its name. Green says nothing more (the
    tooltip says what it watches); a failed extraction or a lost link adds
    its words */
-.live { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm);
+#live { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm);
   color: var(--text-3); padding: 0 6px 0 2px; white-space: nowrap; cursor: default; }
-.live:not(.stale):not(.down) #live-text { position: absolute; width: 1px; height: 1px; overflow: hidden;
+#live:not(.stale):not(.down) #live-text { position: absolute; width: 1px; height: 1px; overflow: hidden;
   clip-path: inset(50%); }
-.live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
+#live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
   box-shadow: 0 0 0 3px var(--sh-green53-a14); }
-.live.stale { color: var(--err); font-weight: 500; }
-.live.stale .dot { background: var(--err); box-shadow: 0 0 0 3px var(--sh-red56-a15); }
-.live.down { color: var(--warn); }
-.live.down .dot { background: var(--warn); animation: livewait 1.2s ease-in-out infinite; }
+#live.stale { color: var(--err); font-weight: 500; }
+#live.stale .dot { background: var(--err); box-shadow: 0 0 0 3px var(--sh-red56-a15); }
+#live.down { color: var(--warn); }
+#live.down .dot { background: var(--warn); animation: livewait 1.2s ease-in-out infinite; }
 @keyframes livewait { 50% { opacity: .35; } }
 /* a voice call going on while its toy is off screen: back to it, or end it */
 .callpill { display: inline-flex; align-items: center; gap: 2px; padding: 2px; margin-right: 4px;
@@ -979,38 +984,53 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
               0 0 0 6px color-mix(in srgb, var(--kind, var(--k-func)) 12%, transparent),
               inset 0 0 16px var(--sh-gray100-a55);
 }
-.node.cell.selected {
-  border-color: var(--line-cyan76);
-  background:
-    /* keep the icon band's pastel above the cyber wash */
-    linear-gradient(90deg,
-      color-mix(in srgb, var(--kind, var(--k-func)) 11%, transparent) 0 56px,
-      transparent 56px),
-    radial-gradient(80% 120% at 50% 35%,
-      var(--rt-bay) 0%, var(--bg-cyan96) 45%, var(--bg-cyan90) 100%);
-  box-shadow: 0 0 0 1.5px var(--sh-cyan77-a45),
-              0 0 26px var(--sh-cyan79-a55),
-              inset 0 0 16px var(--sh-gray100-a55);
-}
 .node.cell::before {
   /* no nucleus halo on the white ground — its soft square bounding
      box read as a dirty rectangle shadow behind every icon */
   display: none;
 }
+/* liquid glass ops: the cell keeps its membrane and kind colour, drawn as
+   glass — a near-clear body that softly blurs what runs behind it (wires,
+   the grid), ONE thin edge, one specular line along the top, a soft
+   ambient shadow. The kind reads as a faint tint and the icon band, never
+   as a painted fill. Hover and selection change the edge, not the body. */
+.node.cell {
+  border: 1px solid color-mix(in srgb, var(--kind, var(--k-func)) var(--og-line), var(--og-edge));
+  background:
+    linear-gradient(180deg, var(--og-spec) 0, transparent 42%),
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--kind, var(--k-func)) var(--og-band), transparent) 0 56px,
+      transparent 56px),
+    color-mix(in srgb, var(--kind, var(--k-func)) var(--og-tint), var(--og-fill));
+  -webkit-backdrop-filter: blur(var(--og-blur)) saturate(140%);
+  backdrop-filter: blur(var(--og-blur)) saturate(140%);
+  box-shadow: inset 0 1px 0 var(--og-rim), var(--og-drop);
+}
+/* the blur is the costly part: off while the canvas is dragged and on a
+   big flow (143 blurred ops panned at ~1.3x the frame time of clear ones) */
+#stage.panning .node.cell, #world.big .node.cell { -webkit-backdrop-filter: none; backdrop-filter: none; }
+.node.cell:hover {
+  --og-spec: var(--og-spec-hover);
+  border-color: color-mix(in srgb, var(--kind, var(--k-func)) var(--og-line-hover), var(--og-edge));
+  box-shadow: inset 0 1px 0 var(--og-rim), var(--og-drop);
+}
+/* selected: the edge lights lavender with a controlled glow round it —
+   the body stays glass. A click only marks the op. */
+.node.selected, .node.cell.selected, .node.cell.selected:hover {
+  border-color: var(--flow-accent);
+  box-shadow: inset 0 1px 0 var(--og-rim),
+              0 0 0 1px var(--flow-accent),
+              0 0 0 4px var(--flow-accent-ring),
+              0 0 18px 2px var(--flow-glow),
+              var(--og-drop);
+}
+.node.selected:not(.cell) {
+  background: linear-gradient(180deg, var(--surface), var(--flow-accent-soft));
+}
 .node.cell .badges { margin-top: 3px; }
 .node.cell .nname { margin-left: 0; }
 .node.dimmed { opacity: .18; }
 .node.heated { border-color: color-mix(in srgb, var(--warn) calc(var(--heat, 0) * 100%), var(--line)); }
-/* selection: the card itself LIGHTS UP — an electric cyan wash across
-   the body with a neon glow. Background does the talking, not border. */
-.node.selected {
-  border-color: var(--line-cyan76);
-  background: radial-gradient(80% 120% at 50% 35%,
-    var(--rt-bay) 0%, var(--bg-cyan96) 45%, var(--bg-cyan90) 100%);
-  box-shadow: 0 0 0 1.5px var(--sh-cyan77-a45),
-              0 0 26px var(--sh-cyan79-a55),
-              0 6px 18px var(--sh-blue58-a22);
-}
 .node::before {
   content: ""; position: absolute; left: 7px; top: 13px; bottom: 13px; width: 4px;
   border-radius: 4px; background: var(--kind, var(--k-func));
@@ -1036,10 +1056,9 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
   color: var(--kind, var(--k-default));
   border-color: color-mix(in srgb, var(--kind, var(--k-default)) 35%, var(--rt-bay));
   background: color-mix(in srgb, var(--kind, var(--k-default)) 7%, var(--rt-bay)); }
-/* the overview card is its name: the chips show on the op that is clicked
-   (in the Workflow view, where a click lays the canvas out again) */
+/* the overview card is its name: a click only lights it — its chips,
+   detail and badges are the inspector's */
 .node .nchips { display: none; }
-#world:not(.dfview) .node.selected .nchips { display: inline-flex; }
 .node .nkind { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .node .agtools { color: var(--muted); font-size: 10.5px; margin-top: 3px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
@@ -1078,21 +1097,21 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 .wires path.loop-head { fill: var(--loop); stroke: none; }
 .wires circle.bouton.b-serve { fill: var(--k-serve); }
 .wires path.eglow {
-  stroke: var(--wire-glow); stroke-width: 12;
+  stroke: var(--wire-glow); stroke-width: 4;
   stroke-linecap: round; pointer-events: none;
 }
-.wires path.ecore { stroke: var(--wire); stroke-width: 4; stroke-linecap: round;
+.wires path.ecore { stroke: var(--wire); stroke-width: 1.6; stroke-linecap: round;
   pointer-events: stroke; }
 .wires path.eray {
-  stroke: var(--rt-bay); stroke-width: 1.6; stroke-linecap: round;
+  stroke: var(--rt-bay); stroke-width: .6; stroke-linecap: round;
   pointer-events: none;
 }
-.wires path.eglow.back { stroke: color-mix(in srgb, var(--loop) 18%, transparent); stroke-width: 14; }
-.wires path.ecore.back { stroke: var(--loop); stroke-width: 3.5; stroke-dasharray: 10 6; }
+.wires path.eglow.back { stroke: color-mix(in srgb, var(--loop) 18%, transparent); stroke-width: 5; }
+.wires path.ecore.back { stroke: var(--loop); stroke-width: 1.6; stroke-dasharray: 10 6; }
 .wires path.eray.back { display: none; }
 .wires path.eglow.hot { stroke: var(--stroke-blue54-a30); }
-.wires path.ecore.hot { stroke: var(--wire-deep); stroke-width: 5; }
-.wires path.eray.hot { stroke-width: 2; }
+.wires path.ecore.hot { stroke: var(--wire-deep); stroke-width: 2.4; }
+.wires path.eray.hot { stroke-width: .9; }
 .wires circle.espark { fill: var(--rt-bay); stroke: var(--wire); stroke-width: 1.6; }
 .wires circle.espark.tailspark { fill: var(--fill-blue85); opacity: .7; stroke: none; }
 .wires circle.espark.back { stroke: var(--loop); }
@@ -1107,29 +1126,29 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 .wires path.eglow.cond { stroke: color-mix(in srgb, var(--rt-wire) 13%, transparent); }
 .wires path.ecore.cond { stroke: var(--rt-wire); }
 .wires path.ecore.cond.relse { stroke: var(--rt-wire-else); }
-.wires path.eray.cond { stroke-width: 1.2; opacity: .85; }
+.wires path.eray.cond { stroke-width: .5; opacity: .85; }
 .wires path.ecore.cond.relse { stroke-dasharray: 9 7; opacity: .75; }
 .wires path.eglow.cond.relse { opacity: .5; }
 .wires path.eray.cond.relse { display: none; }
 .wires circle.espark.cond { stroke: var(--rt-wire); }
 /* soft merge edges: the same family, a quieter voice — never gray */
 .wires path.soft { stroke: var(--stroke-blue78); opacity: .8; }
-.node.serve-node { background: linear-gradient(180deg, var(--bg-yellow97-2), var(--bg-yellow95));
-  border-color: var(--line-yellow82); width: 190px; }
+.node.serve-node { background: linear-gradient(180deg, var(--surface), var(--flow-accent-soft));
+  border-color: color-mix(in srgb, var(--flow-accent) 60%, var(--border)); width: 190px; }
 .node.serve-node::before { background: var(--k-serve); }
 .node.errorlit { border-color: var(--err);
   box-shadow: 0 0 0 3px var(--sh-red58-a12), var(--sh-1); }
 
-/* ingress/egress — the serve boundary, drawn as doors in the brand
-   gold, visually apart from compute ops */
+/* ingress/egress — the serve boundary, drawn as doors in the flow
+   lavender, visually apart from compute ops */
 .node.gate {
-  background: linear-gradient(180deg, var(--bg-yellow97-2), var(--bg-yellow95));
-  border: 1.5px dashed var(--line-yellow78); border-radius: 22px;
+  background: linear-gradient(180deg, var(--surface), var(--flow-accent-soft));
+  border: 1.5px dashed color-mix(in srgb, var(--flow-accent) 75%, var(--border)); border-radius: 22px;
   min-height: 52px;
 }
 .node.gate::before { background: var(--k-serve); }
 .node.gate .nname { color: var(--flow-accent-deep); }
-.node.gate .nkind { color: var(--ink-amber67); }
+.node.gate .nkind { color: color-mix(in srgb, var(--flow-accent-deep) 70%, var(--muted)); }
 
 /* an opened GraphOp — a container whose members are real nodes on the
    canvas; the box itself is just the boundary and a title strip */
@@ -1227,13 +1246,13 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 
 /* the client's doors: a frame hugging each gate, nothing more */
 #edges rect.zoneband {
-  fill: var(--fill-amber70-a6);
-  stroke: var(--stroke-amber64-a38); stroke-dasharray: 5 6; stroke-width: 1;
+  fill: color-mix(in srgb, var(--flow-accent) 6%, transparent);
+  stroke: color-mix(in srgb, var(--flow-accent) 45%, transparent); stroke-dasharray: 5 6; stroke-width: 1;
 }
 .badge.start { color: var(--ink-amber49); border-color: var(--line-amber64-a40);
   background: var(--bg-amber70-a8); }
 .wires text.zonelabel {
-  fill: var(--fill-amber60); font-size: 10px; font-weight: 700; letter-spacing: .12em;
+  fill: var(--flow-accent-deep); font-size: 10px; font-weight: 700; letter-spacing: .12em;
   text-anchor: start;
 }
 .bouton.b-serve { fill: var(--k-serve); }
@@ -1248,7 +1267,6 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
    side insets so it stays inside the cell's curved membrane */
 .node .detail { display: none; margin-top: 5px; padding: 5px 18px 0;
   border-top: 1px dashed var(--line); text-align: center; }
-#world:not(.dfview) .node.selected .detail { display: block; }
 /* the show line: the output that stands for the op, and with a run
    painted, its last value — one line, cut, never a payload */
 .detail .dshow { font-size: 9.5px; margin-top: 2px; text-align: left;
@@ -1257,14 +1275,7 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 .detail .dshow .dval { color: var(--ink-blue48-2); }
 /* and so are badges, but a run's chip, an error, and a nested graph's
    open button (▣ n ▸) */
-.node:not(.selected) .badges .badge:not(.run):not(.err):not(.sub),
-#world.dfview .node .badges .badge:not(.run):not(.err):not(.sub) { display: none; }
-/* close up, the cell relaxes: gentler pixel radii and more padding so
-   the grown card never pushes its icon into the membrane */
-#world:not(.dfview) .node.cell.selected:has(> .detail) {
-  border-radius: 42px 54px 46px 50px / 34px 40px 36px 42px;
-  padding: 13px 12px 11px 70px;
-}
+.node .badges .badge:not(.run):not(.err):not(.sub) { display: none; }
 /* ── the router as a decision card: one row per condition ─────────── */
 .node.branch {
   border-radius: 14px; padding: 9px 12px 8px 12px;
@@ -1369,10 +1380,9 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 /* a very big graph (studio.js BIG_GRAPH_CELLS): the membranes keep their
    ring and their light, not the soft blurred shadows, which every zoom
    frame would re-raster; a selected or running cell still glows */
-#world.big .node.cell:not(.selected):not(.live-active):not(.live-done):not(.live-failed) {
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--kind, var(--k-func)) 7%, transparent); }
+#world.big .node.cell:not(.selected):not(.live-active):not(.live-done):not(.live-failed),
 #world.big .node.cell:not(.selected):not(.live-active):not(.live-done):not(.live-failed):hover {
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--kind, var(--k-func)) 12%, transparent); }
+  box-shadow: inset 0 1px 0 var(--og-rim); }
 
 /* one card at every zoom (no semantic zoom: the layout never changes as
    you zoom): a name big enough to read at a fit-the-graph zoom (16px at
@@ -1392,16 +1402,21 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 @keyframes nodepulse { from { transform: scale(1); opacity: .55; } to { transform: scale(1.07); opacity: 0; } }
 .node.live-done { border-color: color-mix(in srgb, var(--ok) 50%, var(--border-strong)); }
 .node.live-failed { border-color: var(--err); box-shadow: 0 0 0 3px var(--sh-red56-a14); }
-/* on a cell the same states read as light: the op at work glows cyan from
-   its membrane, a finished one settles green, a failed one burns red */
-.node.cell.live-active { border-color: var(--line-cyan76);
-  box-shadow: 0 0 0 1.5px var(--sh-cyan77-a45), 0 0 24px var(--sh-cyan79-a50), inset 0 0 16px var(--sh-gray100-a55); }
-.node.cell.live-active::after { border-color: var(--line-cyan76); }
-.node.cell.live-done { border-color: color-mix(in srgb, var(--ok) 60%, var(--border));
-  box-shadow: 0 3px 12px var(--sh-blue50-a12), 0 0 0 5px color-mix(in srgb, var(--ok) 12%, transparent),
-    inset 0 0 16px var(--sh-gray100-a55); }
+/* on a cell the same states are a status edge, not a new material: the
+   op at work carries a thin signal ring (and the pulse above), a finished
+   one a green edge, a failed one a red edge and ring */
+.node.cell.live-active { border-color: var(--signal);
+  box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 2px var(--signal-ring), var(--og-drop); }
+/* the op at work keeps still: no pulse on the body; the input port it
+   was reached through rings instead (after the glass-tiles reference) */
+.node.cell.live-active::after { display: none; }
+.node.cell.live-active .port.in { border-color: var(--signal); transform: scale(1.15);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--signal), 0 0 10px var(--signal);
+  animation: portring 1.2s ease-in-out infinite alternate; }
+@keyframes portring { to { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--signal-ring), 0 0 4px var(--signal-ring); } }
+.node.cell.live-done { border-color: color-mix(in srgb, var(--ok) 55%, var(--og-edge)); }
 .node.cell.live-failed { border-color: var(--err);
-  box-shadow: 0 0 0 1.5px var(--sh-red56-a35), 0 0 22px var(--sh-red56-a35), inset 0 0 16px var(--sh-gray100-a55); }
+  box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 2px var(--sh-red56-a14), var(--og-drop); }
 .wires path.particle { fill: none; stroke: var(--signal); stroke-width: 5; stroke-linecap: round;
   stroke-dasharray: .01 100; stroke-dashoffset: 0; animation: particle var(--dur, .6s) cubic-bezier(.45, 0, .55, 1) forwards;
   pointer-events: none; }
@@ -1410,9 +1425,12 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 @keyframes particle { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
 .wires path.ecore.flowing { stroke: color-mix(in srgb, var(--signal) 70%, var(--wire)); transition: stroke .4s ease; }
 .wires path.eglow.flowing { stroke: var(--stroke-blue56-a22); transition: stroke .4s ease; }
+/* a run lights its wires, not its ops: the wires no data has crossed yet
+   sink back, the ones carrying it stay bright */
+#world.live .wires path:is(.eglow, .ecore):not(.flowing) { opacity: .35; transition: opacity .3s ease; }
 @media (prefers-reduced-motion: reduce) {
   .wires path.particle { display: none; }
-  .node.live-active::after { animation: none; }
+  .node.live-active::after, .node.cell.live-active .port.in { animation: none; }
 }
 .crumbbtn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   line-height: 1.5; padding: 1px 0; }
@@ -3656,7 +3674,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   .crumbs { flex: 1 1 0; }
   .crumbbtn { max-width: 30vw; padding: 0 4px 0 6px; }
   header.bar > .spacer { display: none; }
-  .live #live-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  #live #live-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   /* the rail becomes a drawer from the left, opened by the screen button */
   body { --rail-w: 0px; }
   .rail { position: fixed; left: 0; top: 0; bottom: 0; width: min(280px, 82vw); z-index: 80;

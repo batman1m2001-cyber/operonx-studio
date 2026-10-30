@@ -32,6 +32,10 @@
   --flow-accent-ring: rgba(196, 181, 255, .34);
   --flow-accent-soft: #262040;
   --flow-glow: rgba(196, 181, 255, .55);
+  --og-fill: rgba(255, 255, 255, .035); --og-tint: 7%; --og-band: 9%; --og-blur: 10px;
+  --og-line: 28%; --og-line-hover: 52%; --og-edge: rgba(255, 255, 255, .08);
+  --og-spec: rgba(255, 255, 255, .06); --og-spec-hover: rgba(255, 255, 255, .1); --og-rim: rgba(255, 255, 255, .14);
+  --og-drop: 0 1px 1px rgba(0, 0, 0, .3), 0 8px 22px rgba(0, 0, 0, .32);
   /* signal */
   --signal: #4d8eff;
   --signal-strong: #85b3ff;
@@ -383,6 +387,6 @@
   --glass-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 12px 36px rgba(0, 0, 0, .45);
   --glass-drop: rgba(255, 255, 255, .12);
   --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, .04), rgba(255, 255, 255, 0) 60%);
-  --glass-under: var(--rt-bay);
+  --glass-under: #0c0d11;   /* the flow canvas: near-black charcoal under the glass ops */
   --glass-still: rgba(22, 26, 32, .95);
 }
