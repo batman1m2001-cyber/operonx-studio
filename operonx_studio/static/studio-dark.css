@@ -32,6 +32,15 @@
   --flow-accent-ring: rgba(196, 181, 255, .34);
   --flow-accent-soft: #262040;
   --flow-glow: rgba(196, 181, 255, .55);
+  --og-fill: rgba(30, 27, 46, .55);
+  --og-tint: 15%;
+  --og-line: 45%;
+  --og-sheen: rgba(255, 255, 255, .16);
+  --og-glint: rgba(255, 255, 255, .07);
+  --og-rim-top: rgba(255, 255, 255, .30);
+  --og-rim-bottom: rgba(0, 0, 0, .40);
+  --og-edge: rgba(255, 255, 255, .10);
+  --og-drop: 0 1px 2px rgba(0, 0, 0, .40), 0 10px 26px rgba(0, 0, 0, .45);
   /* signal */
   --signal: #4d8eff;
   --signal-strong: #85b3ff;

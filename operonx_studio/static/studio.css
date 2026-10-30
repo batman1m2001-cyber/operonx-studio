@@ -44,6 +44,16 @@
   --flow-accent-soft: #f3f0fe;
   --flow-glow: rgba(157, 137, 245, .55);
   --flow-on: #1d1442;
+  /* op glass (the flow view's liquid-glass ops) */
+  --og-fill: rgba(255, 255, 255, .55);
+  --og-tint: 11%;
+  --og-line: 58%;
+  --og-sheen: rgba(255, 255, 255, .95);
+  --og-glint: rgba(255, 255, 255, .55);
+  --og-rim-top: rgba(255, 255, 255, 1);
+  --og-rim-bottom: rgba(40, 40, 110, .16);
+  --og-edge: rgba(255, 255, 255, .75);
+  --og-drop: 0 1px 2px rgba(20, 24, 60, .08), 0 10px 24px rgba(20, 24, 60, .16);
   /* signal — the one colour of things happening now: live runs, the
      assistant at work, focus. Nothing static wears it. */
   --signal: #1f6fe0;
@@ -996,6 +1006,36 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
   /* no nucleus halo on the white ground — its soft square bounding
      box read as a dirty rectangle shadow behind every icon */
   display: none;
+}
+/* liquid glass ops: the cell keeps its membrane and kind colour, but is
+   drawn as glass — a kind-tinted, see-through body, a lens sheen across
+   the top, a bright rim above and a shaded one below, floating on a soft
+   drop. No backdrop blur: a dot grid has nothing to refract, and a blur
+   per op would cost every pan and zoom. */
+.node.cell {
+  border: 1px solid color-mix(in srgb, var(--kind, var(--k-func)) var(--og-line), var(--og-edge));
+  background:
+    radial-gradient(70% 55% at 50% 0%, var(--og-sheen), transparent 72%),
+    radial-gradient(45% 40% at 78% 100%, var(--og-glint), transparent 70%),
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--kind, var(--k-func)) 12%, transparent) 0 56px,
+      transparent 56px),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--kind, var(--k-func)) var(--og-tint), var(--og-fill)),
+      color-mix(in srgb, var(--kind, var(--k-func)) calc(var(--og-tint) * 1.8), var(--og-fill)));
+  box-shadow: inset 0 1.5px 0 var(--og-rim-top),
+              inset 0 -1.5px 0 var(--og-rim-bottom),
+              inset 0 0 0 1px var(--og-edge),
+              var(--og-drop),
+              0 0 18px color-mix(in srgb, var(--kind, var(--k-func)) 14%, transparent);
+}
+.node.cell:hover {
+  border-color: color-mix(in srgb, var(--kind, var(--k-func)) 60%, var(--og-edge));
+  box-shadow: inset 0 1.5px 0 var(--og-rim-top),
+              inset 0 -1.5px 0 var(--og-rim-bottom),
+              inset 0 0 0 1px var(--og-edge),
+              var(--og-drop),
+              0 0 26px color-mix(in srgb, var(--kind, var(--k-func)) 26%, transparent);
 }
 .node.cell .badges { margin-top: 3px; }
 .node.cell .nname { margin-left: 0; }
