@@ -192,6 +192,8 @@ def test_the_real_engine_takes_one_answer_and_refuses_the_next(client, tmp_path,
     assert again.status_code == 409 and again.json()["status"] == "already"
     started = client.post(f"/api/p/{pid}/board/m1/act", json={"op": "prioritize", "card": "C1", "priority": -5})
     assert started.status_code == 409 and "only a card not started" in started.json()["message"]
+    edited = client.post(f"/api/p/{pid}/board/m1/act", json={"op": "edit", "card": "C2", "paths": ["calc.py", "x.py"]})
+    assert edited.status_code == 200 and "paths changed" in edited.json()["message"], edited.text
 
 
 @pytest.mark.skipif(_real_engine() is None, reason="operonx-project is not installed here")

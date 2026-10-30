@@ -533,14 +533,16 @@ def t_board_request(s: Studio, a: Dict[str, Any]) -> str:
             "(board_daemon start); when the plan waits, show it to the owner (board_status) — approving is theirs.")
 
 
-ACTS = ("answer", "approve", "pause", "unpause", "cancel", "replan", "retry", "prioritize", "release", "ship", "merge")
+ACTS = ("answer", "approve", "pause", "unpause", "cancel", "replan", "retry", "prioritize", "edit", "release", "ship",
+        "merge")  # fmt: skip
 
 
 def t_board_act(s: Studio, a: Dict[str, Any]) -> str:
     op = str(a.get("op") or "")
     if op not in ACTS:
         return f"no op {op!r}; there are: {', '.join(ACTS)} (take and submit are board_take and board_submit)"
-    body = {k: a[k] for k in ("op", "ref", "answer", "notes", "card", "priority", "usd", "hours") if k in a}
+    body = {k: a[k] for k in ("op", "ref", "answer", "notes", "card", "priority", "usd", "hours", "paths", "criteria",
+                              "title", "intent") if k in a}  # fmt: skip
     got = _board_act(s, str(a["milestone"]), body)
     s.show("open_board", mid=str(a["milestone"]))
     return ("done: " if got.get("ok") else "refused: ") + str(got.get("message") or got.get("status"))
@@ -772,12 +774,15 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                  "short id or a card, answer: an option key, words, or {\"choice\": key, \"text\": words} for "
                                  "both; the reply says which option was taken), approve, pause, unpause, cancel, "
                                  "replan (notes), retry (usd or hours of extra budget), prioritize (card, priority; "
-                                 "lower runs first), release (a taken card back to the engine), ship (a done milestone: "
+                                 "lower runs first), edit (card; paths, criteria, title or intent, each whole: a card not running — its open "
+                                 "question stays answerable), release (a taken card back to the engine), ship (a done milestone: "
                                  "push its branch, open the PR or the GitLab link), merge (its PR, once checks "
                                  "pass, where the repo grants it). Approve, cancel, answers, ship and merge are the "
                                  "owner's calls: do them only when the owner asked for that.",
                   "schema": _schema({"milestone": _S, "op": _S, "ref": _S, "answer": {}, "notes": _S, "card": _S,
-                                     "priority": _N, "usd": _N, "hours": _N}, ["milestone", "op"])},
+                                     "priority": _N, "usd": _N, "hours": _N, "paths": {"type": "array", "items": _S},
+                                     "criteria": {"type": "array", "items": _S}, "title": _S, "intent": _S},
+                                    ["milestone", "op"])},  # fmt: skip
     "board_daemon": {"fn": t_board_daemon,
                      "description": "Run (start), Stop (stop) or check (status) the project's operonx-project daemon, "
                                     "which plans milestones and works their cards.",
