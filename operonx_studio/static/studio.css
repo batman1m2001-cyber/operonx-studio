@@ -723,16 +723,16 @@ body.railslim .railtoggle .icon { transform: rotate(180deg); }
 /* the project's status: a dot beside its name. Green says nothing more (the
    tooltip says what it watches); a failed extraction or a lost link adds
    its words */
-.live { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm);
+#live { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm);
   color: var(--text-3); padding: 0 6px 0 2px; white-space: nowrap; cursor: default; }
-.live:not(.stale):not(.down) #live-text { position: absolute; width: 1px; height: 1px; overflow: hidden;
+#live:not(.stale):not(.down) #live-text { position: absolute; width: 1px; height: 1px; overflow: hidden;
   clip-path: inset(50%); }
-.live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
+#live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
   box-shadow: 0 0 0 3px var(--sh-green53-a14); }
-.live.stale { color: var(--err); font-weight: 500; }
-.live.stale .dot { background: var(--err); box-shadow: 0 0 0 3px var(--sh-red56-a15); }
-.live.down { color: var(--warn); }
-.live.down .dot { background: var(--warn); animation: livewait 1.2s ease-in-out infinite; }
+#live.stale { color: var(--err); font-weight: 500; }
+#live.stale .dot { background: var(--err); box-shadow: 0 0 0 3px var(--sh-red56-a15); }
+#live.down { color: var(--warn); }
+#live.down .dot { background: var(--warn); animation: livewait 1.2s ease-in-out infinite; }
 @keyframes livewait { 50% { opacity: .35; } }
 /* a voice call going on while its toy is off screen: back to it, or end it */
 .callpill { display: inline-flex; align-items: center; gap: 2px; padding: 2px; margin-right: 4px;
@@ -1407,7 +1407,13 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
    one a green edge, a failed one a red edge and ring */
 .node.cell.live-active { border-color: var(--signal);
   box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 2px var(--signal-ring), var(--og-drop); }
-.node.cell.live-active::after { border-color: var(--signal); }
+/* the op at work keeps still: no pulse on the body; the input port it
+   was reached through rings instead (after the glass-tiles reference) */
+.node.cell.live-active::after { display: none; }
+.node.cell.live-active .port.in { border-color: var(--signal); transform: scale(1.15);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--signal), 0 0 10px var(--signal);
+  animation: portring 1.2s ease-in-out infinite alternate; }
+@keyframes portring { to { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--signal-ring), 0 0 4px var(--signal-ring); } }
 .node.cell.live-done { border-color: color-mix(in srgb, var(--ok) 55%, var(--og-edge)); }
 .node.cell.live-failed { border-color: var(--err);
   box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 2px var(--sh-red56-a14), var(--og-drop); }
@@ -1419,9 +1425,12 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 @keyframes particle { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
 .wires path.ecore.flowing { stroke: color-mix(in srgb, var(--signal) 70%, var(--wire)); transition: stroke .4s ease; }
 .wires path.eglow.flowing { stroke: var(--stroke-blue56-a22); transition: stroke .4s ease; }
+/* a run lights its wires, not its ops: the wires no data has crossed yet
+   sink back, the ones carrying it stay bright */
+#world.live .wires path:is(.eglow, .ecore):not(.flowing) { opacity: .35; transition: opacity .3s ease; }
 @media (prefers-reduced-motion: reduce) {
   .wires path.particle { display: none; }
-  .node.live-active::after { animation: none; }
+  .node.live-active::after, .node.cell.live-active .port.in { animation: none; }
 }
 .crumbbtn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   line-height: 1.5; padding: 1px 0; }
@@ -3665,7 +3674,7 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   .crumbs { flex: 1 1 0; }
   .crumbbtn { max-width: 30vw; padding: 0 4px 0 6px; }
   header.bar > .spacer { display: none; }
-  .live #live-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  #live #live-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   /* the rail becomes a drawer from the left, opened by the screen button */
   body { --rail-w: 0px; }
   .rail { position: fixed; left: 0; top: 0; bottom: 0; width: min(280px, 82vw); z-index: 80;
