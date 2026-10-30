@@ -483,12 +483,12 @@ select { width: auto; min-height: 30px; padding: 4px 28px 4px 10px; font-size: v
 .errbox pre { font-size: 11px; overflow-x: auto; max-height: 300px; }
 .errbox .note { font-family: var(--font); margin-top: 8px; }
 
-/* the brand mark: a gold tile holding the "o" of operonx */
-.mark { width: 24px; height: 24px; flex: none; }
-.mark rect { fill: var(--accent); }
-.mark circle { fill: none; stroke: var(--rt-bay); stroke-width: 2.4; }
-.mark circle.dot { fill: var(--rt-bay); stroke: none; }
-.mark.big { width: 44px; height: 44px; }
+/* the brand mark: the owner's chosen operonx icon (#10 dark, #5 light); login shows the full mark */
+.mark { width: 26px; height: 26px; flex: none; display: inline-block;
+  background: url("/static/operonx-icon-light.png") center / contain no-repeat; }
+:root[data-theme="dark"] .mark { background-image: url("/static/operonx-icon-dark.png"); }
+.mark.big { width: 112px; height: 70px; background-image: url("/static/operonx-mark-light.png"); }
+:root[data-theme="dark"] .mark.big { background-image: url("/static/operonx-mark-dark.png"); }
 .brand { display: inline-flex; align-items: center; gap: 8px; color: var(--text);
   font-weight: 700; font-size: 15px; letter-spacing: -.01em; flex: none; }
 .brand:hover { text-decoration: none; }

@@ -6,7 +6,8 @@
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e1115" media="(prefers-color-scheme: dark)">
 <title>operonx studio</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%23c9940f'/%3E%3Ccircle cx='12' cy='12' r='5.2' fill='none' stroke='white' stroke-width='2.4'/%3E%3Ccircle cx='18.3' cy='5.7' r='1.7' fill='white'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" href="/static/operonx-icon-light.png" media="(prefers-color-scheme: light)">
+<link rel="icon" type="image/png" href="/static/operonx-icon-dark.png" media="(prefers-color-scheme: dark)">
 <script>/* the theme and the glass before the first paint (theme.js keeps them in step) */try{var t=localStorage.getItem("ox:theme")||"dark";if(t==="system")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t;var g=localStorage.getItem("ox:glass")||"system";if(g==="system")g=matchMedia("(prefers-reduced-transparency: reduce), (prefers-contrast: more)").matches?"solid":"glass";document.documentElement.dataset.glass=g}catch(e){}</script>
 <link rel="stylesheet" href="/static/studio.css">
 </head>
@@ -14,7 +15,7 @@
 <div class="shell">
   <header class="bar">
     <a class="brand" href="/" title="All projects" aria-label="operonx studio — all projects">
-      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6"/><circle cx="12" cy="12" r="5.2"/><circle class="dot" cx="18.3" cy="5.7" r="1.7"/></svg>
+      <span class="mark" aria-hidden="true"></span>
       <span class="brand-name">operonx</span>
     </a>
     <nav class="crumbs" aria-label="Location">
