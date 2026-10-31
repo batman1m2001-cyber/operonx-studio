@@ -4749,6 +4749,12 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .cf-sec { display: flex; flex-direction: column; gap: 10px; }
 .cf-field { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: var(--surface-2); border-radius: var(--r-md); }
 .cf-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+/* an edit landed on this field (choreo D6): the new value lit, the old one struck beside it, fading */
+.cf-field.cf-changed { animation: cf-changed 4s ease-out; }
+@keyframes cf-changed { 0%, 30% { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+  100% { background: var(--surface-2); box-shadow: none; } }
+.cf-old { font-size: 11.5px; color: var(--muted); text-decoration: line-through; }
+@media (prefers-reduced-motion: reduce) { .cf-field.cf-changed { animation: none; background: var(--accent-soft); } }
 .cf-name { font-weight: 600; }
 .cf-type { font-size: var(--fs-xs); color: var(--text-3); }
 .cf-default { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); background: var(--surface-3); border-radius: 4px; padding: 0 5px; }

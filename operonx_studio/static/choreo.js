@@ -46,7 +46,7 @@ const Choreo = (() => {
   }
   /* A tool's input reaches the page as the server clipped it: JSON text, cut off when long (a heredoc). The
    * fields that matter are read from the text when it no longer parses. */
-  const FIELDS = ["file_path", "notebook_path", "command", "old_string", "new_string", "content", "op", "ref", "milestone"];
+  const FIELDS = ["file_path", "notebook_path", "command", "old_string", "new_string", "content", "op", "ref", "milestone", "card"];
   function inputOf(item) {
     const raw = item && item.input;
     if (raw && typeof raw === "object") return raw;
@@ -148,6 +148,18 @@ const Choreo = (() => {
       out.push(key ? {press: `qopt:${input.ref}:${key}`, words: "answering"} : {point: `q:${input.ref}`, words: "answering"});
       return out;
     }
+    // a card read rings the card; a card moved is pressed once the move is done (D6). The board shows a
+    // milestone's cards once it is open: its row on Plans until then
+    if (name === "studio:board_card" && input.card && phase === "start") {
+      goPage("plans");
+      out.push({point: `card:${input.card}`, words: "reading", or: input.milestone ? `ms:${input.milestone}` : "page:plans"});
+      return out;
+    }
+    if (name === "studio:board_act" && input.card && ok) {
+      out.push({press: `card:${input.card}`, words: String(input.op || "moved").replace(/_/g, " "),
+                or: input.milestone ? `ms:${input.milestone}` : "page:plans"});
+      return out;
+    }
     if (name === "studio:board_status" && input.milestone && phase === "start") {
       goPage("plans");
       out.push({point: `ms:${input.milestone}`, words: "reading"});
@@ -191,15 +203,37 @@ const Choreo = (() => {
     const touched = mine.filter((o) => new RegExp(`\\bdef ${o.fn || o.name}\\(`).test(text));
     const op = touched[0] || (mine.length === 1 ? mine[0] : null);
     if (!op) return [];
+    // a setting the edit changes (`param=value`): the op is selected, its inspector shows the field (D6)
+    const param = changedParams(`${input.old_string || ""}`, `${input.new_string || ""}${input.content || ""}`, op.params)[0];
+    if (param && phase === "start") {
+      return [{point: `op:${op.name}`, words: "editing"}, {select: op.name}, {point: `field:${op.name}/${param}`, words: "editing"}];
+    }
+    if (param) return [{point: `field:${op.name}/${param}`, words: "saved", soft: true, or: `op:${op.name}`}];
     return phase === "start" ? [{point: `op:${op.name}`, words: "editing"}] : [{point: `op:${op.name}`, words: "saved", soft: true}];
+  }
+
+  /* the op's params whose `name=value` (or `name: type = value`) the new text sets differently from the old */
+  function changedParams(oldText, newText, params) {
+    const valueOf = (text, p) => {
+      const m = new RegExp(`\\b${p}\\s*(?::[^=\\n,()]*)?=(?!=)\\s*([^,\\n)]+)`).exec(text);
+      return m ? m[1].trim() : null;
+    };
+    return (params || []).filter((p) => /^\w+$/.test(p)).filter((p) => {
+      const now = valueOf(newText, p);
+      return now !== null && now !== valueOf(oldText, p);
+    });
   }
 
   /* where a target lives: the screen to go to before pointing at it (null: anywhere, as it is) */
   const PAGE_OF = {status: "now", q: "questions", qopt: "questions", plan: "plans", phase: "plans", ms: "plans",
-                   row: "checklist", commit: "changes", setting: "settings"};
-  const TAB_OF = {op: "flow", run: "traces", job: "jobs", eval: "evals"};
+                   row: "checklist", commit: "changes", setting: "settings", card: "plans"};
+  const TAB_OF = {op: "flow", field: "flow", run: "traces", job: "jobs", eval: "evals"};
+  // setting:<section>/<name> on a settings screen of its own; a bare setting:<name> is Project's Settings
+  const SECTION_TAB = {retention: "settings"};
   function where(target) {
     const kind = String(target || "").split(":")[0];
+    const section = /^setting:([\w-]+)\//.exec(String(target || ""));
+    if (section && SECTION_TAB[section[1]]) return {tab: SECTION_TAB[section[1]]};
     if (PAGE_OF[kind]) return {tab: "project", page: PAGE_OF[kind]};
     if (TAB_OF[kind]) return {tab: TAB_OF[kind]};
     return null;
@@ -221,12 +255,14 @@ const Choreo = (() => {
     if (now && now.target && was.get(now.title) !== now.state) {
       const there = where(now.target);
       if (there && !(here && here.tab === there.tab && (!there.page || here.page === there.page))) out.push({go: there});
+      const field = /^field:([^/]+)\//.exec(now.target);
+      if (field) out.push({select: field[1]});
       out.push({point: now.target, words: short(now.title)});
     }
     return out;
   }
 
-  const api = {steps, changed, planPath, where, opSteps, inputOf, focus};
+  const api = {steps, changed, planPath, where, opSteps, inputOf, focus, changedParams};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   return api;
 })();

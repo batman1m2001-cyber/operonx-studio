@@ -173,7 +173,7 @@ def t_select_op(s: Studio, a: Dict[str, Any]) -> str:
     return f"{a['op']} is selected on the user's Flow canvas."
 
 
-_POINTABLE = re.compile(r"^(?:status|q|qopt|plan|phase|ms|row|commit|setting|page|tab|op|run|job|eval):\S")
+_POINTABLE = re.compile(r"^(?:status|q|qopt|plan|phase|ms|row|commit|setting|page|tab|op|run|job|eval|card|field):\S")
 
 
 def t_point(s: Studio, a: Dict[str, Any]) -> str:
@@ -181,7 +181,8 @@ def t_point(s: Studio, a: Dict[str, Any]) -> str:
     target = str(a.get("target") or "").strip()
     if not _POINTABLE.match(target):
         return (f"not a target: {target!r}. Use plan:docs/X_PLAN.md, phase:docs/X_PLAN.md#P2, row:<id>, q:<id>, "
-                "commit:<sha>, setting:<name>, status:<needs|working|checklist|plans|changes>, op:<name>, run:<id>")
+                "commit:<sha>, setting:<name>, status:<needs|working|checklist|plans|changes>, op:<name>, run:<id>, "
+                "card:<id>, field:<op>/<param>")
     s.show("point", target=target, words=str(a.get("words") or a.get("label") or "")[:40])
     return f"pointed at {target} on the owner's screen"
 
@@ -740,7 +741,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
               "description": "Point at the one thing your answer is about, on the owner's screen: it goes to that page "
                              "and rings it with your two or three words. Targets: plan:docs/X_PLAN.md, "
                              "phase:docs/X_PLAN.md#P2, row:<requirement id>, q:<question id>, commit:<sha>, "
-                             "setting:<name>, status:<needs|working|checklist|plans|changes>, op:<op name>, run:<run id>. "
+                             "setting:<name>, status:<needs|working|checklist|plans|changes>, op:<op name>, run:<run id>, "
+                             "card:<card id> (on the board), field:<op name>/<param> (a setting in the op's inspector). "
                              "Once per answer at most; never as decoration. It only shows where: the answer "
                              "still says everything in words.",
               "schema": _schema({"target": _S, "words": _S}, ["target"])},

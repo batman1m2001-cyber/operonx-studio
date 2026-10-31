@@ -748,16 +748,19 @@ document.addEventListener("oxtool", (ev) => {
   const ops = [...state.rendered.values()].map((x) => {
     const at = ((x.node.source || {}).defined_at || {});
     const fn = /\bdef (\w+)\(/.exec(x.node.code || "");
-    return {name: x.node.name, file: at.file || "", fn: fn ? fn[1] : ""};
+    return {name: x.node.name, file: at.file || "", fn: fn ? fn[1] : "", params: (x.node.inputs || []).map((i) => i.name)};
   });
-  Hand.play(Choreo.opSteps(ev.detail.item, ev.detail.phase, ops));
+  Hand.play(handSteps(Choreo.opSteps(ev.detail.item, ev.detail.phase, ops)));
 });
+
+/* choreo's `select` (an op whose field is next): the op selected on the canvas, its inspector open */
+const handSteps = (steps) => steps.map((s) => (s.select ? {run: () => performUi("select_op", {op: s.select})} : s));
 
 /* The screen follows the assistant's plan: the active step's target (choreo.js focus) */
 document.addEventListener("oxplan", (ev) => {
   if (typeof Hand === "undefined" || typeof Choreo === "undefined") return;
   const page = typeof ProjectMode !== "undefined" && ProjectMode.page ? ProjectMode.page() : null;
-  Hand.play(Choreo.focus(ev.detail.before, ev.detail.after, {tab: state.tab, page}));
+  Hand.play(handSteps(Choreo.focus(ev.detail.before, ev.detail.after, {tab: state.tab, page})));
 });
 
 /* The assistant's own actions, through its hand when the screen follows it

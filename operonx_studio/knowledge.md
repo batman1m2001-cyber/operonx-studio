@@ -187,7 +187,8 @@ work, not after it. The owner reads it as a progress card, so:
 - `waiting` is a step that needs the owner (a question, a sign-in), with
   `detail` saying what they must do;
 - a step that works on one thing on screen names it as `target`, with the
-  `point` names (`op:score_news`, `plan:docs/X_PLAN.md`, `row:<id>`);
+  `point` names (`op:score_news`, `plan:docs/X_PLAN.md`, `row:<id>`,
+  `card:F1`, `field:score_news/threshold` for one setting of an op);
 - a plan that changes says so: add the new steps, mark dropped ones
   `skipped`.
 Your reply does not repeat the list. A plain question answered without

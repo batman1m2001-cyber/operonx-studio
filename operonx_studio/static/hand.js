@@ -114,6 +114,11 @@ const Hand = (() => {
     // a soft gesture gives way to one on the same element lit after it was asked for ("2/5" before "saved")
     if (opts.soft && (lastLit.get(target) || 0) > (opts.asked || 0)) return false;
     if (typeof ProjectMode !== "undefined" && ProjectMode.reveal) ProjectMode.reveal(target);
+    // a field left at its default sits in a folded list: unfold the list it is in
+    if (/^field:/.test(target)) {
+      for (const d of document.querySelectorAll("details:not([open])"))
+        if (d.querySelector(`[data-ox-target="${CSS.escape(target)}"]`)) d.open = true;
+    }
     let n = await wait(target, opts.or ? 1200 : WAIT);
     if (!n && opts.or) { n = await wait(opts.or, 600); target = opts.or; }
     if (!n || (!active() && !opts.force)) return false;

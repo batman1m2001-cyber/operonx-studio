@@ -172,14 +172,30 @@ const Configure = (() => {
     };
   }
 
+  /* a field whose value moved since it was last drawn (an edit landed, D6): lit, the old value struck beside it */
+  const seen = new Map();
+  function changed(row, head, key, value) {
+    const now = JSON.stringify(value === undefined ? null : value);
+    const was = seen.get(key);
+    seen.set(key, now);
+    if (was === undefined || was === now) return;
+    const old = el("s", "cf-old mono", was.length > 40 ? was.slice(0, 39) + "…" : was);
+    old.title = "the value before this change";
+    head.append(old);
+    row.classList.add("cf-changed");
+    setTimeout(() => { row.classList.remove("cf-changed"); old.remove(); }, 4000);
+  }
+
   function field(n, inp, graphName) {
     const b = inp.binding || {};
     const isSet = b.kind === "literal";
     const value = isSet ? b.value : inp.default;
     const kind = kindOf(inp, value);
     const row = el("div", "cf-field");
+    row.dataset.oxTarget = `field:${n.name}/${inp.name}`;
     const head = el("div", "cf-head");
     head.append(el("span", "cf-name mono", inp.name));
+    changed(row, head, `${graphName}:${n.name}/${inp.name}`, value);
     const hint = inp.type && inp.type !== "any" ? (inp.type === "choice" ? "one of" : inp.type) : kind;
     head.append(el("span", "cf-type", hint + (inp.required ? " · required" : "")));
     if (!isSet) head.append(el("span", "cf-default", inp.default != null ? "default" : "not set"));

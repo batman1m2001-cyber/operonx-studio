@@ -163,3 +163,35 @@ test("the screen follows the plan: a newly active step's target, then what an en
   // a step with no target moves nothing
   assert.deepEqual(C.focus(null, plan(["Think", "active"]), NOW), []);
 });
+
+test("board_card rings the card it reads, board_act presses the card it moved (D6)", () => {
+  assert.deepEqual(C.steps(tool("mcp__studio__board_card", {milestone: "m2", card: "F1"}), "start", NOW),
+    [{go: {tab: "project", page: "plans"}}, {point: "card:F1", words: "reading", or: "ms:m2"}]);
+  assert.deepEqual(C.steps(tool("mcp__studio__board_act", {milestone: "m2", op: "retry", card: "F1"}, "ok"), "end", PLANS),
+    [{press: "card:F1", words: "retry", or: "ms:m2"}]);
+  // a clipped input still names the card
+  assert.equal(C.inputOf({input: '{"milestone": "m2", "card": "F3", "notes": "…'}).card, "F3");
+  assert.deepEqual(C.where("card:F1"), {tab: "project", page: "plans"});
+});
+
+test("an op config edit rings the op, selects it, then rings the field it changes (D6)", () => {
+  const ops = [{name: "score", file: "app/ops.py", fn: "score", params: ["threshold", "model"]}];
+  const edit = (status) => ({kind: "tool", name: "Edit", status, input: {file_path: "/p/app/ops.py",
+    old_string: "def score(x, threshold: float = 0.5, model='a'):", new_string: "def score(x, threshold: float = 0.7, model='a'):"}});
+  assert.deepEqual(C.opSteps(edit("running"), "start", ops), [
+    {point: "op:score", words: "editing"}, {select: "score"}, {point: "field:score/threshold", words: "editing"}]);
+  assert.deepEqual(C.opSteps(edit("ok"), "end", ops), [{point: "field:score/threshold", words: "saved", soft: true, or: "op:score"}]);
+  // code, not a setting: the op alone
+  const body = {kind: "tool", name: "Edit", status: "running", input: {file_path: "/p/app/ops.py",
+    old_string: "def score(x):\n    return x", new_string: "def score(x):\n    return x + 1"}};
+  assert.deepEqual(C.opSteps(body, "start", ops), [{point: "op:score", words: "editing"}]);
+  assert.deepEqual(C.changedParams("f(threshold == 1)", "f(threshold == 2)", ["threshold"]), []);
+  assert.deepEqual(C.where("field:score/threshold"), {tab: "flow"});
+});
+
+test("a step aimed at a field selects its op first; a section setting goes to its own screen", () => {
+  const a = {steps: [{title: "Raise the threshold", state: "active", target: "field:score/threshold"}]};
+  assert.deepEqual(C.focus(null, a, {tab: "flow"}), [{select: "score"}, {point: "field:score/threshold", words: "Raise the threshold"}]);
+  assert.deepEqual(C.where("setting:retention/job"), {tab: "settings"});
+  assert.deepEqual(C.where("setting:daemon"), {tab: "project", page: "settings"});
+});

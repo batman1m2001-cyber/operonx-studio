@@ -108,6 +108,7 @@
   function retentionRow(origin, label, help, value) {
     const row = el("div", "setrow");
     row.dataset.origin = origin;
+    row.dataset.oxTarget = `setting:retention/${origin}`;
     const text = el("div", "setlabel");
     text.append(el("div", "setname", label), el("div", "sethelp", help));
     const ctl = el("div", "setctl");
