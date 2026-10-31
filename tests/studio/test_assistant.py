@@ -1342,3 +1342,20 @@ def test_a_steps_call_puts_the_stamped_plan_on_its_item(tmp_path, monkeypatch):
     assert turn.events[-1]["state"] == "thinking" and turn.events[-1]["detail"] == "Step 2 of 3 · Merge"
     bad = call("u3", "active", "active", "pending")                          # the tool answers what is wrong
     assert "plan" not in bad and turn.step == "Step 2 of 3 · Merge"
+
+
+def test_a_test_run_is_read_whole_before_the_clip(tmp_path):
+    from operonx_studio import assistant
+    relay = Relay(ChatStore(tmp_path / "a.sqlite"))
+    turn = assistant.Turn(id="t1", session="s1", scope="p")
+    out = "." * 9000 + "\nFAILED tests/test_a.py::test_x - KeyError: 'lane'\n1 failed, 137 passed in 4.20s\n"
+    for uid, cmd in (("u1", "uv run pytest -q"), ("u2", "ls -la")):
+        relay._translate(turn, {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": uid, "name": "Bash", "input": {"command": cmd}}]}})
+        relay._translate(turn, {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": uid, "content": out, "is_error": True}]}})
+    tested, listed = (turn.items[turn.tools[u]] for u in ("u1", "u2"))
+    assert len(tested["output"]) <= 4100 and "1 failed" not in tested["output"], "the clip dropped the summary"
+    assert (tested["tests"]["passed"], tested["tests"]["failed"], tested["tests"]["ms"]) == (137, 1, 4200)
+    assert tested["tests"]["failures"][0]["line"] == "KeyError: 'lane'"
+    assert "tests" not in listed, "not a test command, no report"

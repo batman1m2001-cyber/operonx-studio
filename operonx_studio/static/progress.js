@@ -37,17 +37,13 @@ const oxProgress = (() => {
     try { return JSON.parse(item.input || "{}"); } catch { return {}; }
   }
 
+  // the tool classes (VISUAL_CHAT_PLAN D5): a global in the page, required in node
+  const T = typeof oxTools !== "undefined" ? oxTools : require("./tools.js");
+
   /* what one tool call did, as the step it belongs to: {kind, words} */
   function kindOf(item) {
     const n = item.name || "";
     const inp = inputOf(item);
-    if (/^(Read|Grep|Glob|LS)$/.test(n)) return {kind: "read", file: base(inp.file_path || inp.path || "")};
-    if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(n)) {
-      const f = base(inp.file_path || inp.notebook_path || "");
-      return {kind: "edit:" + f, words: f ? `Edited ${f}` : "Edited files"};
-    }
-    if (n === "Bash") return {kind: "run"};
-    if (/^Web/.test(n)) return {kind: "web", words: "Looked it up on the web"};
     const studio = /^mcp__studio__(.+)$/.exec(n);
     if (studio) {
       const tool = studio[1];
@@ -57,6 +53,16 @@ const oxProgress = (() => {
       const words = tool.replace(/_/g, " ");
       return {kind: "studio:" + tool, words: words[0].toUpperCase() + words.slice(1)};
     }
+    const c = T.classOf(item);
+    const f = c.res && c.res.kind === "file" ? base(c.res.value) : "";
+    if (c.cls === "read" || c.cls === "search") return {kind: "read", file: c.cls === "read" ? f : ""};
+    if (c.cls === "edit" || c.cls === "create") return {kind: "edit:" + f, words: f ? `Edited ${f}` : "Edited files"};
+    if (c.cls === "delete") return {kind: "delete:" + f, words: f ? `Deleted ${f}` : "Deleted files"};
+    if (c.cls === "test") return {kind: "test", words: "Ran the tests"};
+    if (c.cls === "build") return {kind: "build", words: "Built the project"};
+    if (c.cls === "git") return {kind: "git", words: `Ran git ${c.sub}`.trim()};
+    if (c.cls === "run") return {kind: "run"};
+    if (c.cls === "web") return {kind: "web", words: "Looked it up on the web"};
     return {kind: "tool:" + n, words: n ? `Used ${n}` : "Used a tool"};
   }
 

@@ -78,6 +78,10 @@
   --ref-sym: #6a3fc0; --ref-sym-soft: #f2edfb;
   --ref-cfg: #4a5568; --ref-cfg-soft: #edf0f4;
   --ref-cmd-soft: #eef0ec;
+  /* tool classes (VISUAL_CHAT_PLAN D5): what a call did, by colour */
+  --tc-read: var(--ref-file); --tc-edit: #8a5a00; --tc-create: #23753a; --tc-delete: #a23a12; --tc-search: var(--ref-sym);
+  --tc-run: var(--text-2); --tc-test: #2559a8; --tc-build: #4a5568; --tc-git: #b4440e; --tc-web: #3b4fc4;
+  --tc-studio: var(--accent-strong);
   --sel: #eaf2fe;
   --sel-line: #3b86e0;
 
@@ -5814,3 +5818,68 @@ body.pmode .ax-status { background: var(--glass-still); border-radius: 10px; pad
 .pm-qtoast-x:hover { background: var(--glass-line); color: var(--text); }
 .pm-island[hidden], .pm-qtoast[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .pm-island-dot { animation: none; } }
+
+/* tool rows (VISUAL_CHAT_PLAN D5): the class's icon and verb in its colour, the resource, the state, the time */
+.ax-tool { --tc: var(--tc-run); }
+.tc-read { --tc: var(--tc-read); } .tc-edit { --tc: var(--tc-edit); } .tc-create { --tc: var(--tc-create); }
+.tc-delete { --tc: var(--tc-delete); } .tc-search { --tc: var(--tc-search); } .tc-test { --tc: var(--tc-test); }
+.tc-build { --tc: var(--tc-build); } .tc-git { --tc: var(--tc-git); } .tc-web { --tc: var(--tc-web); }
+.tc-studio { --tc: var(--tc-studio); }
+.ax-tool .ax-step-head { gap: 7px; }
+.ax-tool-verb { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--tc); font-weight: 600; }
+.ax-step-head .ax-tool-verb .icon { color: var(--tc); }
+.ax-tool-res { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 11.5px var(--mono); color: var(--text); }
+code.ax-tool-res.cmd { background: var(--ref-cmd-soft); border-radius: 4px; padding: 1px 6px; }
+code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
+.ax-step-head .ax-ref-file { flex: 0 1 auto; min-width: 0; max-width: 46%; }
+.ax-step-head .ax-ref-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax-tool-st { display: inline-flex; flex: none; color: var(--st); }
+.ax-step-head .ax-tool-st .icon { width: 13px; height: 13px; color: var(--st); }
+.ax-step-head.more:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
+.ax-fold-chips { display: inline-flex; gap: 4px; min-width: 0; overflow: hidden; flex: 0 1 auto; }
+.ax-fold-chips .ax-ref-file { max-width: 150px; }
+.ax-fold-more { font-size: 11px; color: var(--text-3); align-self: center; }
+.ax-fold-calls { display: flex; flex-direction: column; border-left: 2px solid color-mix(in srgb, var(--tc) 35%, transparent);
+  margin: 2px 0 2px -10px; }
+.ax-fold.warned .ax-tool-st { color: var(--st-warn); }
+.ax-io-exit { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
+.ax-io-exit b { font: 600 11.5px var(--mono); color: var(--st); }
+.ax-step-io .ax-tree { font-size: 11.5px; background: var(--surface-2); border-radius: var(--r-sm); padding: 6px 8px;
+  max-height: 220px; overflow: auto; }
+
+/* a test run's report (D6) */
+.ax-tests { padding: 0 12px 8px 33px; display: flex; flex-direction: column; gap: 5px; }
+.ax-tests-bar { display: flex; height: 4px; border-radius: 3px; overflow: hidden; background: var(--surface-2); max-width: 360px; }
+.ax-tests-bar span { min-width: 3px; }
+.ax-tests-bar .seg-ok { background: var(--st-ok); } .ax-tests-bar .seg-err { background: var(--st-err); }
+.ax-tests-bar .seg-skip { background: var(--line-strong, var(--text-3)); opacity: .5; }
+.ax-tests-nums { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums; color: var(--text-2); }
+.ax-tests-nums .n-ok { color: var(--st-ok); font-weight: 600; } .ax-tests-nums .n-err { color: var(--st-err); font-weight: 600; }
+.ax-tests-dot { color: var(--text-3); }
+.ax-tests-runner { margin-left: auto; font: 10.5px var(--mono); color: var(--text-3); }
+.ax-tests-tog { align-self: flex-start; border: none; background: none; padding: 0; font-size: var(--fs-sm); font-weight: 600;
+  color: var(--st-err); cursor: pointer; }
+.ax-tests-tog::after { content: " ▸"; } .ax-tests-tog[aria-expanded="true"]::after { content: " ▾"; }
+.ax-tests-fails { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ax-tests-fail { width: 100%; display: flex; align-items: baseline; gap: 7px; border: none; background: var(--st-err-soft);
+  border-radius: var(--r-sm); padding: 4px 8px; text-align: left; font-size: var(--fs-sm); color: var(--text); cursor: pointer;
+  min-width: 0; }
+.ax-tests-fail .icon { width: 12px; height: 12px; color: var(--st-err); flex: none; align-self: center; }
+.ax-tests-fail code { font: 11.5px var(--mono); flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax-tests-fail span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.ax-tests-fails pre { margin: 3px 0 4px; max-height: 200px; overflow: auto; font: 11px/1.45 var(--mono); background: var(--surface-2);
+  border-radius: var(--r-sm); padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .ax-tests { padding-left: 12px; }
+  .ax-step-head .ax-ref-file { max-width: 40%; }
+  .ax-fold-chips .ax-ref-file:nth-child(n+3) { display: none; }
+}
+.ax-pstep-main, .ax-pstep-body, .ax-step.ax-tool, .ax-fold-calls { min-width: 0; }
+.ax-tool .ax-step-head { min-width: 0; overflow: hidden; }
+.ax-tool .ax-step-head > * { flex-shrink: 0; }
+.ax-tool .ax-step-head > .ax-tool-res, .ax-tool .ax-step-head > .ax-ref-file, .ax-tool .ax-step-head > .ax-fold-chips { flex-shrink: 1; }
+.ax-tests-fail { justify-content: flex-start; }
+.ax-pstep-body { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 560px) { .ax-fold-chips { display: none; } }

@@ -1,6 +1,6 @@
 # The conversation shows the work: a visual-first assistant (VISUAL_CHAT_PLAN)
 
-Status: in progress on feat/visual-chat (2026-10-31): V0–V2 done.
+Status: in progress on feat/visual-chat (2026-10-31): V0–V3 done.
 
 Owner's brief: "Visual-First Conversational Engineering Experience", in 12
 sections. The assistant's work should be readable at a glance: references,

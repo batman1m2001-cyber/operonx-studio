@@ -47,7 +47,7 @@ test("without a plan, tool calls group into steps by what they did", () => {
     tool("mcp__studio__board_act", {milestone: "m1", card: "F1", action: "start"}, "running"),
   ]);
   assert.deepEqual(steps.map((s) => [s.title, s.state]), [
-    ["Read 2 files", "done"], ["Edited ops.py", "done"], ["Ran a command", "failed"], ["Moved F1", "active"]]);
+    ["Read 2 files", "done"], ["Edited ops.py", "done"], ["Ran the tests", "failed"], ["Moved F1", "active"]]);
   assert.equal(steps[0].seqs.length, 3);
   assert.equal(steps[1].ms, 200);
 });

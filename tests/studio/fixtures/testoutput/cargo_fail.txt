@@ -1,0 +1,26 @@
+   Compiling rs v0.1.0 (/tmp/demo/rs)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.65s
+     Running unittests src/lib.rs (target/debug/deps/rs-a35a48c092d3f767)
+
+running 3 tests
+test tests::later ... ignored
+test tests::adds ... ok
+test tests::lane ... FAILED
+
+failures:
+
+---- tests::lane stdout ----
+
+thread 'tests::lane' (3548136) panicked at src/lib.rs:4:25:
+assertion `left == right` failed: lane key
+  left: 1
+ right: 2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tests::lane
+
+test result: FAILED. 1 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

@@ -659,17 +659,6 @@
   let replyEl = null;     // where its answer goes
   let actEl = null;       // the open activity group, if the last thing was a step
 
-  const stepIcon = (item) => {
-    if (item.kind === "thinking") return "spark";
-    const n = item.name || "";
-    if (/^mcp__studio__/.test(n)) return "graph";
-    if (n === "Bash") return "terminal";
-    if (/^(Read|Edit|Write|MultiEdit|NotebookEdit)$/.test(n)) return "file";
-    if (/^(Grep|Glob|LS)$/.test(n)) return "search";
-    if (/^Web/.test(n)) return "globe";
-    return "box";
-  };
-
   function newTurn(userItem) {
     turnEl = el("div", "ax-turn");
     if (userItem) turnEl.dataset.turn = userItem.turn || "";
@@ -771,24 +760,13 @@
     let thought = 0;
     for (const s of steps) {
       if (s.kind === "thinking") { thought += s.ms || 0; continue; }
-      const n = s.name || "";
-      if (n === "ToolSearch") continue;        // loading tools is plumbing, not work
-      const key = /^mcp__studio__/.test(n) ? "studio" : n === "Read" ? "read" : /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(n)
-        ? "edit" : n === "Bash" ? "run" : /^(Grep|Glob|LS)$/.test(n) ? "search" : /^Web/.test(n) ? "web" : "tool";
-      count[key] = (count[key] || 0) + 1;
+      const c = W.oxTools.classOf(s).cls;
+      if (c !== "plumbing") count[c] = (count[c] || 0) + 1;      // loading tools is plumbing, not work
     }
-    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-    const bits = [];
-    if (count.read) bits.push(`read ${plural(count.read, "file", "files")}`);
-    if (count.edit) bits.push(`edited ${plural(count.edit, "file", "files")}`);
-    if (count.run) bits.push(`ran ${plural(count.run, "command", "commands")}`);
-    if (count.search) bits.push(`searched ${plural(count.search, "time", "times")}`);
-    if (count.web) bits.push(`looked up ${plural(count.web, "page", "pages")}`);
-    if (count.studio) bits.push(`used the studio ${count.studio}×`);
-    if (count.tool) bits.push(`used ${plural(count.tool, "tool", "tools")}`);
+    const bits = Object.keys(count).map((c) => W.oxTools.words(c, steps.filter((s) => s.kind !== "thinking"
+      && W.oxTools.classOf(s).cls === c)));
     if (!bits.length) return thought ? `Thought for ${fmt.ms(thought)}` : "Thought";
-    const s = bits.join(", ");
-    return s[0].toUpperCase() + s.slice(1);
+    return bits.map((b, i) => (i ? b[0].toLowerCase() + b.slice(1) : b)).join(", ");
   }
 
   function paintActivity(group) {
@@ -810,45 +788,189 @@
       .filter(Boolean).join(" · ");
   }
 
-  function renderStep(item) {
-    const row = el("div", "ax-step" + (item.status === "error" ? " bad st-err" : ""));
-    const top = el("button", "ax-step-head");
-    top.type = "button";
-    const state = item.status === "running" || (item.kind === "thinking" && item.ms == null)
-      ? el("span", "ax-spin") : icon(item.status === "error" ? B.status("error").icon : stepIcon(item));
-    const label = el("span", "ax-step-label");
-    // a label recorded with an absolute path inside the project reads relative
-    const cwd = A.agent && A.agent.cwd ? A.agent.cwd.replace(/\/$/, "") + "/" : null;
-    if (cwd && item.label && item.label.includes(cwd)) item = {...item, label: item.label.split(cwd).join("")};
-    if (item.kind === "thinking") label.textContent = item.ms != null ? `Thought for ${fmt.ms(item.ms)}` : "Thinking";
-    else {
-      const m = /^(\S+)\s+(.*)$/.exec(item.label || item.name || "");
-      if (m && /^(Read|Edited|Wrote|Ran|Searched|Listed|Fetched|Planned|Delegated)$/.test(m[1])) {
-        label.append(document.createTextNode(m[1] + " "), el("code", null, m[2]));
-      } else label.textContent = item.label || item.name || "tool";
+  /* a tool row (VISUAL_CHAT_PLAN D5): the class's icon and verb in its colour,
+     the resource it acted on, its state and time; the input, output and exit
+     status one click away. Thinking keeps its plain row. */
+  const TL = W.oxTools;
+  function toolRoot() {
+    return refState.root || (A.agent && A.agent.cwd ? A.agent.cwd.replace(/\/$/, "") : "");
+  }
+  function turnTouched(item) {
+    return RF && item && item.turn ? RF.touched(A.items.filter((x) => x.turn === item.turn), toolRoot()) : null;
+  }
+  // a path a tool used is a fact: it is a chip, in the tree or not
+  function fileChip(path, touched) {
+    const p = RF ? RF.rel(path, toolRoot()) : path;
+    const touch = touched && touched.get(p);
+    const b = el("button", `ax-ref ax-ref-file${touch ? " t-" + touch : ""}`);
+    b.type = "button";
+    b.title = p + (touch ? " — " + TOUCH[touch][1] : "");
+    b.append(icon("file"), el("span", null, p.split("/").pop()));
+    if (touch) b.append(el("b", "ax-touch", TOUCH[touch][0]));
+    b.onclick = (e) => { e.stopPropagation(); openFile(p, 0); };
+    return b;
+  }
+  function toolRes(res, touched) {
+    if (!res || !res.value) return null;
+    if (res.kind === "file") return fileChip(res.value, touched);
+    // a command reads as the one that matters: `cd x && uv run pytest` → `uv run pytest`
+    const line = (res.kind === "cmd" ? TL.mainCommand(res.value) : String(res.value)).split("\n")[0];
+    const c = el("code", "ax-tool-res " + res.kind, line + (/\n/.test(res.value) ? " …" : ""));
+    c.title = res.value.length > 400 ? res.value.slice(0, 400) + "…" : res.value;
+    return c;
+  }
+  function stepState(item) {
+    const running = item.status === "running" || (item.kind === "thinking" && item.ms == null);
+    return B.status(running ? (A.running ? "running" : "stopped") : item.status === "error" ? "error" : "done");
+  }
+  function stateMark(st) {
+    const s = el("span", `ax-tool-st st-${st.tone}`);
+    s.title = st.word;
+    s.append(st.spin ? el("span", "ax-spin") : icon(st.icon));
+    return s;
+  }
+  /* D6: a test run's report — the bar, the counts, the failures a click away */
+  function testReport(t) {
+    const box = el("div", "ax-tests" + (t.failed || t.errors ? " bad" : ""));
+    const total = t.passed + t.failed + t.errors + t.skipped || 1;
+    const bar = el("div", "ax-tests-bar");
+    bar.setAttribute("aria-hidden", "true");
+    for (const [k, n] of [["ok", t.passed], ["err", t.failed + t.errors], ["skip", t.skipped]]) {
+      if (n) { const seg = el("span", "seg-" + k); seg.style.flexGrow = String(n / total); bar.append(seg); }
     }
-    top.append(state, label, el("span", "ax-step-ms", item.ms != null ? fmt.ms(item.ms) : ""));
-    row.append(top);
-    const hasBody = item.kind === "thinking" ? !!(item.text || "").trim() : !!(item.input || item.output);
-    if (hasBody) {
-      top.classList.add("more");
-      const io = el("div", "ax-step-io");
-      io.hidden = true;
-      top.onclick = () => {
-        if (!io.childNodes.length) {
-          if (item.kind === "thinking") io.append(el("pre", "ax-think", item.text));
-          else {
-            if (item.input) io.append(el("div", "ax-io-label", "Input"), el("pre", null, item.input));
-            if (item.output) io.append(el("div", "ax-io-label", item.status === "error" ? "Error" : "Result"),
-              el("pre", null, item.output));
-          }
+    const nums = el("div", "ax-tests-nums");
+    const bits = [[t.passed, "passed", "ok"], [t.failed, "failed", "err"], [t.errors, t.errors === 1 ? "error" : "errors", "err"],
+      [t.skipped, "skipped", "skip"]].filter(([n, , k]) => n || k === "ok");
+    bits.forEach(([n, w, k], i) => {
+      if (i) nums.append(el("span", "ax-tests-dot", "·"));
+      nums.append(el("span", "n-" + k, `${n} ${w}`));
+    });
+    if (t.ms != null) nums.append(el("span", "ax-tests-dot", "·"), el("span", "n-ms", fmt.ms(t.ms)));
+    nums.append(el("span", "ax-tests-runner", t.runner));
+    box.append(bar, nums);
+    const fails = t.failures || [];
+    if (fails.length) {
+      const tog = el("button", "ax-tests-tog", `${fails.length} ${fails.length === 1 ? "failure" : "failures"}`);
+      tog.type = "button";
+      tog.setAttribute("aria-expanded", "false");
+      const list = el("ol", "ax-tests-fails");
+      list.hidden = true;
+      for (const f of fails) {
+        const li = el("li");
+        const head = el("button", "ax-tests-fail");
+        head.type = "button";
+        head.append(icon("x"), el("code", null, f.id), el("span", null, f.line || ""));
+        li.append(head);
+        if (f.context) {
+          const pre = el("pre", null, f.context);
+          pre.hidden = true;
+          head.onclick = () => { pre.hidden = !pre.hidden; li.classList.toggle("open", !pre.hidden); };
+          li.append(pre);
         }
-        io.hidden = !io.hidden;
-        row.classList.toggle("open", !io.hidden);
+        list.append(li);
+      }
+      tog.onclick = () => {
+        list.hidden = !list.hidden;
+        tog.setAttribute("aria-expanded", String(!list.hidden));
       };
-      row.append(io);
+      box.append(tog, list);
     }
+    return box;
+  }
+  function toolDetails(item) {
+    const io = el("div", "ax-step-io");
+    const inp = TL.inputOf(item);
+    if (inp && Object.keys(inp).length && W.Values) {
+      io.append(el("div", "ax-io-label", "Input"));
+      const tree = el("div", "ax-tree");
+      tree.append(W.Values.render(inp, {open: true}));
+      io.append(tree);
+    } else if (item.input) io.append(el("div", "ax-io-label", "Input"), el("pre", null, item.input));
+    if (item.output) io.append(el("div", "ax-io-label", item.status === "error" ? "Error" : "Output"),
+      el("pre", null, item.output));
+    const code = TL.exitOf(item);
+    if (code != null) {
+      const ex = el("div", "ax-io-exit " + (code ? "st-err" : "st-ok"));
+      ex.append(el("span", "ax-io-label", "Exit status"), el("b", null, String(code)));
+      io.append(ex);
+    }
+    return io;
+  }
+  function withDetails(row, head, build) {
+    head.classList.add("more");
+    head.tabIndex = 0;
+    head.setAttribute("role", "button");
+    head.setAttribute("aria-expanded", "false");
+    const io = el("div", "ax-step-io");
+    io.hidden = true;
+    const flip = () => {
+      if (!io.childNodes.length) io.append(...build().childNodes);
+      io.hidden = !io.hidden;
+      row.classList.toggle("open", !io.hidden);
+      head.setAttribute("aria-expanded", String(!io.hidden));
+    };
+    head.onclick = (e) => { if (!e.target.closest(".ax-ref")) flip(); };
+    head.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === head) { e.preventDefault(); flip(); } };
+    row.append(io);
+  }
+
+  function renderStep(item) {
+    if (item.kind === "thinking") return renderThought(item);
+    const touched = turnTouched(item);
+    const c = TL.classOf(item, touched);
+    const st = stepState(item);
+    const row = el("div", `ax-step ax-tool tc-${c.cls}` + (item.status === "error" ? " bad st-err" : ""));
+    const head = el("div", "ax-step-head");
+    const verb = el("span", "ax-tool-verb");
+    verb.append(icon(c.icon), el("span", null, c.verb));
+    head.append(verb);
+    const res = toolRes(c.res, touched);
+    if (res) head.append(res);
+    else if (c.cls === "tool" && item.label && item.label !== item.name) head.append(el("span", "ax-tool-res", item.label));
+    head.append(el("span", "ax-spacer"), stateMark(st), el("span", "ax-step-ms", item.ms != null ? fmt.ms(item.ms) : ""));
+    row.append(head);
+    if (item.tests) row.append(testReport(item.tests));
+    if (item.input || item.output) withDetails(row, head, () => toolDetails(item));
     return row;
+  }
+
+  function renderThought(item) {
+    const row = el("div", "ax-step");
+    const head = el("div", "ax-step-head");
+    head.append(item.ms == null ? el("span", "ax-spin") : icon("spark"),
+      el("span", "ax-step-label", item.ms != null ? `Thought for ${fmt.ms(item.ms)}` : "Thinking"),
+      el("span", "ax-step-ms", item.ms != null ? fmt.ms(item.ms) : ""));
+    row.append(head);
+    if ((item.text || "").trim()) withDetails(row, head, () => { const d = el("div"); d.append(el("pre", "ax-think", item.text)); return d; });
+    return row;
+  }
+
+  /* D5: runs of one class are one row — "Read 6 files" with the files as chips; opening it shows each call */
+  function renderTools(items) {
+    const touched = items.length ? turnTouched(items[0]) : null;
+    const groups = TL.fold(items, touched);
+    const out = [];
+    for (const g of groups) {
+      if (g.items.length === 1 || groups.length === 1) { for (const it of g.items) out.push(renderStep(it)); continue; }
+      const row = el("div", `ax-step ax-tool ax-fold tc-${g.cls}`);
+      const head = el("div", "ax-step-head");
+      const verb = el("span", "ax-tool-verb");
+      verb.append(icon(TL.ICON[g.cls]), el("span", null, TL.words(g.cls, g.items, touched)));
+      head.append(verb);
+      const files = TL.filesOf(g.items, touched);
+      const chips = el("span", "ax-fold-chips");
+      for (const f of files.slice(0, 4)) chips.append(fileChip(f, touched));
+      if (files.length > 4) chips.append(el("span", "ax-fold-more", `+${files.length - 4}`));
+      if (files.length) head.append(chips);
+      const worst = g.items.find((i) => i.status === "running") || g.items.find((i) => i.status === "error") || g.items[0];
+      const ms = g.items.reduce((a, i) => a + (i.ms || 0), 0);
+      head.append(el("span", "ax-spacer"), stateMark(stepState(worst)), el("span", "ax-step-ms", ms ? fmt.ms(ms) : ""));
+      row.append(head);
+      if (g.items.some((i) => i.status === "error")) row.classList.add("warned");
+      withDetails(row, head, () => { const d = el("div", "ax-fold-calls"); d.append(...g.items.map(renderStep)); return d; });
+      out.push(row);
+    }
+    return out;
   }
 
   /* the progress card (docs/ASSISTANT_PROGRESS_PLAN.md D4): the turn's
@@ -981,7 +1103,7 @@
         if (step.detail && state !== "active" && state !== "waiting") body.append(el("div", "ax-pstep-detail", step.detail));
         if (step.result) body.append(el("div", "ax-pstep-result", step.result));
         if (step.error) body.append(el("div", "ax-pstep-error", step.error));
-        for (const q of seqs) { const t = A.bySeq.get(q); if (t) body.append(renderStep(t)); }
+        body.append(...renderTools(seqs.map((q) => A.bySeq.get(q)).filter(Boolean)));
         main.append(body);
       }
     }
