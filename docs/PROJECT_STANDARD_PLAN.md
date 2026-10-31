@@ -6,7 +6,7 @@ phases:
   - {id: S2, title: The studio shows it and offers one action, status: done}
   - {id: G1, title: Git per project — who commits, what the assistant may do, enforced, status: done}
   - {id: S3, title: The assistant does it on clones; fix and retry until every project passes, status: done}
-  - {id: S4, title: The passing work lands in the real repos, status: open}
+  - {id: S4, title: The passing work lands in the real repos, status: in_progress}
   - {id: S5, title: Live studio and the report, status: open}
 updated: 2026-10-23
 ---
@@ -141,3 +141,16 @@ What the assistant found for the owner:
 Still open in the assistant: mr-finance's round 3b reply was nine lines (nested bullets); the D4 line holds at
 eight. A run takes 1–2 minutes on the small projects and ~30 on mr-finance (20 plans read against `git log`, its
 1,000-test suite run by the assistant and again by the scorecard).
+
+## 5. Landed (2026-10-31)
+
+| Project | Where | `standard` on the real repo |
+|---|---|---|
+| meeting-prep-operonx, meeting-prep-brd | meeting-prep-projects #14 (merged) | 4/4 each |
+| qc-snatcher | qc-snatcher #4 (merged) | 4/4 |
+| educa-reminder-agent | `refactor/operonx-studio`, pushed (callbot work stays on that branch) | 4/4 |
+| tipcalc | already on `main` | 4/4 |
+| mr-finance | **waits**: the owner is running its FEATURE_FLOWS refactor through the assistant | — |
+
+Read with `operonx_project.status.status(repo)["standard"]` on each tree. S4 closes when mr-finance lands; S5
+needs the live studio restarted on main (it still runs code from before #125 and #126).
