@@ -1311,6 +1311,20 @@ def test_steps_are_checked_and_answer_with_the_active_step():
     assert mcp.t_steps(None, {"steps": [step("Read", "done"), step("Ask", "waiting")]}) == \
         "step 2 of 2: Ask (needs the owner)"
     assert mcp.t_steps(None, {"steps": [step("Read", "done"), step("Merge", "failed")]}) == "1 of 2 steps done, 1 failed"
+    # D12: blocked says why; sub is one level; after names earlier steps; a skipped step leaves the total
+    for bad, why in (({"steps": [step("a", "blocked")]}, "say why"),
+                     ({"steps": [step("a", "done"), step("b", "pending", after=[2])]}, "earlier steps"),
+                     ({"steps": [step("a", "pending", after=[0])]}, "earlier steps"),
+                     ({"steps": [step("a", "pending", sub=[{"title": "x", "state": "waiting"}])]}, "subtask")):
+        with pytest.raises(ValueError, match=why):
+            mcp.check_steps(bad)
+    got = mcp.check_steps({"steps": [step("a", "done", sub=["x", {"title": "y", "state": "done"}]),
+                                     step("b", "blocked", detail="no key", after=[1, 1])]})
+    assert got[0]["sub"] == [{"title": "x", "state": "pending"}, {"title": "y", "state": "done"}]
+    assert got[1]["after"] == [1] and got[1]["detail"] == "no key"
+    assert mcp.step_line(got) == "step 2 of 2: b (blocked: no key)"
+    assert mcp.t_steps(None, {"steps": [step("a", "done"), step("b", "skipped")]}) == "1 of 1 steps done"
+    assert mcp.t_steps(None, {"steps": [step("Read", "done"), step("Merge", "active")]}) == "step 2 of 2: Merge"
     assert "mcp__studio__steps" in chat.STUDIO_READ_TOOLS                   # it changes nothing
     assert "steps" in mcp.TOOLS and "steps" in mcp.HOME_TOOLS
 

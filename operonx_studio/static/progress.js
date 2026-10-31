@@ -15,19 +15,64 @@ const oxProgress = (() => {
     return kind ? `${kind} ${m[2]}` : m[2];
   }
 
-  /* the head: the chip, "3 of 5 steps completed", the percentage, and the words a screen reader hears */
+  /* the head: the chip, "3 of 5 steps", the bar, and the words a screen reader hears.
+     A skipped step leaves the total (VISUAL_CHAT_PLAN D12): the bar is done/total, a count, never an estimate */
   function summary(steps, live) {
-    const n = steps.length;
+    const n = steps.filter((s) => s.state !== "skipped").length;
     const done = steps.filter((s) => s.state === "done").length;
-    const finished = steps.filter((s) => s.state === "done" || s.state === "skipped").length;
     // [word, tone]: the tone is blocks.js status()'s (VISUAL_CHAT_PLAN D3)
     const chip = steps.some((s) => s.state === "failed") ? ["Failed", "err"]
       : steps.some((s) => s.state === "waiting") ? ["Needs you", "warn"]
       : steps.some((s) => s.state === "blocked") ? ["Blocked", "blocked"]
-      : n && finished === n ? ["Completed", "ok"] : live ? ["Executing", "run"] : ["Stopped", "pending"];
-    const at = steps.findIndex((s) => s.state === "active" || s.state === "waiting");
-    return {chip, done, n, pct: n ? Math.round(finished / n * 100) : 0,
-      say: at >= 0 ? `Step ${at + 1} of ${n}: ${steps[at].title}` : `${chip[0]}: ${done} of ${n} steps`};
+      : steps.length && done === n ? ["Completed", "ok"] : live ? ["Executing", "run"] : ["Stopped", "pending"];
+    const at = steps.findIndex((s) => s.state === "active" || s.state === "waiting" || s.state === "blocked");
+    return {chip, done, n, pct: n ? Math.round(done / n * 100) : steps.length ? 100 : 0,
+      say: at >= 0 ? `Step ${at + 1} of ${steps.length}: ${steps[at].title}` : `${chip[0]}: ${done} of ${n} steps`};
+  }
+
+  /* D12: what one step did, from facts only — its tool calls (the ones made while it was active, or inside its
+     started…ended window), the files they changed, its last test run per runner, the commands with their exit
+     status, and its progress: the subtasks done, else the last run's passed/total, else none */
+  function stepFacts(step, seqs, items, touched, rel = (p) => p) {
+    const mine = new Set(seqs || []);
+    const end = step.ended != null ? step.ended : Infinity;
+    const calls = items.filter((it) => it.kind === "tool" && it.name !== "ToolSearch" && (mine.has(it.seq)
+      || (step.started != null && it.created != null && it.created >= step.started && it.created <= end)));
+    const files = new Map();
+    for (const it of calls) {
+      const c = T.classOf(it, touched);
+      if (!/^(edit|create|delete)$/.test(c.cls) || !c.res || c.res.kind !== "file" || it.status === "error") continue;
+      const p = rel(c.res.value);
+      const how = (touched && touched.get(p)) || (c.cls === "create" ? "created" : c.cls === "delete" ? "deleted" : "modified");
+      files.set(p, how === "read" ? "modified" : how);
+    }
+    const runs = new Map();
+    for (const it of calls) if (it.tests) runs.set(it.tests.runner, it.tests);
+    const tests = [...runs.values()];
+    const commands = calls.filter((it) => it.name === "Bash").map((it) =>
+      ({seq: it.seq, cmd: T.mainCommand(String(T.inputOf(it).command || "")), exit: T.exitOf(it), ms: it.ms}));
+    let progress = null;
+    const sub = (step.sub || []).filter((t) => t.state !== "skipped");
+    if (sub.length) progress = {kind: "sub", done: sub.filter((t) => t.state === "done").length, total: sub.length};
+    else if (tests.length) {
+      const t = tests[tests.length - 1];
+      const total = t.passed + t.failed + t.errors;
+      if (total) progress = {kind: "tests", done: t.passed, total};
+    }
+    return {calls, files: [...files].map(([path, how]) => ({path, how})), tests, commands, progress,
+      ms: step.ms != null ? step.ms : null};
+  }
+
+  /* D12: a plan whose steps say what they wait on (after, numbered from 1) is a structure; null when none does */
+  function structure(steps) {
+    if (!steps.some((s) => s.after && s.after.length)) return null;
+    const id = (i) => "s" + (i + 1);
+    const nodes = steps.map((s, i) => ({id: id(i), label: `${i + 1}  ${s.title}`, state: s.state}));
+    const edges = [];
+    steps.forEach((s, i) => {
+      for (const a of s.after || []) if (a >= 1 && a <= steps.length && a - 1 !== i) edges.push({from: id(a - 1), to: id(i)});
+    });
+    return {nodes, edges, groups: {}, direction: "down"};
   }
 
   const base = (p) => String(p || "").split("/").pop();
@@ -93,7 +138,7 @@ const oxProgress = (() => {
     });
   }
 
-  const api = {targetWords, summary, fallback, kindOf};
+  const api = {targetWords, summary, stepFacts, structure, fallback, kindOf};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   return api;
 })();

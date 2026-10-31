@@ -680,7 +680,7 @@ class Relay:
         now = _now()
         for step in steps:
             stamp = turn.stamps.setdefault(step["title"], {})
-            if step["state"] in ("active", "waiting"):
+            if step["state"] in ("active", "waiting", "blocked"):
                 stamp.setdefault("started", now)
             elif step["state"] in ("done", "failed", "skipped"):
                 stamp.setdefault("ended", now)

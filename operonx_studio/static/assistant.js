@@ -921,7 +921,7 @@
     row.append(io);
   }
 
-  function renderStep(item, step, sev) {
+  function renderStep(item, step, sev, noTests) {
     if (item.kind === "thinking") return renderThought(item);
     const touched = turnTouched(item);
     const c = TL.classOf(item, touched);
@@ -944,7 +944,7 @@
       const first = String(item.output).split("\n").find((l) => l.trim() && !/^Exit code \d+$/.test(l)) || "";
       if (first) row.append(el("div", "ax-tool-err", first.slice(0, 240)));
     }
-    if (item.tests) row.append(testReport(item.tests));
+    if (item.tests && !noTests) row.append(testReport(item.tests));
     if (item.input || item.output) withDetails(row, head, () => toolDetails(item, step));
     return row;
   }
@@ -961,13 +961,13 @@
   }
 
   /* D5: runs of one class are one row — "Read 6 files" with the files as chips; opening it shows each call */
-  function renderTools(items, step) {
+  function renderTools(items, step, noTests) {
     const touched = items.length ? turnTouched(items[0]) : null;
     const sev = items.length ? turnSeverity(items[0]) : new Map();
     const groups = TL.fold(items, touched);
     const out = [];
     for (const g of groups) {
-      if (g.items.length === 1 || groups.length === 1) { for (const it of g.items) out.push(renderStep(it, step, sev)); continue; }
+      if (g.items.length === 1 || groups.length === 1) { for (const it of g.items) out.push(renderStep(it, step, sev, noTests)); continue; }
       const row = el("div", `ax-step ax-tool ax-fold tc-${g.cls}`);
       const head = el("div", "ax-step-head");
       const verb = el("span", "ax-tool-verb");
@@ -984,7 +984,7 @@
       head.append(el("span", "ax-spacer"), stateMark(stepState(worst, sev)), el("span", "ax-step-ms", ms ? fmt.ms(ms) : ""));
       row.append(head);
       if (g.items.some((i) => i.status === "error")) row.classList.add("warned");
-      withDetails(row, head, () => { const d = el("div", "ax-fold-calls"); d.append(...g.items.map((i) => renderStep(i, step, sev))); return d; });
+      withDetails(row, head, () => { const d = el("div", "ax-fold-calls"); d.append(...g.items.map((i) => renderStep(i, step, sev, noTests))); return d; });
       out.push(row);
     }
     return out;
@@ -1033,7 +1033,8 @@
     prog.auto = null;
     const before = prog.plan;
     prog.plan = item.plan;
-    const now = item.plan.steps.find((s) => s.state === "active" || s.state === "waiting");
+    prog.turnId = item.turn;
+    const now = item.plan.steps.find((s) => s.state === "active" || s.state === "waiting" || s.state === "blocked");
     if ((now ? now.title : null) !== prog.active) A.handOn = null;   // a new step: the hand has not reached it yet
     prog.active = now ? now.title : null;
     A.nodes.set(item.seq, prog.card);
@@ -1059,14 +1060,81 @@
     prog.title.textContent = prog.plan ? prog.plan.title || "Plan" : "Steps";
     prog.chip.textContent = chip[0];
     prog.chip.className = "ax-prog-chip st-" + chip[1];
-    prog.count.textContent = `${done} of ${n} steps completed`;
+    prog.count.textContent = `${done} of ${n} steps`;
     prog.pct.textContent = `${pct}%`;
     prog.fill.style.width = `${pct}%`;
     prog.card.classList.toggle("live", live);
     prog.card.classList.toggle("auto", !prog.plan);
     if (live) { A.progress = pct; askbarPaint(); }
-    prog.list.replaceChildren(...steps.map((step, i) => progStep(prog, step, i, live)));
+    // D12: steps that say what they wait on are drawn as a structure; the list then holds the selected step
+    const shape = prog.plan && W.oxGraph && W.oxGraph.draw ? P.structure(steps) : null;
+    prog.card.classList.toggle("dag", !!shape);
+    if (shape) {
+      const at = prog.sel != null && prog.sel < steps.length ? prog.sel
+        : steps.findIndex((s) => /^(active|waiting|blocked|failed)$/.test(s.state));
+      paintShape(prog, shape, steps, live, at);
+      prog.list.replaceChildren(...(at >= 0 ? [progStep(prog, steps[at], at, live)] : []));
+    } else {
+      if (prog.shape) { prog.shape.remove(); prog.shape = null; }
+      prog.list.replaceChildren(...steps.map((step, i) => progStep(prog, step, i, live)));
+    }
     if (say !== prog.said) { prog.said = say; prog.say.textContent = say; }
+  }
+
+  function paintShape(prog, shape, steps, live, at) {
+    const G = W.oxGraph;
+    for (const n of shape.nodes) if (n.state === "active" && !live) n.state = "stopped";
+    const L = G.layout(shape, {w: Math.max(240, Math.min(640, innerWidth - 70)), h: 400});
+    const hot = steps.findIndex((s) => s.state === "active" || s.state === "waiting" || s.state === "blocked");
+    const D = G.draw(shape, L, {highlight: new Set(hot >= 0 ? ["s" + (hot + 1)] : []), affected: () => false,
+      flash: new Set(), focusable: true});
+    const had = prog.shape && prog.shape.contains(document.activeElement) ? document.activeElement.getAttribute("data-id") : null;
+    const box = el("div", "ax-prog-shape");
+    D.svg.setAttribute("width", L.width);
+    D.svg.setAttribute("height", L.height);
+    box.append(D.svg);
+    const pick = (i) => {
+      const key = steps[i].title;
+      prog.sel = i;
+      prog.open.add(key);
+      prog.shut.delete(key);
+      paintProg(prog);
+    };
+    for (const [id, g] of D.nodeEls) {
+      const i = +id.slice(1) - 1;
+      g.classList.toggle("sel", i === at);
+      g.setAttribute("aria-pressed", String(i === at));
+      g.addEventListener("click", () => pick(i));
+      g.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(i); }
+        else if (ev.key.startsWith("Arrow")) {
+          ev.preventDefault();
+          const to = G.nearest(L, id, ev.key);
+          if (to) D.nodeEls.get(to).focus();
+        }
+      });
+    }
+    if (prog.shape) prog.shape.replaceWith(box);
+    else prog.list.before(box);
+    prog.shape = box;
+    if (had && D.nodeEls.get(had)) D.nodeEls.get(had).focus();
+  }
+
+  /* D12: a step's facts — the calls it made, their files, tests and commands, and its progress */
+  function stepFactsOf(prog, step, seqs) {
+    const items = prog.turnId ? A.items.filter((x) => x.turn === prog.turnId) : seqs.map((q) => A.bySeq.get(q)).filter(Boolean);
+    const touched = items.length ? turnTouched(items[0]) : null;
+    return P.stepFacts(step, seqs, items, touched, RF ? (p) => RF.rel(p, toolRoot()) : undefined);
+  }
+  function stepMeter(pr) {
+    const m = el("span", "ax-pstep-meter");
+    m.title = pr.kind === "sub" ? `${pr.done} of ${pr.total} subtasks done` : `${pr.done} of ${pr.total} tests passed`;
+    const bar = el("span", "ax-pstep-mbar" + (pr.kind === "tests" && pr.done < pr.total ? " bad" : ""));
+    const fill = el("span");
+    fill.style.width = `${Math.round(pr.done / pr.total * 100)}%`;
+    bar.append(fill);
+    m.append(bar, el("span", "ax-pstep-mnum", `${pr.done}/${pr.total}`));
+    return m;
   }
 
   function progStep(prog, step, i, live) {
@@ -1080,11 +1148,13 @@
     head.type = "button";
     const meta = state === "done" && step.ms != null ? `Completed · ${fmt.ms(step.ms)}`
       : st.word;
-    head.append(el("span", "ax-pstep-num", `${i + 1}`), el("span", "ax-pstep-title", step.title),
-      el("span", "ax-pstep-meta", meta));
-    main.append(head);
     const key = step.key || step.title;
     const seqs = step.seqs || prog.tools.get(key) || [];
+    const facts = stepFactsOf(prog, step, seqs);
+    head.append(el("span", "ax-pstep-num", `${i + 1}`), el("span", "ax-pstep-title", step.title));
+    if (facts.progress) head.append(stepMeter(facts.progress));
+    head.append(el("span", "ax-pstep-meta", meta));
+    main.append(head);
     if (state === "active") {
       const focus = el("div", "ax-pstep-focus");
       const where = P.targetWords(A.handOn || step.target || "");
@@ -1102,8 +1172,10 @@
       }
       if (focus.childNodes.length) main.append(focus);
     }
-    if (state === "waiting" && step.detail) main.append(el("div", "ax-pstep-ask", step.detail));
-    const hasBody = !!(step.result || step.error || seqs.length || (step.detail && state !== "active" && state !== "waiting"));
+    const says = state === "active" || state === "waiting" || state === "blocked";
+    if ((state === "waiting" || state === "blocked") && step.detail) main.append(el("div", `ax-pstep-ask st-${st.tone}`, step.detail));
+    const sub = step.sub || [];
+    const hasBody = !!(step.result || step.error || facts.calls.length || sub.length || (step.detail && !says));
     if (state === "failed" && !prog.shut.has(key)) prog.open.add(key);
     if (hasBody) {
       head.classList.add("more");
@@ -1117,10 +1189,44 @@
       };
       if (open) {
         const body = el("div", "ax-pstep-body");
-        if (step.detail && state !== "active" && state !== "waiting") body.append(el("div", "ax-pstep-detail", step.detail));
+        // D12's order: what it left or why it failed, its files, its tests, its calls, how it ran
         if (step.result) body.append(el("div", "ax-pstep-result", step.result));
         if (step.error) body.append(el("div", "ax-pstep-error", step.error));
-        body.append(...renderTools(seqs.map((q) => A.bySeq.get(q)).filter(Boolean), step.title));
+        if (step.detail && !says) body.append(el("div", "ax-pstep-detail", step.detail));
+        if (sub.length) {
+          const ul = el("ul", "ax-pstep-sub");
+          for (const t of sub) {
+            const ts = B.status(t.state === "active" && !live ? "stopped" : t.state);
+            const li2 = el("li", `st-${ts.tone}`);
+            li2.append(ts.spin ? el("span", "ax-spin") : icon(ts.icon), el("span", null, t.title));
+            li2.title = ts.word;
+            ul.append(li2);
+          }
+          body.append(ul);
+        }
+        if (facts.files.length) {
+          const fl = el("div", "ax-pstep-files");
+          const touched = new Map(facts.files.map((f) => [f.path, f.how]));
+          for (const f of facts.files) fl.append(fileChip(f.path, touched));
+          body.append(fl);
+        }
+        for (const t of facts.tests) body.append(testReport(t));
+        body.append(...renderTools(facts.calls, step.title, true));
+        const runs = facts.commands.filter((c) => c.cmd);
+        if (runs.length || facts.ms != null) {
+          const ex = el("details", "ax-pstep-exec");
+          ex.append(el("summary", null, "Execution" + (facts.ms != null ? ` · ${fmt.ms(facts.ms)}` : "")));
+          const tb = el("ol");
+          for (const c of runs) {
+            const li3 = el("li", c.exit ? "st-err" : c.exit === 0 ? "st-ok" : "");
+            li3.append(el("code", null, c.cmd.split("\n")[0]),
+              el("span", "ax-pstep-exit", c.exit == null ? "running" : `exit ${c.exit}`),
+              el("span", "ax-step-ms", c.ms != null ? fmt.ms(c.ms) : ""));
+            tb.append(li3);
+          }
+          if (runs.length) ex.append(tb);
+          body.append(ex);
+        }
         main.append(body);
       }
     }

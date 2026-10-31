@@ -6023,3 +6023,26 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
 .ax-chart-key { display: inline-flex; align-items: center; gap: 5px; }
 .ax-chart-sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .ax-chart-note { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+
+/* ── the progress card, finished (docs/VISUAL_CHAT_PLAN.md D12) ── */
+.ax-pstep-meter { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+.ax-pstep-meter + .ax-pstep-meta { margin-left: 8px; }
+.ax-pstep-mbar { width: 56px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.ax-pstep-mbar > span { display: block; height: 100%; border-radius: 2px; background: var(--st-ok, var(--ok)); }
+.ax-pstep-mbar.bad > span { background: var(--err); }
+.ax-pstep-mnum { font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
+.ax-pstep-sub { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ax-pstep-sub li { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
+.ax-pstep-sub li > svg, .ax-pstep-sub li > .ax-spin { color: var(--st); flex: none; width: 13px; height: 13px; }
+.ax-pstep-sub li.st-skip, .ax-pstep-sub li.st-pending { color: var(--muted); }
+.ax-pstep-files { display: flex; flex-wrap: wrap; gap: 4px; }
+.ax-pstep-exec { font-size: var(--fs-sm); color: var(--muted); }
+.ax-pstep-exec > summary { cursor: pointer; padding: 2px 0; }
+.ax-pstep-exec > summary:focus-visible { outline: 2px solid var(--sel-line); outline-offset: 2px; border-radius: 4px; }
+.ax-pstep-exec ol { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; }
+.ax-pstep-exec li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ax-pstep-exec code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.ax-pstep-exit { flex: none; color: var(--st, var(--muted)); font-variant-numeric: tabular-nums; }
+.ax-prog-shape { overflow-x: auto; margin: 4px 0 2px; }
+.ax-prog-shape .ax-graph-svg { width: auto; max-width: 100%; max-height: none; margin: 4px auto; }
+.ax-prog.dag .ax-prog-steps:empty { display: none; }

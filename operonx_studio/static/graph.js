@@ -438,6 +438,9 @@ if (typeof window !== "undefined") window.oxGraph = oxGraph;
     }
     return best;
   }
+  // the progress card draws a plan with dependencies the same way (VISUAL_CHAT_PLAN D12)
+  G.draw = drawSvg;
+  G.nearest = nearest;
 
   /* the line under a graph about the selected node; its target opens on a second click */
   function detailOf(n, ctx) {

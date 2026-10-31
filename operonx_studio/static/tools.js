@@ -182,7 +182,7 @@ const oxTools = (() => {
     for (const i of items) if (i.tests) tests.set(i.tests.runner, i.tests);
     const plan = items.filter((i) => i.plan).pop();
     const steps = plan && plan.plan.steps.length
-      ? {done: plan.plan.steps.filter((s) => s.state === "done").length, total: plan.plan.steps.length} : null;
+      ? {done: plan.plan.steps.filter((s) => s.state === "done").length, total: plan.plan.steps.filter((s) => s.state !== "skipped").length} : null;
     const failures = items.filter((i) => sev.get(i.seq) === "failed" || sev.get(i.seq) === "recovered")
       .map((i) => ({seq: i.seq, cls: classOf(i, touched).cls, severity: sev.get(i.seq), line: i.tests && i.tests.failures && i.tests.failures.length
         ? `${i.tests.failures[0].id}: ${i.tests.failures[0].line}`
