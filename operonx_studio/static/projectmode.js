@@ -77,8 +77,33 @@ const ProjectMode = (() => {
   chat.id = "pmchat";
   const side = el("aside", "pm-status");
   side.setAttribute("aria-label", "Where the project stands");
-  main.append(page, chat, side);
+  const grip = el("div", "pm-grip");
+  grip.title = "Drag to resize · double-click for the default width";
+  main.append(page, grip, chat, side);
   box.append(main);
+
+  /* ── the split: drag the conversation's edge; the width is this browser's ── */
+  const chatWidth = (w) => {
+    if (w) chat.style.setProperty("--pm-chat-w", `${w}px`); else chat.style.removeProperty("--pm-chat-w");
+  };
+  chatWidth(v.chatw);
+  grip.onpointerdown = (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing");
+    const x0 = e.clientX, w0 = chat.getBoundingClientRect().width;
+    grip.onpointermove = (m) => {
+      const room = main.getBoundingClientRect().width - side.getBoundingClientRect().width - 360;
+      chatWidth(Math.round(Math.max(300, Math.min(room, w0 + x0 - m.clientX))));
+    };
+    grip.onpointerup = () => {
+      grip.onpointermove = grip.onpointerup = null;
+      document.body.classList.remove("resizing");
+      v.chatw = Math.round(chat.getBoundingClientRect().width);
+      save();
+    };
+  };
+  grip.ondblclick = () => { v.chatw = 0; chatWidth(0); save(); };
 
   /* ── the builder island and a question's toast ────────────────────
    * Glass over the conversation (docs/LIQUID_GLASS_PLAN.md G5). While a
