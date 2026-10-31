@@ -136,7 +136,19 @@
 
   /* ── markdown, safely ─────────────────────────────────────────────── */
 
-  const LINK_ICON = {run: "list", op: "graph", tab: "right", monitor: "chart", eval: "evals", project: "folder"};
+  const B = W.oxBlocks;
+  // what a registered block draws with (static/blocks.js): the page's own helpers
+  const ctx = {
+    el, icon, fmt, inline, copyText, toast, PROJECT,
+    codeBlock: (...a) => codeBlock(...a),
+    md: (...a) => md(...a),
+    studioLink: (...a) => studioLink(...a),
+    status: (k) => B.status(k),
+    get A() { return A; },
+  };
+
+  const LINK_ICON = {run: "list", op: "graph", tab: "right", monitor: "chart", eval: "evals", project: "folder", file: "file",
+                     point: "target", board: "roadmap"};
 
   function studioLink(label, href) {
     const kind = href.slice(7).split("/")[0];
@@ -154,6 +166,90 @@
     return b;
   }
 
+  /* ── references (D4): inline code resolved against the project ───── */
+
+  const RF = W.oxRefs;
+  // the project's tree and points, read once per conversation and again when a turn ends
+  const refState = {files: null, root: "", points: new Map(), at: 0};
+  let refWorld = null;       // the world the text being drawn resolves in (its turn's)
+  async function loadRefs() {
+    if (!PROJECT || !RF) return;
+    const at = ++refState.at;
+    const [tree, status] = await Promise.all([
+      call(`/api/p/${PROJECT}/project/files`).catch(() => null),
+      call(`/api/p/${PROJECT}/project/status`).catch(() => null),
+    ]);
+    if (at !== refState.at) return;
+    if (tree && tree.ok) { refState.files = RF.index(tree.files); refState.root = tree.root || ""; }
+    const pts = new Map();
+    const doc = status && status.project;
+    if (doc) {
+      for (const r of (doc.checklist && doc.checklist.open) || []) pts.set(r.id, `row:${r.id}`);
+      for (const q of doc.needs_you || []) pts.set(q.id, `q:${q.id}`);
+      const phases = new Map();
+      for (const p of doc.plans || []) {
+        if (p.path) pts.set(p.path, `plan:${p.path}`);
+        for (const ph of p.phases || []) phases.set(ph.id, phases.has(ph.id) ? null : `phase:${p.path}#${ph.id}`);
+      }
+      // a phase id names a point only when one plan has it
+      for (const [id, t] of phases) if (t && !pts.has(id)) pts.set(id, t);
+    }
+    refState.points = pts;
+    // what was drawn before the tree came: draw again where the text names code
+    for (const it of A.items) {
+      const n = it.kind === "text" && it.text && it.text.includes("`") ? A.nodes.get(it.seq) : null;
+      if (n) { refWorld = worldFor(it); md(n, it.text); }
+    }
+    refWorld = null;
+  }
+  function opNames() {
+    const out = new Set();
+    const ir = typeof state !== "undefined" && state && state.ir;
+    for (const g of (ir && ir.graphs) || []) (function walk(gr) {
+      for (const n of (gr && gr.nodes) || []) { if (n.name) out.add(n.name); if (n.graph) walk(n.graph); }
+    })(g);
+    return out;
+  }
+  function worldFor(item) {
+    if (!RF) return null;
+    const turn = item && item.turn;
+    const mine = turn ? A.items.filter((x) => x.turn === turn) : [];
+    return {files: refState.files, root: refState.root, ops: opNames(), points: refState.points,
+            touched: RF.touched(mine, refState.root)};
+  }
+  const TOUCH = {read: ["·", "read this turn"], modified: ["●", "modified this turn"], created: ["+", "created this turn"],
+                 deleted: ["−", "deleted this turn"]};
+  function openFile(path, line) {
+    if (W.oxStudioLink) {
+      W.oxStudioLink(`studio:file/${encodeURIComponent(path)}${line ? `#L${line}` : ""}`);
+      if (A.mode === "sheet" || A.mode === "focus") placement.leave();
+    } else if (PROJECT) location.href = `/p/${PROJECT}/project`;
+  }
+  function refCode(code, sentence) {
+    const r = refWorld ? RF.classify(code, refWorld, sentence) : {kind: "code"};
+    if (r.kind === "point") return studioLink(code, `studio:point/${r.target}`);
+    if (r.kind === "op") return studioLink(code, `studio:op/${encodeURIComponent(r.name)}`);
+    if (r.kind === "file") {
+      const b = el("button", `ax-ref ax-ref-file${r.touch ? " t-" + r.touch : ""}`);
+      b.type = "button";
+      b.title = `${r.path}${r.line ? `:${r.line}${r.end ? "-" + r.end : ""}` : ""}${r.touch ? " — " + TOUCH[r.touch][1] : ""}`;
+      b.append(icon("file"), el("span", null, code));
+      if (r.touch) b.append(el("b", "ax-touch", TOUCH[r.touch][0]));
+      b.onclick = () => openFile(r.path, r.line);
+      return b;
+    }
+    if (r.kind === "command") {
+      const c = el("code", "ax-ref-cmd", code);
+      c.title = "Copy";
+      c.tabIndex = 0;
+      const copy = () => { copyText(code); toast("Copied"); };
+      c.onclick = copy;
+      c.onkeydown = (e) => { if (e.key === "Enter") copy(); };
+      return c;
+    }
+    return el("code", r.kind === "symbol" ? "ax-ref-sym" : r.kind === "config" ? "ax-ref-cfg" : null, code);
+  }
+
   function inline(parent, text) {
     // no lookbehind: an engine without it (older iOS Safari) would reject
     // the whole script bundle, not just this pattern
@@ -164,7 +260,7 @@
       if (m[5] && m.index > 0 && /\w/.test(text[m.index - 1])) continue;
       if (m.index > last) parent.append(document.createTextNode(text.slice(last, m.index)));
       const tok = m[0];
-      if (m[1]) parent.append(el("code", null, tok.slice(1, -1)));
+      if (m[1]) parent.append(refCode(tok.slice(1, -1), text));
       else if (m[2]) { const b = el("strong"); inline(b, tok.slice(2, -2)); parent.append(b); }
       else if (m[3]) { const d = el("del"); inline(d, tok.slice(2, -2)); parent.append(d); }
       else if (m[4]) {
@@ -273,6 +369,20 @@
   const isBlockStart = (line) => /^\s*`{3,}[^`]*$/.test(line) || /^#{1,4}\s/.test(line) || /^\s*>/.test(line)
     || /^\s*([-*+]|\d+[.)])\s+/.test(line) || /^\s*([-*_])(\s*\1){2,}\s*$/.test(line);
 
+  // > [!WARNING] title: a thin rule in the status colour, an icon, the body as markdown (D3)
+  function callout(c) {
+    const st = B.status(c.kind);
+    const box = el("div", `ax-callout st-${st.tone}`);
+    box.setAttribute("role", c.kind === "error" || c.kind === "warning" ? "alert" : "note");
+    const head = el("div", "ax-callout-head");
+    head.append(icon(st.icon));
+    inline(head, c.title);
+    const bodyEl = el("div", "ax-callout-body");
+    md(bodyEl, c.body);
+    box.append(head, bodyEl);
+    return box;
+  }
+
   function md(target, text) {
     target.textContent = "";
     const lines = String(text || "").replace(/\r/g, "").split("\n");
@@ -287,9 +397,12 @@
         const body = [];
         i += 1;
         while (i < lines.length && !close.test(lines[i])) body.push(lines[i++]);
+        const closed = i < lines.length;
         i += 1;   // the closing fence (absent while streaming: the block so far)
         const [lang, ...name] = fence[2].trim().split(/\s+/);
-        target.append(codeBlock(lang, body.join("\n"), {name: name.join(" ")}));
+        // a language a block registered (ox-graph, …) is drawn by it (VISUAL_CHAT_PLAN D2)
+        const drawn = lang && B && B.has(lang) ? B.fence(lang, body.join("\n"), closed, ctx) : null;
+        target.append(drawn || codeBlock(lang, body.join("\n"), {name: name.join(" ")}));
         continue;
       }
       if (!line.trim()) { i += 1; continue; }
@@ -306,6 +419,8 @@
         const q = el("blockquote");
         const body = [];
         while (i < lines.length && /^\s*>/.test(lines[i])) body.push(lines[i++].replace(/^\s*>\s?/, ""));
+        const c = B && B.callout(body);
+        if (c) { target.append(callout(c)); continue; }
         md(q, body.join("\n"));
         target.append(q);
         continue;
@@ -544,17 +659,6 @@
   let replyEl = null;     // where its answer goes
   let actEl = null;       // the open activity group, if the last thing was a step
 
-  const stepIcon = (item) => {
-    if (item.kind === "thinking") return "spark";
-    const n = item.name || "";
-    if (/^mcp__studio__/.test(n)) return "graph";
-    if (n === "Bash") return "terminal";
-    if (/^(Read|Edit|Write|MultiEdit|NotebookEdit)$/.test(n)) return "file";
-    if (/^(Grep|Glob|LS)$/.test(n)) return "search";
-    if (/^Web/.test(n)) return "globe";
-    return "box";
-  };
-
   function newTurn(userItem) {
     turnEl = el("div", "ax-turn");
     if (userItem) turnEl.dataset.turn = userItem.turn || "";
@@ -656,24 +760,13 @@
     let thought = 0;
     for (const s of steps) {
       if (s.kind === "thinking") { thought += s.ms || 0; continue; }
-      const n = s.name || "";
-      if (n === "ToolSearch") continue;        // loading tools is plumbing, not work
-      const key = /^mcp__studio__/.test(n) ? "studio" : n === "Read" ? "read" : /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(n)
-        ? "edit" : n === "Bash" ? "run" : /^(Grep|Glob|LS)$/.test(n) ? "search" : /^Web/.test(n) ? "web" : "tool";
-      count[key] = (count[key] || 0) + 1;
+      const c = W.oxTools.classOf(s).cls;
+      if (c !== "plumbing") count[c] = (count[c] || 0) + 1;      // loading tools is plumbing, not work
     }
-    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-    const bits = [];
-    if (count.read) bits.push(`read ${plural(count.read, "file", "files")}`);
-    if (count.edit) bits.push(`edited ${plural(count.edit, "file", "files")}`);
-    if (count.run) bits.push(`ran ${plural(count.run, "command", "commands")}`);
-    if (count.search) bits.push(`searched ${plural(count.search, "time", "times")}`);
-    if (count.web) bits.push(`looked up ${plural(count.web, "page", "pages")}`);
-    if (count.studio) bits.push(`used the studio ${count.studio}×`);
-    if (count.tool) bits.push(`used ${plural(count.tool, "tool", "tools")}`);
+    const bits = Object.keys(count).map((c) => W.oxTools.words(c, steps.filter((s) => s.kind !== "thinking"
+      && W.oxTools.classOf(s).cls === c)));
     if (!bits.length) return thought ? `Thought for ${fmt.ms(thought)}` : "Thought";
-    const s = bits.join(", ");
-    return s[0].toUpperCase() + s.slice(1);
+    return bits.map((b, i) => (i ? b[0].toLowerCase() + b.slice(1) : b)).join(", ");
   }
 
   function paintActivity(group) {
@@ -695,51 +788,221 @@
       .filter(Boolean).join(" · ");
   }
 
-  function renderStep(item) {
-    const row = el("div", "ax-step" + (item.status === "error" ? " bad" : ""));
-    const top = el("button", "ax-step-head");
-    top.type = "button";
-    const state = item.status === "running" || (item.kind === "thinking" && item.ms == null)
-      ? el("span", "ax-spin") : icon(item.status === "error" ? "alert" : stepIcon(item));
-    const label = el("span", "ax-step-label");
-    // a label recorded with an absolute path inside the project reads relative
-    const cwd = A.agent && A.agent.cwd ? A.agent.cwd.replace(/\/$/, "") + "/" : null;
-    if (cwd && item.label && item.label.includes(cwd)) item = {...item, label: item.label.split(cwd).join("")};
-    if (item.kind === "thinking") label.textContent = item.ms != null ? `Thought for ${fmt.ms(item.ms)}` : "Thinking";
-    else {
-      const m = /^(\S+)\s+(.*)$/.exec(item.label || item.name || "");
-      if (m && /^(Read|Edited|Wrote|Ran|Searched|Listed|Fetched|Planned|Delegated)$/.test(m[1])) {
-        label.append(document.createTextNode(m[1] + " "), el("code", null, m[2]));
-      } else label.textContent = item.label || item.name || "tool";
+  /* a tool row (VISUAL_CHAT_PLAN D5): the class's icon and verb in its colour,
+     the resource it acted on, its state and time; the input, output and exit
+     status one click away. Thinking keeps its plain row. */
+  const TL = W.oxTools;
+  function toolRoot() {
+    return refState.root || (A.agent && A.agent.cwd ? A.agent.cwd.replace(/\/$/, "") : "");
+  }
+  // renderAll asks every row for its turn's items, files and severities: one
+  // pass answers each once, not once per row (VISUAL_CHAT_PLAN V7 render gate)
+  let turnMemo = null;
+  function memo(key, make) {
+    if (!turnMemo) return make();
+    if (!turnMemo.has(key)) turnMemo.set(key, make());
+    return turnMemo.get(key);
+  }
+  function itemsOfTurn(turn) {
+    return memo("i" + turn, () => A.items.filter((x) => x.turn === turn));
+  }
+  function turnTouched(item) {
+    return RF && item && item.turn ? memo("t" + item.turn, () => RF.touched(itemsOfTurn(item.turn), toolRoot())) : null;
+  }
+  // a path a tool used is a fact: it is a chip, in the tree or not
+  function fileChip(path, touched) {
+    const p = RF ? RF.rel(path, toolRoot()) : path;
+    const touch = touched && touched.get(p);
+    const b = el("button", `ax-ref ax-ref-file${touch ? " t-" + touch : ""}`);
+    b.type = "button";
+    b.title = p + (touch ? " — " + TOUCH[touch][1] : "");
+    b.append(icon("file"), el("span", null, p.split("/").pop()));
+    if (touch) b.append(el("b", "ax-touch", TOUCH[touch][0]));
+    b.onclick = (e) => { e.stopPropagation(); openFile(p, 0); };
+    return b;
+  }
+  function toolRes(res, touched) {
+    if (!res || !res.value) return null;
+    if (res.kind === "file") return fileChip(res.value, touched);
+    // a command reads as the one that matters: `cd x && uv run pytest` → `uv run pytest`
+    const line = (res.kind === "cmd" ? TL.mainCommand(res.value) : String(res.value)).split("\n")[0];
+    const c = el("code", "ax-tool-res " + res.kind, line + (/\n/.test(res.value) ? " …" : ""));
+    c.title = res.value.length > 400 ? res.value.slice(0, 400) + "…" : res.value;
+    return c;
+  }
+  // D8: a failed call whose class later worked is "recovered" (amber); one that never did stays "failed" (red)
+  function turnSeverity(item) {
+    return item && item.turn ? memo("s" + item.turn, () => TL.severities(itemsOfTurn(item.turn), turnTouched(item))) : new Map();
+  }
+  function stepState(item, sev) {
+    const running = item.status === "running" || (item.kind === "thinking" && item.ms == null);
+    const s = sev && sev.get(item.seq);
+    return B.status(running ? (A.running ? "running" : "stopped")
+      : item.status === "error" ? (s === "recovered" ? "recovered" : "error") : s === "warning" ? "warning" : "done");
+  }
+  function stateMark(st) {
+    const s = el("span", `ax-tool-st st-${st.tone}`);
+    s.title = st.word;
+    s.append(st.spin ? el("span", "ax-spin") : icon(st.icon));
+    return s;
+  }
+  /* D6: a test run's report — the bar, the counts, the failures a click away */
+  function testReport(t) {
+    const box = el("div", "ax-tests" + (t.failed || t.errors ? " bad" : ""));
+    const total = t.passed + t.failed + t.errors + t.skipped || 1;
+    const bar = el("div", "ax-tests-bar");
+    bar.setAttribute("aria-hidden", "true");
+    for (const [k, n] of [["ok", t.passed], ["err", t.failed + t.errors], ["skip", t.skipped]]) {
+      if (n) { const seg = el("span", "seg-" + k); seg.style.flexGrow = String(n / total); bar.append(seg); }
     }
-    top.append(state, label, el("span", "ax-step-ms", item.ms != null ? fmt.ms(item.ms) : ""));
-    row.append(top);
-    const hasBody = item.kind === "thinking" ? !!(item.text || "").trim() : !!(item.input || item.output);
-    if (hasBody) {
-      top.classList.add("more");
-      const io = el("div", "ax-step-io");
-      io.hidden = true;
-      top.onclick = () => {
-        if (!io.childNodes.length) {
-          if (item.kind === "thinking") io.append(el("pre", "ax-think", item.text));
-          else {
-            if (item.input) io.append(el("div", "ax-io-label", "Input"), el("pre", null, item.input));
-            if (item.output) io.append(el("div", "ax-io-label", item.status === "error" ? "Error" : "Result"),
-              el("pre", null, item.output));
-          }
+    const nums = el("div", "ax-tests-nums");
+    const bits = [[t.passed, "passed", "ok"], [t.failed, "failed", "err"], [t.errors, t.errors === 1 ? "error" : "errors", "err"],
+      [t.skipped, "skipped", "skip"]].filter(([n, , k]) => n || k === "ok");
+    bits.forEach(([n, w, k], i) => {
+      if (i) nums.append(el("span", "ax-tests-dot", "·"));
+      nums.append(el("span", "n-" + k, `${n} ${w}`));
+    });
+    if (t.ms != null) nums.append(el("span", "ax-tests-dot", "·"), el("span", "n-ms", fmt.ms(t.ms)));
+    nums.append(el("span", "ax-tests-runner", t.runner));
+    box.append(bar, nums);
+    const fails = t.failures || [];
+    if (fails.length) {
+      const tog = el("button", "ax-tests-tog", `${fails.length} ${fails.length === 1 ? "failure" : "failures"}`);
+      tog.type = "button";
+      tog.setAttribute("aria-expanded", "false");
+      const list = el("ol", "ax-tests-fails");
+      list.hidden = true;
+      for (const f of fails) {
+        const li = el("li");
+        const head = el("button", "ax-tests-fail");
+        head.type = "button";
+        head.append(icon("x"), el("code", null, f.id), el("span", null, f.line || ""));
+        li.append(head);
+        if (f.context) {
+          const pre = el("pre", null, f.context);
+          pre.hidden = true;
+          head.onclick = () => { pre.hidden = !pre.hidden; li.classList.toggle("open", !pre.hidden); };
+          li.append(pre);
         }
-        io.hidden = !io.hidden;
-        row.classList.toggle("open", !io.hidden);
+        list.append(li);
+      }
+      tog.onclick = () => {
+        list.hidden = !list.hidden;
+        tog.setAttribute("aria-expanded", String(!list.hidden));
       };
-      row.append(io);
+      box.append(tog, list);
     }
+    return box;
+  }
+  function toolDetails(item, step) {
+    const io = el("div", "ax-step-io");
+    if (step && item.status === "error") io.append(el("div", "ax-io-label", "Step"), el("div", "ax-io-step", step));
+    const inp = TL.inputOf(item);
+    if (inp && Object.keys(inp).length && W.Values) {
+      io.append(el("div", "ax-io-label", "Input"));
+      const tree = el("div", "ax-tree");
+      tree.append(W.Values.render(inp, {open: true}));
+      io.append(tree);
+    } else if (item.input) io.append(el("div", "ax-io-label", "Input"), el("pre", null, item.input));
+    if (item.output) io.append(el("div", "ax-io-label", item.status === "error" ? "Error" : "Output"),
+      el("pre", null, item.output));
+    const code = TL.exitOf(item);
+    if (code != null) {
+      const ex = el("div", "ax-io-exit " + (code ? "st-err" : "st-ok"));
+      ex.append(el("span", "ax-io-label", "Exit status"), el("b", null, String(code)));
+      io.append(ex);
+    }
+    return io;
+  }
+  function withDetails(row, head, build) {
+    head.classList.add("more");
+    head.tabIndex = 0;
+    head.setAttribute("role", "button");
+    head.setAttribute("aria-expanded", "false");
+    const io = el("div", "ax-step-io");
+    io.hidden = true;
+    const flip = () => {
+      if (!io.childNodes.length) io.append(...build().childNodes);
+      io.hidden = !io.hidden;
+      row.classList.toggle("open", !io.hidden);
+      head.setAttribute("aria-expanded", String(!io.hidden));
+    };
+    head.onclick = (e) => { if (!e.target.closest(".ax-ref")) flip(); };
+    head.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === head) { e.preventDefault(); flip(); } };
+    row.append(io);
+  }
+
+  function renderStep(item, step, sev, noTests) {
+    if (item.kind === "thinking") return renderThought(item);
+    const touched = turnTouched(item);
+    const c = TL.classOf(item, touched);
+    const st = stepState(item, sev || turnSeverity(item));
+    const row = el("div", `ax-step ax-tool tc-${c.cls}` + (st.kind === "recovered" ? " recovered st-warn"
+      : item.status === "error" ? " bad st-err" : ""));
+    const head = el("div", "ax-step-head");
+    const verb = el("span", "ax-tool-verb");
+    verb.append(icon(c.icon), el("span", null, c.verb));
+    head.append(verb);
+    const res = toolRes(c.res, touched);
+    if (res) head.append(res);
+    else if (c.cls === "tool" && item.label && item.label !== item.name) head.append(el("span", "ax-tool-res", item.label));
+    head.append(el("span", "ax-spacer"));
+    if (st.kind === "recovered") head.append(el("span", "ax-tool-sev", "recovered"));
+    head.append(stateMark(st), el("span", "ax-step-ms", item.ms != null ? fmt.ms(item.ms) : ""));
+    row.append(head);
+    // the first line of what went wrong, without opening the row
+    if (item.status === "error" && item.output && !item.tests) {
+      const first = String(item.output).split("\n").find((l) => l.trim() && !/^Exit code \d+$/.test(l)) || "";
+      if (first) row.append(el("div", "ax-tool-err", first.slice(0, 240)));
+    }
+    if (item.tests && !noTests) row.append(testReport(item.tests));
+    if (item.input || item.output) withDetails(row, head, () => toolDetails(item, step));
     return row;
+  }
+
+  function renderThought(item) {
+    const row = el("div", "ax-step");
+    const head = el("div", "ax-step-head");
+    head.append(item.ms == null ? el("span", "ax-spin") : icon("spark"),
+      el("span", "ax-step-label", item.ms != null ? `Thought for ${fmt.ms(item.ms)}` : "Thinking"),
+      el("span", "ax-step-ms", item.ms != null ? fmt.ms(item.ms) : ""));
+    row.append(head);
+    if ((item.text || "").trim()) withDetails(row, head, () => { const d = el("div"); d.append(el("pre", "ax-think", item.text)); return d; });
+    return row;
+  }
+
+  /* D5: runs of one class are one row — "Read 6 files" with the files as chips; opening it shows each call */
+  function renderTools(items, step, noTests) {
+    const touched = items.length ? turnTouched(items[0]) : null;
+    const sev = items.length ? turnSeverity(items[0]) : new Map();
+    const groups = TL.fold(items, touched);
+    const out = [];
+    for (const g of groups) {
+      if (g.items.length === 1 || groups.length === 1) { for (const it of g.items) out.push(renderStep(it, step, sev, noTests)); continue; }
+      const row = el("div", `ax-step ax-tool ax-fold tc-${g.cls}`);
+      const head = el("div", "ax-step-head");
+      const verb = el("span", "ax-tool-verb");
+      verb.append(icon(TL.ICON[g.cls]), el("span", null, TL.words(g.cls, g.items, touched)));
+      head.append(verb);
+      const files = TL.filesOf(g.items, touched);
+      const chips = el("span", "ax-fold-chips");
+      for (const f of files.slice(0, 4)) chips.append(fileChip(f, touched));
+      if (files.length > 4) chips.append(el("span", "ax-fold-more", `+${files.length - 4}`));
+      if (files.length) head.append(chips);
+      const worst = g.items.find((i) => i.status === "running") || g.items.find((i) => sev.get(i.seq) === "failed")
+        || g.items.find((i) => i.status === "error") || g.items[0];
+      const ms = g.items.reduce((a, i) => a + (i.ms || 0), 0);
+      head.append(el("span", "ax-spacer"), stateMark(stepState(worst, sev)), el("span", "ax-step-ms", ms ? fmt.ms(ms) : ""));
+      row.append(head);
+      if (g.items.some((i) => i.status === "error")) row.classList.add("warned");
+      withDetails(row, head, () => { const d = el("div", "ax-fold-calls"); d.append(...g.items.map((i) => renderStep(i, step, sev, noTests))); return d; });
+      out.push(row);
+    }
+    return out;
   }
 
   /* the progress card (docs/ASSISTANT_PROGRESS_PLAN.md D4): the turn's
      plan as the steps tool last posted it, with the tool calls each step made */
-  const PSTEP = {pending: "Pending", active: "In progress", done: "Completed", failed: "Failed",
-    skipped: "Skipped", waiting: "Needs you"};
   const P = W.oxProgress;
 
   function progOf(turn) {
@@ -781,7 +1044,8 @@
     prog.auto = null;
     const before = prog.plan;
     prog.plan = item.plan;
-    const now = item.plan.steps.find((s) => s.state === "active" || s.state === "waiting");
+    prog.turnId = item.turn;
+    const now = item.plan.steps.find((s) => s.state === "active" || s.state === "waiting" || s.state === "blocked");
     if ((now ? now.title : null) !== prog.active) A.handOn = null;   // a new step: the hand has not reached it yet
     prog.active = now ? now.title : null;
     A.nodes.set(item.seq, prog.card);
@@ -806,35 +1070,103 @@
     const {chip, done, n, pct, say} = P.summary(steps, live);
     prog.title.textContent = prog.plan ? prog.plan.title || "Plan" : "Steps";
     prog.chip.textContent = chip[0];
-    prog.chip.className = "ax-prog-chip " + chip[1];
-    prog.count.textContent = `${done} of ${n} steps completed`;
+    prog.chip.className = "ax-prog-chip st-" + chip[1];
+    prog.count.textContent = `${done} of ${n} steps`;
     prog.pct.textContent = `${pct}%`;
     prog.fill.style.width = `${pct}%`;
     prog.card.classList.toggle("live", live);
     prog.card.classList.toggle("auto", !prog.plan);
     if (live) { A.progress = pct; askbarPaint(); }
-    prog.list.replaceChildren(...steps.map((step, i) => progStep(prog, step, i, live)));
+    // D12: steps that say what they wait on are drawn as a structure; the list then holds the selected step
+    const shape = prog.plan && W.oxGraph && W.oxGraph.draw ? P.structure(steps) : null;
+    prog.card.classList.toggle("dag", !!shape);
+    if (shape) {
+      const at = prog.sel != null && prog.sel < steps.length ? prog.sel
+        : steps.findIndex((s) => /^(active|waiting|blocked|failed)$/.test(s.state));
+      paintShape(prog, shape, steps, live, at);
+      prog.list.replaceChildren(...(at >= 0 ? [progStep(prog, steps[at], at, live)] : []));
+    } else {
+      if (prog.shape) { prog.shape.remove(); prog.shape = null; }
+      prog.list.replaceChildren(...steps.map((step, i) => progStep(prog, step, i, live)));
+    }
     if (say !== prog.said) { prog.said = say; prog.say.textContent = say; }
+  }
+
+  function paintShape(prog, shape, steps, live, at) {
+    const G = W.oxGraph;
+    for (const n of shape.nodes) if (n.state === "active" && !live) n.state = "stopped";
+    const L = G.layout(shape, {w: Math.max(240, Math.min(640, innerWidth - 70)), h: 400});
+    const hot = steps.findIndex((s) => s.state === "active" || s.state === "waiting" || s.state === "blocked");
+    const D = G.draw(shape, L, {highlight: new Set(hot >= 0 ? ["s" + (hot + 1)] : []), affected: () => false,
+      flash: new Set(), focusable: true});
+    const had = prog.shape && prog.shape.contains(document.activeElement) ? document.activeElement.getAttribute("data-id") : null;
+    const box = el("div", "ax-prog-shape");
+    D.svg.setAttribute("width", L.width);
+    D.svg.setAttribute("height", L.height);
+    box.append(D.svg);
+    const pick = (i) => {
+      const key = steps[i].title;
+      prog.sel = i;
+      prog.open.add(key);
+      prog.shut.delete(key);
+      paintProg(prog);
+    };
+    for (const [id, g] of D.nodeEls) {
+      const i = +id.slice(1) - 1;
+      g.classList.toggle("sel", i === at);
+      g.setAttribute("aria-pressed", String(i === at));
+      g.addEventListener("click", () => pick(i));
+      g.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(i); }
+        else if (ev.key.startsWith("Arrow")) {
+          ev.preventDefault();
+          const to = G.nearest(L, id, ev.key);
+          if (to) D.nodeEls.get(to).focus();
+        }
+      });
+    }
+    if (prog.shape) prog.shape.replaceWith(box);
+    else prog.list.before(box);
+    prog.shape = box;
+    if (had && D.nodeEls.get(had)) D.nodeEls.get(had).focus();
+  }
+
+  /* D12: a step's facts — the calls it made, their files, tests and commands, and its progress */
+  function stepFactsOf(prog, step, seqs) {
+    const items = prog.turnId ? itemsOfTurn(prog.turnId) : seqs.map((q) => A.bySeq.get(q)).filter(Boolean);
+    const touched = items.length ? turnTouched(items[0]) : null;
+    return P.stepFacts(step, seqs, items, touched, RF ? (p) => RF.rel(p, toolRoot()) : undefined);
+  }
+  function stepMeter(pr) {
+    const m = el("span", "ax-pstep-meter");
+    m.title = pr.kind === "sub" ? `${pr.done} of ${pr.total} subtasks done` : `${pr.done} of ${pr.total} tests passed`;
+    const bad = pr.kind === "tests" && pr.done < pr.total ? " bad" : "";
+    const bar = el("span", "ax-pstep-mbar" + bad);
+    const fill = el("span");
+    fill.style.width = `${Math.round(pr.done / pr.total * 100)}%`;
+    bar.append(fill);
+    m.append(bar, el("span", "ax-pstep-mnum" + bad, `${pr.done}/${pr.total}`));
+    return m;
   }
 
   function progStep(prog, step, i, live) {
     const state = step.state === "active" && !live ? "stopped" : step.state;
-    const li = el("li", "ax-pstep " + state);
+    const st = B.status(state);
+    const li = el("li", `ax-pstep ${state} st-${st.tone}`);
     const dot = el("span", "ax-pstep-dot");
-    if (state === "active") dot.append(el("span", "ax-spin"));
-    else if (state === "done") dot.append(icon("check"));
-    else if (state === "failed") dot.append(icon("x"));
-    else if (state === "waiting") dot.append(icon("alert"));
+    dot.append(st.spin ? el("span", "ax-spin") : icon(st.icon));
     const main = el("div", "ax-pstep-main");
     const head = el("button", "ax-pstep-head");
     head.type = "button";
     const meta = state === "done" && step.ms != null ? `Completed · ${fmt.ms(step.ms)}`
-      : state === "stopped" ? "Stopped" : PSTEP[state];
-    head.append(el("span", "ax-pstep-num", `${i + 1}`), el("span", "ax-pstep-title", step.title),
-      el("span", "ax-pstep-meta", meta));
-    main.append(head);
+      : st.word;
     const key = step.key || step.title;
     const seqs = step.seqs || prog.tools.get(key) || [];
+    const facts = stepFactsOf(prog, step, seqs);
+    head.append(el("span", "ax-pstep-num", `${i + 1}`), el("span", "ax-pstep-title", step.title));
+    if (facts.progress) head.append(stepMeter(facts.progress));
+    head.append(el("span", "ax-pstep-meta", meta));
+    main.append(head);
     if (state === "active") {
       const focus = el("div", "ax-pstep-focus");
       const where = P.targetWords(A.handOn || step.target || "");
@@ -852,25 +1184,65 @@
       }
       if (focus.childNodes.length) main.append(focus);
     }
-    if (state === "waiting" && step.detail) main.append(el("div", "ax-pstep-ask", step.detail));
-    const hasBody = !!(step.result || step.error || seqs.length || (step.detail && state !== "active" && state !== "waiting"));
+    const says = state === "active" || state === "waiting" || state === "blocked";
+    if ((state === "waiting" || state === "blocked") && step.detail) main.append(el("div", `ax-pstep-ask st-${st.tone}`, step.detail));
+    const sub = step.sub || [];
+    const hasBody = !!(step.result || step.error || facts.calls.length || sub.length || (step.detail && !says));
     if (state === "failed" && !prog.shut.has(key)) prog.open.add(key);
     if (hasBody) {
       head.classList.add("more");
       const open = prog.open.has(key);
       li.classList.toggle("open", open);
       head.setAttribute("aria-expanded", String(open));
+      head.dataset.step = key;
       head.onclick = () => {
         if (prog.open.has(key)) { prog.open.delete(key); prog.shut.add(key); }
         else prog.open.add(key);
         paintProg(prog);
+        // the card is drawn anew: the keyboard stays on this step
+        const again = [...prog.list.querySelectorAll(".ax-pstep-head")].find((h) => h.dataset.step === key);
+        if (again) again.focus();
       };
       if (open) {
         const body = el("div", "ax-pstep-body");
-        if (step.detail && state !== "active" && state !== "waiting") body.append(el("div", "ax-pstep-detail", step.detail));
+        // D12's order: what it left or why it failed, its files, its tests, its calls, how it ran
         if (step.result) body.append(el("div", "ax-pstep-result", step.result));
         if (step.error) body.append(el("div", "ax-pstep-error", step.error));
-        for (const q of seqs) { const t = A.bySeq.get(q); if (t) body.append(renderStep(t)); }
+        if (step.detail && !says) body.append(el("div", "ax-pstep-detail", step.detail));
+        if (sub.length) {
+          const ul = el("ul", "ax-pstep-sub");
+          for (const t of sub) {
+            const ts = B.status(t.state === "active" && !live ? "stopped" : t.state);
+            const li2 = el("li", `st-${ts.tone}`);
+            li2.append(ts.spin ? el("span", "ax-spin") : icon(ts.icon), el("span", null, t.title));
+            li2.title = ts.word;
+            ul.append(li2);
+          }
+          body.append(ul);
+        }
+        if (facts.files.length) {
+          const fl = el("div", "ax-pstep-files");
+          const touched = new Map(facts.files.map((f) => [f.path, f.how]));
+          for (const f of facts.files) fl.append(fileChip(f.path, touched));
+          body.append(fl);
+        }
+        for (const t of facts.tests) body.append(testReport(t));
+        body.append(...renderTools(facts.calls, step.title, true));
+        const runs = facts.commands.filter((c) => c.cmd);
+        if (runs.length || facts.ms != null) {
+          const ex = el("details", "ax-pstep-exec");
+          ex.append(el("summary", null, "Execution" + (facts.ms != null ? ` · ${fmt.ms(facts.ms)}` : "")));
+          const tb = el("ol");
+          for (const c of runs) {
+            const li3 = el("li", c.exit ? "st-err" : c.exit === 0 ? "st-ok" : "");
+            li3.append(el("code", null, c.cmd.split("\n")[0]),
+              el("span", "ax-pstep-exit", c.exit == null ? "running" : `exit ${c.exit}`),
+              el("span", "ax-step-ms", c.ms != null ? fmt.ms(c.ms) : ""));
+            tb.append(li3);
+          }
+          if (runs.length) ex.append(tb);
+          body.append(ex);
+        }
         main.append(body);
       }
     }
@@ -924,48 +1296,108 @@
 
   function renderText(item) {
     const box = el("div", "ax-text");
+    refWorld = worldFor(item);
     md(box, item.text || "");
+    refWorld = null;
     A.nodes.set(item.seq, box);
     return box;
   }
 
+  /* D7: a file's diff is a registered block, so the progress card and the
+     Files page open the same viewer — ```ox-diff in a reply draws it too */
+  function diffView(f, head) {
+    const box = el("div", "ax-diff");
+    if (head) box.append(el("div", "file", f.path));
+    for (const l of f.lines) box.append(el("div", l.t === "ctx" ? "" : l.t, l.s || " "));
+    if (!f.lines.length) box.append(el("div", "hunk", "(no lines: a binary file or an empty one)"));
+    return box;
+  }
+  if (B) B.register("ox-diff", {
+    validate: (body) => {
+      const files = TL.splitDiff(body);
+      return files.length ? {ok: true, value: files} : {ok: false, reason: "no file in the diff"};
+    },
+    render: (files) => { const box = el("div", "ax-diffs"); for (const f of files) box.append(diffView(f, true)); return box; },
+  });
+
+  const TOUCH_WORD = {modified: "Modified", created: "Created", deleted: "Deleted"};
+  /* D7: the turn's file activity — the strip, the files (by folder past 6), each with its own diff, the reads folded */
   function renderChanges(item) {
     const card = el("div", "ax-card ax-changes");
     const files = item.files || [];
+    const touchOf = (f) => (f.deleted ? "deleted" : f.new ? "created" : "modified");
+    const touched = (item.turn && turnTouched(item)) || new Map();
+    const changed = new Set(files.map((f) => f.path));
+    const reads = [...touched].filter(([p, t]) => t === "read" && !changed.has(p)).map(([p]) => p);
+    const count = {modified: 0, created: 0, deleted: 0};
+    for (const f of files) count[touchOf(f)]++;
     const plus = files.reduce((s, f) => s + (f.added || 0), 0);
     const minus = files.reduce((s, f) => s + (f.removed || 0), 0);
-    const top = el("div", "ax-card-head");
-    top.append(icon("file"), el("b", null, `Changed ${files.length} file${files.length === 1 ? "" : "s"}`),
-      el("span", "ax-add", `+${plus}`), el("span", "ax-del", `−${minus}`));
+    const top = el("div", "ax-card-head ax-act-strip");
+    top.append(icon("file"));
+    const bits = [];
+    if (reads.length) bits.push(["read", `Read ${reads.length}`]);
+    for (const k of ["modified", "created", "deleted"]) if (count[k]) bits.push([k, `${TOUCH_WORD[k]} ${count[k]}`]);
+    bits.forEach(([k, w], i) => {
+      if (i) top.append(el("span", "ax-tests-dot", "·"));
+      const b = el("span", "ax-strip-" + k);
+      b.append(el("b", "ax-touch", TOUCH[k][0]), el("span", null, w));
+      top.append(b);
+    });
+    top.append(el("span", "ax-spacer"), el("span", "ax-add", `+${plus}`), el("span", "ax-del", `−${minus}`));
     // another person's assistant worked in this project at the same time:
     // the diff can't tell whose edit is whose, so the card says so (§2.3)
     const overlap = (item.overlap || []).length
       ? el("p", "ax-overlap", `${item.overlap.join(", ")}'s assistant was working in this project at the same time — `
                               + "some of these changes may be theirs. Check the diff before you undo.")
       : null;
+    const diffs = new Map();
+    let split = null;
+    const diffOf = (path) => {
+      if (!split) { split = TL.splitDiff(item.diff); for (const f of split) diffs.set(f.path, f); }
+      return diffs.get(path) || {path, lines: []};
+    };
     const flist = el("div", "ax-files");
-    for (const f of files) {
-      const r = el("div", "ax-file");
-      const p = el("span", "ax-path", f.path);
-      p.title = f.path;
-      r.append(p);
-      if (f.new) r.append(el("span", "ax-new", "new"));
-      r.append(el("span", "ax-add", `+${f.added || 0}`), el("span", "ax-del", `−${f.removed || 0}`));
-      flist.append(r);
-    }
-    const fold = el("details", "ax-diff-fold");
-    fold.append(el("summary", null, "Show the diff"));
-    fold.addEventListener("toggle", () => {
-      if (!fold.open || fold._filled) return;
-      fold._filled = true;
-      const box = el("div", "ax-diff");
-      for (const ln of String(item.diff || "(no diff)").split("\n")) {
-        if (/^(diff --git |index |new file mode|deleted file mode|similarity |rename |--- )/.test(ln)) continue;
-        if (ln.startsWith("+++ ")) { box.append(el("div", "file", ln.replace(/^\+\+\+ (b\/)?/, ""))); continue; }
-        box.append(el("div", ln.startsWith("@@") ? "hunk" : ln.startsWith("+") ? "add" : ln.startsWith("-") ? "del" : "", ln || " "));
+    const fileRow = (f, short) => {
+      const t = touchOf(f);
+      const row = el("div", "ax-file t-" + t);
+      const head = el("div", "ax-file-head");
+      head.append(el("b", "ax-touch", TOUCH[t][0]));
+      const p = el("span", "ax-path", short || f.path);
+      p.title = `${f.path} — ${TOUCH[t][1]}`;
+      head.append(p);
+      if (t !== "modified") head.append(el("span", "ax-new", t === "created" ? "new" : "deleted"));
+      head.append(el("span", "ax-add", `+${f.added || 0}`), el("span", "ax-del", `−${f.removed || 0}`));
+      row.append(head);
+      withDetails(row, head, () => { const d = el("div"); d.append(diffView(diffOf(f.path))); return d; });
+      return row;
+    };
+    if (files.length > 6) {
+      const groups = new Map();
+      for (const f of files) {
+        const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : ".";
+        if (!groups.has(dir)) groups.set(dir, []);
+        groups.get(dir).push(f);
       }
-      fold.append(box);
-    });
+      for (const [dir, fs] of groups) {
+        flist.append(el("div", "ax-files-dir", dir === "." ? "./" : dir + "/"));
+        for (const f of fs) flist.append(fileRow(f, f.path.slice(dir === "." ? 0 : dir.length + 1)));
+      }
+    } else for (const f of files) flist.append(fileRow(f));
+    let readFold = null;
+    if (reads.length) {
+      readFold = el("div", "ax-step ax-reads");
+      const head = el("div", "ax-step-head");
+      const verb = el("span", "ax-tool-verb");
+      verb.append(icon("file"), el("span", null, `Read ${reads.length} ${reads.length === 1 ? "file" : "files"}`));
+      head.append(verb);
+      readFold.append(head);
+      withDetails(readFold, head, () => {
+        const d = el("div", "ax-reads-list");
+        for (const p of reads) d.append(fileChip(p, touched));
+        return d;
+      });
+    }
     const acts = el("div", "ax-card-acts");
     const note = el("span", "ax-card-note");
     const keep = tbtn("Keep", "ax-btn");
@@ -989,6 +1421,7 @@
       keep.disabled = undo.disabled = true;
       try {
         const got = await call(`/api/p/${PROJECT}/chat/undo`, {
+          // a deleted file is in files: undo checks it back out of the snapshot
           sha: item.sha, files: files.filter((f) => !f.new).map((f) => f.path),
           new_files: files.filter((f) => f.new).map((f) => f.path)});
         mark("undone", (got.restored || []).length);
@@ -998,16 +1431,16 @@
       }
     };
     acts.append(note, el("span", "ax-spacer"), undo, keep);
-    card.append(...[top, overlap, flist, fold, acts].filter(Boolean));
+    card.append(...[top, overlap, flist, readFold, acts].filter(Boolean));
     paint();
     A.nodes.set(item.seq, card);
     return card;
   }
 
   function renderError(item) {
-    const card = el("div", "ax-card ax-error");
+    const card = el("div", "ax-card ax-error st-err");
     const top = el("div", "ax-card-head");
-    top.append(icon("alert"), el("span", null, (item.text || "Something went wrong").split("\n")[0].slice(0, 300)));
+    top.append(icon(B.status("fatal").icon), el("span", null, (item.text || "Something went wrong").split("\n")[0].slice(0, 300)));
     card.append(top);
     const more = String(item.text || "");
     if (more.includes("\n") || more.length > 300) {
@@ -1063,8 +1496,74 @@
     }
     f.append(acts, meta);
     if (item.state === "stopped") f.classList.add("stopped");
-    A.nodes.set(item.seq, f);
-    return f;
+    const strip = outcomeStrip(item);
+    const node = strip ? el("div", "ax-turnend") : f;
+    if (strip) node.append(strip, f);
+    A.nodes.set(item.seq, node);
+    return node;
+  }
+
+  /* D8: the turn's outcome in one line, facts only — state, time, cost, files,
+     the last run per runner, steps, failures (by class past 3, as a bar) */
+  function outcomeStrip(item) {
+    const turnItems = item.turn ? itemsOfTurn(item.turn) : [];
+    if (!turnItems.some((x) => x.kind === "tool" || x.kind === "changes" || x.kind === "error")) return null;
+    const o = TL.outcome(turnItems, item, turnTouched(item));
+    const st = B.status(o.state === "done" ? "done" : o.state);
+    const strip = el("div", `ax-outcome st-${st.tone}`);
+    const line = el("div", "ax-outcome-line");
+    const mark = el("span", "ax-outcome-st");
+    mark.append(icon(st.icon || "dot"), el("b", null, o.state === "fatal" ? "Stopped by an error" : st.word));
+    const parts = [mark];
+    const add = (cls, text) => parts.push(el("span", cls, text));
+    if (o.ms) add("ax-outcome-n", fmt.ms(o.ms));
+    if (o.cost != null) add("ax-outcome-n", fmt.money(o.cost));
+    const fw = [["modified", "modified"], ["created", "created"], ["deleted", "deleted"]]
+      .filter(([k]) => o.files[k]).map(([k, w]) => `${o.files[k]} ${w}`);
+    if (fw.length) add("ax-outcome-files", fw.join(" · "));
+    for (const t of o.tests) {
+      const b = el("span", "ax-outcome-test " + (t.failed || t.errors ? "st-err" : "st-ok"));
+      b.append(icon(t.failed || t.errors ? "x" : "check"),
+        el("span", null, `${t.runner} ${t.passed} passed` + (t.failed + t.errors ? ` · ${t.failed + t.errors} failed` : "")
+          + (t.skipped ? ` · ${t.skipped} skipped` : "")));
+      parts.push(b);
+    }
+    if (o.steps) add("ax-outcome-n", `Steps ${o.steps.done}/${o.steps.total}`);
+    let list = null;
+    if (o.failures.length) {
+      const failed = o.failures.filter((f) => f.severity === "failed").length;
+      const b = el("button", "ax-outcome-fails");
+      b.type = "button";
+      b.setAttribute("aria-expanded", "false");
+      const cls = Object.entries(o.byClass).sort((a, z) => z[1] - a[1]);
+      const words = `${o.failures.length} failed` + (o.failures.length >= 3 ? `: ${cls.map(([c, n]) => `${n} ${c}`).join(", ")}` : "")
+        + (failed < o.failures.length ? ` (${o.failures.length - failed} recovered)` : "");
+      if (o.failures.length >= 3) {
+        const bar = el("span", "ax-outcome-bar");
+        bar.setAttribute("aria-hidden", "true");
+        for (const [c, n] of cls) {
+          const seg = el("span", "tc-" + c);
+          seg.style.flexGrow = String(n);
+          bar.append(seg);
+        }
+        b.append(bar);
+      }
+      b.append(el("span", null, words));
+      list = el("ol", "ax-outcome-list");
+      list.hidden = true;
+      for (const f of o.failures) {
+        const li = el("li", `tc-${f.cls} ` + (f.severity === "recovered" ? "st-warn" : "st-err"));
+        li.append(icon(TL.ICON[f.cls]), el("b", null, f.cls),
+          el("span", null, f.line || "(no output)"), el("em", null, f.severity === "recovered" ? "recovered" : "failed"));
+        list.append(li);
+      }
+      b.onclick = () => { list.hidden = !list.hidden; b.setAttribute("aria-expanded", String(!list.hidden)); };
+      list._tog = b;
+    }
+    parts.forEach((p, i) => { if (i) line.append(el("span", "ax-tests-dot", "·")); line.append(p); });
+    strip.append(line);
+    if (list) strip.append(list._tog, list);
+    return strip;
   }
 
   function append(item) {
@@ -1074,8 +1573,10 @@
     if (item.kind === "tool" && item.plan) { takePlan(item); return; }
     if (item.kind === "tool" || item.kind === "thinking") { addStep(item); return; }
     if (item.kind !== "turn_end") actEl = null;
-    let node;
-    if (item.kind === "text") node = renderText(item);
+    // a kind a block registered is drawn by it (VISUAL_CHAT_PLAN D2)
+    let node = B && B.has("item:" + item.kind) ? B.item(item.kind, item, ctx) : null;
+    if (node) A.nodes.set(item.seq, node);
+    else if (item.kind === "text") node = renderText(item);
     else if (item.kind === "changes") node = renderChanges(item);
     else if (item.kind === "error") node = renderError(item);
     else if (item.kind === "compact") {
@@ -1107,8 +1608,12 @@
       node.replaceWith(row);
       A.nodes.set(item.seq, row);
       if (row._group) paintActivity(row._group);
+    } else if (B && B.has("item:" + item.kind)) {
+      const fresh = B.item(item.kind, old, ctx);
+      node.replaceWith(fresh);
+      A.nodes.set(item.seq, fresh);
     } else if (item.kind === "changes") node.replaceWith(renderChanges(old));
-    else if (item.kind === "text") md(node, old.text || "");
+    else if (item.kind === "text") { refWorld = worldFor(old); md(node, old.text || ""); refWorld = null; }
   }
 
   // streaming text: one markdown render per frame, whatever the delta rate
@@ -1123,7 +1628,8 @@
     if (!frame) frame = requestAnimationFrame(() => {
       frame = 0;
       const stick = nearBottom();
-      for (const s of dirty) { const n = A.nodes.get(s); const it = A.bySeq.get(s); if (n && it) md(n, it.text); }
+      for (const s of dirty) { const n = A.nodes.get(s); const it = A.bySeq.get(s); if (n && it) { refWorld = worldFor(it); md(n, it.text); } }
+      refWorld = null;
       dirty.clear();
       if (stick) toBottom();
     });
@@ -1135,10 +1641,16 @@
     A.bySeq.clear();
     turnEl = replyEl = actEl = null;
     if (!A.items.length) { renderEmpty(); return; }
-    for (const it of A.items) append(it);
-    for (const g of log.querySelectorAll(".ax-act")) paintActivity(g);
+    // the transcript's render time, for scripts/perf/render_chat.py (VISUAL_CHAT_PLAN V0)
+    const t0 = performance.now();
+    turnMemo = new Map();
+    try {
+      for (const it of A.items) append(it);
+      for (const g of log.querySelectorAll(".ax-act")) paintActivity(g);
+    } finally { turnMemo = null; }
     markLast();
     toBottom();
+    try { performance.measure("ax:render", {start: t0, detail: A.items.length}); } catch { /* an old engine */ }
   }
 
   // only the last answer offers Regenerate; only the last error, Retry
@@ -1946,6 +2458,7 @@
     paintEditing();
     loadDraft();
     renderAll();
+    loadRefs();
     paintList();
     if (got.running) follow(got.running.id, got.running.cursor, got.running);
     else paintBusy();
@@ -2050,6 +2563,7 @@
   function finished(ev) {
     const r = A.running;
     A.running = null;
+    loadRefs();
     if (ev.state === "lost") toast("That task is no longer running — the studio restarted", true);
     if (ev.usage && A.session) A.session.usage = ev.usage;
     paintBusy();

@@ -51,12 +51,13 @@ def _changed(root: Path) -> Dict[str, str]:
 
 
 def tree(root: Path) -> Dict[str, Any]:
-    """``{"ok", "files": [path, …], "changed": {path: "uncommitted" | "recent"}}``."""
+    """``{"ok", "root", "files": [path, …], "changed": {path: "uncommitted" | "recent"}}``; ``root`` turns an absolute path the
+    assistant names into one of these."""
     files = _listed(root)
     if files is None:
         return {"ok": False, "message": "not a git checkout: the Files page reads what git tracks"}
     have = set(files)
-    return {"ok": True, "files": files, "changed": {p: m for p, m in _changed(root).items() if p in have}}
+    return {"ok": True, "root": str(root), "files": files, "changed": {p: m for p, m in _changed(root).items() if p in have}}
 
 
 def read(root: Path, path: str) -> Dict[str, Any]:

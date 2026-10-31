@@ -268,6 +268,15 @@ def test_undo_restores_the_snapshot_version_not_head(repo):
     assert (repo / "notes.md").read_text() == "one\ntwo\nmine\n"
 
 
+def test_a_deleted_file_is_named_and_undo_brings_it_back(repo):
+    snap = chat.snapshot(repo)
+    (repo / "main.py").unlink()
+    got = chat.changes_since(repo, snap)
+    assert [(f["path"], f.get("deleted"), f["added"]) for f in got["files"]] == [("main.py", True, 0)]
+    assert chat.undo(repo, got["sha"], ["main.py"], []) == ["main.py"]
+    assert (repo / "main.py").read_text() == MAIN
+
+
 def test_undo_never_leaves_the_repo(repo, tmp_path):
     outside = tmp_path / "outside.txt"
     outside.write_text("keep me", encoding="utf-8")

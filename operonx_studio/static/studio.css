@@ -63,6 +63,28 @@
   --err: #c93a30;
   --err-soft: #fdeeec;
   --info: #2f6fd0;
+  /* the assistant's one status vocabulary (VISUAL_CHAT_PLAN D3): blocks.js
+     status(kind) names the tone; .st-<tone> sets --st / --st-soft for a block */
+  --st-ok: var(--ok); --st-ok-soft: var(--ok-soft);
+  --st-warn: var(--warn); --st-warn-soft: var(--warn-soft);
+  --st-err: var(--err); --st-err-soft: var(--err-soft);
+  --st-run: var(--accent-strong); --st-run-soft: var(--accent-soft);
+  --st-pending: var(--text-3); --st-pending-soft: var(--surface-3);
+  --st-blocked: #a3366a; --st-blocked-soft: #fbedf4;
+  --st-skip: var(--text-3); --st-skip-soft: var(--surface-2);
+  --st-info: var(--info); --st-info-soft: var(--signal-soft);
+  /* what inline code names (D4): a file, a symbol, a config key, a command */
+  --ref-file: #0b6f86; --ref-file-soft: #e6f4f7;
+  --ref-sym: #6a3fc0; --ref-sym-soft: #f2edfb;
+  --ref-cfg: #4a5568; --ref-cfg-soft: #edf0f4;
+  --ref-cmd-soft: #eef0ec;
+  /* tool classes (VISUAL_CHAT_PLAN D5): what a call did, by colour */
+  --tc-read: var(--ref-file); --tc-edit: #8a5a00; --tc-create: #23753a; --tc-delete: #a23a12; --tc-search: var(--ref-sym);
+  --tc-run: var(--text-2); --tc-test: #2559a8; --tc-build: #4a5568; --tc-git: #b4440e; --tc-web: #3b4fc4;
+  --tc-studio: var(--accent-strong);
+  /* chart series (D9 ox-chart): the dataviz reference categorical palette, in its fixed order */
+  --ch-1: #2a78d6; --ch-2: #eb6834; --ch-3: #1baf7a; --ch-4: #eda100;
+  --ch-5: #e87ba4; --ch-6: #008300; --ch-7: #6250d6; --ch-8: #e34948;
   --sel: #eaf2fe;
   --sel-line: #3b86e0;
 
@@ -2321,6 +2343,25 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-text li + li { margin-top: .2em; }
 .ax-text li > ul, .ax-text li > ol { margin: .2em 0 0; }
 .ax-text code { font: .87em var(--mono); background: var(--surface-3); padding: .1em .35em; border-radius: 4px; }
+/* references (D4): a file opens the Files page at its line; this turn's glyph says what was done to it */
+.ax-ref { display: inline-flex; align-items: center; gap: 3px; vertical-align: baseline; min-height: 0; height: auto;
+  padding: .05em .4em .05em .3em; margin: 0 1px; border: none; border-radius: 4px; font: .87em var(--mono); line-height: 1.45;
+  white-space: normal; word-break: break-all; text-align: left; cursor: pointer; }
+.ax-ref-file { background: var(--ref-file-soft); color: var(--ref-file); }
+.ax-ref-file .icon { width: 12px; height: 12px; flex: none; }
+.ax-ref-file:hover { background: color-mix(in srgb, var(--ref-file) 18%, var(--ref-file-soft)); }
+.ax-ref-file:focus-visible { outline: 2px solid var(--ref-file); outline-offset: 1px; }
+.ax-touch { font: 700 1em var(--mono); margin-left: 1px; }
+.t-read .ax-touch { color: var(--text-3); }
+.t-modified .ax-touch { color: var(--warn); }
+.t-created .ax-touch { color: var(--ok); }
+.t-deleted { text-decoration: line-through; }
+.t-deleted .ax-touch { color: var(--err); text-decoration: none; }
+.ax-text code.ax-ref-sym { background: var(--ref-sym-soft); color: var(--ref-sym); }
+.ax-text code.ax-ref-cfg { background: var(--ref-cfg-soft); color: var(--ref-cfg); }
+.ax-text code.ax-ref-cmd { background: var(--ref-cmd-soft); cursor: copy; }
+.ax-text code.ax-ref-cmd::before { content: "$ "; color: var(--text-3); }
+.ax-text code.ax-ref-cmd:hover { box-shadow: inset 0 0 0 1px var(--border); }
 .ax-text pre code { font: inherit; background: none; padding: 0; border-radius: 0; color: inherit; }
 .ax-text strong { font-weight: 650; }
 .ax-text .ax-h { margin: .9em 0 .35em; font-weight: 650; line-height: 1.3; letter-spacing: -.005em; }
@@ -2328,6 +2369,26 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-text h4.ax-h, .ax-text h5.ax-h, .ax-text h6.ax-h { font-size: 1em; }
 .ax-text > .ax-h:first-child { margin-top: 0; }
 .ax-text blockquote { margin: 0 0 .65em; padding: 1px 0 1px 12px; border-left: 3px solid var(--border-strong); color: var(--text-2); }
+/* a status names its tone; a block reads --st / --st-soft (VISUAL_CHAT_PLAN D3) */
+.st-ok { --st: var(--st-ok); --st-soft: var(--st-ok-soft); }
+.st-warn { --st: var(--st-warn); --st-soft: var(--st-warn-soft); }
+.st-err { --st: var(--st-err); --st-soft: var(--st-err-soft); }
+.st-run { --st: var(--st-run); --st-soft: var(--st-run-soft); }
+.st-pending { --st: var(--st-pending); --st-soft: var(--st-pending-soft); }
+.st-blocked { --st: var(--st-blocked); --st-soft: var(--st-blocked-soft); }
+.st-skip { --st: var(--st-skip); --st-soft: var(--st-skip-soft); }
+.st-info { --st: var(--st-info); --st-soft: var(--st-info-soft); }
+/* a callout: > [!WARNING] — a thin rule in the status colour and an icon, not a card */
+.ax-callout { margin: 0 0 .75em; padding: 1px 0 1px 12px; border-left: 2px solid var(--st); }
+.ax-callout-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; color: var(--st); font-weight: 600; }
+.ax-callout-head .icon { width: 14px; height: 14px; flex: none; }
+.ax-callout-body > :last-child { margin-bottom: 0; }
+/* a registered block: its placeholder while the fence streams, its fallback when it cannot be drawn */
+.ax-blk-wait { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 96px; margin: 0 0 .65em;
+  border-radius: var(--r-md); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-sm); }
+.ax-blk-fail { margin: 0 0 .65em; }
+.ax-blk-fail .ax-code { margin-bottom: 0; }
+.ax-blk-why { margin-top: 4px; color: var(--text-3); font-size: var(--fs-sm); }
 .ax-text hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
 .ax-text a { color: var(--signal-strong); text-decoration: underline; text-underline-offset: 2px; }
 .ax-table { overflow-x: auto; margin: 0 0 .7em; border-radius: var(--r-sm); }
@@ -2373,9 +2434,9 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   padding: 0 10px; border: none; border-radius: 0; background: none; color: var(--text-2); font-size: var(--fs-md);
   font-weight: 450; text-align: left; }
 .ax-act-head:hover { color: var(--text); background: var(--surface-3); border: none; }
-.ax-act-ico { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--ok); }
+.ax-act-ico { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--st-ok); }
 .ax-act-ico .icon { width: 15px; height: 15px; }
-.ax-act.warned .ax-act-time { color: var(--warn); }
+.ax-act.warned .ax-act-time { color: var(--st-warn); }
 .ax-act-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-act.live .ax-act-sum { color: var(--text); }
 .ax-act-time { color: var(--text-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
@@ -2389,7 +2450,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-step-head.more { cursor: pointer; }
 .ax-step-head.more:hover { background: var(--surface-2); color: var(--text); }
 .ax-step-head .icon { width: 14px; height: 14px; color: var(--text-3); }
-.ax-step.bad .ax-step-head .icon { color: var(--err); }
+.ax-step.bad .ax-step-head .icon { color: var(--st-err); }
 .ax-step-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-step-label code { font: 11.5px var(--mono); color: var(--text); }
 .ax-step-ms { color: var(--text-3); font-variant-numeric: tabular-nums; }
@@ -2411,10 +2472,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-prog-chip { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
   background: var(--surface-2); color: var(--text-2); }
-.ax-prog-chip.run { background: var(--accent-soft); color: var(--accent-strong); }
-.ax-prog-chip.ok { background: var(--ok-soft); color: var(--ok); }
-.ax-prog-chip.warn { background: var(--warn-soft); color: var(--warn); }
-.ax-prog-chip.bad { background: var(--err-soft); color: var(--err); }
+.ax-prog-chip { background: var(--st-soft, var(--surface-2)); color: var(--st, var(--text-2)); }
 .ax-prog-meta { display: flex; justify-content: space-between; margin: 6px 0 5px; font-size: var(--fs-sm); color: var(--text-3);
   font-variant-numeric: tabular-nums; }
 .ax-prog-bar { height: 4px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
@@ -2424,21 +2482,17 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-pstep { position: relative; display: flex; gap: 10px; padding-bottom: 6px; }
 .ax-pstep:not(:last-child)::before { content: ""; position: absolute; left: 9px; top: 22px; bottom: 0; width: 2px;
   background: var(--line); }
-.ax-pstep.done:not(:last-child)::before { background: var(--accent); }
+.ax-pstep.done:not(:last-child)::before { background: var(--st); }
 .ax-pstep-dot { flex: none; width: 20px; height: 20px; margin-top: 4px; border-radius: 50%; display: inline-flex;
   align-items: center; justify-content: center; background: var(--surface-3); color: var(--text-3);
   transition: background .2s ease, color .2s ease; }
 .ax-pstep-dot .icon { width: 12px; height: 12px; }
-.ax-pstep.pending .ax-pstep-dot::after, .ax-pstep.skipped .ax-pstep-dot::after, .ax-pstep.stopped .ax-pstep-dot::after {
-  content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
-.ax-pstep.done .ax-pstep-dot { background: var(--accent); color: var(--on-accent); }
-.ax-pstep.active .ax-pstep-dot { background: var(--accent-soft); }
-.ax-pstep.failed .ax-pstep-dot { background: var(--err); color: #fff; }
-.ax-pstep.waiting .ax-pstep-dot { background: var(--warn-soft); color: var(--warn); }
+.ax-pstep-dot { background: var(--st-soft); color: var(--st); }
+.ax-pstep.pending .ax-pstep-dot .icon, .ax-pstep.stopped .ax-pstep-dot .icon { width: 8px; height: 8px; }
+.ax-pstep.done .ax-pstep-dot, .ax-pstep.failed .ax-pstep-dot { background: var(--st); color: var(--on-fill); }
 .ax-pstep-main { flex: 1; min-width: 0; border-radius: var(--r-md); transition: background .2s ease; }
-.ax-pstep.active .ax-pstep-main { background: var(--accent-soft); padding-bottom: 8px; }
-.ax-pstep.waiting .ax-pstep-main { background: var(--warn-soft); padding-bottom: 8px; }
-.ax-pstep.failed .ax-pstep-main { background: var(--err-soft); }
+.ax-pstep:is(.active, .waiting, .blocked) .ax-pstep-main { background: var(--st-soft); padding-bottom: 8px; }
+.ax-pstep.failed .ax-pstep-main { background: var(--st-soft); }
 .ax-pstep-head { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 3px 8px;
   border: none; border-radius: var(--r-md); background: none; font-size: var(--fs-md); font-weight: 450; color: var(--text);
   text-align: left; cursor: default; }
@@ -2449,9 +2503,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-pstep-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-pstep.open .ax-pstep-title, .ax-pstep.active .ax-pstep-title { white-space: normal; }
 .ax-pstep-meta { flex: none; color: var(--text-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
-.ax-pstep.active .ax-pstep-meta { color: var(--accent-strong); font-weight: 600; }
-.ax-pstep.waiting .ax-pstep-meta { color: var(--warn); font-weight: 600; }
-.ax-pstep.failed .ax-pstep-meta { color: var(--err); font-weight: 600; }
+.ax-pstep:is(.active, .waiting, .failed, .blocked) .ax-pstep-meta { color: var(--st); font-weight: 600; }
 .ax-pstep.pending .ax-pstep-title, .ax-pstep.stopped .ax-pstep-title { color: var(--text-2); }
 .ax-pstep.skipped .ax-pstep-title { color: var(--text-3); text-decoration: line-through; }
 .ax-pstep-focus { margin: 2px 8px 0; padding: 8px 10px; border-radius: var(--r-md); background: var(--surface);
@@ -2461,10 +2513,10 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-pstep-focus .ax-pstep-detail { margin-top: 2px; }
 .ax-pstep-now { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--text-3); font-family: var(--mono);
   font-size: 11.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.ax-pstep-ask { margin: 0 8px; font-size: var(--fs-sm); color: var(--warn); }
+.ax-pstep-ask { margin: 0 8px; font-size: var(--fs-sm); color: var(--st); }
 .ax-pstep-body { padding: 2px 8px 8px; display: grid; gap: 4px; }
-.ax-pstep-result { font-size: var(--fs-sm); color: var(--ok); }
-.ax-pstep-error { font-size: var(--fs-sm); color: var(--err); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ax-pstep-result { font-size: var(--fs-sm); color: var(--st-ok); }
+.ax-pstep-error { font-size: var(--fs-sm); color: var(--st-err); white-space: pre-wrap; overflow-wrap: anywhere; }
 .ax-pstep-body .ax-step { border-radius: var(--r-sm); background: var(--surface); }
 .ax-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
@@ -2499,9 +2551,9 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-diff .hunk { color: var(--text-3); }
 .ax-diff .file { font-weight: 600; color: var(--text); margin-top: 6px; }
 .ax-diff .file:first-child { margin-top: 0; }
-.ax-error { background: var(--err-soft); }
+.ax-error { background: var(--st-err-soft); }
 .ax-error .ax-card-head { align-items: flex-start; }
-.ax-error .ax-card-head .icon { color: var(--err); margin-top: 2px; }
+.ax-error .ax-card-head .icon { color: var(--st-err); margin-top: 2px; }
 .ax-error .ax-card-head span { color: var(--ink-red39); overflow-wrap: anywhere; }
 .ax-flow { border-color: var(--line-blue56-a28); background: var(--signal-soft); }
 .ax-flow .ax-card-head .icon { color: var(--signal); }
@@ -4919,7 +4971,7 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 /* B2 cards: the same tint */
 .ax-card, .ax-start, .xpcard, .xpwhy:not(.warn):not(.bad), .xpgroup, .evds, .kbtext, .kbinspect,
 .kbchunkrow, .kbhit, .kbcite-row { background: var(--card); --well: var(--surface); }
-.ax-error { background: var(--err-soft); }
+.ax-error { background: var(--st-err-soft); }
 
 /* ── a run's Workflow: the canvas and the step it is on ────────────────
    The step panel is always beside the canvas (a sheet on a phone): what
@@ -5358,7 +5410,14 @@ button.pm-w { cursor: pointer; }
   border-bottom: 1px solid var(--border-soft); background: var(--bg); }
 .pm-fpath { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); word-break: break-all; }
 .pm-fhead .pm-where { font-size: 11.5px; color: var(--text-3); }
+.pm-codebox { position: relative; display: flex; min-width: max-content; }
 .pm-code { margin: 0; padding: 10px 12px; font: 12.5px/1.5 var(--mono); color: var(--text); white-space: pre; tab-size: 4; }
+.pm-gutter { margin: 0; padding: 10px 8px 10px 12px; font: 12.5px/1.5 var(--mono); color: var(--text-3); text-align: right;
+  user-select: none; border-right: 1px solid var(--border-soft); position: sticky; left: 0; background: var(--bg); z-index: 1; }
+.pm-lmark { position: absolute; left: 0; right: 0; z-index: 2; background: color-mix(in srgb, var(--warn) 16%, transparent);
+  border-left: 3px solid var(--warn); pointer-events: none; animation: pm-lmark 1.6s ease-out; }
+@keyframes pm-lmark { from { background: color-mix(in srgb, var(--warn) 40%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .pm-lmark { animation: none; } }
 .pm-fview > .pm-quiet { padding: 12px; }
 @media (max-width: 760px) {
   .pm-main.paged .pm-page.pm-page-files { overflow-y: auto; display: block; }
@@ -5762,3 +5821,230 @@ body.pmode .ax-status { background: var(--glass-still); border-radius: 10px; pad
 .pm-qtoast-x:hover { background: var(--glass-line); color: var(--text); }
 .pm-island[hidden], .pm-qtoast[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .pm-island-dot { animation: none; } }
+
+/* tool rows (VISUAL_CHAT_PLAN D5): the class's icon and verb in its colour, the resource, the state, the time */
+.ax-tool { --tc: var(--tc-run); }
+.tc-read { --tc: var(--tc-read); } .tc-edit { --tc: var(--tc-edit); } .tc-create { --tc: var(--tc-create); }
+.tc-delete { --tc: var(--tc-delete); } .tc-search { --tc: var(--tc-search); } .tc-test { --tc: var(--tc-test); }
+.tc-build { --tc: var(--tc-build); } .tc-git { --tc: var(--tc-git); } .tc-web { --tc: var(--tc-web); }
+.tc-studio { --tc: var(--tc-studio); }
+.ax-tool .ax-step-head { gap: 7px; }
+.ax-tool-verb { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--tc); font-weight: 600; }
+.ax-step-head .ax-tool-verb .icon { color: var(--tc); }
+.ax-tool-res { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 11.5px var(--mono); color: var(--text); }
+code.ax-tool-res.cmd { background: var(--ref-cmd-soft); border-radius: 4px; padding: 1px 6px; }
+code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
+.ax-step-head .ax-ref-file { flex: 0 1 auto; min-width: 0; max-width: 46%; }
+.ax-step-head .ax-ref-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax-tool-st { display: inline-flex; flex: none; color: var(--st); }
+.ax-step-head .ax-tool-st .icon { width: 13px; height: 13px; color: var(--st); }
+.ax-step-head.more:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
+.ax-fold-chips { display: inline-flex; gap: 4px; min-width: 0; overflow: hidden; flex: 0 1 auto; }
+.ax-fold-chips .ax-ref-file { max-width: 150px; }
+.ax-fold-more { font-size: 11px; color: var(--text-3); align-self: center; }
+.ax-fold-calls { display: flex; flex-direction: column; border-left: 2px solid color-mix(in srgb, var(--tc) 35%, transparent);
+  margin: 2px 0 2px -10px; }
+.ax-fold.warned .ax-tool-st { color: var(--st-warn); }
+.ax-io-exit { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
+.ax-io-exit b { font: 600 11.5px var(--mono); color: var(--st); }
+.ax-step-io .ax-tree { font-size: 11.5px; background: var(--surface-2); border-radius: var(--r-sm); padding: 6px 8px;
+  max-height: 220px; overflow: auto; }
+
+/* a test run's report (D6) */
+.ax-tests { padding: 0 12px 8px 33px; display: flex; flex-direction: column; gap: 5px; }
+.ax-tests-bar { display: flex; height: 4px; border-radius: 3px; overflow: hidden; background: var(--surface-2); max-width: 360px; }
+.ax-tests-bar span { min-width: 3px; }
+.ax-tests-bar .seg-ok { background: var(--st-ok); } .ax-tests-bar .seg-err { background: var(--st-err); }
+.ax-tests-bar .seg-skip { background: var(--line-strong, var(--text-3)); opacity: .5; }
+.ax-tests-nums { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums; color: var(--text-2); }
+.ax-tests-nums .n-ok { color: var(--st-ok); font-weight: 600; } .ax-tests-nums .n-err { color: var(--st-err); font-weight: 600; }
+.ax-tests-dot { color: var(--text-3); }
+.ax-tests-runner { margin-left: auto; font: 10.5px var(--mono); color: var(--text-3); }
+.ax-tests-tog { align-self: flex-start; border: none; background: none; padding: 0; font-size: var(--fs-sm); font-weight: 600;
+  color: var(--st-err); cursor: pointer; }
+.ax-tests-tog::after { content: " ▸"; } .ax-tests-tog[aria-expanded="true"]::after { content: " ▾"; }
+.ax-tests-fails { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ax-tests-fail { width: 100%; display: flex; align-items: baseline; gap: 7px; border: none; background: var(--st-err-soft);
+  border-radius: var(--r-sm); padding: 4px 8px; text-align: left; font-size: var(--fs-sm); color: var(--text); cursor: pointer;
+  min-width: 0; }
+.ax-tests-fail .icon { width: 12px; height: 12px; color: var(--st-err); flex: none; align-self: center; }
+.ax-tests-fail code { font: 11.5px var(--mono); flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax-tests-fail span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.ax-tests-fails pre { margin: 3px 0 4px; max-height: 200px; overflow: auto; font: 11px/1.45 var(--mono); background: var(--surface-2);
+  border-radius: var(--r-sm); padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .ax-tests { padding-left: 12px; }
+  .ax-step-head .ax-ref-file { max-width: 40%; }
+  .ax-fold-chips .ax-ref-file:nth-child(n+3) { display: none; }
+}
+.ax-pstep-main, .ax-pstep-body, .ax-step.ax-tool, .ax-fold-calls { min-width: 0; }
+.ax-tool .ax-step-head { min-width: 0; overflow: hidden; }
+.ax-tool .ax-step-head > * { flex-shrink: 0; }
+.ax-tool .ax-step-head > .ax-tool-res, .ax-tool .ax-step-head > .ax-ref-file, .ax-tool .ax-step-head > .ax-fold-chips { flex-shrink: 1; }
+.ax-tests-fail { justify-content: flex-start; }
+.ax-pstep-body { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 560px) { .ax-fold-chips { display: none; } }
+
+/* file activity (VISUAL_CHAT_PLAN D7): the strip, the files each with its own diff, the reads folded */
+.ax-act-strip { flex-wrap: wrap; row-gap: 2px; font-size: var(--fs-sm); color: var(--text-2); }
+.ax-act-strip > span[class^="ax-strip-"] { display: inline-flex; align-items: baseline; gap: 4px; font-weight: 600; }
+.ax-strip-read .ax-touch { color: var(--text-3); } .ax-strip-modified .ax-touch { color: var(--warn); }
+.ax-strip-created .ax-touch { color: var(--ok); } .ax-strip-deleted .ax-touch { color: var(--err); }
+.ax-file { display: block; border-radius: var(--r-sm); }
+.ax-file-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 2px 6px; border-radius: var(--r-sm); cursor: pointer; }
+.ax-file-head:hover { background: var(--surface-2); }
+.ax-file-head .ax-touch { width: 10px; flex: none; text-align: center; }
+.ax-file.t-deleted { text-decoration: none; }
+.ax-file.t-deleted .ax-path { text-decoration: line-through; }
+.ax-file > .ax-step-io { padding: 0 0 6px 18px; }
+.ax-file > .ax-step-io .ax-diff { margin-top: 2px; }
+.ax-files-dir { font: 600 11px var(--mono); color: var(--text-3); padding: 6px 6px 1px; }
+.ax-files-dir ~ .ax-file .ax-file-head { padding-left: 16px; }
+.ax-reads { margin-top: 2px; }
+.ax-reads .ax-step-head { min-height: 24px; font-size: var(--fs-sm); padding: 0 6px; }
+.ax-reads .ax-tool-verb { color: var(--text-3); font-weight: 500; }
+.ax-reads-list { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 6px 4px; }
+.ax-reads > .ax-step-io { padding: 0 0 4px; }
+.ax-diffs .ax-diff + .ax-diff { margin-top: 8px; }
+
+/* severity (D8): a failed row is red, a recovered one amber; the first error line shows without opening the row */
+.ax-tool.recovered .ax-step-head .ax-tool-st .icon { color: var(--st-warn); }
+.ax-tool-sev { font-size: 10.5px; font-weight: 600; color: var(--st-warn); background: var(--st-warn-soft, var(--surface-2));
+  border-radius: 4px; padding: 0 5px; }
+.ax-tool-err { padding: 0 12px 6px 33px; font: 11.5px var(--mono); color: var(--st); min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.ax-io-step { font-size: var(--fs-sm); color: var(--text); margin-bottom: 6px; }
+
+/* the turn's outcome (D8): one line of facts; failures by class as a bar, a click opens the list */
+.ax-turnend { display: flex; flex-direction: column; gap: 2px; }
+.ax-outcome { border-top: 1px solid var(--border); padding: 7px 2px 2px; font-size: var(--fs-sm); color: var(--text-2); min-width: 0; }
+.ax-outcome-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-variant-numeric: tabular-nums; }
+.ax-outcome-st { display: inline-flex; align-items: center; gap: 5px; color: var(--st); }
+.ax-outcome-st .icon { width: 13px; height: 13px; color: var(--st); }
+.ax-outcome-test { display: inline-flex; align-items: center; gap: 4px; color: var(--st); }
+.ax-outcome-test .icon { width: 12px; height: 12px; }
+.ax-outcome-fails { display: flex; flex-wrap: wrap; max-width: 100%; text-align: left; margin-top: 4px; align-items: center; gap: 6px; border: none; background: none; padding: 0;
+  font: inherit; font-weight: 600; color: var(--st-err); cursor: pointer; }
+.ax-outcome-fails::after { content: "▸"; font-size: 10px; } .ax-outcome-fails[aria-expanded="true"]::after { content: "▾"; }
+.ax-outcome-bar { display: inline-flex; width: 64px; height: 6px; border-radius: 3px; overflow: hidden; gap: 1px; }
+.ax-outcome-bar span { background: var(--tc, var(--st-err)); min-width: 4px; }
+.ax-outcome-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ax-outcome-list li { display: flex; align-items: center; gap: 7px; padding: 3px 8px; border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--st) 9%, transparent); min-width: 0; }
+.ax-outcome-list li .icon { width: 12px; height: 12px; color: var(--tc); flex: none; }
+.ax-outcome-list li b { font-weight: 600; color: var(--tc); flex: none; }
+.ax-outcome-list li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px var(--mono); }
+.ax-outcome-list li em { font-style: normal; font-size: 10.5px; color: var(--st); flex: none; }
+.ax-outcome.st-err .ax-outcome-st b, .ax-outcome.st-warn .ax-outcome-st b { font-weight: 600; }
+
+/* D9/D10: graphs and charts in a reply (static/graph.js) */
+.ax-graph, .ax-chart { margin: 0 0 .75em; padding: 8px 10px 6px; border: 1px solid var(--border-soft); border-radius: 12px;
+  background: var(--surface); max-width: 100%; box-sizing: border-box; }
+.ax-graph-head { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: 12.5px; }
+.ax-graph-title { font-weight: 600; color: var(--text); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax-graph-upd { color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
+.ax-graph-open { margin-left: auto; }
+.ax-graph-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 28px; height: 26px;
+  padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text-2);
+  font: inherit; font-size: 12px; cursor: pointer; }
+.ax-graph-btn:hover { background: var(--surface-3); color: var(--text); }
+.ax-graph-btn:focus-visible, .ax-g-node:focus-visible { outline: 2px solid var(--sel-line); outline-offset: 2px; }
+.ax-graph-body { overflow-x: auto; overflow-y: hidden; }
+.ax-graph-svg { display: block; width: 100%; height: auto; margin: 6px auto 2px; overflow: visible; }
+.ax-graph-svg.overview { cursor: zoom-in; max-height: 260px; }
+.ax-graph-svg text { user-select: text; }
+.ax-g-group { fill: var(--surface-2); stroke: var(--border-soft); stroke-width: 1; }
+.ax-g-gtitle { font-size: 10.5px; font-weight: 600; fill: var(--text-3); letter-spacing: .02em; }
+.ax-g-edge { fill: none; stroke: var(--text-3); stroke-width: 1.4; opacity: .7; }
+.ax-g-edge.back { stroke-dasharray: 4 3; }
+.ax-g-edge.hot { stroke: var(--sel-line); opacity: 1; stroke-width: 2; }
+.ax-g-arrow { fill: var(--text-3); }
+.ax-g-elabel { font-size: 10px; fill: var(--text-3); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.ax-g-node { cursor: pointer; }
+.ax-g-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.2; }
+.ax-g-node.has-st .ax-g-box { fill: var(--st-soft); stroke: var(--st); }
+.ax-g-node:hover .ax-g-box { stroke-width: 2; }
+.ax-g-node.hot .ax-g-box { stroke: var(--sel-line); stroke-width: 2.2; }
+.ax-g-node.sel .ax-g-box { stroke: var(--sel-line); stroke-width: 2.4; fill: var(--sel); }
+.ax-g-node.affected .ax-g-box { stroke: var(--tc-edit); stroke-dasharray: 5 3; stroke-width: 2; }
+.ax-g-mod { fill: var(--tc-edit); }
+.ax-g-modt { font-size: 8px; font-weight: 700; fill: var(--on-fill); text-anchor: middle; }
+.ax-g-dot { fill: var(--st); }
+.ax-g-glyph { font-size: 9px; font-weight: 700; fill: var(--on-fill); text-anchor: middle; }
+.ax-g-label { font-size: 11.5px; fill: var(--text); text-anchor: middle; }
+.ax-g-node.pulse .ax-g-box { animation: ax-g-pulse 1.6s ease-in-out infinite; }
+.ax-g-node.flash .ax-g-box { animation: ax-g-flash 1.2s ease-out 2; }
+@keyframes ax-g-pulse { 50% { stroke-width: 3; stroke-opacity: .55; } }
+@keyframes ax-g-flash { 0% { stroke-width: 4; } 100% { stroke-width: 1.2; } }
+@media (prefers-reduced-motion: reduce) { .ax-g-node.pulse .ax-g-box, .ax-g-node.flash .ax-g-box { animation: none; } }
+.ax-graph-detail { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 26px; padding: 4px 2px 0;
+  font-size: 12.5px; color: var(--text-2); border-top: 1px solid var(--border-soft); }
+.ax-graph-hint { color: var(--text-3); font-size: 12px; }
+.ax-graph-dtext { color: var(--text-2); min-width: 0; }
+.ax-graph-st { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px 1px 5px; border-radius: 999px;
+  background: var(--st-soft); color: var(--st); font-size: 11.5px; font-weight: 600; }
+.ax-graph-st svg { width: 12px; height: 12px; }
+.ax-graph-note { display: flex; align-items: center; gap: 6px; margin: 0 0 .65em; font-size: 12.5px; color: var(--text-3); }
+.ax-graph-note svg { width: 14px; height: 14px; flex: none; }
+.ax-graph-ov { position: fixed; inset: 16px; z-index: 900; display: flex; flex-direction: column; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, .28); overflow: hidden; }
+.ax-graph-ovbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+.ax-graph-ovbar b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax-graph-n { color: var(--text-3); font-size: 12px; margin-right: auto; }
+.ax-graph-ovbody { flex: 1; display: flex; min-height: 0; }
+.ax-graph-stage { flex: 1; position: relative; overflow: hidden; touch-action: none; cursor: grab; background: var(--surface-2); }
+.ax-graph-stage.grab { cursor: grabbing; }
+.ax-graph-stage svg { position: absolute; inset: 0; }
+.ax-graph-side { width: 280px; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px; border-left: 1px solid var(--border-soft); min-height: 0; }
+.ax-graph-ovdetail .ax-graph-detail { border-top: 0; flex-direction: column; align-items: flex-start; }
+.ax-graph-q { height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; }
+.ax-graph-list { flex: 1; overflow: auto; display: flex; flex-direction: column; }
+.ax-graph-li { text-align: left; padding: 5px 8px; border: 0; border-radius: 6px; background: none; color: var(--text-2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.ax-graph-li:hover { background: var(--surface-3); color: var(--text); }
+@media (max-width: 640px) {
+  .ax-graph-ov { inset: 0; border-radius: 0; border: 0; }
+  .ax-graph-ovbody { flex-direction: column; }
+  .ax-graph-side { width: auto; max-height: 38%; border-left: 0; border-top: 1px solid var(--border-soft); }
+}
+.ax-chart-unit { color: var(--text-3); font-size: 11.5px; }
+.ax-chart { max-width: 460px; }
+.ax-chart-svg { display: block; width: 100%; max-width: 420px; height: auto; max-height: 160px; margin: 4px 0 2px; overflow: visible; }
+.ax-chart-svg.spark { max-width: 260px; max-height: 40px; }
+.ax-ch-grid { stroke: var(--border-soft); stroke-width: 1; }
+.ax-ch-grid.zero { stroke: var(--border); }
+.ax-ch-tick { font-size: 10px; fill: var(--text-3); }
+.ax-ch-val { font-size: 11px; font-weight: 600; fill: var(--text); }
+.ax-ch-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.ax-ch-dot { stroke: var(--surface); stroke-width: 2; }
+.ax-ch-mark:hover, .ax-ch-dot:hover { opacity: .8; }
+.ax-chart-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--text-2); }
+.ax-chart-key { display: inline-flex; align-items: center; gap: 5px; }
+.ax-chart-sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.ax-chart-note { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+
+/* ── the progress card, finished (docs/VISUAL_CHAT_PLAN.md D12) ── */
+.ax-pstep-meter { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+.ax-pstep-meter + .ax-pstep-meta { margin-left: 8px; }
+.ax-pstep-mbar { width: 56px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.ax-pstep-mbar > span { display: block; height: 100%; border-radius: 2px; background: var(--st-ok, var(--ok)); }
+/* a failing run: passed in green, failed in red, so the folded row answers "did it pass?" */
+.ax-pstep-mbar.bad { background: var(--err); }
+.ax-pstep-mnum { font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
+.ax-pstep-mnum.bad { color: var(--err); font-weight: 600; }
+.ax-pstep-sub { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ax-pstep-sub li { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
+.ax-pstep-sub li > svg, .ax-pstep-sub li > .ax-spin { color: var(--st); flex: none; width: 13px; height: 13px; }
+.ax-pstep-sub li.st-skip, .ax-pstep-sub li.st-pending { color: var(--muted); }
+.ax-pstep-files { display: flex; flex-wrap: wrap; gap: 4px; }
+.ax-pstep-exec { font-size: var(--fs-sm); color: var(--muted); }
+.ax-pstep-exec > summary { cursor: pointer; padding: 2px 0; }
+.ax-pstep-exec > summary:focus-visible { outline: 2px solid var(--sel-line); outline-offset: 2px; border-radius: 4px; }
+.ax-pstep-exec ol { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; }
+.ax-pstep-exec li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ax-pstep-exec code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.ax-pstep-exit { flex: none; color: var(--st, var(--muted)); font-variant-numeric: tabular-nums; }
+.ax-prog-shape { overflow-x: auto; margin: 4px 0 2px; }
+.ax-prog-shape .ax-graph-svg { width: auto; max-width: 100%; max-height: none; margin: 4px auto; }
+.ax-prog.dag .ax-prog-steps:empty { display: none; }

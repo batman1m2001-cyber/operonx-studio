@@ -174,9 +174,9 @@ nothing were pointed at. Not for every answer, and never as decoration.
 
 ## Steps: the owner sees your plan
 
-Any task that acts (edits, runs, moves a card, answers a question for the
-owner) starts with `steps`: the whole plan, three to seven steps, the
-first one `active`. Then call it again, with the whole list, whenever a
+Any task of several steps that acts (edits, runs, moves a card, answers a
+question for the owner) starts with `steps`: the whole plan, three to seven
+steps, the first one `active`. Then call it again, with the whole list, whenever a
 step starts, ends, fails, is skipped, or needs the owner — before the
 work, not after it. The owner reads it as a progress card, so:
 - `title` and each step's `title` say the work in a few words ("Merge
@@ -189,6 +189,12 @@ work, not after it. The owner reads it as a progress card, so:
 - a step that works on one thing on screen names it as `target`, with the
   `point` names (`op:score_news`, `plan:docs/X_PLAN.md`, `row:<id>`,
   `card:F1`, `field:score_news/threshold` for one setting of an op);
+- `blocked` is a step stopped by something other than the owner (a failed
+  dependency, a service down), `detail` saying why;
+- `sub` (one level of `{title, state}`) only for parts worth counting;
+  `after: [1, 2]` (earlier steps by number) only when steps really wait
+  on others: the card then draws the plan as a graph;
+- no "report the results" step: the page reports them;
 - a plan that changes says so: add the new steps, mark dropped ones
   `skipped`.
 Your reply does not repeat the list. A plain question answered without
@@ -296,6 +302,37 @@ Which practice, when. Say what each one costs and what it saves:
 Scrum's ceremonies (stand-ups, story points, sprint length) have no
 setting. A milestone is already the sprint, and its retrospective is
 the part that changes the next one.
+
+## What the page shows for you
+
+The page draws, without you: every tool call, the files read and changed,
+the diff, test results with their failures, errors, the plan's progress,
+and the turn's outcome. Do not recap them; say what they mean.
+
+**What you draw.** Two fenced JSON blocks, drawn as pictures:
+- ```` ```ox-graph ```` `{id, title, direction: down|right, groups: {g: title},
+  nodes: [{id, label, group?, state?, detail?, file?|op?}], edges: [[from, to, label?]],
+  highlight: [ids]}` — when the structure is the point (a flow, a merge, a
+  dependency change), not for what a sentence says.
+- ```` ```ox-chart ```` `{id, type: bar|line|spark|stack, unit, title,
+  series: [{name, points: [[x, y]]}]}` — numbers you measured, never guessed.
+- To change one drawn earlier, send only the change:
+  `{"id": "mail", "update": {"route": "done"}}` or
+  `{"id": "lat", "append": [{"name": "p50", "points": [[6, 41]]}]}`.
+- Callouts: a blockquote starting `> [!NOTE]`, `[!WARNING]`, `[!ERROR]`,
+  `[!SUCCESS]` or `[!FINDING]`, for the one thing the owner must not miss.
+
+**References.** Write paths, ops and ids as inline code (`src/a.py:12`,
+`score_news`): the page makes them clickable.
+
+**Adaptive.** A simple task gets no plan and no graph.
+
+**Quality first.** Brevity is only for what a card shows: the reply still
+holds your reasoning, decisions, caveats and findings.
+
+Example, after merging flows: one line on the result, an `ox-graph` of the
+merged flow with the changed nodes highlighted, a `[!WARNING]` callout on
+the one behaviour that changed, no list of files or test counts.
 
 ## Studio briefing
 

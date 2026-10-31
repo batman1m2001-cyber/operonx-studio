@@ -60,6 +60,9 @@ const Icons = (() => {
     globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.4 5.3 3.4 8.5s-1 6.1-3.4 8.5c-2.4-2.4-3.4-5.3-3.4-8.5s1-6.1 3.4-8.5Z"/>',
     more: '<circle cx="6" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="18" cy="12" r="1.2" fill="currentColor"/>',
     archive: '<rect x="3.5" y="4.5" width="17" height="4" rx="1"/><path d="M5 8.5v10a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-10M10 12.5h4"/>',
+    dot: '<circle cx="12" cy="12" r="4.5"/>',
+    ban: '<circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/>',
+    skip: '<path d="m5 6 7 6-7 6M13 6v12"/>',
     info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8h.01"/>',
     download: '<path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14"/>',
     alert: '<path d="M10.3 4.3 2.9 17.5A2 2 0 0 0 4.6 20.5h14.8a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4.5M12 17.2h.01"/>',
@@ -78,12 +81,20 @@ const Icons = (() => {
   };
 
   /** One icon as an SVG element; `cls` is added to the `icon` class. */
+  // parsed once per name and class, then cloned: a long transcript draws thousands
+  const parsed = new Map();
   function svg(name, cls) {
-    const wrap = document.createElement("span");
-    wrap.innerHTML = '<svg class="icon' + (cls ? " " + cls : "") + '" viewBox="0 0 24 24" '
-      + 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
-      + 'stroke-linejoin="round" aria-hidden="true" focusable="false">' + (P[name] || "") + "</svg>";
-    return /** @type {Element} */ (wrap.firstChild);
+    const key = name + " " + (cls || "");
+    let node = parsed.get(key);
+    if (!node) {
+      const wrap = document.createElement("span");
+      wrap.innerHTML = '<svg class="icon' + (cls ? " " + cls : "") + '" viewBox="0 0 24 24" '
+        + 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
+        + 'stroke-linejoin="round" aria-hidden="true" focusable="false">' + (P[name] || "") + "</svg>";
+      node = /** @type {Element} */ (wrap.firstChild);
+      parsed.set(key, node);
+    }
+    return /** @type {Element} */ (node.cloneNode(true));
   }
 
   /** A button with an icon, and a visible label when `label` is given;

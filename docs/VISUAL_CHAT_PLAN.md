@@ -1,6 +1,6 @@
 # The conversation shows the work: a visual-first assistant (VISUAL_CHAT_PLAN)
 
-Status: plan, waiting for the owner's go (2026-10-31).
+Status: done on feat/visual-chat (2026-11-01): V0–V8 done, see the V8 result.
 
 Owner's brief: "Visual-First Conversational Engineering Experience", in 12
 sections. The assistant's work should be readable at a glance: references,
@@ -89,6 +89,97 @@ rules:
 - **Cut the replies' repetition of what cards show** (D11).
 
 V0 measures the baseline and V7 measures it again.
+
+**V0 baseline** (2026-10-31, main d737464; `scripts/perf/chat_baseline.py`
+over a read-only copy of the live store, `scripts/perf/render_chat.py` on a
+scratch studio):
+
+| Metric | Value |
+|---|---|
+| Turns measured | 70 |
+| Median input / output tokens per turn | 47,215 / 375 |
+| Output share of all tokens | 16.8k of 1.72M (1.0%); 1.64M of the input was cached |
+| Median LLM calls per turn | 2 (the long mr-finance turn: 21) |
+| Median time to the first tool or text item | 5.6 s |
+| Median total turn time | 7.7 s (the long turn: 145 s) |
+| Median reply length | 125 chars |
+| Median stored bytes per turn | 2.0 KB (the long turn: 61 KB) |
+| `ox-` fences / callouts used | 0 / 0 |
+| Render of a 434-item session | median 248 ms, one long task ~280 ms, 5,495 DOM nodes |
+
+**V7 result** (2026-10-31, Sonnet, scratch copy of meeting-prep-operonx, the
+same three tasks with the old knowledge and then the new: "walk me through how a
+brief is prepared, op by op, and where approval comes in"; "run
+tests/test_zones.py, add a test for an uncovered edge case, run again"; "which
+recorded runs were slowest, per service").
+
+LLM side (median of the 3 turns per arm; totals in brackets):
+
+| Metric | Old knowledge | New knowledge |
+|---|---|---|
+| Input tokens | 140,772 (534,742) | 148,646 (435,160) |
+| Output tokens | 2,014 (5,804) | 2,174 (5,555) |
+| LLM calls | 4 | 5 |
+| First tool or text item | 4.8 s | 4.2 s |
+| Total turn time | 22.5 s | 23.6 s |
+| Reply length | 1,376 chars | 1,655 chars |
+| Stored bytes | 19.3 KB | 18.4 KB |
+| Graphs / charts / callouts drawn | 0 / 0 / 0 | 1 / 0 / 1 |
+| Malformed blocks | 0 | 0 |
+
+The A/B ran with the knowledge 2.3 KB larger; the gate allows 2 KB, so the
+wording was then cut to 1,991 bytes with no rule dropped (about 0.5k input
+tokens a turn, cached after the first). LLM calls are the agent loop's own
+(4, 9, 4 against 5, 5, 6, following each run's tool use): the page adds none.
+The op-by-op walk-through drew its flow as an `ox-graph` (valid); the
+slowest-runs question had one eval and no services, so both arms answered with
+a table and no chart was due. The test task's paths differed (9 calls against
+5), which is most of the totals' gap; three tasks per arm cannot separate the
+knowledge from that variance.
+
+Frontend side (`render_chat.py`, the 434-item session, V0's code 4e53a7b and
+this branch on one box, alternated, 15 renders each): first measure 363 ms
+against 240 ms (+51%) — every tool row re-filtered the whole transcript for its
+turn's files and severities, and each call was classed four or five times. Now
+renderAll answers each turn once, a call's class is kept per item, and an icon
+is parsed once and cloned: **276 ms against 261 ms (+6%, gate +20%)**, long task
+~320 ms against ~303 ms, 6,454 DOM nodes against 5,495 (+17%: the class icons,
+file chips and outcome lines). A three-turn session with a graph renders in
+27 ms (318 nodes).
+
+**V8 result** (2026-11-01). The three new-arm turns were replayed into the
+page at stream speed: the message is typed and sent for real, and the turn's
+stream is answered from its stored items, with text in deltas of four words and
+each tool running and then done. Shots mid-stream and done at 1440 / 1100 / 390,
+light and dark (18 runs).
+
+| Check | Result |
+|---|---|
+| Page errors, horizontal overflow at 390 | 0 in 18 runs |
+| Held inside the open `ox-graph` fence (1440 light, 390 dark) | "Drawing graph…" placeholder, 0 raw JSON; the graph draws when the fence closes |
+| Keyboard: Tab through the transcript | every focused control has a ring; Enter opens each step and row (fixed: a step head lost focus when the card redrew) |
+| Contrast of the chat pieces (step rows, meters, graph labels, callouts, rows, outcome) | min 4.97:1 light, 5.99:1 dark |
+| One click | every closed control in the 3 turns opens with one click (3, 4 and 4 controls); the reply text is never folded |
+| Suites | `tests/studio` 559 passed, 5 skipped; `tests/js` 178 passed |
+
+Comprehension, from the folded view only:
+
+| Question | Walk-through | Tests task | Slowest runs |
+|---|---|---|---|
+| What is it doing? | the steps card: read operonx.toml, ran git ls-files, ran 2 commands | ran the tests, ran 3 commands | list runs, Monitor, list runs |
+| Working on now? | (mid-stream) the active step and "Writing…" | same | same |
+| Which files? | `src/prepare/graph.py` chip | `tests/test_zones.py` chip; Modified 1 | none touched |
+| How do ops relate? | the inline graph, inbox → … → approval gate → request/held | n/a | n/a |
+| What changed? | nothing | +13 −0 in test_zones.py, with Undo / Keep | nothing |
+| Did it pass? | Completed | step 1 meter 0/2 in red; outcome "pytest 0 passed · 2 failed" | Completed |
+| Left or blocked? | the NOTE callout | "fix the database credentials … and run the script form" | "start a service to compare" |
+
+Three fixes came out of it. A tall graph was drawn into a 260 px box, so an
+11-node flow (539×590) scaled to 0.44 and its labels to ~4 px; it now keeps
+its size, or 80% of it with the figure scrolling sideways (labels 10 px at
+1440, 8 px at 390). A test row showed `$ ls` for `ls; cat …; uv run pytest …`;
+the row now names the part that tests or builds. A failing step meter was a grey
+bar; its failed part and its count are now red.
 
 ## 2 · Decisions
 
@@ -514,8 +605,10 @@ branch per plan). The PR is opened at V8.
 
 **Efficiency (V7).**
 - No extra LLM call per turn, and the prompt grows by ≤ 2 KB.
-- Render time of a 400-item session grows by ≤ 20%, and no long task
-  exceeds 100 ms.
+- Render time of a 400-item session grows by ≤ 20%, and its long task by
+  ≤ 20%. (V0 found the baseline's own long task at ~290 ms, so "no long
+  task over 100 ms", first written here, failed before any change; it is
+  measured against the baseline instead.)
 - Stream and stored bytes are reported.
 - Output tokens and reply chars are reported as measured, whichever way
   they move.

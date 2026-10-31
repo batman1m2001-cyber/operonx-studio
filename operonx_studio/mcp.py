@@ -187,12 +187,16 @@ def t_point(s: Studio, a: Dict[str, Any]) -> str:
     return f"pointed at {target} on the owner's screen"
 
 
-STEP_STATES = ("pending", "active", "done", "failed", "skipped", "waiting")
+STEP_STATES = ("pending", "active", "done", "failed", "skipped", "waiting", "blocked")
+SUB_STATES = ("pending", "active", "done", "failed", "skipped", "blocked")
 
 
 def check_steps(a: Dict[str, Any]) -> List[Dict[str, Any]]:
     """The plan a ``steps`` call posts (docs/ASSISTANT_PROGRESS_PLAN.md D1),
-    checked: a non-empty list, known states, at most one active."""
+    checked: a non-empty list, known states, at most one active. Optional
+    (docs/VISUAL_CHAT_PLAN.md D12): ``blocked`` with its reason in ``detail``,
+    ``sub`` — one level of subtasks — and ``after`` — the earlier steps
+    (numbered from 1) a step waits on."""
     steps = a.get("steps")
     if not isinstance(steps, list) or not steps:
         raise ValueError("steps is the whole plan: a non-empty list of {title, state}")
@@ -203,22 +207,45 @@ def check_steps(a: Dict[str, Any]) -> List[Dict[str, Any]]:
         state = str(step.get("state") or "pending")
         if state not in STEP_STATES:
             raise ValueError(f"step {n}: unknown state {state!r}; use {', '.join(STEP_STATES)}")
-        out.append({"title": str(step["title"]).strip(), "state": state,
-                    **{k: str(step[k]) for k in ("detail", "target", "result", "error") if step.get(k)}})
+        if state == "blocked" and not str(step.get("detail") or "").strip():
+            raise ValueError(f"step {n} is blocked: say why in detail")
+        got = {"title": str(step["title"]).strip(), "state": state,
+               **{k: str(step[k]) for k in ("detail", "target", "result", "error") if step.get(k)}}
+        sub = step.get("sub")
+        if sub:
+            if not isinstance(sub, list):
+                raise ValueError(f"step {n}: sub is a list of {{title, state}}")
+            got["sub"] = []
+            for t in sub:
+                t = t if isinstance(t, dict) else {"title": t}
+                st = str(t.get("state") or "pending")
+                if not str(t.get("title") or "").strip() or st not in SUB_STATES:
+                    raise ValueError(f"step {n}: a subtask is {{title, state}}, state one of {', '.join(SUB_STATES)}")
+                got["sub"].append({"title": str(t["title"]).strip(), "state": st})
+        after = step.get("after")
+        if after:
+            if not isinstance(after, list) or not all(isinstance(i, int) and not isinstance(i, bool) and 1 <= i < n
+                                                       for i in after):
+                raise ValueError(f"step {n}: after lists earlier steps by number (1 to {n - 1})")
+            got["after"] = sorted(set(after))
+        out.append(got)
     if sum(s["state"] == "active" for s in out) > 1:
         raise ValueError("at most one step is active")
     return out
 
 
 def step_line(steps: List[Dict[str, Any]]) -> str:
-    """``step 3 of 5: <the active step>`` — or what the plan is waiting on, or how it ended."""
-    for state in ("active", "waiting"):
+    """``step 3 of 5: <the active step>`` — or what the plan is waiting on, or how it ended.
+    A skipped step is not counted in the total."""
+    total = sum(s["state"] != "skipped" for s in steps)
+    for state in ("active", "waiting", "blocked"):
         for n, step in enumerate(steps, 1):
             if step["state"] == state:
-                return f"step {n} of {len(steps)}: {step['title']}" + (" (needs the owner)" if state == "waiting" else "")
-    done = sum(s["state"] in ("done", "skipped") for s in steps)
+                return f"step {n} of {len(steps)}: {step['title']}" + (
+                    " (needs the owner)" if state == "waiting" else f" (blocked: {step['detail']})" if state == "blocked" else "")
+    done = sum(s["state"] == "done" for s in steps)
     failed = sum(s["state"] == "failed" for s in steps)
-    return f"{done} of {len(steps)} steps done" + (f", {failed} failed" if failed else "")
+    return f"{done} of {total} steps done" + (f", {failed} failed" if failed else "")
 
 
 def t_steps(s: Studio, a: Dict[str, Any]) -> str:
@@ -750,12 +777,18 @@ TOOLS: Dict[str, Dict[str, Any]] = {
               "description": "Your plan, shown to the owner as a progress card. Post the WHOLE list each time: first "
                              "the whole plan with the first step active, then once whenever a step starts, ends, "
                              "fails, is skipped, or needs the owner — before the work, not after. state: pending|"
-                             "active|done|failed|skipped|waiting (waiting = needs the owner); at most one active. "
-                             "detail says what the step does in words; result what a done step left; error why one "
-                             "failed; target the part of the screen it works on (the point tool's names).",
+                             "active|done|failed|skipped|waiting|blocked (waiting = needs the owner; blocked = cannot go "
+                             "on for another reason, said in detail); at most one active. detail says what the step "
+                             "does in words; result what a done step left; error why one failed; target the part of "
+                             "the screen it works on (the point tool's names). Optional, only when they help: sub, one "
+                             "level of subtasks (the step's progress is how many are done); after, the earlier steps "
+                             "(by number, from 1) a step waits on — the card then draws the plan as a structure.",
               "schema": _schema({"title": _S, "steps": {"type": "array", "items": _schema(
                   {"title": _S, "state": {"type": "string", "enum": list(STEP_STATES)}, "detail": _S,
-                   "target": _S, "result": _S, "error": _S}, ["title", "state"])}}, ["steps"])},
+                   "target": _S, "result": _S, "error": _S,
+                   "sub": {"type": "array", "items": _schema(
+                       {"title": _S, "state": {"type": "string", "enum": list(SUB_STATES)}}, ["title"])},
+                   "after": {"type": "array", "items": {"type": "integer"}}}, ["title", "state"])}}, ["steps"])},
     "run_job": {"fn": t_run_job,
                 "description": "Start one of the application's jobs (or a job of steps); resume=true reruns only "
                                "what the last run did not finish.",

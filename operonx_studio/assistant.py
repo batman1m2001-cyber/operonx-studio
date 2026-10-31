@@ -65,6 +65,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import chat as _chat
+from . import testreport
 from .mcp import check_steps, step_line
 
 __all__ = ["ChatStore", "EFFORTS", "parse_rate", "IMAGE_TYPES", "MAX_ATTACHMENTS", "MAX_ATTACHMENT_BYTES", "MODELS", "MODEL_INFO",
@@ -555,6 +556,7 @@ class Turn:
     text_seq: Optional[int] = None       # the answer block being streamed
     think_seq: Optional[int] = None      # the thinking block being streamed
     tools: Dict[str, int] = field(default_factory=dict)   # tool_use_id → item seq
+    tests: Dict[str, str] = field(default_factory=dict)   # tool_use_id → the test command it runs, whole (D6)
     claude_after: Optional[str] = None
     model: Optional[str] = None           # asked for (an alias), then what the CLI resolved it to
     requested: Optional[str] = None       # the model asked for, as asked
@@ -678,7 +680,7 @@ class Relay:
         now = _now()
         for step in steps:
             stamp = turn.stamps.setdefault(step["title"], {})
-            if step["state"] in ("active", "waiting"):
+            if step["state"] in ("active", "waiting", "blocked"):
                 stamp.setdefault("started", now)
             elif step["state"] in ("done", "failed", "skipped"):
                 stamp.setdefault("ended", now)
@@ -1059,6 +1061,8 @@ class Relay:
                                       **({"plan": plan} if plan else {}))
                     if block.get("id"):
                         turn.tools[block["id"]] = item["seq"]
+                        if name == "Bash" and testreport.is_test(str(inputs.get("command") or "")):
+                            turn.tests[block["id"]] = str(inputs["command"])
                     turn.text_seq = None
                     self._state(turn, "tool", turn.step if plan else label)
             usage = message.get("usage") or {}
@@ -1079,6 +1083,10 @@ class Relay:
                 content = block.get("content")
                 if isinstance(content, list):
                     content = "\n".join(str(c.get("text") or "") for c in content if isinstance(c, dict))
+                # a test run is read whole, before the clip: its summary line sits at the end (D6)
+                report = testreport.parse(turn.tests.pop(block.get("tool_use_id") or "", ""), str(content or ""))
+                if report:
+                    item["tests"] = report
                 item.update(status="error" if block.get("is_error") else "ok", output=_clip(content or ""),
                             ms=round((_now() - float(item.get("t0") or _now())) * 1000))
                 self._replace(turn, item)
