@@ -146,3 +146,20 @@ test("the shell: a heredoc into a plan, sed -i on the matrix, git -c … commit;
   const ans = {kind: "tool", name: "mcp__studio__board_act", status: "running", input: '{"op": "answer", "ref": "Q3", "answer": {"choice": "b", "text": ""}}'};
   assert.equal(C.steps(ans, "start", NOW)[1].press, "qopt:Q3:b");
 });
+
+test("the screen follows the plan: a newly active step's target, then what an ended step left", () => {
+  const plan = (...steps) => ({title: "t", steps: steps.map(([title, state, target]) => ({title, state, ...(target ? {target} : {})}))});
+  const a = plan(["Read", "active", "op:score"], ["Ask", "pending", "q:Q-3"]);
+  // the first plan: go to Flow and ring the op with the step's words
+  assert.deepEqual(C.focus(null, a, NOW), [{go: {tab: "flow"}}, {point: "op:score", words: "Read"}]);
+  // already on Flow: no going
+  assert.deepEqual(C.focus(null, a, {tab: "flow"}), [{point: "op:score", words: "Read"}]);
+  // the same active step again: nothing
+  assert.deepEqual(C.focus(a, a, NOW), []);
+  // it ends, the next needs the owner: ring what it left, then the question
+  const b = plan(["Read", "done", "op:score"], ["Ask", "waiting", "q:Q-3"]);
+  assert.deepEqual(C.focus(a, b, {tab: "project", page: "questions"}),
+    [{point: "op:score", words: "done", soft: true}, {point: "q:Q-3", words: "Ask"}]);
+  // a step with no target moves nothing
+  assert.deepEqual(C.focus(null, plan(["Think", "active"]), NOW), []);
+});

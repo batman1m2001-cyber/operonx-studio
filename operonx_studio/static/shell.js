@@ -753,6 +753,13 @@ document.addEventListener("oxtool", (ev) => {
   Hand.play(Choreo.opSteps(ev.detail.item, ev.detail.phase, ops));
 });
 
+/* The screen follows the assistant's plan: the active step's target (choreo.js focus) */
+document.addEventListener("oxplan", (ev) => {
+  if (typeof Hand === "undefined" || typeof Choreo === "undefined") return;
+  const page = typeof ProjectMode !== "undefined" && ProjectMode.page ? ProjectMode.page() : null;
+  Hand.play(Choreo.focus(ev.detail.before, ev.detail.after, {tab: state.tab, page}));
+});
+
 /* The assistant's own actions, through its hand when the screen follows it
  * (docs/ALIVE_ASSISTANT_PLAN.md D6): the menu's icon pressed, the action,
  * then the thing it is about, ringed. A click of the user's runs performUi

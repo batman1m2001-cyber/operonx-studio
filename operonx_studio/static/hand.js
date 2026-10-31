@@ -103,6 +103,8 @@ const Hand = (() => {
     void ring.offsetWidth;   // restart the ring's arrival
     ring.classList.add("on");
     place();
+    // the progress card names what the hand is on (docs/ASSISTANT_PROGRESS_PLAN.md D5)
+    document.dispatchEvent(new CustomEvent("oxhandpoint", {detail: {target, words}}));
     fade = setTimeout(() => { ring.classList.remove("on"); cursor.classList.remove("on"); lit = litTarget = null; }, LINGER);
   }
 

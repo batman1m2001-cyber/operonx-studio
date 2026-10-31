@@ -205,7 +205,28 @@ const Choreo = (() => {
     return null;
   }
 
-  const api = {steps, changed, planPath, where, opSteps, inputOf};
+  /* the screen follows the plan (docs/ASSISTANT_PROGRESS_PLAN.md D5): a step
+     that ended rings what it worked on; a step that became active goes to
+     its target and rings it with the step's words. `before`/`after` are the
+     plans the steps tool posted (null: none yet). */
+  const short = (t) => (t.length > 40 ? t.slice(0, 39) + "…" : t);
+  function focus(before, after, here) {
+    const was = new Map(((before && before.steps) || []).map((s) => [s.title, s.state]));
+    const out = [];
+    for (const s of (after && after.steps) || []) {
+      if (s.target && was.get(s.title) === "active" && (s.state === "done" || s.state === "failed"))
+        out.push({point: s.target, words: s.state === "done" ? "done" : "failed", soft: true});
+    }
+    const now = ((after && after.steps) || []).find((s) => s.state === "active" || s.state === "waiting");
+    if (now && now.target && was.get(now.title) !== now.state) {
+      const there = where(now.target);
+      if (there && !(here && here.tab === there.tab && (!there.page || here.page === there.page))) out.push({go: there});
+      out.push({point: now.target, words: short(now.title)});
+    }
+    return out;
+  }
+
+  const api = {steps, changed, planPath, where, opSteps, inputOf, focus};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   return api;
 })();

@@ -736,7 +736,167 @@
     return row;
   }
 
+  /* the progress card (docs/ASSISTANT_PROGRESS_PLAN.md D4): the turn's
+     plan as the steps tool last posted it, with the tool calls each step made */
+  const PSTEP = {pending: "Pending", active: "In progress", done: "Completed", failed: "Failed",
+    skipped: "Skipped", waiting: "Needs you"};
+  const P = W.oxProgress;
+
+  function progOf(turn) {
+    if (turn._prog) return turn._prog;
+    const card = el("section", "ax-prog");
+    card.setAttribute("aria-label", "Progress");
+    const title = el("div", "ax-prog-title");
+    const chip = el("span", "ax-prog-chip");
+    const top = el("div", "ax-prog-top");
+    top.append(title, chip);
+    const count = el("span", "ax-prog-count");
+    const pct = el("span", "ax-prog-pct");
+    const meta = el("div", "ax-prog-meta");
+    meta.append(count, pct);
+    const bar = el("div", "ax-prog-bar");
+    const fill = el("span");
+    bar.append(fill);
+    const list = el("ol", "ax-prog-steps");
+    const say = el("div", "ax-sr");
+    say.setAttribute("aria-live", "polite");
+    card.append(top, meta, bar, list, say);
+    turn.querySelector(".ax-reply").prepend(card);
+    const prog = {turn, card, title, chip, count, pct, fill, list, say, plan: null, active: null,
+      auto: null, tools: new Map(), open: new Set(), shut: new Set(), ended: false};
+    card._prog = prog;
+    turn._prog = prog;
+    return prog;
+  }
+
+  function progLive(prog) {
+    const turns = log.querySelectorAll(".ax-turn");
+    return !prog.ended && !!A.running && turns[turns.length - 1] === prog.turn;
+  }
+
+  function takePlan(item) {
+    const prog = progOf(turnEl);
+    // tool calls before the first plan (the fallback's) belong to its first step
+    if (prog.auto && item.plan.steps.length) prog.tools.set(item.plan.steps[0].title, prog.auto);
+    prog.auto = null;
+    const before = prog.plan;
+    prog.plan = item.plan;
+    const now = item.plan.steps.find((s) => s.state === "active" || s.state === "waiting");
+    if ((now ? now.title : null) !== prog.active) A.handOn = null;   // a new step: the hand has not reached it yet
+    prog.active = now ? now.title : null;
+    A.nodes.set(item.seq, prog.card);
+    paintProg(prog);
+    // the screen goes where the active step works (D5): live turns only, not a reload
+    if (progLive(prog)) document.dispatchEvent(new CustomEvent("oxplan", {detail: {before, after: item.plan}}));
+  }
+
+  // what the hand rings now: the focus box names it (D5); a press on the rail is the way there, not the place
+  A.handOn = null;
+  document.addEventListener("oxhandpoint", (ev) => {
+    const t = ev.detail && ev.detail.target;
+    if (!t || /^(tab|page):/.test(t)) return;
+    A.handOn = t;
+    for (const c of log.querySelectorAll(".ax-prog.live")) paintProg(c._prog);
+  });
+
+  function paintProg(prog) {
+    // a plan the assistant posted, or (D3) the steps its tool calls make
+    const steps = prog.plan ? prog.plan.steps : P.fallback(prog.auto.map((q) => A.bySeq.get(q)).filter(Boolean));
+    const live = progLive(prog);
+    const {chip, done, n, pct, say} = P.summary(steps, live);
+    prog.title.textContent = prog.plan ? prog.plan.title || "Plan" : "Steps";
+    prog.chip.textContent = chip[0];
+    prog.chip.className = "ax-prog-chip " + chip[1];
+    prog.count.textContent = `${done} of ${n} steps completed`;
+    prog.pct.textContent = `${pct}%`;
+    prog.fill.style.width = `${pct}%`;
+    prog.card.classList.toggle("live", live);
+    prog.card.classList.toggle("auto", !prog.plan);
+    if (live) { A.progress = pct; askbarPaint(); }
+    prog.list.replaceChildren(...steps.map((step, i) => progStep(prog, step, i, live)));
+    if (say !== prog.said) { prog.said = say; prog.say.textContent = say; }
+  }
+
+  function progStep(prog, step, i, live) {
+    const state = step.state === "active" && !live ? "stopped" : step.state;
+    const li = el("li", "ax-pstep " + state);
+    const dot = el("span", "ax-pstep-dot");
+    if (state === "active") dot.append(el("span", "ax-spin"));
+    else if (state === "done") dot.append(icon("check"));
+    else if (state === "failed") dot.append(icon("x"));
+    else if (state === "waiting") dot.append(icon("alert"));
+    const main = el("div", "ax-pstep-main");
+    const head = el("button", "ax-pstep-head");
+    head.type = "button";
+    const meta = state === "done" && step.ms != null ? `Completed · ${fmt.ms(step.ms)}`
+      : state === "stopped" ? "Stopped" : PSTEP[state];
+    head.append(el("span", "ax-pstep-num", `${i + 1}`), el("span", "ax-pstep-title", step.title),
+      el("span", "ax-pstep-meta", meta));
+    main.append(head);
+    const key = step.key || step.title;
+    const seqs = step.seqs || prog.tools.get(key) || [];
+    if (state === "active") {
+      const focus = el("div", "ax-pstep-focus");
+      const where = P.targetWords(A.handOn || step.target || "");
+      if (where) {
+        const line = el("div", "ax-pstep-where", "Studio is focusing on ");
+        line.append(el("b", null, where));
+        focus.append(line);
+      }
+      if (step.detail) focus.append(el("div", "ax-pstep-detail", step.detail));
+      const now = seqs.map((q) => A.bySeq.get(q)).filter((t) => t && t.kind === "tool" && t.status === "running").pop();
+      if (now) {
+        const tool = el("div", "ax-pstep-now");
+        tool.append(el("span", "ax-spin"), el("span", null, now.label || now.name));
+        focus.append(tool);
+      }
+      if (focus.childNodes.length) main.append(focus);
+    }
+    if (state === "waiting" && step.detail) main.append(el("div", "ax-pstep-ask", step.detail));
+    const hasBody = !!(step.result || step.error || seqs.length || (step.detail && state !== "active" && state !== "waiting"));
+    if (state === "failed" && !prog.shut.has(key)) prog.open.add(key);
+    if (hasBody) {
+      head.classList.add("more");
+      const open = prog.open.has(key);
+      li.classList.toggle("open", open);
+      head.setAttribute("aria-expanded", String(open));
+      head.onclick = () => {
+        if (prog.open.has(key)) { prog.open.delete(key); prog.shut.add(key); }
+        else prog.open.add(key);
+        paintProg(prog);
+      };
+      if (open) {
+        const body = el("div", "ax-pstep-body");
+        if (step.detail && state !== "active" && state !== "waiting") body.append(el("div", "ax-pstep-detail", step.detail));
+        if (step.result) body.append(el("div", "ax-pstep-result", step.result));
+        if (step.error) body.append(el("div", "ax-pstep-error", step.error));
+        for (const q of seqs) { const t = A.bySeq.get(q); if (t) body.append(renderStep(t)); }
+        main.append(body);
+      }
+    }
+    li.append(dot, main);
+    return li;
+  }
+
   function addStep(item) {
+    // a tool belongs to the step that was active when it started
+    let prog = turnEl && turnEl._prog;
+    if (prog && prog.active) {
+      if (!prog.tools.has(prog.active)) prog.tools.set(prog.active, []);
+      prog.tools.get(prog.active).push(item.seq);
+      A.nodes.set(item.seq, prog.card);
+      paintProg(prog);
+      return;
+    }
+    // no plan posted (D3): the page makes one from what the tools did;
+    // loading tools is plumbing, and thinking stays in the activity row
+    if (item.kind === "tool" && item.name !== "ToolSearch" && !(prog && prog.plan)) {
+      prog = progOf(turnEl);
+      (prog.auto = prog.auto || []).push(item.seq);
+      A.nodes.set(item.seq, prog.card);
+      paintProg(prog);
+      return;
+    }
     if (!actEl) {
       actEl = el("div", "ax-act");
       const h = el("button", "ax-act-head");
@@ -911,6 +1071,7 @@
     A.bySeq.set(item.seq, item);
     if (item.kind === "user") { newTurn(item); return; }
     if (!replyEl) newTurn(null);
+    if (item.kind === "tool" && item.plan) { takePlan(item); return; }
     if (item.kind === "tool" || item.kind === "thinking") { addStep(item); return; }
     if (item.kind !== "turn_end") actEl = null;
     let node;
@@ -927,6 +1088,7 @@
       switchDivider(item);
       node = renderEnd(item);
       for (const g of replyEl.querySelectorAll(".ax-act")) paintActivity(g);
+      if (turnEl && turnEl._prog) { turnEl._prog.ended = true; paintProg(turnEl._prog); }
       actEl = null;
     } else return;
     replyEl.append(node);
@@ -938,6 +1100,7 @@
     Object.assign(old, item);
     const node = A.nodes.get(item.seq);
     if (!node) return;
+    if (node._prog) { paintProg(node._prog); return; }
     if (item.kind === "tool" || item.kind === "thinking") {
       const row = renderStep(old);
       row._group = node._group;
@@ -1792,7 +1955,7 @@
 
   function applyEvent(ev) {
     const r = A.running;
-    if (ev.t === "state" && r) { r.state = ev.state; r.detail = ev.detail || ""; paintStatus(); }
+    if (ev.t === "state" && r) { r.state = ev.state; r.detail = ev.detail || ""; r.step = ev.step || ""; paintStatus(); askbarPaint(); }
     else if (ev.t === "item") {
       const it = ev.item;
       const stick = nearBottom();
@@ -1893,6 +2056,8 @@
     paintHead();
     markLast();
     for (const g of log.querySelectorAll(".ax-act.live")) paintActivity(g);
+    for (const c of log.querySelectorAll(".ax-prog.live")) paintProg(c._prog);
+    A.progress = A.handOn = null;
     if (r && A.session) {
       A.lastEnded.add(r.id);
       // the title may have been named by the model by now
@@ -1934,7 +2099,8 @@
     if (!r) return;
     const words = {starting: "Starting", thinking: "Thinking", writing: "Writing", compacting: "Compacting the conversation",
       stopping: "Stopping"};
-    statusText.textContent = r.state === "tool" && r.detail ? r.detail : `${words[r.state] || "Working"}…`;
+    statusText.textContent = r.step && /^(thinking|tool|writing)$/.test(r.state) ? r.step
+      : r.state === "tool" && r.detail ? r.detail : `${words[r.state] || "Working"}…`;
     statusTime.textContent = fmt.secs((Date.now() - r.t0) / 1000);
   }
 
@@ -2700,8 +2866,11 @@
   askbar.append(icon("spark"), askText);
 
   function askbarPaint() {
+    const step = A.running && A.running.step;
     askbar.classList.toggle("busy", !!A.running);
-    askText.textContent = A.running ? "The assistant is working…" : "Ask the assistant…";
+    askbar.classList.toggle("stepped", !!step);
+    askbar.style.setProperty("--ax-prog", `${A.progress || 0}%`);
+    askText.textContent = step || (A.running ? "The assistant is working…" : "Ask the assistant…");
   }
 
   const placement = {
