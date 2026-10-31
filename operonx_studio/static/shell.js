@@ -641,6 +641,8 @@ async function load(first) {
   // which ops' code changed since the last extraction — the canvas
   // outlines them for a while, so an edit (the assistant's or anyone's)
   // shows where it landed
+  const drawn = (it) => it && JSON.stringify([it.node.code, it.node.inputs]);
+  const selWas = state.sel && state.rendered && drawn(state.rendered.get(state.sel));
   if (state.ir && !first) {
     const codeOf = (ir) => {
       const m = new Map();
@@ -681,6 +683,15 @@ async function load(first) {
   if (state.graph) pick.value = state.graph.name;
   $("#btn-project").title = `${data.graphs.length} operons · ${(data.services || []).length} services · ${(data.jobs || []).length} jobs`;
   render();
+  // the open inspector is drawn on select: the op's code or settings changed, it is drawn again, so an edited
+  // field shows its new value with the old one struck (configure.js changed)
+  const sel = state.sel && state.rendered.get(state.sel);
+  if (sel && selWas && drawn(sel) !== selWas && !$("#inspector").hidden) {
+    const top = $("#inspector").scrollTop;
+    state.sel = null;
+    select(sel.key);
+    $("#inspector").scrollTop = top;
+  }
   // opened on a hidden canvas (the assistant in focus): fit it when it shows
   if (first) { if (state.renderPending) state.viewPending = true; else initView(); }
   pushView();
@@ -753,8 +764,26 @@ document.addEventListener("oxtool", (ev) => {
   Hand.play(handSteps(Choreo.opSteps(ev.detail.item, ev.detail.phase, ops)));
 });
 
-/* choreo's `select` (an op whose field is next): the op selected on the canvas, its inspector open */
-const handSteps = (steps) => steps.map((s) => (s.select ? {run: () => performUi("select_op", {op: s.select})} : s));
+/* choreo's `select` (an op whose field is next): a glance — the op selected, its inspector open, the field
+ * rung, then the panel as it was, so the turn's progress card stays in view (ASSISTANT_PROGRESS_PLAN P7) */
+function handSteps(steps) {
+  const out = [];
+  const stamp = state.stamp;
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (!s.select) { out.push(s); continue; }
+    let was = null;
+    out.push({run: async () => {
+      // `fresh`: the edit has landed, the field shows once the code is read again (the pulse, a few seconds)
+      for (const t0 = Date.now(); s.fresh && state.stamp === stamp && Date.now() - t0 < 6000;) await new Promise((r) => setTimeout(r, 120));
+      was = panelState();
+      return performUi("select_op", {op: s.select});
+    }});
+    if (i + 1 < steps.length) out.push(steps[++i]);
+    out.push({run: () => { if (was && !was.on) hideSide(); else if (was && was.tab !== "inspect") showSide(was.tab); }});
+  }
+  return out;
+}
 
 /* The screen follows the assistant's plan: the active step's target (choreo.js focus) */
 document.addEventListener("oxplan", (ev) => {

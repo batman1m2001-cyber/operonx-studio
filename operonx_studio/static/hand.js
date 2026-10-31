@@ -86,7 +86,8 @@ const Hand = (() => {
 
   function place() {
     if (lit && !visible(lit) && litTarget) lit = find(litTarget);
-    if (!lit || !visible(lit)) { ring.classList.remove("on"); return; }
+    // its element went (a tab switched back): gone at once, not fading where the element was
+    if (!lit || !visible(lit)) { ring.style.transition = "none"; ring.classList.remove("on"); return; }
     const r = lit.getBoundingClientRect();
     Object.assign(ring.style, {left: `${r.left - 4}px`, top: `${r.top - 4}px`, width: `${r.width + 8}px`, height: `${r.height + 8}px`});
     // a small element (an icon in a bar) keeps its words beside it, not cut off above it
@@ -95,6 +96,7 @@ const Hand = (() => {
   }
   function light(n, target, words) {
     clearTimeout(fade);
+    ring.style.transition = "";
     lit = n;
     litTarget = target;
     label.textContent = words || "";

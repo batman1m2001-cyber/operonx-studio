@@ -1,6 +1,6 @@
 # The assistant works on screen: steps and focus (ASSISTANT_PROGRESS_PLAN)
 
-Status: planned 2026-10-30, not started. Estimate ~4 h for P1–P7.
+Status: done 2026-10-31 (P1–P7; live gate passed on a Sonnet turn).
 
 Owner's brief: "Task-Aware Interactive UI & Visual Execution Progress" — the
 assistant is an operator working inside the studio, not a chat widget: the
@@ -128,7 +128,7 @@ transition. The user's own click still stops the hand for the turn
 | P4 | the fallback (D3): steps grouped from tool calls when no plan was posted; node tests | 30 min |
 | P5 | sync (D5): `Choreo.focus`, `oxhandpoint`, the end-of-step ring; node tests | 30 min |
 | P6 | finer targets (D6): `card:`, `field:`, `setting:` names; inspector opens and rings the field; the field's change highlight; choreo for `board_card`/`board_act` and op edits | 45 min |
-| P7 | live gate on the scratch studio: a Sonnet turn that plans and edits an op, shot at 1440 and 390 wide, mid-turn and done, light and dark, compared with the reference | 25 min |
+| P7 | done 2026-10-31 — live gate on the scratch studio: a Sonnet turn that plans and edits an op, shot at 1440 and 390 wide, mid-turn and done, light and dark, compared with the reference | 25 min |
 
 ## Gates
 

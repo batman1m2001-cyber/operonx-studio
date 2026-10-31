@@ -201,14 +201,17 @@ const Choreo = (() => {
     if (!mine.length) return [];
     const text = `${input.old_string || ""}\n${input.new_string || ""}\n${input.content || ""}`;
     const touched = mine.filter((o) => new RegExp(`\\bdef ${o.fn || o.name}\\(`).test(text));
-    const op = touched[0] || (mine.length === 1 ? mine[0] : null);
+    // or its call site in the graph (`fields = unpack(item=…, max_chars=500)`): the binding names the op
+    const bound = mine.filter((o) => new RegExp(`\\b${o.name}\\s*=\\s*${o.fn || o.name}\\(`).test(text));
+    const op = touched[0] || bound[0] || (mine.length === 1 ? mine[0] : null);
     if (!op) return [];
     // a setting the edit changes (`param=value`): the op is selected, its inspector shows the field (D6)
     const param = changedParams(`${input.old_string || ""}`, `${input.new_string || ""}${input.content || ""}`, op.params)[0];
     if (param && phase === "start") {
-      return [{point: `op:${op.name}`, words: "editing"}, {select: op.name}, {point: `field:${op.name}/${param}`, words: "editing"}];
+      return [{point: `op:${op.name}`, words: "editing"}, {select: op.name}, {point: `field:${op.name}/${param}`, words: "editing", or: `op:${op.name}`}];
     }
-    if (param) return [{point: `field:${op.name}/${param}`, words: "saved", soft: true, or: `op:${op.name}`}];
+    // ended: once the studio has re-read the code (`fresh`), the field again — its new value, the old one struck
+    if (param) return [{select: op.name, fresh: true}, {point: `field:${op.name}/${param}`, words: "saved", or: `op:${op.name}`}];
     return phase === "start" ? [{point: `op:${op.name}`, words: "editing"}] : [{point: `op:${op.name}`, words: "saved", soft: true}];
   }
 
@@ -257,7 +260,7 @@ const Choreo = (() => {
       if (there && !(here && here.tab === there.tab && (!there.page || here.page === there.page))) out.push({go: there});
       const field = /^field:([^/]+)\//.exec(now.target);
       if (field) out.push({select: field[1]});
-      out.push({point: now.target, words: short(now.title)});
+      out.push({point: now.target, words: short(now.title), ...(field ? {or: `op:${field[1]}`} : {})});
     }
     return out;
   }

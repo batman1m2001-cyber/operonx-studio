@@ -232,6 +232,7 @@ const Configure = (() => {
       const more = el("details", "cf-more");
       more.append(el("summary", null, `${unset.length} left at their default`));
       for (const inp of [...quiet, ...unset.filter(i => QUIET.has(i.name))]) more.append(field(n, inp, graphName));
+      if (more.querySelector(".cf-changed")) more.open = true;   // an edit just landed in it: shown, not folded
       sec.append(more);
     }
     if (!set.length && !unset.length) sec.append(el("div", "note", "Every input is wired: nothing to set here."));
