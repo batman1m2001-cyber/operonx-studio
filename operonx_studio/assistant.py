@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import chat as _chat
+from .mcp import check_steps, step_line
 
 __all__ = ["ChatStore", "EFFORTS", "parse_rate", "IMAGE_TYPES", "MAX_ATTACHMENTS", "MAX_ATTACHMENT_BYTES", "MODELS", "MODEL_INFO",
            "Relay", "title_from", "valid_model"]
@@ -559,6 +560,8 @@ class Turn:
     reach: Optional[str] = None           # read | edit | full for this turn; None: the studio's (a viewer: read)
     deny: List[str] = field(default_factory=list)     # --disallowedTools rules (a viewer's)
     on_end: List[Any] = field(default_factory=list)       # called once the turn has ended
+    stamps: Dict[str, Dict[str, float]] = field(default_factory=dict)  # step title → {started, ended}
+    step: str = ""                        # "Step 3 of 5 · <title>", the status line's words
 
 
 def _tool_label(name: str, inputs: Dict[str, Any], cwd: Optional[str] = None) -> str:
@@ -649,7 +652,29 @@ class Relay:
         if turn.state == state and not detail:
             return
         turn.state = state
-        self._emit(turn, {"t": "state", "state": state, "detail": detail})
+        self._emit(turn, {"t": "state", "state": state, "detail": detail, **({"step": turn.step} if turn.step else {})})
+
+    def _plan(self, turn: Turn, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """A ``steps`` call's list, stamped (docs/ASSISTANT_PROGRESS_PLAN.md D1):
+        a step starts the first time it is seen active and ends the first time
+        it is seen finished, so a block can say "Completed · 2.1 s"."""
+        try:
+            steps = check_steps(inputs)
+        except ValueError:
+            return None       # the tool answers the model with what is wrong
+        now = _now()
+        for step in steps:
+            stamp = turn.stamps.setdefault(step["title"], {})
+            if step["state"] in ("active", "waiting"):
+                stamp.setdefault("started", now)
+            elif step["state"] in ("done", "failed", "skipped"):
+                stamp.setdefault("ended", now)
+            step.update(stamp)
+            if "started" in stamp and "ended" in stamp:
+                step["ms"] = round((stamp["ended"] - stamp["started"]) * 1000)
+        line = step_line(steps)
+        turn.step = line[0].upper() + line[1:].replace(": ", " · ", 1) if line.startswith("step ") else ""
+        return {"title": str(inputs.get("title") or ""), "steps": steps}
 
     def _flush(self, turn: Turn, force: bool = False) -> None:
         now = time.monotonic()
@@ -1000,12 +1025,14 @@ class Relay:
                     name = block.get("name") or "tool"
                     inputs = block.get("input") or {}
                     label = _tool_label(name, inputs, turn.cwd)
+                    plan = self._plan(turn, inputs) if name == "mcp__studio__steps" else None
                     item = self._item(turn, "tool", id=block.get("id"), name=name, label=label,
-                                      input=_clip(inputs), status="running", t0=_now())
+                                      input=_clip(inputs), status="running", t0=_now(),
+                                      **({"plan": plan} if plan else {}))
                     if block.get("id"):
                         turn.tools[block["id"]] = item["seq"]
                     turn.text_seq = None
-                    self._state(turn, "tool", label)
+                    self._state(turn, "tool", turn.step if plan else label)
             usage = message.get("usage") or {}
             if usage:
                 ctx = sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
@@ -1027,7 +1054,7 @@ class Relay:
                 item.update(status="error" if block.get("is_error") else "ok", output=_clip(content or ""),
                             ms=round((_now() - float(item.get("t0") or _now())) * 1000))
                 self._replace(turn, item)
-            self._state(turn, "thinking")
+            self._state(turn, "thinking", turn.step)
             return False
         if kind == "result":
             turn.claude_after = event.get("session_id") or turn.claude_after

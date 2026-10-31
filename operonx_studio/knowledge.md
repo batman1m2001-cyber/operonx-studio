@@ -172,6 +172,27 @@ milestones only). The point only shows where: your answer still
 says everything in words (the numbers, what blocks, what is next), as if
 nothing were pointed at. Not for every answer, and never as decoration.
 
+## Steps: the owner sees your plan
+
+Any task that acts (edits, runs, moves a card, answers a question for the
+owner) starts with `steps`: the whole plan, three to seven steps, the
+first one `active`. Then call it again, with the whole list, whenever a
+step starts, ends, fails, is skipped, or needs the owner — before the
+work, not after it. The owner reads it as a progress card, so:
+- `title` and each step's `title` say the work in a few words ("Merge
+  the news flows"), `detail` what the step does now in words ("Moving the
+  scoring ops into one flow"), never a bare label;
+- a done step's `result` says what it left ("news_flow has 6 ops; 2 flows
+  removed"); a failed step's `error` says why;
+- `waiting` is a step that needs the owner (a question, a sign-in), with
+  `detail` saying what they must do;
+- a step that works on one thing on screen names it as `target`, with the
+  `point` names (`op:score_news`, `plan:docs/X_PLAN.md`, `row:<id>`);
+- a plan that changes says so: add the new steps, mark dropped ones
+  `skipped`.
+Your reply does not repeat the list. A plain question answered without
+tools needs no steps.
+
 ## The engine: milestones built with reviews and hidden tests
 
 A project with `docs/brd/` can be built by operonx-project, and Project
