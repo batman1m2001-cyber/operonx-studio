@@ -136,6 +136,17 @@
 
   /* ── markdown, safely ─────────────────────────────────────────────── */
 
+  const B = W.oxBlocks;
+  // what a registered block draws with (static/blocks.js): the page's own helpers
+  const ctx = {
+    el, icon, fmt, inline, copyText, toast, PROJECT,
+    codeBlock: (...a) => codeBlock(...a),
+    md: (...a) => md(...a),
+    studioLink: (...a) => studioLink(...a),
+    status: (k) => B.status(k),
+    get A() { return A; },
+  };
+
   const LINK_ICON = {run: "list", op: "graph", tab: "right", monitor: "chart", eval: "evals", project: "folder"};
 
   function studioLink(label, href) {
@@ -273,6 +284,20 @@
   const isBlockStart = (line) => /^\s*`{3,}[^`]*$/.test(line) || /^#{1,4}\s/.test(line) || /^\s*>/.test(line)
     || /^\s*([-*+]|\d+[.)])\s+/.test(line) || /^\s*([-*_])(\s*\1){2,}\s*$/.test(line);
 
+  // > [!WARNING] title: a thin rule in the status colour, an icon, the body as markdown (D3)
+  function callout(c) {
+    const st = B.status(c.kind);
+    const box = el("div", `ax-callout st-${st.tone}`);
+    box.setAttribute("role", c.kind === "error" || c.kind === "warning" ? "alert" : "note");
+    const head = el("div", "ax-callout-head");
+    head.append(icon(st.icon));
+    inline(head, c.title);
+    const bodyEl = el("div", "ax-callout-body");
+    md(bodyEl, c.body);
+    box.append(head, bodyEl);
+    return box;
+  }
+
   function md(target, text) {
     target.textContent = "";
     const lines = String(text || "").replace(/\r/g, "").split("\n");
@@ -287,9 +312,12 @@
         const body = [];
         i += 1;
         while (i < lines.length && !close.test(lines[i])) body.push(lines[i++]);
+        const closed = i < lines.length;
         i += 1;   // the closing fence (absent while streaming: the block so far)
         const [lang, ...name] = fence[2].trim().split(/\s+/);
-        target.append(codeBlock(lang, body.join("\n"), {name: name.join(" ")}));
+        // a language a block registered (ox-graph, …) is drawn by it (VISUAL_CHAT_PLAN D2)
+        const drawn = lang && B && B.has(lang) ? B.fence(lang, body.join("\n"), closed, ctx) : null;
+        target.append(drawn || codeBlock(lang, body.join("\n"), {name: name.join(" ")}));
         continue;
       }
       if (!line.trim()) { i += 1; continue; }
@@ -306,6 +334,8 @@
         const q = el("blockquote");
         const body = [];
         while (i < lines.length && /^\s*>/.test(lines[i])) body.push(lines[i++].replace(/^\s*>\s?/, ""));
+        const c = B && B.callout(body);
+        if (c) { target.append(callout(c)); continue; }
         md(q, body.join("\n"));
         target.append(q);
         continue;
@@ -696,11 +726,11 @@
   }
 
   function renderStep(item) {
-    const row = el("div", "ax-step" + (item.status === "error" ? " bad" : ""));
+    const row = el("div", "ax-step" + (item.status === "error" ? " bad st-err" : ""));
     const top = el("button", "ax-step-head");
     top.type = "button";
     const state = item.status === "running" || (item.kind === "thinking" && item.ms == null)
-      ? el("span", "ax-spin") : icon(item.status === "error" ? "alert" : stepIcon(item));
+      ? el("span", "ax-spin") : icon(item.status === "error" ? B.status("error").icon : stepIcon(item));
     const label = el("span", "ax-step-label");
     // a label recorded with an absolute path inside the project reads relative
     const cwd = A.agent && A.agent.cwd ? A.agent.cwd.replace(/\/$/, "") + "/" : null;
@@ -738,8 +768,6 @@
 
   /* the progress card (docs/ASSISTANT_PROGRESS_PLAN.md D4): the turn's
      plan as the steps tool last posted it, with the tool calls each step made */
-  const PSTEP = {pending: "Pending", active: "In progress", done: "Completed", failed: "Failed",
-    skipped: "Skipped", waiting: "Needs you"};
   const P = W.oxProgress;
 
   function progOf(turn) {
@@ -806,7 +834,7 @@
     const {chip, done, n, pct, say} = P.summary(steps, live);
     prog.title.textContent = prog.plan ? prog.plan.title || "Plan" : "Steps";
     prog.chip.textContent = chip[0];
-    prog.chip.className = "ax-prog-chip " + chip[1];
+    prog.chip.className = "ax-prog-chip st-" + chip[1];
     prog.count.textContent = `${done} of ${n} steps completed`;
     prog.pct.textContent = `${pct}%`;
     prog.fill.style.width = `${pct}%`;
@@ -819,17 +847,15 @@
 
   function progStep(prog, step, i, live) {
     const state = step.state === "active" && !live ? "stopped" : step.state;
-    const li = el("li", "ax-pstep " + state);
+    const st = B.status(state);
+    const li = el("li", `ax-pstep ${state} st-${st.tone}`);
     const dot = el("span", "ax-pstep-dot");
-    if (state === "active") dot.append(el("span", "ax-spin"));
-    else if (state === "done") dot.append(icon("check"));
-    else if (state === "failed") dot.append(icon("x"));
-    else if (state === "waiting") dot.append(icon("alert"));
+    dot.append(st.spin ? el("span", "ax-spin") : icon(st.icon));
     const main = el("div", "ax-pstep-main");
     const head = el("button", "ax-pstep-head");
     head.type = "button";
     const meta = state === "done" && step.ms != null ? `Completed · ${fmt.ms(step.ms)}`
-      : state === "stopped" ? "Stopped" : PSTEP[state];
+      : st.word;
     head.append(el("span", "ax-pstep-num", `${i + 1}`), el("span", "ax-pstep-title", step.title),
       el("span", "ax-pstep-meta", meta));
     main.append(head);
@@ -1005,9 +1031,9 @@
   }
 
   function renderError(item) {
-    const card = el("div", "ax-card ax-error");
+    const card = el("div", "ax-card ax-error st-err");
     const top = el("div", "ax-card-head");
-    top.append(icon("alert"), el("span", null, (item.text || "Something went wrong").split("\n")[0].slice(0, 300)));
+    top.append(icon(B.status("fatal").icon), el("span", null, (item.text || "Something went wrong").split("\n")[0].slice(0, 300)));
     card.append(top);
     const more = String(item.text || "");
     if (more.includes("\n") || more.length > 300) {
@@ -1074,8 +1100,10 @@
     if (item.kind === "tool" && item.plan) { takePlan(item); return; }
     if (item.kind === "tool" || item.kind === "thinking") { addStep(item); return; }
     if (item.kind !== "turn_end") actEl = null;
-    let node;
-    if (item.kind === "text") node = renderText(item);
+    // a kind a block registered is drawn by it (VISUAL_CHAT_PLAN D2)
+    let node = B && B.has("item:" + item.kind) ? B.item(item.kind, item, ctx) : null;
+    if (node) A.nodes.set(item.seq, node);
+    else if (item.kind === "text") node = renderText(item);
     else if (item.kind === "changes") node = renderChanges(item);
     else if (item.kind === "error") node = renderError(item);
     else if (item.kind === "compact") {
@@ -1107,6 +1135,10 @@
       node.replaceWith(row);
       A.nodes.set(item.seq, row);
       if (row._group) paintActivity(row._group);
+    } else if (B && B.has("item:" + item.kind)) {
+      const fresh = B.item(item.kind, old, ctx);
+      node.replaceWith(fresh);
+      A.nodes.set(item.seq, fresh);
     } else if (item.kind === "changes") node.replaceWith(renderChanges(old));
     else if (item.kind === "text") md(node, old.text || "");
   }

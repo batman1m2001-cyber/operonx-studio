@@ -63,6 +63,16 @@
   --err: #c93a30;
   --err-soft: #fdeeec;
   --info: #2f6fd0;
+  /* the assistant's one status vocabulary (VISUAL_CHAT_PLAN D3): blocks.js
+     status(kind) names the tone; .st-<tone> sets --st / --st-soft for a block */
+  --st-ok: var(--ok); --st-ok-soft: var(--ok-soft);
+  --st-warn: var(--warn); --st-warn-soft: var(--warn-soft);
+  --st-err: var(--err); --st-err-soft: var(--err-soft);
+  --st-run: var(--accent-strong); --st-run-soft: var(--accent-soft);
+  --st-pending: var(--text-3); --st-pending-soft: var(--surface-3);
+  --st-blocked: #a3366a; --st-blocked-soft: #fbedf4;
+  --st-skip: var(--text-3); --st-skip-soft: var(--surface-2);
+  --st-info: var(--info); --st-info-soft: var(--signal-soft);
   --sel: #eaf2fe;
   --sel-line: #3b86e0;
 
@@ -2328,6 +2338,26 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-text h4.ax-h, .ax-text h5.ax-h, .ax-text h6.ax-h { font-size: 1em; }
 .ax-text > .ax-h:first-child { margin-top: 0; }
 .ax-text blockquote { margin: 0 0 .65em; padding: 1px 0 1px 12px; border-left: 3px solid var(--border-strong); color: var(--text-2); }
+/* a status names its tone; a block reads --st / --st-soft (VISUAL_CHAT_PLAN D3) */
+.st-ok { --st: var(--st-ok); --st-soft: var(--st-ok-soft); }
+.st-warn { --st: var(--st-warn); --st-soft: var(--st-warn-soft); }
+.st-err { --st: var(--st-err); --st-soft: var(--st-err-soft); }
+.st-run { --st: var(--st-run); --st-soft: var(--st-run-soft); }
+.st-pending { --st: var(--st-pending); --st-soft: var(--st-pending-soft); }
+.st-blocked { --st: var(--st-blocked); --st-soft: var(--st-blocked-soft); }
+.st-skip { --st: var(--st-skip); --st-soft: var(--st-skip-soft); }
+.st-info { --st: var(--st-info); --st-soft: var(--st-info-soft); }
+/* a callout: > [!WARNING] — a thin rule in the status colour and an icon, not a card */
+.ax-callout { margin: 0 0 .75em; padding: 1px 0 1px 12px; border-left: 2px solid var(--st); }
+.ax-callout-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; color: var(--st); font-weight: 600; }
+.ax-callout-head .icon { width: 14px; height: 14px; flex: none; }
+.ax-callout-body > :last-child { margin-bottom: 0; }
+/* a registered block: its placeholder while the fence streams, its fallback when it cannot be drawn */
+.ax-blk-wait { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 96px; margin: 0 0 .65em;
+  border-radius: var(--r-md); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-sm); }
+.ax-blk-fail { margin: 0 0 .65em; }
+.ax-blk-fail .ax-code { margin-bottom: 0; }
+.ax-blk-why { margin-top: 4px; color: var(--text-3); font-size: var(--fs-sm); }
 .ax-text hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
 .ax-text a { color: var(--signal-strong); text-decoration: underline; text-underline-offset: 2px; }
 .ax-table { overflow-x: auto; margin: 0 0 .7em; border-radius: var(--r-sm); }
@@ -2373,9 +2403,9 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   padding: 0 10px; border: none; border-radius: 0; background: none; color: var(--text-2); font-size: var(--fs-md);
   font-weight: 450; text-align: left; }
 .ax-act-head:hover { color: var(--text); background: var(--surface-3); border: none; }
-.ax-act-ico { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--ok); }
+.ax-act-ico { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--st-ok); }
 .ax-act-ico .icon { width: 15px; height: 15px; }
-.ax-act.warned .ax-act-time { color: var(--warn); }
+.ax-act.warned .ax-act-time { color: var(--st-warn); }
 .ax-act-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-act.live .ax-act-sum { color: var(--text); }
 .ax-act-time { color: var(--text-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
@@ -2389,7 +2419,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-step-head.more { cursor: pointer; }
 .ax-step-head.more:hover { background: var(--surface-2); color: var(--text); }
 .ax-step-head .icon { width: 14px; height: 14px; color: var(--text-3); }
-.ax-step.bad .ax-step-head .icon { color: var(--err); }
+.ax-step.bad .ax-step-head .icon { color: var(--st-err); }
 .ax-step-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-step-label code { font: 11.5px var(--mono); color: var(--text); }
 .ax-step-ms { color: var(--text-3); font-variant-numeric: tabular-nums; }
@@ -2411,10 +2441,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-prog-chip { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
   background: var(--surface-2); color: var(--text-2); }
-.ax-prog-chip.run { background: var(--accent-soft); color: var(--accent-strong); }
-.ax-prog-chip.ok { background: var(--ok-soft); color: var(--ok); }
-.ax-prog-chip.warn { background: var(--warn-soft); color: var(--warn); }
-.ax-prog-chip.bad { background: var(--err-soft); color: var(--err); }
+.ax-prog-chip { background: var(--st-soft, var(--surface-2)); color: var(--st, var(--text-2)); }
 .ax-prog-meta { display: flex; justify-content: space-between; margin: 6px 0 5px; font-size: var(--fs-sm); color: var(--text-3);
   font-variant-numeric: tabular-nums; }
 .ax-prog-bar { height: 4px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
@@ -2424,21 +2451,17 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-pstep { position: relative; display: flex; gap: 10px; padding-bottom: 6px; }
 .ax-pstep:not(:last-child)::before { content: ""; position: absolute; left: 9px; top: 22px; bottom: 0; width: 2px;
   background: var(--line); }
-.ax-pstep.done:not(:last-child)::before { background: var(--accent); }
+.ax-pstep.done:not(:last-child)::before { background: var(--st); }
 .ax-pstep-dot { flex: none; width: 20px; height: 20px; margin-top: 4px; border-radius: 50%; display: inline-flex;
   align-items: center; justify-content: center; background: var(--surface-3); color: var(--text-3);
   transition: background .2s ease, color .2s ease; }
 .ax-pstep-dot .icon { width: 12px; height: 12px; }
-.ax-pstep.pending .ax-pstep-dot::after, .ax-pstep.skipped .ax-pstep-dot::after, .ax-pstep.stopped .ax-pstep-dot::after {
-  content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
-.ax-pstep.done .ax-pstep-dot { background: var(--accent); color: var(--on-accent); }
-.ax-pstep.active .ax-pstep-dot { background: var(--accent-soft); }
-.ax-pstep.failed .ax-pstep-dot { background: var(--err); color: #fff; }
-.ax-pstep.waiting .ax-pstep-dot { background: var(--warn-soft); color: var(--warn); }
+.ax-pstep-dot { background: var(--st-soft); color: var(--st); }
+.ax-pstep.pending .ax-pstep-dot .icon, .ax-pstep.stopped .ax-pstep-dot .icon { width: 8px; height: 8px; }
+.ax-pstep.done .ax-pstep-dot, .ax-pstep.failed .ax-pstep-dot { background: var(--st); color: var(--on-fill); }
 .ax-pstep-main { flex: 1; min-width: 0; border-radius: var(--r-md); transition: background .2s ease; }
-.ax-pstep.active .ax-pstep-main { background: var(--accent-soft); padding-bottom: 8px; }
-.ax-pstep.waiting .ax-pstep-main { background: var(--warn-soft); padding-bottom: 8px; }
-.ax-pstep.failed .ax-pstep-main { background: var(--err-soft); }
+.ax-pstep:is(.active, .waiting, .blocked) .ax-pstep-main { background: var(--st-soft); padding-bottom: 8px; }
+.ax-pstep.failed .ax-pstep-main { background: var(--st-soft); }
 .ax-pstep-head { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 3px 8px;
   border: none; border-radius: var(--r-md); background: none; font-size: var(--fs-md); font-weight: 450; color: var(--text);
   text-align: left; cursor: default; }
@@ -2449,9 +2472,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-pstep-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-pstep.open .ax-pstep-title, .ax-pstep.active .ax-pstep-title { white-space: normal; }
 .ax-pstep-meta { flex: none; color: var(--text-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
-.ax-pstep.active .ax-pstep-meta { color: var(--accent-strong); font-weight: 600; }
-.ax-pstep.waiting .ax-pstep-meta { color: var(--warn); font-weight: 600; }
-.ax-pstep.failed .ax-pstep-meta { color: var(--err); font-weight: 600; }
+.ax-pstep:is(.active, .waiting, .failed, .blocked) .ax-pstep-meta { color: var(--st); font-weight: 600; }
 .ax-pstep.pending .ax-pstep-title, .ax-pstep.stopped .ax-pstep-title { color: var(--text-2); }
 .ax-pstep.skipped .ax-pstep-title { color: var(--text-3); text-decoration: line-through; }
 .ax-pstep-focus { margin: 2px 8px 0; padding: 8px 10px; border-radius: var(--r-md); background: var(--surface);
@@ -2461,10 +2482,10 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-pstep-focus .ax-pstep-detail { margin-top: 2px; }
 .ax-pstep-now { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--text-3); font-family: var(--mono);
   font-size: 11.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.ax-pstep-ask { margin: 0 8px; font-size: var(--fs-sm); color: var(--warn); }
+.ax-pstep-ask { margin: 0 8px; font-size: var(--fs-sm); color: var(--st); }
 .ax-pstep-body { padding: 2px 8px 8px; display: grid; gap: 4px; }
-.ax-pstep-result { font-size: var(--fs-sm); color: var(--ok); }
-.ax-pstep-error { font-size: var(--fs-sm); color: var(--err); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ax-pstep-result { font-size: var(--fs-sm); color: var(--st-ok); }
+.ax-pstep-error { font-size: var(--fs-sm); color: var(--st-err); white-space: pre-wrap; overflow-wrap: anywhere; }
 .ax-pstep-body .ax-step { border-radius: var(--r-sm); background: var(--surface); }
 .ax-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
@@ -2499,9 +2520,9 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-diff .hunk { color: var(--text-3); }
 .ax-diff .file { font-weight: 600; color: var(--text); margin-top: 6px; }
 .ax-diff .file:first-child { margin-top: 0; }
-.ax-error { background: var(--err-soft); }
+.ax-error { background: var(--st-err-soft); }
 .ax-error .ax-card-head { align-items: flex-start; }
-.ax-error .ax-card-head .icon { color: var(--err); margin-top: 2px; }
+.ax-error .ax-card-head .icon { color: var(--st-err); margin-top: 2px; }
 .ax-error .ax-card-head span { color: var(--ink-red39); overflow-wrap: anywhere; }
 .ax-flow { border-color: var(--line-blue56-a28); background: var(--signal-soft); }
 .ax-flow .ax-card-head .icon { color: var(--signal); }
@@ -4919,7 +4940,7 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 /* B2 cards: the same tint */
 .ax-card, .ax-start, .xpcard, .xpwhy:not(.warn):not(.bad), .xpgroup, .evds, .kbtext, .kbinspect,
 .kbchunkrow, .kbhit, .kbcite-row { background: var(--card); --well: var(--surface); }
-.ax-error { background: var(--err-soft); }
+.ax-error { background: var(--st-err-soft); }
 
 /* ── a run's Workflow: the canvas and the step it is on ────────────────
    The step panel is always beside the canvas (a sheet on a phone): what

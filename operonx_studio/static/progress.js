@@ -20,9 +20,11 @@ const oxProgress = (() => {
     const n = steps.length;
     const done = steps.filter((s) => s.state === "done").length;
     const finished = steps.filter((s) => s.state === "done" || s.state === "skipped").length;
-    const chip = steps.some((s) => s.state === "failed") ? ["Failed", "bad"]
+    // [word, tone]: the tone is blocks.js status()'s (VISUAL_CHAT_PLAN D3)
+    const chip = steps.some((s) => s.state === "failed") ? ["Failed", "err"]
       : steps.some((s) => s.state === "waiting") ? ["Needs you", "warn"]
-      : n && finished === n ? ["Completed", "ok"] : live ? ["Executing", "run"] : ["Stopped", "off"];
+      : steps.some((s) => s.state === "blocked") ? ["Blocked", "blocked"]
+      : n && finished === n ? ["Completed", "ok"] : live ? ["Executing", "run"] : ["Stopped", "pending"];
     const at = steps.findIndex((s) => s.state === "active" || s.state === "waiting");
     return {chip, done, n, pct: n ? Math.round(finished / n * 100) : 0,
       say: at >= 0 ? `Step ${at + 1} of ${n}: ${steps[at].title}` : `${chip[0]}: ${done} of ${n} steps`};

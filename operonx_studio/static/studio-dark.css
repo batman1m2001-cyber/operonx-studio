@@ -49,6 +49,8 @@
   --err: #f26a5f;
   --err-soft: #2f1715;
   --info: #6aa2ff;
+  --st-blocked: #ec8fbd;
+  --st-blocked-soft: #2c1522;
   --sel: #16233a;
   --sel-line: #5e9cf2;
   /* node kinds — the same six families, re-stepped for the dark canvas
