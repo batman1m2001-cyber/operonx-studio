@@ -145,6 +145,20 @@ if "SLOW" in msg:
     time.sleep(30)
     sys.exit(0)
 
+if "BGWAIT" in msg:
+    # a suite run in the background: the CLI ends its answer, says nothing while it runs, then picks up
+    emit({"type": "system", "subtype": "background_tasks_changed", "session_id": sid,
+          "tasks": [{"task_id": "b1", "task_type": "local_bash", "description": "Run the full suite"}]})
+    emit({"type": "result", "subtype": "success", "session_id": sid, "total_cost_usd": 0.01, "is_error": False,
+          "result": "Waiting for the suite", "usage": usage, "num_turns": 1})
+    time.sleep(2.5)
+    emit({"type": "system", "subtype": "task_notification", "task_id": "b1", "status": "completed", "session_id": sid})
+    emit({"type": "system", "subtype": "background_tasks_changed", "tasks": [], "session_id": sid})
+    emit({"type": "system", "subtype": "init", "session_id": sid, "model": model})
+    emit({"type": "result", "subtype": "success", "session_id": sid, "total_cost_usd": 0.01, "is_error": False,
+          "result": "Suite passed", "usage": usage, "num_turns": 1})
+    sys.exit(0)
+
 if "LONGTOOL" in msg:
     # a tool that runs a while: the CLI writes only its heartbeat meanwhile
     for n in range(10):
@@ -167,6 +181,11 @@ emit({"type": "assistant", "message": {"model": model, "content": [
 if "EDIT" in msg:
     with open("added.py", "w") as f:
         f.write("X = 1\n")
+if "PLANEDIT" in msg:
+    emit({"type": "assistant", "message": {"model": model, "content": [
+        {"type": "tool_use", "id": "toolu_2", "name": "Edit", "input": {"file_path": "docs/X_PLAN.md"}},
+        {"type": "tool_use", "id": "toolu_3", "name": "Write", "input": {"file_path": "notes.md"}}],
+        "usage": usage}, "session_id": sid})
 emit({"type": "user", "message": {"role": "user", "content": [
     {"tool_use_id": "toolu_1", "type": "tool_result", "content": "1\tfrom operonx.core import op\n",
      **({"is_error": True} if "TOOLFAIL" in msg else {})}]}, "session_id": sid})
@@ -420,7 +439,27 @@ def test_a_turn_is_stopped_for_going_quiet_not_for_working_long(client, project,
     t0 = time.monotonic()
     assert _drain(client, turn)[-1]["state"] == "stopped" and time.monotonic() - t0 < 10
     errors = [i for i in client.get(f"/api/assistant/sessions/{sid}").json()["items"] if i["kind"] == "error"]
-    assert "said nothing for" in errors[-1]["text"] and errors[-1]["retry"]
+    # the work it did stays done: the card continues the conversation instead of redoing the turn
+    assert "said nothing for" in errors[-1]["text"] and errors[-1]["resume"] and not errors[-1].get("retry")
+
+
+def test_waiting_on_a_background_task_is_not_going_quiet(client, project, fake, monkeypatch):
+    # the CLI is silent while a run_in_background suite runs; that wait has its own, longer limit
+    monkeypatch.setenv("OPERONX_STUDIO_CHAT_IDLE_MIN", "0.02")
+    monkeypatch.delenv("OPERONX_STUDIO_CHAT_WAIT_MIN", raising=False)
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    turn = client.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "BGWAIT please"}).json()["turn"]
+    events = _drain(client, turn)
+    assert events[-1]["state"] == "done"
+    assert {"t": "state", "state": "waiting", "detail": "Run the full suite"}.items() <= next(
+        e for e in events if e.get("state") == "waiting").items()
+    monkeypatch.setenv("OPERONX_STUDIO_CHAT_WAIT_MIN", "0.02")
+    turn = client.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "BGWAIT again"}).json()["turn"]
+    assert _drain(client, turn)[-1]["state"] == "stopped"
+    errors = [i for i in client.get(f"/api/assistant/sessions/{sid}").json()["items"] if i["kind"] == "error"]
+    assert "background task ran past" in errors[-1]["text"] and "Run the full suite" in errors[-1]["text"]
+    assert errors[-1]["resume"]
 
 
 def test_a_cap_on_the_whole_run_still_holds_when_set(client, project, fake, monkeypatch):
@@ -431,6 +470,26 @@ def test_a_cap_on_the_whole_run_still_holds_when_set(client, project, fake, monk
     assert _drain(client, turn)[-1]["state"] == "stopped"
     errors = [i for i in client.get(f"/api/assistant/sessions/{sid}").json()["items"] if i["kind"] == "error"]
     assert "longer than the studio allows" in errors[-1]["text"]
+
+
+def test_a_plan_doc_the_turn_edited_goes_on_the_board(client, project, fake, monkeypatch):
+    """mr-finance: FEATURE_FLOWS_PLAN moved phase by phase in chat and the Board never showed it."""
+    from operonx_studio import projectboard as pb
+
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    (project / "docs").mkdir()
+    (project / "docs" / "X_PLAN.md").write_text("---\ntitle: X\nstatus: in_progress\n---\n", encoding="utf-8")
+    synced = []
+    monkeypatch.setattr(pb, "available", lambda root: True)
+    monkeypatch.setattr(pb, "act", lambda root, req, actor: synced.append((req, actor)) or {"ok": True})
+    sid = _session(client, _pid(client, project))["id"]
+    _say(client, sid, "PLANEDIT the plan")
+    for _ in range(50):
+        if synced:
+            break
+        time.sleep(0.05)
+    text = (project / "docs" / "X_PLAN.md").read_text(encoding="utf-8")
+    assert synced == [({"op": "plan", "path": "docs/X_PLAN.md", "text": text}, "assistant")]  # notes.md is not
 
 
 def test_failures_say_so_and_offer_a_retry(client, project, fake):

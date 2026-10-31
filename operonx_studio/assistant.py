@@ -33,13 +33,16 @@ around it:
   an agent that was asked to do something; a turn ends when it ends, is
   stopped, or its CLI says nothing for ``OPERONX_STUDIO_CHAT_IDLE_MIN``
   (default 15). Working long is not a reason: Claude Code has no wall clock,
-  and a running tool writes a heartbeat every half minute or so.
+  and a running tool writes a heartbeat every half minute or so. Waiting on
+  a background task (a test suite run with ``run_in_background``) is not
+  silence either: the CLI says nothing until it ends, so the limit then is
+  ``OPERONX_STUDIO_CHAT_WAIT_MIN`` (default 120).
   ``OPERONX_STUDIO_CHAT_MAX_MIN`` still caps a turn's whole run when set.
 
 Client events (``i`` is the event's index, the cursor):
 
     {"t": "turn",  "turn": id, "session": sid}
-    {"t": "state", "state": "starting|thinking|writing|tool|compacting", "detail": "…"}
+    {"t": "state", "state": "starting|thinking|writing|tool|waiting|compacting", "detail": "…"}
     {"t": "item",  "item": {...}}               an item created or replaced whole
     {"t": "delta", "seq": n, "text": "…"}       more text for item n
     {"t": "usage", "usage": {...}}              the session's usage, updated
@@ -571,6 +574,7 @@ class Turn:
     cwd: Optional[str] = None
     kill_timer: Optional[asyncio.TimerHandle] = None
     heard: float = field(default_factory=time.monotonic)   # the CLI's last line
+    background: List[str] = field(default_factory=list)   # the background tasks it waits on (descriptions)
     usage: Dict[str, Any] = field(default_factory=dict)
     last_flush: float = 0.0
     owner: Optional[str] = None           # the person whose turn it is (their user id)
@@ -579,6 +583,7 @@ class Turn:
     reach: Optional[str] = None           # read | edit | full for this turn; None: the studio's (a viewer: read)
     deny: List[str] = field(default_factory=list)     # --disallowedTools rules (a viewer's)
     on_end: List[Any] = field(default_factory=list)       # called once the turn has ended
+    edited: List[str] = field(default_factory=list)       # the files its Edit / Write calls changed (absolute)
     stamps: Dict[str, Dict[str, float]] = field(default_factory=dict)  # step title → {started, ended}
     step: str = ""                        # "Step 3 of 5 · <title>", the status line's words
 
@@ -975,15 +980,16 @@ class Relay:
         got_result = False
         state = "failed"
         loop = asyncio.get_running_loop()
-        cap, idle = turn_limit("MAX_MIN", 0), turn_limit("IDLE_MIN", 15)
+        cap, idle, wait = turn_limit("MAX_MIN", 0), turn_limit("IDLE_MIN", 15), turn_limit("WAIT_MIN", 120)
         timers: List[asyncio.TimerHandle] = []
         if cap:
             timers.append(loop.call_later(cap, lambda: self.stop(turn.id, reason="time")))
 
         def quiet() -> None:
-            left = turn.heard + idle - time.monotonic()
+            # a background task's run is quiet by nature: it gets the longer limit
+            left = turn.heard + (max(idle, wait) if turn.background and wait else idle) - time.monotonic()
             if left <= 0:
-                self.stop(turn.id, reason="idle")
+                self.stop(turn.id, reason="wait" if turn.background else "idle")
             else:
                 timers.append(loop.call_later(left, quiet))
 
@@ -1068,6 +1074,11 @@ class Relay:
                 turn.claude_after = event.get("session_id")
                 turn.model = event.get("model") or turn.model
                 self._state(turn, "compacting" if turn.kind == "compact" else "thinking")
+            elif sub == "background_tasks_changed":
+                turn.background = [str(t.get("description") or t.get("task_id") or "a task")
+                                   for t in event.get("tasks") or [] if isinstance(t, dict)]
+                if turn.background:
+                    self._state(turn, "waiting", turn.background[0])
             elif sub == "status" and event.get("status") == "compacting":
                 self._state(turn, "compacting")
             elif sub == "compact_boundary":
@@ -1114,6 +1125,8 @@ class Relay:
                     name = block.get("name") or "tool"
                     inputs = block.get("input") or {}
                     label = _tool_label(name, inputs, turn.cwd)
+                    if name in ("Edit", "Write", "MultiEdit") and isinstance(inputs.get("file_path"), str):
+                        turn.edited.append(str(Path(turn.cwd or ".", inputs["file_path"])))
                     plan = self._plan(turn, inputs) if name == "mcp__studio__steps" else None
                     item = self._item(turn, "tool", id=block.get("id"), name=name, label=label,
                                       input=_clip(inputs), status="running", t0=_now(),
@@ -1355,10 +1368,15 @@ class Relay:
         if reason == "time":
             self._item(turn, "error", text="Stopped: this ran longer than the studio allows "
                                            "(OPERONX_STUDIO_CHAT_MAX_MIN).", retry=False)
+        # what it did stays done: the card continues the conversation, it does not redo the turn
         if reason == "idle":
             self._item(turn, "error", text=f"Stopped: the assistant said nothing for "
                                            f"{turn_limit('IDLE_MIN', 15) / 60:g} min (OPERONX_STUDIO_CHAT_IDLE_MIN).",
-                       retry=True)
+                       resume=True)
+        if reason == "wait":
+            self._item(turn, "error", text=f"Stopped: a background task ran past "
+                                           f"{turn_limit('WAIT_MIN', 120) / 60:g} min (OPERONX_STUDIO_CHAT_WAIT_MIN): "
+                                           f"{turn.background[0] if turn.background else ''}", resume=True)
         return True
 
     def _sweep(self) -> None:

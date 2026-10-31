@@ -4779,6 +4779,25 @@ def build_studio_app(recents: Optional[Recents] = None):
         token = ((mcp or {}).get("env") or {}).get("OPERONX_STUDIO_TOKEN") or ""
         return lambda: agents.revoke(token)
 
+    def _plan_sync(scope: str, turn: Any):
+        """The plan docs a turn edited go on the board as they now stand (the engine's ``plan``), so a phase's
+        card moves when the doc does, from a branch's worktree too. A doc with no status block is left alone."""
+        def run() -> None:
+            root = _git_root(scope) if scope != "home" else None
+            docs = sorted({p for p in turn.edited if re.search(r"(^|/)docs/(.+/)?[^/]+_PLAN\.md$", p)})
+            if root is None or not docs or not _projectboard.available(root):
+                return
+
+            def sync() -> None:
+                for path in docs:
+                    try:
+                        _projectboard.act(root, _projectboard.plan_request(root, path), "assistant")
+                    except Exception:  # noqa: BLE001 — the board catches up on the next call
+                        pass
+
+            threading.Thread(target=sync, name="plan-sync", daemon=True).start()
+        return run
+
     def _home_briefing() -> str:
         roster = "\n".join(f"- {r.name}: {r.root}" for r in recents.ordered() if r.exists)
         return ("# Studio briefing\nNo project is open. Projects this studio knows:\n" + (roster or "(none yet)")
@@ -5382,6 +5401,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         except RuntimeError as exc:
             _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
+        turn.on_end.append(_plan_sync(sess["scope"], turn))
         return JSONResponse({"turn": turn.id, "cursor": 0})
 
     @app.post("/api/assistant/sessions/{sid}/compact")

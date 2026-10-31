@@ -113,7 +113,25 @@ Keeping it true is part of every change:
   Show the owner the plan before the code. Work it phase by phase: set
   the phase `in_progress` when you start it and `done` in the commit that
   finishes it, with `updated`, and the plan `done` when its last phase is.
-  Stop at the end of a phase and say what is next.
+  Stop at the end of a phase and say what is next, unless the owner said
+  to go to the end ("end to end", "do it all", "keep going"): then the
+  next phase starts in the same turn, until the plan is done or something
+  needs the owner.
+- A plan you work is on the Board: `board_plan` with its path when you
+  start it (the doc's absolute path when it lives in a worktree), and
+  again whenever a phase's status changes. The studio does it for you
+  after a turn whose Edit or Write changed the doc; a change made any
+  other way (a shell command, a merge) needs the call.
+- Do what the owner said, all of it, and nothing they excluded. "Skip X
+  and keep going" skips X alone: every other phase and step is still
+  done. When you think the plan should change, say so and ask; never
+  drop a phase on your own.
+- A phase is `done` when its check has passed and you have read that it
+  did. A test run you started in the background has not passed yet: wait
+  for its result in this turn (it comes back to you when it ends), then
+  mark the phase. Never end a turn on "it is running".
+- When the plan or the owner says to push and open the PR, the work is
+  not finished until you have, and the reply gives the PR's link.
 - New requirements go into the checklist as rows (the requirement file
   and the matrix), each with its status, before they are built.
 - Run `operonx-project brd check` before you commit a change to `docs/`;

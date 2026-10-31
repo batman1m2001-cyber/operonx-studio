@@ -41,7 +41,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 __all__ = ["SCHEMA", "BoardError", "act", "available", "card", "checklist", "daemon_start", "daemon_status",
-           "daemon_stop", "milestone", "milestones", "project_checklist"]
+           "daemon_stop", "milestone", "milestones", "plan_request", "project_checklist"]
 
 #: The newest store layout this reader knows.
 SCHEMA = 2
@@ -606,6 +606,26 @@ def _engine() -> Optional[List[str]]:
     return [str(beside)] if beside.is_file() else None
 
 
+def plan_request(root: Path, path: str) -> Dict[str, Any]:
+    """The engine's ``plan`` for a plan doc: ``docs/X_PLAN.md`` in the checkout, or the doc's path in a worktree
+    of the same repo (a branch's), whose text is sent, since the checkout has not got it yet."""
+    p = Path(path)
+    if not p.is_absolute():
+        return {"op": "plan", "path": path}
+
+    def git(where: Path, *args: str) -> str:
+        got = subprocess.run(["git", "-C", str(where), "rev-parse", *args], capture_output=True, text=True)
+        return got.stdout.strip() if got.returncode == 0 else ""
+
+    top = git(p.parent, "--show-toplevel")
+    same = top and Path(git(p.parent, "--path-format=absolute", "--git-common-dir")).resolve() == Path(
+        git(root, "--path-format=absolute", "--git-common-dir")).resolve()  # fmt: skip
+    if not same or not p.is_file():
+        raise BoardError(f"{path} is not a file in a checkout of this project")
+    return {"op": "plan", "path": p.resolve().relative_to(Path(top).resolve()).as_posix(),
+            "text": p.read_text(encoding="utf-8")}  # fmt: skip
+
+
 def act(root: Path, request: Dict[str, Any], actor: str) -> Dict[str, Any]:
     """Run one action through ``operonx-project api``; its JSON answer, or why there is none."""
     argv = _engine()
@@ -809,6 +829,25 @@ def register(app: Any, *, watcher_of: Any) -> None:
         if not isinstance(body, dict):
             return JSONResponse({"ok": False, "status": "invalid", "message": "a JSON object"}, status_code=400)
         out = await asyncio.to_thread(act, root, {**body, "op": "start"}, _actor(request))
+        return JSONResponse(out, status_code=200 if out.get("ok") else 409 if out.get("status") != "unavailable"
+                            else 503)  # fmt: skip
+
+    @app.post("/api/p/{pid}/board/plan")
+    async def board_plan(pid: str, request: Request) -> JSONResponse:
+        """A plan doc on the board (the engine's ``plan``): a milestone, a card per phase, as the doc says."""
+        import asyncio
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        body = await request.json()
+        if not isinstance(body, dict) or not isinstance(body.get("path"), str):
+            return JSONResponse({"ok": False, "status": "invalid", "message": "{path}: the plan doc"}, status_code=400)
+        try:
+            req = plan_request(root, body["path"])
+        except BoardError as exc:
+            return JSONResponse({"ok": False, "status": "invalid", "message": str(exc)}, status_code=409)
+        out = await asyncio.to_thread(act, root, req, _actor(request))
         return JSONResponse(out, status_code=200 if out.get("ok") else 409 if out.get("status") != "unavailable"
                             else 503)  # fmt: skip
 

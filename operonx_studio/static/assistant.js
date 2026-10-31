@@ -1489,6 +1489,14 @@
       fold.append(el("summary", null, "Details"), el("pre", null, more));
       card.append(fold);
     }
+    if (item.resume && item.turn) {
+      // a turn stopped mid-work: what it did is done, so the conversation goes on from it rather than redoing it
+      const acts = el("div", "ax-card-acts");
+      const go = tbtn("Continue", "ax-btn primary", "play");
+      go.onclick = () => resume();
+      acts.append(el("span", "ax-spacer"), go);
+      card.append(acts);
+    }
     if (item.retry && item.turn) {
       const acts = el("div", "ax-card-acts");
       const retry = tbtn("Try again", "ax-btn", "refresh");
@@ -2653,9 +2661,10 @@
     const r = A.running;
     if (!r) return;
     const words = {starting: "Starting", thinking: "Thinking", writing: "Writing", compacting: "Compacting the conversation",
-      stopping: "Stopping"};
+      stopping: "Stopping", waiting: "Waiting for a background task"};
     statusText.textContent = r.step && /^(thinking|tool|writing)$/.test(r.state) ? r.step
-      : r.state === "tool" && r.detail ? r.detail : `${words[r.state] || "Working"}…`;
+      : r.state === "tool" && r.detail ? r.detail
+      : r.state === "waiting" && r.detail ? `Waiting for a background task · ${r.detail}` : `${words[r.state] || "Working"}…`;
     statusTime.textContent = fmt.secs((Date.now() - r.t0) / 1000);
   }
 
@@ -2733,6 +2742,15 @@
     // the pending message stays until the server's copy arrives (the first event)
     follow(got.turn, 0);
     refreshListIfShown();
+  }
+
+  async function resume() {
+    if (!A.session || A.running) return false;
+    try {
+      await call(`/api/assistant/sessions/${A.session.id}/turns`, {message: "Continue where you stopped.", view: viewForMessage()});
+    } catch (err) { toast(err.message, true); return false; }
+    await openSession(A.session.id);
+    return true;
   }
 
   async function redo(opts) {
