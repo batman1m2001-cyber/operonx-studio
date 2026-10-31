@@ -147,7 +147,8 @@
     get A() { return A; },
   };
 
-  const LINK_ICON = {run: "list", op: "graph", tab: "right", monitor: "chart", eval: "evals", project: "folder"};
+  const LINK_ICON = {run: "list", op: "graph", tab: "right", monitor: "chart", eval: "evals", project: "folder", file: "file",
+                     point: "target", board: "roadmap"};
 
   function studioLink(label, href) {
     const kind = href.slice(7).split("/")[0];
@@ -165,6 +166,90 @@
     return b;
   }
 
+  /* ── references (D4): inline code resolved against the project ───── */
+
+  const RF = W.oxRefs;
+  // the project's tree and points, read once per conversation and again when a turn ends
+  const refState = {files: null, root: "", points: new Map(), at: 0};
+  let refWorld = null;       // the world the text being drawn resolves in (its turn's)
+  async function loadRefs() {
+    if (!PROJECT || !RF) return;
+    const at = ++refState.at;
+    const [tree, status] = await Promise.all([
+      call(`/api/p/${PROJECT}/project/files`).catch(() => null),
+      call(`/api/p/${PROJECT}/project/status`).catch(() => null),
+    ]);
+    if (at !== refState.at) return;
+    if (tree && tree.ok) { refState.files = RF.index(tree.files); refState.root = tree.root || ""; }
+    const pts = new Map();
+    const doc = status && status.project;
+    if (doc) {
+      for (const r of (doc.checklist && doc.checklist.open) || []) pts.set(r.id, `row:${r.id}`);
+      for (const q of doc.needs_you || []) pts.set(q.id, `q:${q.id}`);
+      const phases = new Map();
+      for (const p of doc.plans || []) {
+        if (p.path) pts.set(p.path, `plan:${p.path}`);
+        for (const ph of p.phases || []) phases.set(ph.id, phases.has(ph.id) ? null : `phase:${p.path}#${ph.id}`);
+      }
+      // a phase id names a point only when one plan has it
+      for (const [id, t] of phases) if (t && !pts.has(id)) pts.set(id, t);
+    }
+    refState.points = pts;
+    // what was drawn before the tree came: draw again where the text names code
+    for (const it of A.items) {
+      const n = it.kind === "text" && it.text && it.text.includes("`") ? A.nodes.get(it.seq) : null;
+      if (n) { refWorld = worldFor(it); md(n, it.text); }
+    }
+    refWorld = null;
+  }
+  function opNames() {
+    const out = new Set();
+    const ir = typeof state !== "undefined" && state && state.ir;
+    for (const g of (ir && ir.graphs) || []) (function walk(gr) {
+      for (const n of (gr && gr.nodes) || []) { if (n.name) out.add(n.name); if (n.graph) walk(n.graph); }
+    })(g);
+    return out;
+  }
+  function worldFor(item) {
+    if (!RF) return null;
+    const turn = item && item.turn;
+    const mine = turn ? A.items.filter((x) => x.turn === turn) : [];
+    return {files: refState.files, root: refState.root, ops: opNames(), points: refState.points,
+            touched: RF.touched(mine, refState.root)};
+  }
+  const TOUCH = {read: ["·", "read this turn"], modified: ["●", "modified this turn"], created: ["+", "created this turn"],
+                 deleted: ["−", "deleted this turn"]};
+  function openFile(path, line) {
+    if (W.oxStudioLink) {
+      W.oxStudioLink(`studio:file/${encodeURIComponent(path)}${line ? `#L${line}` : ""}`);
+      if (A.mode === "sheet" || A.mode === "focus") placement.leave();
+    } else if (PROJECT) location.href = `/p/${PROJECT}/project`;
+  }
+  function refCode(code, sentence) {
+    const r = refWorld ? RF.classify(code, refWorld, sentence) : {kind: "code"};
+    if (r.kind === "point") return studioLink(code, `studio:point/${r.target}`);
+    if (r.kind === "op") return studioLink(code, `studio:op/${encodeURIComponent(r.name)}`);
+    if (r.kind === "file") {
+      const b = el("button", `ax-ref ax-ref-file${r.touch ? " t-" + r.touch : ""}`);
+      b.type = "button";
+      b.title = `${r.path}${r.line ? `:${r.line}${r.end ? "-" + r.end : ""}` : ""}${r.touch ? " — " + TOUCH[r.touch][1] : ""}`;
+      b.append(icon("file"), el("span", null, code));
+      if (r.touch) b.append(el("b", "ax-touch", TOUCH[r.touch][0]));
+      b.onclick = () => openFile(r.path, r.line);
+      return b;
+    }
+    if (r.kind === "command") {
+      const c = el("code", "ax-ref-cmd", code);
+      c.title = "Copy";
+      c.tabIndex = 0;
+      const copy = () => { copyText(code); toast("Copied"); };
+      c.onclick = copy;
+      c.onkeydown = (e) => { if (e.key === "Enter") copy(); };
+      return c;
+    }
+    return el("code", r.kind === "symbol" ? "ax-ref-sym" : r.kind === "config" ? "ax-ref-cfg" : null, code);
+  }
+
   function inline(parent, text) {
     // no lookbehind: an engine without it (older iOS Safari) would reject
     // the whole script bundle, not just this pattern
@@ -175,7 +260,7 @@
       if (m[5] && m.index > 0 && /\w/.test(text[m.index - 1])) continue;
       if (m.index > last) parent.append(document.createTextNode(text.slice(last, m.index)));
       const tok = m[0];
-      if (m[1]) parent.append(el("code", null, tok.slice(1, -1)));
+      if (m[1]) parent.append(refCode(tok.slice(1, -1), text));
       else if (m[2]) { const b = el("strong"); inline(b, tok.slice(2, -2)); parent.append(b); }
       else if (m[3]) { const d = el("del"); inline(d, tok.slice(2, -2)); parent.append(d); }
       else if (m[4]) {
@@ -950,7 +1035,9 @@
 
   function renderText(item) {
     const box = el("div", "ax-text");
+    refWorld = worldFor(item);
     md(box, item.text || "");
+    refWorld = null;
     A.nodes.set(item.seq, box);
     return box;
   }
@@ -1140,7 +1227,7 @@
       node.replaceWith(fresh);
       A.nodes.set(item.seq, fresh);
     } else if (item.kind === "changes") node.replaceWith(renderChanges(old));
-    else if (item.kind === "text") md(node, old.text || "");
+    else if (item.kind === "text") { refWorld = worldFor(old); md(node, old.text || ""); refWorld = null; }
   }
 
   // streaming text: one markdown render per frame, whatever the delta rate
@@ -1155,7 +1242,8 @@
     if (!frame) frame = requestAnimationFrame(() => {
       frame = 0;
       const stick = nearBottom();
-      for (const s of dirty) { const n = A.nodes.get(s); const it = A.bySeq.get(s); if (n && it) md(n, it.text); }
+      for (const s of dirty) { const n = A.nodes.get(s); const it = A.bySeq.get(s); if (n && it) { refWorld = worldFor(it); md(n, it.text); } }
+      refWorld = null;
       dirty.clear();
       if (stick) toBottom();
     });
@@ -1981,6 +2069,7 @@
     paintEditing();
     loadDraft();
     renderAll();
+    loadRefs();
     paintList();
     if (got.running) follow(got.running.id, got.running.cursor, got.running);
     else paintBusy();
@@ -2085,6 +2174,7 @@
   function finished(ev) {
     const r = A.running;
     A.running = null;
+    loadRefs();
     if (ev.state === "lost") toast("That task is no longer running — the studio restarted", true);
     if (ev.usage && A.session) A.session.usage = ev.usage;
     paintBusy();

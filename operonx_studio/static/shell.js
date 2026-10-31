@@ -863,7 +863,7 @@ async function performUi(kind, args) {
 
 /* `studio:` links in the assistant's replies (chat.js turns them into
  * buttons): studio:run/<id>, studio:op/<name>, studio:tab/<name>, studio:point/<target>,
- * studio:monitor/<origin>/<name>, studio:board/<milestone>[/<card>]. */
+ * studio:monitor/<origin>/<name>, studio:board/<milestone>[/<card>], studio:file/<path>#L<n>. */
 window.oxStudioLink = (href) => {
   const path = String(href).replace(/^studio:/, "");
   const [kind, ...rest] = path.split("/");
@@ -875,6 +875,11 @@ window.oxStudioLink = (href) => {
   if (kind === "eval") return performUi("open_eval", {name: rest[0], run: rest[1] || ""});
   // studio:point/q:Q-16 — the hand goes to it and rings it, as when the assistant points
   if (kind === "point") return performUi("point", {target: arg, byUser: true});
+  // studio:file/src/app.py#L42 — Project mode's Files page, at the line
+  if (kind === "file") {
+    const f = window.oxRefs && window.oxRefs.fileHref(href.replace(/^studio:/, ""));
+    return f ? switchTab("project", {page: "files", file: f.path, line: f.line, end: f.end}) : null;
+  }
   if (kind === "monitor") return performUi("open_monitor", {target: rest.length > 1 ? `${rest[0]}:${decodeURIComponent(rest.slice(1).join("/"))}` : ""});
   return null;
 };

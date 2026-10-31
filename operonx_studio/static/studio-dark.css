@@ -51,6 +51,10 @@
   --info: #6aa2ff;
   --st-blocked: #ec8fbd;
   --st-blocked-soft: #2c1522;
+  --ref-file: #5fd0e6; --ref-file-soft: #10282e;
+  --ref-sym: #c3a6ff; --ref-sym-soft: #241c33;
+  --ref-cfg: #aab6c8; --ref-cfg-soft: #1e232b;
+  --ref-cmd-soft: #1b1f1a;
   --sel: #16233a;
   --sel-line: #5e9cf2;
   /* node kinds — the same six families, re-stepped for the dark canvas

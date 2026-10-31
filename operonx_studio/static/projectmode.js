@@ -672,6 +672,7 @@ const ProjectMode = (() => {
     if (!paths.length) list.append(el("p", "pm-quiet", v.fonly ? "Nothing changed lately." : "No files."));
   }
   let fileToken = 0;
+  let fline = null;     // {line, end} the next open of v.file scrolls to and marks
   async function openFile(path, view) {
     const mine = ++fileToken;
     view.textContent = "";
@@ -685,8 +686,28 @@ const ProjectMode = (() => {
     const mark = ftree && ftree.changed[path];
     head.append(el("span", "pm-where", `${got.size.toLocaleString()} bytes${mark ? " · " + MARK[mark] : ""}`));
     if (got.binary) { view.append(el("p", "pm-quiet", "A binary file: not shown.")); return; }
-    view.append(el("pre", "pm-code", got.text));
+    // the numbers in a gutter beside the text, one <pre> each: a 10k-line file is two nodes, not 10k
+    const lines = got.text.replace(/\n$/, "").split("\n").length;
+    const body = el("div", "pm-codebox");
+    const gutter = el("pre", "pm-gutter", Array.from({length: lines}, (_, i) => i + 1).join("\n"));
+    gutter.setAttribute("aria-hidden", "true");
+    body.append(gutter, el("pre", "pm-code", got.text));
+    view.append(body);
     if (got.truncated) view.append(el("p", "pm-quiet", "The first 400 KB only."));
+    const at = fline && fline.line ? fline : null;
+    fline = null;
+    if (at && at.line <= lines) {
+      const lh = parseFloat(getComputedStyle(gutter).lineHeight) || 18.75;
+      const pad = parseFloat(getComputedStyle(gutter).paddingTop) || 0;
+      const n = Math.max(1, Math.min(lines, at.end || at.line) - at.line + 1);
+      const mark = el("div", "pm-lmark");
+      mark.style.top = `${pad + (at.line - 1) * lh}px`;
+      mark.style.height = `${n * lh}px`;
+      body.append(mark);
+      head.append(el("span", "pm-where", `line ${at.line}${n > 1 ? `–${at.line + n - 1}` : ""}`));
+      // the line a third of the way down, under the sticky head
+      view.scrollTop = Math.max(0, pad + (at.line - 1) * lh - view.clientHeight / 3);
+    }
   }
 
   async function drawSettings() {
@@ -946,6 +967,14 @@ const ProjectMode = (() => {
   function show(opts) {
     if (opts && opts.page) v.page = PAGES[opts.page] ? opts.page : "now";
     if (opts && opts.mid !== undefined) v.mid = opts.mid;
+    // studio:file/<path>#L<n>: that file, at that line (not remembered: a reload opens the file at its top)
+    if (opts && opts.file) {
+      v.file = opts.file;
+      fline = {line: opts.line || 0, end: opts.end || 0};
+      // its folders open in the tree, so the file is in view there too
+      const parts = opts.file.split("/");
+      for (let i = 1; i < parts.length; i++) v.fopen[parts.slice(0, i).join("/") + "/"] = 1;
+    }
     save();
     enter();
     paintBar();

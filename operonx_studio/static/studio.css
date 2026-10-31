@@ -73,6 +73,11 @@
   --st-blocked: #a3366a; --st-blocked-soft: #fbedf4;
   --st-skip: var(--text-3); --st-skip-soft: var(--surface-2);
   --st-info: var(--info); --st-info-soft: var(--signal-soft);
+  /* what inline code names (D4): a file, a symbol, a config key, a command */
+  --ref-file: #0b6f86; --ref-file-soft: #e6f4f7;
+  --ref-sym: #6a3fc0; --ref-sym-soft: #f2edfb;
+  --ref-cfg: #4a5568; --ref-cfg-soft: #edf0f4;
+  --ref-cmd-soft: #eef0ec;
   --sel: #eaf2fe;
   --sel-line: #3b86e0;
 
@@ -2331,6 +2336,25 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-text li + li { margin-top: .2em; }
 .ax-text li > ul, .ax-text li > ol { margin: .2em 0 0; }
 .ax-text code { font: .87em var(--mono); background: var(--surface-3); padding: .1em .35em; border-radius: 4px; }
+/* references (D4): a file opens the Files page at its line; this turn's glyph says what was done to it */
+.ax-ref { display: inline-flex; align-items: center; gap: 3px; vertical-align: baseline; min-height: 0; height: auto;
+  padding: .05em .4em .05em .3em; margin: 0 1px; border: none; border-radius: 4px; font: .87em var(--mono); line-height: 1.45;
+  white-space: normal; word-break: break-all; text-align: left; cursor: pointer; }
+.ax-ref-file { background: var(--ref-file-soft); color: var(--ref-file); }
+.ax-ref-file .icon { width: 12px; height: 12px; flex: none; }
+.ax-ref-file:hover { background: color-mix(in srgb, var(--ref-file) 18%, var(--ref-file-soft)); }
+.ax-ref-file:focus-visible { outline: 2px solid var(--ref-file); outline-offset: 1px; }
+.ax-touch { font: 700 1em var(--mono); margin-left: 1px; }
+.t-read .ax-touch { color: var(--text-3); }
+.t-modified .ax-touch { color: var(--warn); }
+.t-created .ax-touch { color: var(--ok); }
+.t-deleted { text-decoration: line-through; }
+.t-deleted .ax-touch { color: var(--err); text-decoration: none; }
+.ax-text code.ax-ref-sym { background: var(--ref-sym-soft); color: var(--ref-sym); }
+.ax-text code.ax-ref-cfg { background: var(--ref-cfg-soft); color: var(--ref-cfg); }
+.ax-text code.ax-ref-cmd { background: var(--ref-cmd-soft); cursor: copy; }
+.ax-text code.ax-ref-cmd::before { content: "$ "; color: var(--text-3); }
+.ax-text code.ax-ref-cmd:hover { box-shadow: inset 0 0 0 1px var(--border); }
 .ax-text pre code { font: inherit; background: none; padding: 0; border-radius: 0; color: inherit; }
 .ax-text strong { font-weight: 650; }
 .ax-text .ax-h { margin: .9em 0 .35em; font-weight: 650; line-height: 1.3; letter-spacing: -.005em; }
@@ -5379,7 +5403,14 @@ button.pm-w { cursor: pointer; }
   border-bottom: 1px solid var(--border-soft); background: var(--bg); }
 .pm-fpath { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); word-break: break-all; }
 .pm-fhead .pm-where { font-size: 11.5px; color: var(--text-3); }
+.pm-codebox { position: relative; display: flex; min-width: max-content; }
 .pm-code { margin: 0; padding: 10px 12px; font: 12.5px/1.5 var(--mono); color: var(--text); white-space: pre; tab-size: 4; }
+.pm-gutter { margin: 0; padding: 10px 8px 10px 12px; font: 12.5px/1.5 var(--mono); color: var(--text-3); text-align: right;
+  user-select: none; border-right: 1px solid var(--border-soft); position: sticky; left: 0; background: var(--bg); z-index: 1; }
+.pm-lmark { position: absolute; left: 0; right: 0; z-index: 2; background: color-mix(in srgb, var(--warn) 16%, transparent);
+  border-left: 3px solid var(--warn); pointer-events: none; animation: pm-lmark 1.6s ease-out; }
+@keyframes pm-lmark { from { background: color-mix(in srgb, var(--warn) 40%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .pm-lmark { animation: none; } }
 .pm-fview > .pm-quiet { padding: 12px; }
 @media (max-width: 760px) {
   .pm-main.paged .pm-page.pm-page-files { overflow-y: auto; display: block; }
