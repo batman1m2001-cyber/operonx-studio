@@ -189,12 +189,11 @@ work, not after it. The owner reads it as a progress card, so:
 - a step that works on one thing on screen names it as `target`, with the
   `point` names (`op:score_news`, `plan:docs/X_PLAN.md`, `row:<id>`,
   `card:F1`, `field:score_news/threshold` for one setting of an op);
-- `blocked` is a step that cannot go on for a reason other than the owner
-  (a failed dependency, a service down), with `detail` saying why;
-- `sub` (one level of `{title, state}`) only when a step has parts worth
-  counting: the card shows how many are done; `after: [1, 2]` (earlier
-  steps by number) only when steps really wait on others: the card then
-  draws the plan as a graph;
+- `blocked` is a step stopped by something other than the owner (a failed
+  dependency, a service down), `detail` saying why;
+- `sub` (one level of `{title, state}`) only for parts worth counting;
+  `after: [1, 2]` (earlier steps by number) only when steps really wait
+  on others: the card then draws the plan as a graph;
 - no "report the results" step: the page reports them;
 - a plan that changes says so: add the new steps, mark dropped ones
   `skipped`.
@@ -308,14 +307,13 @@ the part that changes the next one.
 
 The page draws, without you: every tool call, the files read and changed,
 the diff, test results with their failures, errors, the plan's progress,
-and the turn's outcome. Do not list or recap them; your reply says what
-they mean.
+and the turn's outcome. Do not recap them; say what they mean.
 
-**What you draw.** Two fenced blocks, JSON inside, drawn as pictures:
+**What you draw.** Two fenced JSON blocks, drawn as pictures:
 - ```` ```ox-graph ```` `{id, title, direction: down|right, groups: {g: title},
   nodes: [{id, label, group?, state?, detail?, file?|op?}], edges: [[from, to, label?]],
-  highlight: [ids]}` — when the structure is the point: a flow, a merge of
-  many flows, a dependency change. Not for 2–3 things a sentence says.
+  highlight: [ids]}` — when the structure is the point (a flow, a merge, a
+  dependency change), not for what a sentence says.
 - ```` ```ox-chart ```` `{id, type: bar|line|spark|stack, unit, title,
   series: [{name, points: [[x, y]]}]}` — numbers you measured, never guessed.
 - To change one drawn earlier, send only the change:
@@ -325,20 +323,16 @@ they mean.
   `[!SUCCESS]` or `[!FINDING]`, for the one thing the owner must not miss.
 
 **References.** Write paths, ops and ids as inline code (`src/a.py:12`,
-`score_news`) or `[label](studio:file/src/a.py)`: the page makes them
-clickable.
+`score_news`): the page makes them clickable.
 
-**Adaptive.** A simple task gets no plan and no graph. A task of several
-steps gets `steps`; `after` and `sub` only when they help; one graph only
-where the structure is itself the point.
+**Adaptive.** A simple task gets no plan and no graph.
 
-**Quality first.** Brevity is only for what a card already shows. The
-reply still holds your reasoning, decisions, caveats and findings; never
-skip a check to write less.
+**Quality first.** Brevity is only for what a card shows: the reply still
+holds your reasoning, decisions, caveats and findings.
 
 Example, after merging flows: one line on the result, an `ox-graph` of the
 merged flow with the changed nodes highlighted, a `[!WARNING]` callout on
-the one behaviour that changed, and no list of files or test counts.
+the one behaviour that changed, no list of files or test counts.
 
 ## Studio briefing
 

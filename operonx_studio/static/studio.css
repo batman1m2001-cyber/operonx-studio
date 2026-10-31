@@ -5951,9 +5951,9 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
   font: inherit; font-size: 12px; cursor: pointer; }
 .ax-graph-btn:hover { background: var(--surface-3); color: var(--text); }
 .ax-graph-btn:focus-visible, .ax-g-node:focus-visible { outline: 2px solid var(--sel-line); outline-offset: 2px; }
-.ax-graph-body { overflow: hidden; }
-.ax-graph-svg { display: block; width: 100%; height: auto; max-height: 260px; margin: 6px auto 2px; overflow: visible; }
-.ax-graph-svg.overview { cursor: zoom-in; }
+.ax-graph-body { overflow-x: auto; overflow-y: hidden; }
+.ax-graph-svg { display: block; width: 100%; height: auto; margin: 6px auto 2px; overflow: visible; }
+.ax-graph-svg.overview { cursor: zoom-in; max-height: 260px; }
 .ax-graph-svg text { user-select: text; }
 .ax-g-group { fill: var(--surface-2); stroke: var(--border-soft); stroke-width: 1; }
 .ax-g-gtitle { font-size: 10.5px; font-weight: 600; fill: var(--text-3); letter-spacing: .02em; }
@@ -6029,8 +6029,10 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
 .ax-pstep-meter + .ax-pstep-meta { margin-left: 8px; }
 .ax-pstep-mbar { width: 56px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .ax-pstep-mbar > span { display: block; height: 100%; border-radius: 2px; background: var(--st-ok, var(--ok)); }
-.ax-pstep-mbar.bad > span { background: var(--err); }
+/* a failing run: passed in green, failed in red, so the folded row answers "did it pass?" */
+.ax-pstep-mbar.bad { background: var(--err); }
 .ax-pstep-mnum { font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
+.ax-pstep-mnum.bad { color: var(--err); font-weight: 600; }
 .ax-pstep-sub { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .ax-pstep-sub li { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
 .ax-pstep-sub li > svg, .ax-pstep-sub li > .ax-spin { color: var(--st); flex: none; width: 13px; height: 13px; }

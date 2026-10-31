@@ -25,7 +25,9 @@ const oxTools = (() => {
   /* the command that matters: `cd x && uv run pytest` → `uv run pytest`; env assignments dropped */
   function mainCommand(cmd) {
     const parts = String(cmd || "").trim().split(/\s*(?:&&|;)\s*/).filter((p) => p && !/^(cd|export|source|set)\b/.test(p));
-    return (parts[0] || String(cmd || "").trim()).replace(/^([A-Z_][A-Z0-9_]*=\S*\s+)+/, "");
+    // the part that tests or builds is the one the row is about: `ls; uv run pytest` → `uv run pytest`
+    const key = parts.find((p) => TEST.test(p)) || parts.find((p) => BUILD.test(p)) || parts[0];
+    return (key || String(cmd || "").trim()).replace(/^([A-Z_][A-Z0-9_]*=\S*\s+)+/, "");
   }
 
   function bashClass(cmd) {

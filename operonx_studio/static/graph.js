@@ -622,7 +622,8 @@ if (typeof window !== "undefined") window.oxGraph = oxGraph;
       const D = drawSvg(g, L, {highlight: new Set(g.highlight), affected: (n) => affects(n.file, changed),
         flash: new Set(flash || []), focusable: !big});
       D.svg.style.maxWidth = `${L.width}px`;
-      if (big) D.svg.classList.add("overview");
+      // a tall or wide graph keeps its labels readable: past 80% the body scrolls sideways
+      if (big) D.svg.classList.add("overview"); else D.svg.style.minWidth = `${Math.round(L.width * 0.8)}px`;
       const detail = ctx.el("div");
       detail.append(detailOf(null, ctx));
       const old = box.querySelector(".ax-graph-body");

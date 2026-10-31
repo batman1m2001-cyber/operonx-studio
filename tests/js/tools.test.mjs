@@ -44,6 +44,10 @@ test("Bash classes from the command", () => {
   assert.equal(T.classOf(bash("sed -n 1,40p src/a.py")).res.value, "src/a.py");
   assert.equal(cls(bash("curl -s localhost:8000/health")), "run");
   assert.deepEqual(T.classOf(bash("ls")).res, {kind: "cmd", value: "ls"});
+  // a recorded call (VISUAL_CHAT_PLAN V8): the row names the part that ran the tests
+  assert.equal(T.mainCommand("ls; cat tests/test_zones.py; uv run pytest tests/test_zones.py 2>&1 | tail -20"),
+    "uv run pytest tests/test_zones.py 2>&1 | tail -20");
+  assert.equal(T.mainCommand("cd /p && git status"), "git status");
 });
 
 test("fold: consecutive calls of one class are one row; a test run stands alone", () => {

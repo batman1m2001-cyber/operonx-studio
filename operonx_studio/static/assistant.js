@@ -1140,11 +1140,12 @@
   function stepMeter(pr) {
     const m = el("span", "ax-pstep-meter");
     m.title = pr.kind === "sub" ? `${pr.done} of ${pr.total} subtasks done` : `${pr.done} of ${pr.total} tests passed`;
-    const bar = el("span", "ax-pstep-mbar" + (pr.kind === "tests" && pr.done < pr.total ? " bad" : ""));
+    const bad = pr.kind === "tests" && pr.done < pr.total ? " bad" : "";
+    const bar = el("span", "ax-pstep-mbar" + bad);
     const fill = el("span");
     fill.style.width = `${Math.round(pr.done / pr.total * 100)}%`;
     bar.append(fill);
-    m.append(bar, el("span", "ax-pstep-mnum", `${pr.done}/${pr.total}`));
+    m.append(bar, el("span", "ax-pstep-mnum" + bad, `${pr.done}/${pr.total}`));
     return m;
   }
 
@@ -1193,10 +1194,14 @@
       const open = prog.open.has(key);
       li.classList.toggle("open", open);
       head.setAttribute("aria-expanded", String(open));
+      head.dataset.step = key;
       head.onclick = () => {
         if (prog.open.has(key)) { prog.open.delete(key); prog.shut.add(key); }
         else prog.open.add(key);
         paintProg(prog);
+        // the card is drawn anew: the keyboard stays on this step
+        const again = [...prog.list.querySelectorAll(".ax-pstep-head")].find((h) => h.dataset.step === key);
+        if (again) again.focus();
       };
       if (open) {
         const body = el("div", "ax-pstep-body");
