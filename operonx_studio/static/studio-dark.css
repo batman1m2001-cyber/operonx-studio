@@ -57,6 +57,8 @@
   --ref-cmd-soft: #1b1f1a;
   --tc-edit: #f0b45a; --tc-create: #6fd08c; --tc-delete: #f29a76; --tc-test: #7ab4f0; --tc-build: #aab6c8;
   --tc-git: #fb9a5c; --tc-web: #9fb0ff;
+  --ch-1: #3987e5; --ch-2: #d95926; --ch-3: #199e70; --ch-4: #c98500;
+  --ch-5: #d55181; --ch-6: #008300; --ch-7: #9085e9; --ch-8: #e66767;
   --sel: #16233a;
   --sel-line: #5e9cf2;
   /* node kinds — the same six families, re-stepped for the dark canvas
