@@ -145,6 +145,16 @@ if "SLOW" in msg:
     time.sleep(30)
     sys.exit(0)
 
+if "LONGTOOL" in msg:
+    # a tool that runs a while: the CLI writes only its heartbeat meanwhile
+    for n in range(10):
+        time.sleep(0.3)
+        emit({"type": "tool_progress", "tool_use_id": "toolu_1", "tool_name": "Bash", "heartbeat": True,
+              "elapsed_time_seconds": n, "session_id": sid})
+    emit({"type": "result", "subtype": "success", "session_id": sid, "total_cost_usd": 0.01, "is_error": False,
+          "result": "Suite passed", "usage": usage, "num_turns": 1})
+    sys.exit(0)
+
 emit({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}})
 emit({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Let me look."}}})
 emit({"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}})
@@ -395,6 +405,32 @@ def test_stop_keeps_what_was_written(client, project, fake):
     assert items[-1]["kind"] == "turn_end" and items[-1]["state"] == "stopped"
     sess = client.get(f"/api/assistant/sessions/{sid}").json()["session"]
     assert not sess["running"] and sess["claude_session"]          # the next turn continues from it
+
+
+def test_a_turn_is_stopped_for_going_quiet_not_for_working_long(client, project, fake, monkeypatch):
+    # 1.2 s of silence ends a turn; a tool's heartbeats keep a 3 s one alive,
+    # and there is no wall clock unless OPERONX_STUDIO_CHAT_MAX_MIN asks for one
+    monkeypatch.setenv("OPERONX_STUDIO_CHAT_IDLE_MIN", "0.02")
+    monkeypatch.delenv("OPERONX_STUDIO_CHAT_MAX_MIN", raising=False)
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    turn = client.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "LONGTOOL please"}).json()["turn"]
+    assert _drain(client, turn)[-1]["state"] == "done"
+    turn = client.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "SLOW please"}).json()["turn"]
+    t0 = time.monotonic()
+    assert _drain(client, turn)[-1]["state"] == "stopped" and time.monotonic() - t0 < 10
+    errors = [i for i in client.get(f"/api/assistant/sessions/{sid}").json()["items"] if i["kind"] == "error"]
+    assert "said nothing for" in errors[-1]["text"] and errors[-1]["retry"]
+
+
+def test_a_cap_on_the_whole_run_still_holds_when_set(client, project, fake, monkeypatch):
+    monkeypatch.setenv("OPERONX_STUDIO_CHAT_MAX_MIN", "0.02")
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    turn = client.post(f"/api/assistant/sessions/{sid}/turns", json={"message": "LONGTOOL please"}).json()["turn"]
+    assert _drain(client, turn)[-1]["state"] == "stopped"
+    errors = [i for i in client.get(f"/api/assistant/sessions/{sid}").json()["items"] if i["kind"] == "error"]
+    assert "longer than the studio allows" in errors[-1]["text"]
 
 
 def test_failures_say_so_and_offer_a_retry(client, project, fake):

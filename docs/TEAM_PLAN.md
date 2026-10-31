@@ -238,7 +238,8 @@ route gets in §2.2.
   - `_studio_mcp` issues an in-memory token for the requesting user, valid
     for one turn.
   - The token is revoked when the turn ends, or after `CHAT_MAX_MIN` + 5
-    min.
+    min (a day + 5 min when no cap is set: since 2026-10-31 a turn is
+    stopped for `CHAT_IDLE_MIN` of silence, not a wall clock).
   - The middleware accepts it as `oxsession` and marks the request as coming
     from the assistant.
   - The MCP config moves from the command line to a 0600 file under
