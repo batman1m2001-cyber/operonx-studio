@@ -745,6 +745,28 @@ def register(app: Any, *, watcher_of: Any) -> None:
         return JSONResponse(out, status_code=200 if out.get("ok") else 503 if out.get("status") == "unavailable"
                             else 409)  # fmt: skip
 
+    @app.get("/api/p/{pid}/project/files")
+    def project_files(pid: str) -> JSONResponse:
+        """The project's files as git sees them, the lately changed ones marked (Project mode › Files)."""
+        from . import files
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        out = files.tree(root)
+        return JSONResponse(out, status_code=200 if out["ok"] else 409)
+
+    @app.get("/api/p/{pid}/project/file")
+    def project_file(pid: str, path: str) -> JSONResponse:
+        """One of them, read-only."""
+        from . import files
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        out = files.read(root, path)
+        return JSONResponse(out, status_code=200 if out["ok"] else 404)
+
     @app.get("/api/p/{pid}/board/{mid}")
     def board_milestone(pid: str, mid: str) -> JSONResponse:
         """One milestone: its columns, cards, open questions, plan, waves and last events."""

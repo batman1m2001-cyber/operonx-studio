@@ -5238,7 +5238,7 @@ button.pm-item:hover { background: var(--surface-2); }
   .prail { order: 9; width: auto; height: 52px; flex-direction: row; border-right: none; border-top: 1px solid var(--border);
     padding: 4px 8px calc(4px + env(safe-area-inset-bottom)); }
   .prail .tabs { flex-direction: row; justify-content: space-around; }
-  .prail .tabs button { width: 52px; min-height: 44px; }
+  .prail .tabs button { width: auto; flex: 1 1 0; min-width: 0; min-height: 44px; }
   .prail .tabs .pback { margin-top: 0; }
   #project.pane { padding: 0; flex: 1; min-height: 0; }
   .pm-main { flex-direction: column; }
@@ -5330,6 +5330,34 @@ button.pm-w { cursor: pointer; }
 .pm-day { margin: 16px 0 6px; }
 .pm-change { display: flex; flex-direction: column; padding: 6px 0; border-bottom: 1px solid var(--border-soft); font-size: var(--fs-sm); }
 .pm-change .pm-where { font-size: 11.5px; color: var(--text-3); font-family: var(--mono); }
+/* Files: the tree on the left, the file on the right; a dot marks what changed lately */
+.pm-main.paged .pm-page.pm-page-files { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 16px; }
+.pm-page-files .pm-pagehead .pm-chip { margin-left: auto; }
+.pm-fgrid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 12px; }
+.pm-ftree, .pm-fview { min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.pm-ftree { padding: 6px 0; }
+.pm-frow { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: none; text-align: left;
+  padding: 3px 10px 3px 8px; font-size: var(--fs-sm); color: var(--text-2); cursor: pointer; }
+.pm-frow:hover { background: var(--accent-soft); color: var(--text); }
+.pm-frow.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.pm-fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-fdir .pm-fname { color: var(--text); }
+.pm-fcaret { width: 0; height: 0; border-left: 5px solid var(--text-3); border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent; transition: transform .12s; }
+.pm-fdir.open .pm-fcaret { transform: rotate(90deg); }
+.pm-fdot { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); flex: none; }
+.pm-fdot.uncommitted { background: var(--warn); }
+.pm-fhead { position: sticky; top: 0; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft); background: var(--bg); }
+.pm-fpath { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); word-break: break-all; }
+.pm-fhead .pm-where { font-size: 11.5px; color: var(--text-3); }
+.pm-code { margin: 0; padding: 10px 12px; font: 12.5px/1.5 var(--mono); color: var(--text); white-space: pre; tab-size: 4; }
+.pm-fview > .pm-quiet { padding: 12px; }
+@media (max-width: 760px) {
+  .pm-main.paged .pm-page.pm-page-files { overflow-y: auto; display: block; }
+  .pm-fgrid { display: flex; flex-direction: column; }
+  .pm-ftree { max-height: 45vh; }
+}
 
 .pm-set { max-width: 640px; padding: 14px 0; border-bottom: 1px solid var(--border-soft); }
 .pm-set p { margin: 0 0 8px; }

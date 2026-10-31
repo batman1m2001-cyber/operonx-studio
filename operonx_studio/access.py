@@ -104,6 +104,8 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/board/{{mid}}/checklist"): "read",
     ("GET", f"{P}/board/{{mid}}/card/{{cid}}"): "read",
     ("GET", f"{P}/project/status"): "read",                        # Project mode: the engine's status document
+    ("GET", f"{P}/project/files"): "read",                         # Project mode › Files: what git tracks
+    ("GET", f"{P}/project/file"): "read",
     ("GET", f"{P}/git"): "read",                                   # what the assistant may do with git
     ("POST", f"{P}/git"): "admin",                                 # it reaches the machine's push credentials
     ("GET", f"{P}/trace/{{run}}"): "read",
