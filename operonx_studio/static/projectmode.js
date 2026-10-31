@@ -16,6 +16,7 @@
  *   Checklist  the requirements: done, open, and their tests
  *   Questions  what waits for the owner, answered in place
  *   Changes    the commits, newest first
+ *   Files      the project's files, read-only; what changed lately is marked
  *   Settings   how it is built, the models, the engine's daemon
  *
  * On a page other than Now the page takes the centre and the conversation
@@ -30,9 +31,10 @@ const ProjectMode = (() => {
   const box = $("#project");
   const bar = $("#prail");
   const K = `pmode:${PID}`;
-  const v = Object.assign({page: "now", open: {}, mid: "", filter: "open", search: ""}, recall(K, {}));
+  const v = Object.assign({page: "now", open: {}, mid: "", filter: "open", search: "", fopen: {}, file: "",
+                           fonly: false}, recall(K, {}));
   const PAGES = {now: "Now", plans: "Plans", checklist: "Checklist", questions: "Questions", changes: "Changes",
-                 settings: "Settings"};
+                 files: "Files", settings: "Settings"};
   let doc = null;      // the last status document
   let failed = null;   // why there is none: {message, unavailable}
   let token = 0;
@@ -575,6 +577,93 @@ const ProjectMode = (() => {
     }
   }
 
+  /* ── Files: the tree on the left, the file on the right ─────────── */
+  const MARK = {uncommitted: "changed, not committed", recent: "committed in the last two hours"};
+  let ftree = null;     // {files, changed} as last read
+  async function drawFiles() {
+    const mine = ++pageToken;
+    page.textContent = "";
+    page.append(pageHead("Files", ""));
+    try { ftree = await api(`/api/p/${PID}/project/files`); }
+    catch (err) { ftree = null; if (mine === pageToken) page.append(el("p", "pm-quiet", (err.data || {}).message || err.message)); return; }
+    if (mine !== pageToken || v.page !== "files") return;
+    page.textContent = "";
+    const n = Object.keys(ftree.changed).length;
+    const head = pageHead("Files", `${plural(ftree.files.length, "file")}${n ? ` · ${n} changed lately` : ""}`);
+    const only = button("pm-chip" + (v.fonly ? " on" : ""), "Changed only", () => { v.fonly = !v.fonly; save(); drawFiles(); },
+                        "Only the files changed and not committed, or committed in the last two hours");
+    only.disabled = !n && !v.fonly;
+    head.append(only);
+    const grid = el("div", "pm-fgrid");
+    const list = el("nav", "pm-ftree");
+    list.setAttribute("aria-label", "Files");
+    const view = el("section", "pm-fview");
+    grid.append(list, view);
+    page.append(head, grid);
+    fillTree(list);
+    if (v.file && ftree.files.includes(v.file)) openFile(v.file, view);
+    else view.append(el("p", "pm-quiet", "Pick a file."));
+  }
+  function fillTree(list) {
+    const paths = v.fonly ? ftree.files.filter((p) => ftree.changed[p]) : ftree.files;
+    const root = {dirs: {}, files: []};
+    for (const p of paths) {
+      const parts = p.split("/");
+      let at = root;
+      for (const d of parts.slice(0, -1)) at = at.dirs[d] || (at.dirs[d] = {dirs: {}, files: []});
+      at.files.push(p);
+    }
+    const dirty = (node) => node.files.some((p) => ftree.changed[p]) || Object.values(node.dirs).some(dirty);
+    const walk = (node, prefix, depth, into) => {
+      for (const name of Object.keys(node.dirs).sort()) {
+        const path = prefix + name + "/", sub = node.dirs[name];
+        const open = v.fonly || !!v.fopen[path];
+        const row = button("pm-frow pm-fdir" + (open ? " open" : ""), "", () => {
+          if (v.fopen[path]) delete v.fopen[path]; else v.fopen[path] = 1;
+          save(); list.textContent = ""; fillTree(list);
+        }, path);
+        row.style.paddingLeft = `${8 + depth * 14}px`;
+        row.append(el("i", "pm-fcaret"), el("span", "pm-fname", name));
+        if (dirty(sub)) row.append(el("b", "pm-fdot"));
+        into.append(row);
+        if (open) walk(sub, path, depth + 1, into);
+      }
+      for (const p of node.files) {
+        const mark = ftree.changed[p];
+        const row = button("pm-frow pm-ffile" + (p === v.file ? " on" : ""), "", () => {
+          v.file = p; save();
+          for (const r of list.querySelectorAll(".pm-ffile.on")) r.classList.remove("on");
+          row.classList.add("on");
+          openFile(p, page.querySelector(".pm-fview"));
+        }, mark ? `${p} — ${MARK[mark]}` : p);
+        row.style.paddingLeft = `${22 + depth * 14}px`;
+        row.append(el("span", "pm-fname", p.split("/").pop()));
+        if (mark) row.append(el("b", "pm-fdot " + mark));
+        tgt(row, `file:${p}`);
+        into.append(row);
+      }
+    };
+    walk(root, "", 0, list);
+    if (!paths.length) list.append(el("p", "pm-quiet", v.fonly ? "Nothing changed lately." : "No files."));
+  }
+  let fileToken = 0;
+  async function openFile(path, view) {
+    const mine = ++fileToken;
+    view.textContent = "";
+    const head = el("div", "pm-fhead");
+    head.append(el("span", "pm-fpath", path));
+    view.append(head);
+    let got;
+    try { got = await api(`/api/p/${PID}/project/file?path=${enc(path)}`); }
+    catch (err) { if (mine === fileToken) view.append(el("p", "pm-quiet", (err.data || {}).message || err.message)); return; }
+    if (mine !== fileToken) return;
+    const mark = ftree && ftree.changed[path];
+    head.append(el("span", "pm-where", `${got.size.toLocaleString()} bytes${mark ? " · " + MARK[mark] : ""}`));
+    if (got.binary) { view.append(el("p", "pm-quiet", "A binary file: not shown.")); return; }
+    view.append(el("pre", "pm-code", got.text));
+    if (got.truncated) view.append(el("p", "pm-quiet", "The first 400 KB only."));
+  }
+
   async function drawSettings() {
     const mine = ++pageToken;
     page.textContent = "";
@@ -719,12 +808,14 @@ const ProjectMode = (() => {
 
   function drawPage() {
     main.classList.toggle("paged", v.page !== "now");
+    page.classList.toggle("pm-page-files", v.page === "files");
     if (v.page !== "plans" && HAS_BOARD()) BoardView.unmount();
     if (v.page === "now") { page.textContent = ""; return; }
     if (v.page === "plans") drawPlans();
     else if (v.page === "checklist") drawChecklist();
     else if (v.page === "questions") drawQuestions();
     else if (v.page === "changes") drawChanges();
+    else if (v.page === "files") drawFiles();
     else if (v.page === "settings") drawSettings();
   }
 
@@ -753,6 +844,13 @@ const ProjectMode = (() => {
       const typing = page.contains(document.activeElement) && /TEXTAREA|INPUT|SELECT/.test(document.activeElement.tagName);
       if (!typing && (v.page === "questions" || v.page === "settings" || (v.page === "plans" && !v.mid)
         || (base && (v.page === "changes" || v.page === "checklist")))) drawPage();
+      else if (v.page === "files" && ftree) {
+        api(`/api/p/${PID}/project/files`).then((got) => {
+          const list = page.querySelector(".pm-ftree");
+          if (!list || v.page !== "files") return;
+          ftree = got; list.textContent = ""; fillTree(list);
+        }).catch(() => { /* the last tree */ });
+      }
     }
     schedule();
   }
