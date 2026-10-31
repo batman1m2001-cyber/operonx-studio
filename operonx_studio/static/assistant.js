@@ -848,12 +848,14 @@
   }
   /* D6: a test run's report — the bar, the counts, the failures a click away */
   function testReport(t) {
-    const box = el("div", "ax-tests" + (t.failed || t.errors ? " bad" : ""));
-    const total = t.passed + t.failed + t.errors + t.skipped || 1;
+    const box = el("div", "ax-tests" + (t.failed || t.errors ? " bad" : "") + (t.live ? " live" : ""));
+    const ran = t.passed + t.failed + t.errors + t.skipped;
+    // a run still going (D6, live): what ran so far, and the rest of the bar when the runner says its share
+    const total = (t.live && t.pct ? Math.max(ran, ran * 100 / t.pct) : ran) || 1;
     const bar = el("div", "ax-tests-bar");
     bar.setAttribute("aria-hidden", "true");
-    for (const [k, n] of [["ok", t.passed], ["err", t.failed + t.errors], ["skip", t.skipped]]) {
-      if (n) { const seg = el("span", "seg-" + k); seg.style.flexGrow = String(n / total); bar.append(seg); }
+    for (const [k, n] of [["ok", t.passed], ["err", t.failed + t.errors], ["skip", t.skipped], ["rest", total - ran]]) {
+      if (n > 0) { const seg = el("span", "seg-" + k); seg.style.flexGrow = String(n / total); bar.append(seg); }
     }
     const nums = el("div", "ax-tests-nums");
     const bits = [[t.passed, "passed", "ok"], [t.failed, "failed", "err"], [t.errors, t.errors === 1 ? "error" : "errors", "err"],
@@ -862,7 +864,8 @@
       if (i) nums.append(el("span", "ax-tests-dot", "·"));
       nums.append(el("span", "n-" + k, `${n} ${w}`));
     });
-    if (t.ms != null) nums.append(el("span", "ax-tests-dot", "·"), el("span", "n-ms", fmt.ms(t.ms)));
+    if (t.live) nums.append(el("span", "ax-tests-dot", "·"), el("span", "n-live", t.pct != null ? `running · ${t.pct}%` : "running"));
+    else if (t.ms != null) nums.append(el("span", "ax-tests-dot", "·"), el("span", "n-ms", fmt.ms(t.ms)));
     nums.append(el("span", "ax-tests-runner", t.runner));
     box.append(bar, nums);
     const fails = t.failures || [];
@@ -1071,12 +1074,14 @@
     prog.title.textContent = prog.plan ? prog.plan.title || "Plan" : "Steps";
     prog.chip.textContent = chip[0];
     prog.chip.className = "ax-prog-chip st-" + chip[1];
-    prog.count.textContent = `${done} of ${n} steps`;
-    prog.pct.textContent = `${pct}%`;
+    // steps the page makes from the tool calls grow as the turn goes: "13 of 14" would be 14 of 15 a moment
+    // later, so they are counted, never measured
+    prog.count.textContent = prog.plan ? `${done} of ${n} steps` : `${steps.length} ${steps.length === 1 ? "step" : "steps"}`;
+    prog.pct.textContent = prog.plan ? `${pct}%` : "";
     prog.fill.style.width = `${pct}%`;
     prog.card.classList.toggle("live", live);
     prog.card.classList.toggle("auto", !prog.plan);
-    if (live) { A.progress = pct; askbarPaint(); }
+    if (live) { A.progress = prog.plan ? pct : null; askbarPaint(); }
     // D12: steps that say what they wait on are drawn as a structure; the list then holds the selected step
     const shape = prog.plan && W.oxGraph && W.oxGraph.draw ? P.structure(steps) : null;
     prog.card.classList.toggle("dag", !!shape);
@@ -1087,7 +1092,35 @@
       prog.list.replaceChildren(...(at >= 0 ? [progStep(prog, steps[at], at, live)] : []));
     } else {
       if (prog.shape) { prog.shape.remove(); prog.shape = null; }
-      prog.list.replaceChildren(...steps.map((step, i) => progStep(prog, step, i, live)));
+      // live, the card sticks above the reply: the steps done before the last one fold into a line, so the
+      // card stays short and the words under it stay readable
+      const first = steps.findIndex((s) => s.state !== "done" && s.state !== "skipped");
+      const fold = live && !prog.all ? (first < 0 ? steps.length : first) - 1 : 0;
+      const kept = prog.list.scrollTop;
+      const rows = steps.map((step, i) => i < fold ? null : progStep(prog, step, i, live)).filter(Boolean);
+      if (fold >= 2) {
+        const li = el("li", "ax-pstep ax-pstep-fold done st-ok");
+        const dot = el("span", "ax-pstep-dot");
+        dot.append(icon(B.status("done").icon));
+        const more = el("button", "ax-pstep-head more", `${fold} earlier steps done`);
+        more.type = "button";
+        more.setAttribute("aria-expanded", "false");
+        more.onclick = () => { prog.all = true; paintProg(prog); };
+        const main = el("div", "ax-pstep-main");
+        main.append(more);
+        li.append(dot, main);
+        prog.list.replaceChildren(li, ...rows);
+      } else {
+        prog.list.replaceChildren(...steps.map((step, i) => progStep(prog, step, i, live)));
+      }
+      // past the cap the list scrolls: a new running step comes into sight, else the reader's place is kept
+      prog.list.scrollTop = kept;
+      const at = live ? steps.findIndex((st) => st.state === "active") : -1;
+      if (at !== prog.seen) {
+        prog.seen = at;
+        const now = at >= 0 && prog.list.scrollHeight > prog.list.clientHeight ? prog.list.querySelector(".ax-pstep.active") : null;
+        if (now) prog.list.scrollTop = now.offsetTop - prog.list.offsetTop - 8;
+      }
     }
     if (say !== prog.said) { prog.said = say; prog.say.textContent = say; }
   }
@@ -1139,12 +1172,20 @@
   }
   function stepMeter(pr) {
     const m = el("span", "ax-pstep-meter");
-    m.title = pr.kind === "sub" ? `${pr.done} of ${pr.total} subtasks done` : `${pr.done} of ${pr.total} tests passed`;
     const bad = pr.kind === "tests" && pr.done < pr.total ? " bad" : "";
     const bar = el("span", "ax-pstep-mbar" + bad);
     const fill = el("span");
-    fill.style.width = `${Math.round(pr.done / pr.total * 100)}%`;
     bar.append(fill);
+    if (pr.live) {
+      // still running: the bar is the runner's share done when it says one, else the share passed so far
+      m.title = `${pr.done} passed${pr.total > pr.done ? `, ${pr.total - pr.done} failed` : ""} so far`
+        + (pr.pct != null ? ` · ${pr.pct}% of the run` : "");
+      fill.style.width = `${pr.pct != null ? pr.pct : Math.round(pr.done / pr.total * 100)}%`;
+      m.append(bar, el("span", "ax-pstep-mnum" + bad, `${pr.done}${bad ? ` · ${pr.total - pr.done}✗` : ""}`));
+      return m;
+    }
+    m.title = pr.kind === "sub" ? `${pr.done} of ${pr.total} subtasks done` : `${pr.done} of ${pr.total} tests passed`;
+    fill.style.width = `${Math.round(pr.done / pr.total * 100)}%`;
     m.append(bar, el("span", "ax-pstep-mnum" + bad, `${pr.done}/${pr.total}`));
     return m;
   }

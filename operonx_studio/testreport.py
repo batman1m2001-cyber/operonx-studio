@@ -215,3 +215,58 @@ def parse(command: str, output: str) -> Optional[Dict[str, Any]]:
             rep["failures"] = fails
             return rep
     return None
+
+
+# the per-test lines a runner prints while it runs: (runner, pattern, {group text → outcome})
+_PYTEST_DOTS = re.compile(r"^(?:\S+\.py\s+)?([.FEsxX]+)\s*(?:\[\s*\d+%\])?\s*$")
+_PYTEST_WORD = re.compile(r"\b(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b.*?(?:\[\s*\d+%\])?\s*$")
+_LIVE = [
+    ("cargo test", re.compile(r"^test \S+ \.\.\. (ok|FAILED|ignored)\s*$"), {"ok": "passed", "FAILED": "failed", "ignored": "skipped"}),
+    ("go test", re.compile(r"^\s*--- (PASS|FAIL|SKIP): "), {"PASS": "passed", "FAIL": "failed", "SKIP": "skipped"}),
+    ("node --test", re.compile(r"^\s*(ok|not ok) \d+ - "), {"ok": "passed", "not ok": "failed"}),
+    ("tests", re.compile(r"^\s*([✔✓√]|[✖✕×]|[○↓﹣]) "), {"✔": "passed", "✓": "passed", "√": "passed", "✖": "failed",
+                                                         "✕": "failed", "×": "failed", "○": "skipped", "↓": "skipped",
+                                                         "﹣": "skipped"}),
+]
+_PYTEST_CHAR = {".": "passed", "X": "passed", "F": "failed", "E": "errors", "s": "skipped", "x": "skipped"}
+_PYTEST_WORDS = {"PASSED": "passed", "XPASS": "passed", "FAILED": "failed", "ERROR": "errors", "SKIPPED": "skipped",
+                 "XFAIL": "skipped"}
+
+
+def progress(command: str, output: str) -> Optional[Dict[str, Any]]:
+    """A test run so far, from the output it has printed (D6, live): the tests each line reports, and the share
+    done when the runner says it ("[ 40%]"). {"live": True, "pct": 40 | None, …counts}; None before the first test."""
+    if not is_test(command) or not output:
+        return None
+    text = _ANSI.sub("", output.replace("\r\n", "\n").replace("\r", "\n"))
+    lines = text.split("\n")
+    if not _PYTEST_DOTS.match(lines[-1].strip()):
+        lines.pop()                         # half written; a line of dots is read as it grows
+    pcts = re.findall(r"\[\s*(\d{1,3})%\]\s*$", text, re.M)
+    counts = {"passed": 0, "failed": 0, "skipped": 0, "errors": 0}
+    runner = None
+    if pcts or re.search(r"^=+ test session starts", text, re.M) or re.search(r"\b(py\.?test)\b", command):
+        runner = "pytest"
+        for ln in lines:
+            s = ln.strip()
+            if s.startswith(("FAILED ", "ERROR ")):       # the short summary repeats the failures
+                continue
+            m = _PYTEST_DOTS.match(s)
+            if m and (re.search(r"\[\s*\d+%\]", s) or re.match(r"^\S+\.py\s", s) or len(m.group(1)) > 1):
+                for ch in m.group(1):
+                    counts[_PYTEST_CHAR[ch]] += 1
+                continue
+            w = _PYTEST_WORD.search(s)
+            if w and "::" in s:
+                counts[_PYTEST_WORDS[w.group(1)]] += 1
+    else:
+        for name, rx, words in _LIVE:
+            hits = [m.group(1) for m in map(rx.match, lines) if m]
+            if hits:
+                runner = name
+                for h in hits:
+                    counts[words[h]] += 1
+                break
+    if runner is None or not (any(counts.values()) or pcts):
+        return None
+    return {**_report(runner, **counts), "live": True, "pct": min(100, int(pcts[-1])) if pcts else None}

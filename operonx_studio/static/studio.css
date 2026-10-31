@@ -6048,3 +6048,11 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
 .ax-prog-shape { overflow-x: auto; margin: 4px 0 2px; }
 .ax-prog-shape .ax-graph-svg { width: auto; max-width: 100%; max-height: none; margin: 4px auto; }
 .ax-prog.dag .ax-prog-steps:empty { display: none; }
+
+/* a test run still going (D6, live): the rest of the bar is the share not run yet */
+.ax-tests-bar .seg-rest { background: transparent; }
+.ax-tests-nums .n-live { color: var(--text-2); }
+/* the live card sticks above the reply: it stays short (done steps fold, the list scrolls past a cap) */
+.ax-prog.live .ax-prog-steps { max-height: min(38vh, 340px); overflow-y: auto; overscroll-behavior: contain; }
+.ax-prog.auto .ax-prog-bar, .ax-prog.auto .ax-prog-pct:empty { display: none; }
+.ax-pstep-fold .ax-pstep-head { color: var(--text-2); font-size: var(--fs-sm); justify-content: flex-start; text-align: left; }
