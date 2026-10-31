@@ -31,7 +31,10 @@ around it:
   that reconnects asks from its cursor and misses nothing.
 * **A turn outlives its page.** Nobody watching is not a reason to stop
   an agent that was asked to do something; a turn ends when it ends, is
-  stopped, or passes ``OPERONX_STUDIO_CHAT_MAX_MIN`` (default 60).
+  stopped, or its CLI says nothing for ``OPERONX_STUDIO_CHAT_IDLE_MIN``
+  (default 15). Working long is not a reason: Claude Code has no wall clock,
+  and a running tool writes a heartbeat every half minute or so.
+  ``OPERONX_STUDIO_CHAT_MAX_MIN`` still caps a turn's whole run when set.
 
 Client events (``i`` is the event's index, the cursor):
 
@@ -131,6 +134,15 @@ _MODEL_ERROR = re.compile(r"issue with the selected model|unrecognized_model|mod
 # the agent did, never a whole file.
 _TOOL_IO_LIMIT = 4000
 _FLUSH_EVERY = 0.25
+
+
+def turn_limit(name: str, default: float) -> float:
+    """``OPERONX_STUDIO_CHAT_<name>`` in seconds (it is set in minutes); 0 is
+    no limit."""
+    try:
+        return max(0.0, float(os.environ.get(f"OPERONX_STUDIO_CHAT_{name}") or default) * 60)
+    except ValueError:
+        return default * 60
 
 
 def _now() -> float:
@@ -551,6 +563,7 @@ class Turn:
     reseed: bool = False                  # a fresh Claude session, seeded with a summary
     cwd: Optional[str] = None
     kill_timer: Optional[asyncio.TimerHandle] = None
+    heard: float = field(default_factory=time.monotonic)   # the CLI's last line
     usage: Dict[str, Any] = field(default_factory=dict)
     last_flush: float = 0.0
     owner: Optional[str] = None           # the person whose turn it is (their user id)
@@ -878,10 +891,24 @@ class Relay:
         assert proc is not None and proc.stdout is not None
         got_result = False
         state = "failed"
-        limit = float(os.environ.get("OPERONX_STUDIO_CHAT_MAX_MIN") or 60) * 60
-        watchdog = asyncio.get_running_loop().call_later(limit, lambda: self.stop(turn.id, reason="time"))
+        loop = asyncio.get_running_loop()
+        cap, idle = turn_limit("MAX_MIN", 0), turn_limit("IDLE_MIN", 15)
+        timers: List[asyncio.TimerHandle] = []
+        if cap:
+            timers.append(loop.call_later(cap, lambda: self.stop(turn.id, reason="time")))
+
+        def quiet() -> None:
+            left = turn.heard + idle - time.monotonic()
+            if left <= 0:
+                self.stop(turn.id, reason="idle")
+            else:
+                timers.append(loop.call_later(left, quiet))
+
+        if idle:
+            timers.append(loop.call_later(idle, quiet))
         try:
             async for raw in proc.stdout:
+                turn.heard = time.monotonic()
                 try:
                     event = json.loads(raw)
                 except ValueError:
@@ -905,7 +932,8 @@ class Relay:
                 self._flush(turn)
             await proc.wait()
         finally:
-            watchdog.cancel()
+            for timer in timers:
+                timer.cancel()
         if turn.stopping:
             return "stopped"
         if not got_result:
@@ -1231,6 +1259,10 @@ class Relay:
         if reason == "time":
             self._item(turn, "error", text="Stopped: this ran longer than the studio allows "
                                            "(OPERONX_STUDIO_CHAT_MAX_MIN).", retry=False)
+        if reason == "idle":
+            self._item(turn, "error", text=f"Stopped: the assistant said nothing for "
+                                           f"{turn_limit('IDLE_MIN', 15) / 60:g} min (OPERONX_STUDIO_CHAT_IDLE_MIN).",
+                       retry=True)
         return True
 
     def _sweep(self) -> None:

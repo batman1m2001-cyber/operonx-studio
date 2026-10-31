@@ -4752,8 +4752,9 @@ def build_studio_app(recents: Optional[Recents] = None):
         server = request.scope.get("server") or ("127.0.0.1", 8765)
         host = "127.0.0.1" if server[0] in ("0.0.0.0", "::", None) else server[0]
         # a token for this turn's owner alone, revoked when the turn ends
-        # (decision D12); the shared login cookie it replaced never expired
-        ttl = (float(os.environ.get("OPERONX_STUDIO_CHAT_MAX_MIN") or 60) + 5) * 60
+        # (decision D12); the shared login cookie it replaced never expired.
+        # The ttl only backs up a missed end: the turn's cap, else a day
+        ttl = (turn_limit("MAX_MIN", 0) or 24 * 3600) + 5 * 60
         token = agents.issue(request.state.user["id"], ttl)
         env = {"OPERONX_STUDIO_URL": f"http://{host}:{server[1]}", "OPERONX_STUDIO_PID": pid,
                "OPERONX_STUDIO_TOKEN": token}
@@ -4800,6 +4801,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         MODELS,
         ChatStore,
         Relay,
+        turn_limit,
         valid_model,
     )
 
