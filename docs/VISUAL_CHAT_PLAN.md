@@ -1,6 +1,6 @@
 # The conversation shows the work: a visual-first assistant (VISUAL_CHAT_PLAN)
 
-Status: plan, waiting for the owner's go (2026-10-31).
+Status: in progress on feat/visual-chat (2026-10-31): V0 done.
 
 Owner's brief: "Visual-First Conversational Engineering Experience", in 12
 sections. The assistant's work should be readable at a glance: references,
@@ -89,6 +89,23 @@ rules:
 - **Cut the replies' repetition of what cards show** (D11).
 
 V0 measures the baseline and V7 measures it again.
+
+**V0 baseline** (2026-10-31, main d737464; `scripts/perf/chat_baseline.py`
+over a read-only copy of the live store, `scripts/perf/render_chat.py` on a
+scratch studio):
+
+| Metric | Value |
+|---|---|
+| Turns measured | 70 |
+| Median input / output tokens per turn | 47,215 / 375 |
+| Output share of all tokens | 16.8k of 1.72M (1.0%); 1.64M of the input was cached |
+| Median LLM calls per turn | 2 (the long mr-finance turn: 21) |
+| Median time to the first tool or text item | 5.6 s |
+| Median total turn time | 7.7 s (the long turn: 145 s) |
+| Median reply length | 125 chars |
+| Median stored bytes per turn | 2.0 KB (the long turn: 61 KB) |
+| `ox-` fences / callouts used | 0 / 0 |
+| Render of a 434-item session | median 248 ms, one long task ~280 ms, 5,495 DOM nodes |
 
 ## 2 · Decisions
 
@@ -514,8 +531,10 @@ branch per plan). The PR is opened at V8.
 
 **Efficiency (V7).**
 - No extra LLM call per turn, and the prompt grows by ≤ 2 KB.
-- Render time of a 400-item session grows by ≤ 20%, and no long task
-  exceeds 100 ms.
+- Render time of a 400-item session grows by ≤ 20%, and its long task by
+  ≤ 20%. (V0 found the baseline's own long task at ~290 ms, so "no long
+  task over 100 ms", first written here, failed before any change; it is
+  measured against the baseline instead.)
 - Stream and stored bytes are reported.
 - Output tokens and reply chars are reported as measured, whichever way
   they move.

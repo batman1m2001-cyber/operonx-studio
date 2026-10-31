@@ -1135,10 +1135,13 @@
     A.bySeq.clear();
     turnEl = replyEl = actEl = null;
     if (!A.items.length) { renderEmpty(); return; }
+    // the transcript's render time, for scripts/perf/render_chat.py (VISUAL_CHAT_PLAN V0)
+    const t0 = performance.now();
     for (const it of A.items) append(it);
     for (const g of log.querySelectorAll(".ax-act")) paintActivity(g);
     markLast();
     toBottom();
+    try { performance.measure("ax:render", {start: t0, detail: A.items.length}); } catch { /* an old engine */ }
   }
 
   // only the last answer offers Regenerate; only the last error, Retry
