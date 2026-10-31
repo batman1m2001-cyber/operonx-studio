@@ -519,10 +519,10 @@ select { width: auto; min-height: 30px; padding: 4px 28px 4px 10px; font-size: v
 .errbox pre { font-size: 11px; overflow-x: auto; max-height: 300px; }
 .errbox .note { font-family: var(--font); margin-top: 8px; }
 
-/* the brand mark: the operonx icon in Lavender (#10 dark, #5 light, recoloured); login shows the full mark */
-.mark { width: 26px; height: 26px; flex: none; display: inline-block;
-  background: url("/static/operonx-icon-light.png") center / contain no-repeat; }
-:root[data-theme="dark"] .mark { background-image: url("/static/operonx-icon-dark.png"); }
+/* the brand mark: the glyph alone on the page, no tile (the tile stays for the favicon); login shows the full mark */
+.mark { width: 38px; height: 22px; flex: none; display: inline-block;
+  background: url("/static/operonx-glyph-light.png") center / contain no-repeat; }
+:root[data-theme="dark"] .mark { background-image: url("/static/operonx-glyph-dark.png"); }
 .mark.big { width: 112px; height: 70px; background-image: url("/static/operonx-mark-light.png"); }
 :root[data-theme="dark"] .mark.big { background-image: url("/static/operonx-mark-dark.png"); }
 .brand { display: inline-flex; align-items: center; gap: 8px; color: var(--text);
