@@ -587,6 +587,16 @@ def t_board_start(s: Studio, a: Dict[str, Any]) -> str:
             "(board_act approve) — it must be running (board_daemon start).")
 
 
+def t_board_plan(s: Studio, a: Dict[str, Any]) -> str:
+    try:
+        got = s.call("/board/plan", {"path": str(a.get("path") or "")})
+    except RuntimeError as exc:
+        return f"refused: {exc}"
+    if got.get("milestone"):
+        s.show("open_board", mid=got["milestone"], view="board")
+    return ("done: " if got.get("ok") else "refused: ") + str(got.get("message"))
+
+
 def t_board_request(s: Studio, a: Dict[str, Any]) -> str:
     body = {k: a[k] for k in ("text", "title", "mode", "max_usd", "needs") if a.get(k) not in (None, "", [])}
     try:
@@ -845,6 +855,12 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                     "schema": _schema({"title": _S, "rows": {"type": "array", "items": _S}, "goal": _S, "mode": _S,
                                        "max_usd": _N, "from_board": _S, "needs": {"type": "array", "items": _S}},
                                       ["title"])},
+    "board_plan": {"fn": t_board_plan,
+                   "description": "Put a plan doc on the Board, or bring its milestone back in line with the doc: "
+                                  "the plan is a milestone, each phase a card in the state the doc's status block "
+                                  "gives. path: docs/<NAME>_PLAN.md, or the doc's absolute path in the worktree it "
+                                  "is worked in. The engine does not work these cards; the doc is the record.",
+                   "schema": _schema({"path": _S}, ["path"])},
     "board_request": {"fn": t_board_request,
                       "description": "The owner asks for something new in their own words: text is the words as they "
                                      "gave them (do not rewrite them into requirements; the engine extracts those). "

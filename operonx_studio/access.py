@@ -194,6 +194,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/board/daemon"): "edit",                      # Run / Stop the project's daemon
     ("POST", f"{P}/board/new"): "edit",
     ("POST", f"{P}/board/request"): "edit",
+    ("POST", f"{P}/board/plan"): "edit",                         # a plan doc onto the board; commits its board file
     ("GET", f"{P}/board/practices"): "read",
     ("POST", f"{P}/board/practices"): "edit",                       # commits docs/brd/practices.toml on the checkout
     ("GET", f"{P}/board/settings"): "read",

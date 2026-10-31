@@ -738,3 +738,51 @@ def test_the_assistant_never_inherits_the_studios_virtualenv(monkeypatch):
 
     monkeypatch.setenv("VIRTUAL_ENV", "/elsewhere/.venv")  # the shell that started the studio
     assert "VIRTUAL_ENV" not in base_env()
+
+
+PLAN_DOC = ("---\ntitle: CSV export\nstatus: in_progress\nphases:\n  - {id: E1, title: Rows, status: done}\n"
+            "  - {id: E2, title: Header, status: in_progress}\n  - {id: E3, title: Docs, status: open}\n---\n")  # fmt: skip
+
+
+def _engine_plans() -> bool:
+    eng = _engine_here()
+    if eng is None:
+        return False
+    got = subprocess.run([eng, "api", "--repo", ".", "-"], input='{"op": "plan"}', capture_output=True, text=True,
+                         cwd=Path(__file__).parent)  # fmt: skip
+    return "unknown op 'plan'" not in got.stdout
+
+
+@pytest.mark.skipif(not _engine_plans(), reason="the installed engine has no plan op")
+def test_a_plan_doc_is_put_on_the_board_from_the_checkout_or_its_worktree(client, tmp_path, monkeypatch):
+    """mr-finance FEATURE_FLOWS_PLAN was worked in chat and never showed on the Board: a plan is its milestone."""
+    from operonx_studio import projectboard as pb
+
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", _engine_here())
+    root = make_project(tmp_path / "calc")
+    (root / "docs").mkdir(exist_ok=True)
+    (root / "docs" / "EXPORT_PLAN.md").write_text(PLAN_DOC, encoding="utf-8")
+    _git(root, "add", "docs/EXPORT_PLAN.md")
+    _git(root, "commit", "-q", "-m", "plan")
+    pid = _open(client, root)
+    got = client.post(f"/api/p/{pid}/board/plan", json={"path": "docs/EXPORT_PLAN.md"})
+    assert got.status_code == 200, got.text
+    mid = got.json()["milestone"]
+    cards = {c["title"]: c["state"] for c in client.get(f"/api/p/{pid}/board/{mid}").json()["cards"]}
+    assert cards == {"E1 Rows": "done", "E2 Header": "running", "E3 Docs": "ready"}, cards
+
+    # the plan moves on in a worktree, its doc not on main yet: the board follows the worktree's copy
+    wt = tmp_path / "wt"
+    _git(root, "worktree", "add", "-q", "-b", "feat", str(wt))
+    (wt / "docs" / "EXPORT_PLAN.md").write_text(PLAN_DOC.replace("in_progress}", "done}"), encoding="utf-8")
+    assert pb.plan_request(root, str(wt / "docs" / "EXPORT_PLAN.md"))["path"] == "docs/EXPORT_PLAN.md"
+    got = client.post(f"/api/p/{pid}/board/plan", json={"path": str(wt / "docs" / "EXPORT_PLAN.md")})
+    assert got.status_code == 200 and got.json()["milestone"] == mid, got.text
+    states = [c["state"] for c in client.get(f"/api/p/{pid}/board/{mid}").json()["cards"]]
+    assert sorted(states) == ["done", "done", "ready"], states
+
+    # a path in another repository is not this project's plan
+    other = make_project(tmp_path / "other", store=False)
+    (other / "X_PLAN.md").write_text(PLAN_DOC, encoding="utf-8")
+    got = client.post(f"/api/p/{pid}/board/plan", json={"path": str(other / "X_PLAN.md")})
+    assert got.status_code >= 400 and got.status_code != 500, got.text
