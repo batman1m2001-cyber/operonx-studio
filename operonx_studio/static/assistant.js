@@ -1905,7 +1905,7 @@
     A.running = null;
     A.queue = null;
     A.editing = null;
-    local.drop(K_CURRENT);
+    local.set(K_CURRENT, "");          // chosen: a reload keeps it blank
     paintHead();
     paintBusy();
     paintEditing();
@@ -3030,7 +3030,14 @@
     const fromHash = /#assistant=([\w-]+)/.exec(location.hash);
     // a project page picks up where it was; home starts fresh (its last
     // conversations are one click away under Recent conversations)
-    const id = (fromHash && fromHash[1]) || imported || (PROJECT ? local.get(K_CURRENT, null) : null);
+    let id = (fromHash && fromHash[1]) || imported || (PROJECT ? local.get(K_CURRENT, null) : null);
+    // a browser that never chose here (another device, the public link) picks up the latest conversation
+    if (!id && PROJECT && local.get(K_CURRENT, null) === null) {
+      try {
+        const got = await call(`/api/assistant/sessions?scope=${PROJECT}&limit=5`);
+        id = ((got.sessions || []).find((s) => s.title || s.preview) || {}).id || null;
+      } catch { /* a blank conversation, as before */ }
+    }
     if (fromHash) history.replaceState(null, "", location.pathname + location.search);
     if (id) await openSession(id);
     else { renderAll(); loadDraft(); }
