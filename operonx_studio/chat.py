@@ -150,13 +150,20 @@ def snapshot(repo: Optional[Path]) -> Optional[Dict[str, Any]]:
 
 
 def changes_since(repo: Path, snap: Dict[str, Any], limit: int = 200_000) -> Dict[str, Any]:
-    """What changed in *repo* since *snap*: files, line counts, one diff."""
+    """What changed in *repo* since *snap*: files, line counts, one diff. A file the turn deleted has deleted=True;
+    undo checks it back out of the snapshot like any other tracked file."""
     files: List[Dict[str, Any]] = []
     for line in (_git(repo, "diff", "--numstat", snap["sha"]) or "").splitlines():
         parts = line.split("\t")
         if len(parts) == 3 and not _ignored(parts[2]):
             added, removed = (int(x) if x.isdigit() else 0 for x in parts[:2])
             files.append({"path": parts[2], "added": added, "removed": removed, "new": False})
+    # a tracked file the turn removed is in numstat as all-removed; name-status says it is gone (D7)
+    gone = {ln.split("\t", 1)[1] for ln in (_git(repo, "diff", "--name-status", "--no-renames", snap["sha"]) or "").splitlines()
+            if ln.startswith("D\t")}
+    for f in files:
+        if f["path"] in gone:
+            f["deleted"] = True
     paths = [f["path"] for f in files]
     diff = _git(repo, "diff", "--no-color", snap["sha"], "--", *paths) if paths else ""
     before = set(snap.get("untracked") or [])

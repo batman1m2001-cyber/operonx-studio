@@ -5883,3 +5883,55 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
 .ax-tests-fail { justify-content: flex-start; }
 .ax-pstep-body { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 560px) { .ax-fold-chips { display: none; } }
+
+/* file activity (VISUAL_CHAT_PLAN D7): the strip, the files each with its own diff, the reads folded */
+.ax-act-strip { flex-wrap: wrap; row-gap: 2px; font-size: var(--fs-sm); color: var(--text-2); }
+.ax-act-strip > span[class^="ax-strip-"] { display: inline-flex; align-items: baseline; gap: 4px; font-weight: 600; }
+.ax-strip-read .ax-touch { color: var(--text-3); } .ax-strip-modified .ax-touch { color: var(--warn); }
+.ax-strip-created .ax-touch { color: var(--ok); } .ax-strip-deleted .ax-touch { color: var(--err); }
+.ax-file { display: block; border-radius: var(--r-sm); }
+.ax-file-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 2px 6px; border-radius: var(--r-sm); cursor: pointer; }
+.ax-file-head:hover { background: var(--surface-2); }
+.ax-file-head .ax-touch { width: 10px; flex: none; text-align: center; }
+.ax-file.t-deleted { text-decoration: none; }
+.ax-file.t-deleted .ax-path { text-decoration: line-through; }
+.ax-file > .ax-step-io { padding: 0 0 6px 18px; }
+.ax-file > .ax-step-io .ax-diff { margin-top: 2px; }
+.ax-files-dir { font: 600 11px var(--mono); color: var(--text-3); padding: 6px 6px 1px; }
+.ax-files-dir ~ .ax-file .ax-file-head { padding-left: 16px; }
+.ax-reads { margin-top: 2px; }
+.ax-reads .ax-step-head { min-height: 24px; font-size: var(--fs-sm); padding: 0 6px; }
+.ax-reads .ax-tool-verb { color: var(--text-3); font-weight: 500; }
+.ax-reads-list { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 6px 4px; }
+.ax-reads > .ax-step-io { padding: 0 0 4px; }
+.ax-diffs .ax-diff + .ax-diff { margin-top: 8px; }
+
+/* severity (D8): a failed row is red, a recovered one amber; the first error line shows without opening the row */
+.ax-tool.recovered .ax-step-head .ax-tool-st .icon { color: var(--st-warn); }
+.ax-tool-sev { font-size: 10.5px; font-weight: 600; color: var(--st-warn); background: var(--st-warn-soft, var(--surface-2));
+  border-radius: 4px; padding: 0 5px; }
+.ax-tool-err { padding: 0 12px 6px 33px; font: 11.5px var(--mono); color: var(--st); min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.ax-io-step { font-size: var(--fs-sm); color: var(--text); margin-bottom: 6px; }
+
+/* the turn's outcome (D8): one line of facts; failures by class as a bar, a click opens the list */
+.ax-turnend { display: flex; flex-direction: column; gap: 2px; }
+.ax-outcome { border-top: 1px solid var(--border); padding: 7px 2px 2px; font-size: var(--fs-sm); color: var(--text-2); min-width: 0; }
+.ax-outcome-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-variant-numeric: tabular-nums; }
+.ax-outcome-st { display: inline-flex; align-items: center; gap: 5px; color: var(--st); }
+.ax-outcome-st .icon { width: 13px; height: 13px; color: var(--st); }
+.ax-outcome-test { display: inline-flex; align-items: center; gap: 4px; color: var(--st); }
+.ax-outcome-test .icon { width: 12px; height: 12px; }
+.ax-outcome-fails { display: flex; flex-wrap: wrap; max-width: 100%; text-align: left; margin-top: 4px; align-items: center; gap: 6px; border: none; background: none; padding: 0;
+  font: inherit; font-weight: 600; color: var(--st-err); cursor: pointer; }
+.ax-outcome-fails::after { content: "▸"; font-size: 10px; } .ax-outcome-fails[aria-expanded="true"]::after { content: "▾"; }
+.ax-outcome-bar { display: inline-flex; width: 64px; height: 6px; border-radius: 3px; overflow: hidden; gap: 1px; }
+.ax-outcome-bar span { background: var(--tc, var(--st-err)); min-width: 4px; }
+.ax-outcome-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ax-outcome-list li { display: flex; align-items: center; gap: 7px; padding: 3px 8px; border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--st) 9%, transparent); min-width: 0; }
+.ax-outcome-list li .icon { width: 12px; height: 12px; color: var(--tc); flex: none; }
+.ax-outcome-list li b { font-weight: 600; color: var(--tc); flex: none; }
+.ax-outcome-list li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px var(--mono); }
+.ax-outcome-list li em { font-style: normal; font-size: 10.5px; color: var(--st); flex: none; }
+.ax-outcome.st-err .ax-outcome-st b, .ax-outcome.st-warn .ax-outcome-st b { font-weight: 600; }

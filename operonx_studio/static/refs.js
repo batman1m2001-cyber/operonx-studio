@@ -106,6 +106,13 @@ const oxRefs = (() => {
       if (it.kind === "tool") {
         let inp = it.input;
         if (typeof inp === "string") { try { inp = JSON.parse(inp); } catch { inp = null; } }
+        if (it.name === "Bash" && inp && it.status !== "error") {
+          // a read-class shell call: cat / head / tail / sed -n / wc / less on a file, not into one
+          const m = /^(?:cat|head|tail|less|wc|sed\s+-n\s+(?:'[^']*'|"[^"]*"|\S+))\s+(?:-\S+\s+)*(['"]?)([\w./-]+\.\w+)\1\s*$/
+            .exec(String(inp.command || "").trim().split(/\s*(?:&&|;)\s*/).filter((c) => !/^cd\b/.test(c))[0] || "");
+          if (m) put(m[2], "read");
+          continue;
+        }
         const p = inp && (inp.file_path || inp.notebook_path);
         if (!p || it.status === "error") continue;
         if (it.name === "Read") put(p, "read");

@@ -40,6 +40,8 @@ test("Bash classes from the command", () => {
   assert.equal(cls(bash("sed -i 's/a/b/' src/x.py")), "edit");
   assert.equal(T.classOf(bash("cat > notes.md <<'EOF'\nhi\nEOF")).res.value, "notes.md");
   assert.equal(cls(bash("rg lane src/")), "search");
+  assert.equal(cls(bash("cat README.md")), "read");
+  assert.equal(T.classOf(bash("sed -n 1,40p src/a.py")).res.value, "src/a.py");
   assert.equal(cls(bash("curl -s localhost:8000/health")), "run");
   assert.deepEqual(T.classOf(bash("ls")).res, {kind: "cmd", value: "ls"});
 });
@@ -58,4 +60,45 @@ test("exit status: Bash says it; a running call has none", () => {
   assert.equal(T.exitOf({name: "Bash", status: "ok", output: "fine"}), 0);
   assert.equal(T.exitOf({name: "Bash", status: "running"}), null);
   assert.equal(T.exitOf({name: "Read", status: "ok"}), null);
+});
+
+test("the turn's diff splits per file, a new file too", () => {
+  const diff = [
+    "diff --git a/src/a.py b/src/a.py", "index 1..2 100644", "--- a/src/a.py", "+++ b/src/a.py",
+    "@@ -1,2 +1,2 @@", " keep", "-old", "+new",
+    "diff --git a/gone.py b/gone.py", "deleted file mode 100644", "--- a/gone.py", "+++ /dev/null", "@@ -1 +0,0 @@", "-x",
+    "--- /dev/null", "+++ b/new.py", "+a", "+b", ""].join("\n");
+  const files = T.splitDiff(diff);
+  assert.deepEqual(files.map((f) => f.path), ["src/a.py", "gone.py", "new.py"]);
+  assert.deepEqual(files[0].lines.map((l) => l.t), ["hunk", "ctx", "del", "add"]);
+  assert.deepEqual(files[2].lines.map((l) => l.s), ["+a", "+b"]);
+});
+
+test("a failed call is recovered when a later call of its class worked", () => {
+  const items = [
+    {seq: 1, ...bash("pytest"), status: "error", output: "Exit code 1\n2 failed"},
+    {seq: 2, ...bash("npm run build"), status: "error", output: "Exit code 2\nboom"},
+    {seq: 3, ...bash("pytest"), status: "ok", tests: {runner: "pytest", passed: 3, failed: 0, skipped: 1}},
+  ];
+  const sev = T.severities(items);
+  assert.deepEqual([...sev], [[1, "recovered"], [2, "failed"], [3, "warning"]]);
+});
+
+test("the outcome: files, last run per runner, steps, failures by class", () => {
+  const items = [
+    {seq: 1, kind: "tool", plan: {steps: [{title: "a", state: "done"}, {title: "b", state: "active"}]}},
+    {seq: 2, kind: "tool", ...bash("pytest"), status: "error", output: "Exit code 1",
+     tests: {runner: "pytest", passed: 1, failed: 2, skipped: 0}},
+    {seq: 3, kind: "tool", ...bash("pytest"), status: "ok", tests: {runner: "pytest", passed: 3, failed: 0, skipped: 0}},
+    {seq: 4, kind: "tool", ...bash("curl x"), status: "error", output: "Exit code 7\nrefused"},
+    {seq: 5, kind: "changes", files: [{path: "a"}, {path: "b", new: true}, {path: "c", deleted: true}]},
+  ];
+  const o = T.outcome(items, {kind: "turn_end", ms: 900, cost: 0.1});
+  assert.deepEqual(o.files, {modified: 1, created: 1, deleted: 1});
+  assert.equal(o.tests.length, 1);
+  assert.equal(o.tests[0].passed, 3);
+  assert.deepEqual(o.steps, {done: 1, total: 2});
+  assert.deepEqual(o.byClass, {test: 1, run: 1});
+  assert.equal(o.state, "failed");
+  assert.equal(T.outcome([{seq: 9, kind: "error", text: "x"}], {}).state, "fatal");
 });

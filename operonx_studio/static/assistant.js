@@ -819,9 +819,15 @@
     c.title = res.value.length > 400 ? res.value.slice(0, 400) + "…" : res.value;
     return c;
   }
-  function stepState(item) {
+  // D8: a failed call whose class later worked is "recovered" (amber); one that never did stays "failed" (red)
+  function turnSeverity(item) {
+    return item && item.turn ? TL.severities(A.items.filter((x) => x.turn === item.turn), turnTouched(item)) : new Map();
+  }
+  function stepState(item, sev) {
     const running = item.status === "running" || (item.kind === "thinking" && item.ms == null);
-    return B.status(running ? (A.running ? "running" : "stopped") : item.status === "error" ? "error" : "done");
+    const s = sev && sev.get(item.seq);
+    return B.status(running ? (A.running ? "running" : "stopped")
+      : item.status === "error" ? (s === "recovered" ? "recovered" : "error") : s === "warning" ? "warning" : "done");
   }
   function stateMark(st) {
     const s = el("span", `ax-tool-st st-${st.tone}`);
@@ -877,8 +883,9 @@
     }
     return box;
   }
-  function toolDetails(item) {
+  function toolDetails(item, step) {
     const io = el("div", "ax-step-io");
+    if (step && item.status === "error") io.append(el("div", "ax-io-label", "Step"), el("div", "ax-io-step", step));
     const inp = TL.inputOf(item);
     if (inp && Object.keys(inp).length && W.Values) {
       io.append(el("div", "ax-io-label", "Input"));
@@ -914,12 +921,13 @@
     row.append(io);
   }
 
-  function renderStep(item) {
+  function renderStep(item, step, sev) {
     if (item.kind === "thinking") return renderThought(item);
     const touched = turnTouched(item);
     const c = TL.classOf(item, touched);
-    const st = stepState(item);
-    const row = el("div", `ax-step ax-tool tc-${c.cls}` + (item.status === "error" ? " bad st-err" : ""));
+    const st = stepState(item, sev || turnSeverity(item));
+    const row = el("div", `ax-step ax-tool tc-${c.cls}` + (st.kind === "recovered" ? " recovered st-warn"
+      : item.status === "error" ? " bad st-err" : ""));
     const head = el("div", "ax-step-head");
     const verb = el("span", "ax-tool-verb");
     verb.append(icon(c.icon), el("span", null, c.verb));
@@ -927,10 +935,17 @@
     const res = toolRes(c.res, touched);
     if (res) head.append(res);
     else if (c.cls === "tool" && item.label && item.label !== item.name) head.append(el("span", "ax-tool-res", item.label));
-    head.append(el("span", "ax-spacer"), stateMark(st), el("span", "ax-step-ms", item.ms != null ? fmt.ms(item.ms) : ""));
+    head.append(el("span", "ax-spacer"));
+    if (st.kind === "recovered") head.append(el("span", "ax-tool-sev", "recovered"));
+    head.append(stateMark(st), el("span", "ax-step-ms", item.ms != null ? fmt.ms(item.ms) : ""));
     row.append(head);
+    // the first line of what went wrong, without opening the row
+    if (item.status === "error" && item.output && !item.tests) {
+      const first = String(item.output).split("\n").find((l) => l.trim() && !/^Exit code \d+$/.test(l)) || "";
+      if (first) row.append(el("div", "ax-tool-err", first.slice(0, 240)));
+    }
     if (item.tests) row.append(testReport(item.tests));
-    if (item.input || item.output) withDetails(row, head, () => toolDetails(item));
+    if (item.input || item.output) withDetails(row, head, () => toolDetails(item, step));
     return row;
   }
 
@@ -946,12 +961,13 @@
   }
 
   /* D5: runs of one class are one row — "Read 6 files" with the files as chips; opening it shows each call */
-  function renderTools(items) {
+  function renderTools(items, step) {
     const touched = items.length ? turnTouched(items[0]) : null;
+    const sev = items.length ? turnSeverity(items[0]) : new Map();
     const groups = TL.fold(items, touched);
     const out = [];
     for (const g of groups) {
-      if (g.items.length === 1 || groups.length === 1) { for (const it of g.items) out.push(renderStep(it)); continue; }
+      if (g.items.length === 1 || groups.length === 1) { for (const it of g.items) out.push(renderStep(it, step, sev)); continue; }
       const row = el("div", `ax-step ax-tool ax-fold tc-${g.cls}`);
       const head = el("div", "ax-step-head");
       const verb = el("span", "ax-tool-verb");
@@ -962,12 +978,13 @@
       for (const f of files.slice(0, 4)) chips.append(fileChip(f, touched));
       if (files.length > 4) chips.append(el("span", "ax-fold-more", `+${files.length - 4}`));
       if (files.length) head.append(chips);
-      const worst = g.items.find((i) => i.status === "running") || g.items.find((i) => i.status === "error") || g.items[0];
+      const worst = g.items.find((i) => i.status === "running") || g.items.find((i) => sev.get(i.seq) === "failed")
+        || g.items.find((i) => i.status === "error") || g.items[0];
       const ms = g.items.reduce((a, i) => a + (i.ms || 0), 0);
-      head.append(el("span", "ax-spacer"), stateMark(stepState(worst)), el("span", "ax-step-ms", ms ? fmt.ms(ms) : ""));
+      head.append(el("span", "ax-spacer"), stateMark(stepState(worst, sev)), el("span", "ax-step-ms", ms ? fmt.ms(ms) : ""));
       row.append(head);
       if (g.items.some((i) => i.status === "error")) row.classList.add("warned");
-      withDetails(row, head, () => { const d = el("div", "ax-fold-calls"); d.append(...g.items.map(renderStep)); return d; });
+      withDetails(row, head, () => { const d = el("div", "ax-fold-calls"); d.append(...g.items.map((i) => renderStep(i, step, sev))); return d; });
       out.push(row);
     }
     return out;
@@ -1103,7 +1120,7 @@
         if (step.detail && state !== "active" && state !== "waiting") body.append(el("div", "ax-pstep-detail", step.detail));
         if (step.result) body.append(el("div", "ax-pstep-result", step.result));
         if (step.error) body.append(el("div", "ax-pstep-error", step.error));
-        body.append(...renderTools(seqs.map((q) => A.bySeq.get(q)).filter(Boolean)));
+        body.append(...renderTools(seqs.map((q) => A.bySeq.get(q)).filter(Boolean), step.title));
         main.append(body);
       }
     }
@@ -1164,43 +1181,101 @@
     return box;
   }
 
+  /* D7: a file's diff is a registered block, so the progress card and the
+     Files page open the same viewer — ```ox-diff in a reply draws it too */
+  function diffView(f, head) {
+    const box = el("div", "ax-diff");
+    if (head) box.append(el("div", "file", f.path));
+    for (const l of f.lines) box.append(el("div", l.t === "ctx" ? "" : l.t, l.s || " "));
+    if (!f.lines.length) box.append(el("div", "hunk", "(no lines: a binary file or an empty one)"));
+    return box;
+  }
+  if (B) B.register("ox-diff", {
+    validate: (body) => {
+      const files = TL.splitDiff(body);
+      return files.length ? {ok: true, value: files} : {ok: false, reason: "no file in the diff"};
+    },
+    render: (files) => { const box = el("div", "ax-diffs"); for (const f of files) box.append(diffView(f, true)); return box; },
+  });
+
+  const TOUCH_WORD = {modified: "Modified", created: "Created", deleted: "Deleted"};
+  /* D7: the turn's file activity — the strip, the files (by folder past 6), each with its own diff, the reads folded */
   function renderChanges(item) {
     const card = el("div", "ax-card ax-changes");
     const files = item.files || [];
+    const touchOf = (f) => (f.deleted ? "deleted" : f.new ? "created" : "modified");
+    const touched = item.turn && RF ? RF.touched(A.items.filter((x) => x.turn === item.turn), toolRoot()) : new Map();
+    const changed = new Set(files.map((f) => f.path));
+    const reads = [...touched].filter(([p, t]) => t === "read" && !changed.has(p)).map(([p]) => p);
+    const count = {modified: 0, created: 0, deleted: 0};
+    for (const f of files) count[touchOf(f)]++;
     const plus = files.reduce((s, f) => s + (f.added || 0), 0);
     const minus = files.reduce((s, f) => s + (f.removed || 0), 0);
-    const top = el("div", "ax-card-head");
-    top.append(icon("file"), el("b", null, `Changed ${files.length} file${files.length === 1 ? "" : "s"}`),
-      el("span", "ax-add", `+${plus}`), el("span", "ax-del", `−${minus}`));
+    const top = el("div", "ax-card-head ax-act-strip");
+    top.append(icon("file"));
+    const bits = [];
+    if (reads.length) bits.push(["read", `Read ${reads.length}`]);
+    for (const k of ["modified", "created", "deleted"]) if (count[k]) bits.push([k, `${TOUCH_WORD[k]} ${count[k]}`]);
+    bits.forEach(([k, w], i) => {
+      if (i) top.append(el("span", "ax-tests-dot", "·"));
+      const b = el("span", "ax-strip-" + k);
+      b.append(el("b", "ax-touch", TOUCH[k][0]), el("span", null, w));
+      top.append(b);
+    });
+    top.append(el("span", "ax-spacer"), el("span", "ax-add", `+${plus}`), el("span", "ax-del", `−${minus}`));
     // another person's assistant worked in this project at the same time:
     // the diff can't tell whose edit is whose, so the card says so (§2.3)
     const overlap = (item.overlap || []).length
       ? el("p", "ax-overlap", `${item.overlap.join(", ")}'s assistant was working in this project at the same time — `
                               + "some of these changes may be theirs. Check the diff before you undo.")
       : null;
+    const diffs = new Map();
+    let split = null;
+    const diffOf = (path) => {
+      if (!split) { split = TL.splitDiff(item.diff); for (const f of split) diffs.set(f.path, f); }
+      return diffs.get(path) || {path, lines: []};
+    };
     const flist = el("div", "ax-files");
-    for (const f of files) {
-      const r = el("div", "ax-file");
-      const p = el("span", "ax-path", f.path);
-      p.title = f.path;
-      r.append(p);
-      if (f.new) r.append(el("span", "ax-new", "new"));
-      r.append(el("span", "ax-add", `+${f.added || 0}`), el("span", "ax-del", `−${f.removed || 0}`));
-      flist.append(r);
-    }
-    const fold = el("details", "ax-diff-fold");
-    fold.append(el("summary", null, "Show the diff"));
-    fold.addEventListener("toggle", () => {
-      if (!fold.open || fold._filled) return;
-      fold._filled = true;
-      const box = el("div", "ax-diff");
-      for (const ln of String(item.diff || "(no diff)").split("\n")) {
-        if (/^(diff --git |index |new file mode|deleted file mode|similarity |rename |--- )/.test(ln)) continue;
-        if (ln.startsWith("+++ ")) { box.append(el("div", "file", ln.replace(/^\+\+\+ (b\/)?/, ""))); continue; }
-        box.append(el("div", ln.startsWith("@@") ? "hunk" : ln.startsWith("+") ? "add" : ln.startsWith("-") ? "del" : "", ln || " "));
+    const fileRow = (f, short) => {
+      const t = touchOf(f);
+      const row = el("div", "ax-file t-" + t);
+      const head = el("div", "ax-file-head");
+      head.append(el("b", "ax-touch", TOUCH[t][0]));
+      const p = el("span", "ax-path", short || f.path);
+      p.title = `${f.path} — ${TOUCH[t][1]}`;
+      head.append(p);
+      if (t !== "modified") head.append(el("span", "ax-new", t === "created" ? "new" : "deleted"));
+      head.append(el("span", "ax-add", `+${f.added || 0}`), el("span", "ax-del", `−${f.removed || 0}`));
+      row.append(head);
+      withDetails(row, head, () => { const d = el("div"); d.append(diffView(diffOf(f.path))); return d; });
+      return row;
+    };
+    if (files.length > 6) {
+      const groups = new Map();
+      for (const f of files) {
+        const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : ".";
+        if (!groups.has(dir)) groups.set(dir, []);
+        groups.get(dir).push(f);
       }
-      fold.append(box);
-    });
+      for (const [dir, fs] of groups) {
+        flist.append(el("div", "ax-files-dir", dir === "." ? "./" : dir + "/"));
+        for (const f of fs) flist.append(fileRow(f, f.path.slice(dir === "." ? 0 : dir.length + 1)));
+      }
+    } else for (const f of files) flist.append(fileRow(f));
+    let readFold = null;
+    if (reads.length) {
+      readFold = el("div", "ax-step ax-reads");
+      const head = el("div", "ax-step-head");
+      const verb = el("span", "ax-tool-verb");
+      verb.append(icon("file"), el("span", null, `Read ${reads.length} ${reads.length === 1 ? "file" : "files"}`));
+      head.append(verb);
+      readFold.append(head);
+      withDetails(readFold, head, () => {
+        const d = el("div", "ax-reads-list");
+        for (const p of reads) d.append(fileChip(p, touched));
+        return d;
+      });
+    }
     const acts = el("div", "ax-card-acts");
     const note = el("span", "ax-card-note");
     const keep = tbtn("Keep", "ax-btn");
@@ -1224,6 +1299,7 @@
       keep.disabled = undo.disabled = true;
       try {
         const got = await call(`/api/p/${PROJECT}/chat/undo`, {
+          // a deleted file is in files: undo checks it back out of the snapshot
           sha: item.sha, files: files.filter((f) => !f.new).map((f) => f.path),
           new_files: files.filter((f) => f.new).map((f) => f.path)});
         mark("undone", (got.restored || []).length);
@@ -1233,7 +1309,7 @@
       }
     };
     acts.append(note, el("span", "ax-spacer"), undo, keep);
-    card.append(...[top, overlap, flist, fold, acts].filter(Boolean));
+    card.append(...[top, overlap, flist, readFold, acts].filter(Boolean));
     paint();
     A.nodes.set(item.seq, card);
     return card;
@@ -1298,8 +1374,74 @@
     }
     f.append(acts, meta);
     if (item.state === "stopped") f.classList.add("stopped");
-    A.nodes.set(item.seq, f);
-    return f;
+    const strip = outcomeStrip(item);
+    const node = strip ? el("div", "ax-turnend") : f;
+    if (strip) node.append(strip, f);
+    A.nodes.set(item.seq, node);
+    return node;
+  }
+
+  /* D8: the turn's outcome in one line, facts only — state, time, cost, files,
+     the last run per runner, steps, failures (by class past 3, as a bar) */
+  function outcomeStrip(item) {
+    const turnItems = item.turn ? A.items.filter((x) => x.turn === item.turn) : [];
+    if (!turnItems.some((x) => x.kind === "tool" || x.kind === "changes" || x.kind === "error")) return null;
+    const o = TL.outcome(turnItems, item, turnTouched(item));
+    const st = B.status(o.state === "done" ? "done" : o.state);
+    const strip = el("div", `ax-outcome st-${st.tone}`);
+    const line = el("div", "ax-outcome-line");
+    const mark = el("span", "ax-outcome-st");
+    mark.append(icon(st.icon || "dot"), el("b", null, o.state === "fatal" ? "Stopped by an error" : st.word));
+    const parts = [mark];
+    const add = (cls, text) => parts.push(el("span", cls, text));
+    if (o.ms) add("ax-outcome-n", fmt.ms(o.ms));
+    if (o.cost != null) add("ax-outcome-n", fmt.money(o.cost));
+    const fw = [["modified", "modified"], ["created", "created"], ["deleted", "deleted"]]
+      .filter(([k]) => o.files[k]).map(([k, w]) => `${o.files[k]} ${w}`);
+    if (fw.length) add("ax-outcome-files", fw.join(" · "));
+    for (const t of o.tests) {
+      const b = el("span", "ax-outcome-test " + (t.failed || t.errors ? "st-err" : "st-ok"));
+      b.append(icon(t.failed || t.errors ? "x" : "check"),
+        el("span", null, `${t.runner} ${t.passed} passed` + (t.failed + t.errors ? ` · ${t.failed + t.errors} failed` : "")
+          + (t.skipped ? ` · ${t.skipped} skipped` : "")));
+      parts.push(b);
+    }
+    if (o.steps) add("ax-outcome-n", `Steps ${o.steps.done}/${o.steps.total}`);
+    let list = null;
+    if (o.failures.length) {
+      const failed = o.failures.filter((f) => f.severity === "failed").length;
+      const b = el("button", "ax-outcome-fails");
+      b.type = "button";
+      b.setAttribute("aria-expanded", "false");
+      const cls = Object.entries(o.byClass).sort((a, z) => z[1] - a[1]);
+      const words = `${o.failures.length} failed` + (o.failures.length >= 3 ? `: ${cls.map(([c, n]) => `${n} ${c}`).join(", ")}` : "")
+        + (failed < o.failures.length ? ` (${o.failures.length - failed} recovered)` : "");
+      if (o.failures.length >= 3) {
+        const bar = el("span", "ax-outcome-bar");
+        bar.setAttribute("aria-hidden", "true");
+        for (const [c, n] of cls) {
+          const seg = el("span", "tc-" + c);
+          seg.style.flexGrow = String(n);
+          bar.append(seg);
+        }
+        b.append(bar);
+      }
+      b.append(el("span", null, words));
+      list = el("ol", "ax-outcome-list");
+      list.hidden = true;
+      for (const f of o.failures) {
+        const li = el("li", `tc-${f.cls} ` + (f.severity === "recovered" ? "st-warn" : "st-err"));
+        li.append(icon(TL.ICON[f.cls]), el("b", null, f.cls),
+          el("span", null, f.line || "(no output)"), el("em", null, f.severity === "recovered" ? "recovered" : "failed"));
+        list.append(li);
+      }
+      b.onclick = () => { list.hidden = !list.hidden; b.setAttribute("aria-expanded", String(!list.hidden)); };
+      list._tog = b;
+    }
+    parts.forEach((p, i) => { if (i) line.append(el("span", "ax-tests-dot", "·")); line.append(p); });
+    strip.append(line);
+    if (list) strip.append(list._tog, list);
+    return strip;
   }
 
   function append(item) {

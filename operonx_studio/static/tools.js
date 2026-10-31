@@ -38,6 +38,8 @@ const oxTools = (() => {
     if (/^rm\s/.test(c)) return {cls: "delete", verb: "Deleted", file: firstPath(c.slice(3))};
     const sed = /^sed\s+(?:-\S*\s+)*-i\S*\s+(?:'[^']*'|"[^"]*"|\S+)\s+(\S+)/.exec(c);
     if (sed) return {cls: "edit", verb: "Edited", file: sed[1]};
+    const read = /^(?:cat|head|tail|less|wc|sed\s+-n\s+(?:'[^']*'|"[^"]*"|\S+))\s+(?:-\S+\s+)*(['"]?)([\w./-]+\.\w+)\1\s*$/.exec(c);
+    if (read) return {cls: "read", verb: "Read", file: read[2]};
     const into = /(?:^|\s)(?:cat|echo|printf|tee)\b[^|]*?(?:>>?|\btee\s+(?:-a\s+)?)\s*['"]?([\w./-]+\.\w+)['"]?/.exec(c);
     if (into) return {cls: "edit", verb: "Wrote", file: into[1]};
     if (BUILD.test(c)) return {cls: "build", verb: "Built"};
@@ -127,7 +129,73 @@ const oxTools = (() => {
     return m ? +m[1] : item.status === "error" ? null : item.name === "Bash" ? 0 : null;
   }
 
-  const api = {classOf, fold, words, filesOf, exitOf, mainCommand, inputOf, ICON};
+  /* the turn's one diff split per file (D7): [{path, lines: [{t: hunk|add|del|ctx, s}]}] */
+  function splitDiff(diff) {
+    const out = [];
+    let cur = null;
+    for (const ln of String(diff || "").split("\n")) {
+      const git = /^diff --git a\/(.+?) b\/(.+)$/.exec(ln);
+      if (git) { cur = {path: git[2], lines: [], head: true}; out.push(cur); continue; }
+      if (ln.startsWith("--- ")) {
+        // a new file the relay added has no "diff --git" head: its "--- /dev/null" starts it
+        if (!cur || !cur.head) { cur = {path: "", lines: [], head: true}; out.push(cur); }
+        continue;
+      }
+      if (ln.startsWith("+++ ")) {
+        if (cur && !cur.path) cur.path = ln.replace(/^\+\+\+ (b\/)?/, "");
+        if (cur) cur.head = false;
+        continue;
+      }
+      if (!cur || /^(index |new file mode|deleted file mode|similarity |rename |old mode|new mode|Binary files)/.test(ln)) continue;
+      if (ln === "\u2026 (diff cut)") { cur.lines.push({t: "ctx", s: ln}); continue; }
+      cur.lines.push({t: ln.startsWith("@@") ? "hunk" : ln[0] === "+" ? "add" : ln[0] === "-" ? "del" : "ctx", s: ln});
+    }
+    for (const f of out) {
+      delete f.head;
+      while (f.lines.length && f.lines[f.lines.length - 1].s === "") f.lines.pop();
+    }
+    return out;
+  }
+
+  /* severity of each call (D8): failed · recovered (a later call of its class worked) · warning (skips) */
+  function severities(items, touched) {
+    const calls = items.filter((i) => i.kind === "tool" && !i.plan);
+    const sev = new Map();
+    calls.forEach((it, k) => {
+      if (it.status === "error") {
+        const cls = classOf(it, touched).cls;
+        const later = calls.slice(k + 1).some((x) => x.status === "ok" && classOf(x, touched).cls === cls);
+        sev.set(it.seq, later ? "recovered" : "failed");
+      } else if (it.tests && it.tests.skipped) sev.set(it.seq, "warning");
+    });
+    return sev;
+  }
+
+  /* the turn's outcome from its items, facts only (D8): what the strip under a turn says */
+  function outcome(items, end, touched) {
+    const sev = severities(items, touched);
+    const changes = items.filter((i) => i.kind === "changes").pop();
+    const fs = (changes && changes.files) || [];
+    const files = {modified: fs.filter((f) => !f.new && !f.deleted).length, created: fs.filter((f) => f.new).length,
+      deleted: fs.filter((f) => f.deleted).length};
+    const tests = new Map();
+    for (const i of items) if (i.tests) tests.set(i.tests.runner, i.tests);
+    const plan = items.filter((i) => i.plan).pop();
+    const steps = plan && plan.plan.steps.length
+      ? {done: plan.plan.steps.filter((s) => s.state === "done").length, total: plan.plan.steps.length} : null;
+    const failures = items.filter((i) => sev.get(i.seq) === "failed" || sev.get(i.seq) === "recovered")
+      .map((i) => ({seq: i.seq, cls: classOf(i, touched).cls, severity: sev.get(i.seq), line: i.tests && i.tests.failures && i.tests.failures.length
+        ? `${i.tests.failures[0].id}: ${i.tests.failures[0].line}`
+        : String(i.output || "").split("\n").find((l) => l.trim() && !/^Exit code \d+$/.test(l)) || ""}));
+    const byClass = {};
+    for (const f of failures) byClass[f.cls] = (byClass[f.cls] || 0) + 1;
+    const fatal = items.some((i) => i.kind === "error") || (end && /^(killed|timeout|timed_out)$/.test(end.state || ""));
+    const state = fatal ? "fatal" : end && end.state === "stopped" ? "stopped"
+      : failures.some((f) => f.severity === "failed") ? "failed" : "done";
+    return {state, ms: end && end.ms, cost: end && end.cost, files, tests: [...tests.values()], steps, failures, byClass};
+  }
+
+  const api = {classOf, fold, words, filesOf, exitOf, mainCommand, inputOf, splitDiff, severities, outcome, ICON};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   return api;
 })();
