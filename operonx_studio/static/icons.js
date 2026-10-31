@@ -81,12 +81,20 @@ const Icons = (() => {
   };
 
   /** One icon as an SVG element; `cls` is added to the `icon` class. */
+  // parsed once per name and class, then cloned: a long transcript draws thousands
+  const parsed = new Map();
   function svg(name, cls) {
-    const wrap = document.createElement("span");
-    wrap.innerHTML = '<svg class="icon' + (cls ? " " + cls : "") + '" viewBox="0 0 24 24" '
-      + 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
-      + 'stroke-linejoin="round" aria-hidden="true" focusable="false">' + (P[name] || "") + "</svg>";
-    return /** @type {Element} */ (wrap.firstChild);
+    const key = name + " " + (cls || "");
+    let node = parsed.get(key);
+    if (!node) {
+      const wrap = document.createElement("span");
+      wrap.innerHTML = '<svg class="icon' + (cls ? " " + cls : "") + '" viewBox="0 0 24 24" '
+        + 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
+        + 'stroke-linejoin="round" aria-hidden="true" focusable="false">' + (P[name] || "") + "</svg>";
+      node = /** @type {Element} */ (wrap.firstChild);
+      parsed.set(key, node);
+    }
+    return /** @type {Element} */ (node.cloneNode(true));
   }
 
   /** A button with an icon, and a visible label when `label` is given;

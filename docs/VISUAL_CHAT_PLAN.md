@@ -1,6 +1,6 @@
 # The conversation shows the work: a visual-first assistant (VISUAL_CHAT_PLAN)
 
-Status: in progress on feat/visual-chat (2026-10-31): V0–V6 done.
+Status: in progress on feat/visual-chat (2026-10-31): V0–V7 done.
 
 Owner's brief: "Visual-First Conversational Engineering Experience", in 12
 sections. The assistant's work should be readable at a glance: references,
@@ -106,6 +106,43 @@ scratch studio):
 | Median stored bytes per turn | 2.0 KB (the long turn: 61 KB) |
 | `ox-` fences / callouts used | 0 / 0 |
 | Render of a 434-item session | median 248 ms, one long task ~280 ms, 5,495 DOM nodes |
+
+**V7 result** (2026-10-31, Sonnet, scratch copy of meeting-prep-operonx, the
+same three tasks with the old knowledge and then the new: "walk me through how a
+brief is prepared, op by op, and where approval comes in"; "run
+tests/test_zones.py, add a test for an uncovered edge case, run again"; "which
+recorded runs were slowest, per service").
+
+LLM side (median of the 3 turns per arm; totals in brackets):
+
+| Metric | Old knowledge | New knowledge |
+|---|---|---|
+| Input tokens | 140,772 (534,742) | 148,646 (435,160) |
+| Output tokens | 2,014 (5,804) | 2,174 (5,555) |
+| LLM calls | 4 | 5 |
+| First tool or text item | 4.8 s | 4.2 s |
+| Total turn time | 22.5 s | 23.6 s |
+| Reply length | 1,376 chars | 1,655 chars |
+| Stored bytes | 19.3 KB | 18.4 KB |
+| Graphs / charts / callouts drawn | 0 / 0 / 0 | 1 / 0 / 1 |
+| Malformed blocks | 0 | 0 |
+
+The knowledge grew 2.3 KB (about 0.6k input tokens a turn, cached after the
+first). The op-by-op walk-through drew its flow as an `ox-graph` (valid); the
+slowest-runs question had one eval and no services, so both arms answered with
+a table and no chart was due. The test task's paths differed (9 calls against
+5), which is most of the totals' gap; three tasks per arm cannot separate the
+knowledge from that variance.
+
+Frontend side (`render_chat.py`, the 434-item session, V0's code 4e53a7b and
+this branch on one box, alternated, 15 renders each): first measure 363 ms
+against 240 ms (+51%) — every tool row re-filtered the whole transcript for its
+turn's files and severities, and each call was classed four or five times. Now
+renderAll answers each turn once, a call's class is kept per item, and an icon
+is parsed once and cloned: **276 ms against 261 ms (+6%, gate +20%)**, long task
+~320 ms against ~303 ms, 6,454 DOM nodes against 5,495 (+17%: the class icons,
+file chips and outcome lines). A three-turn session with a graph renders in
+27 ms (318 nodes).
 
 ## 2 · Decisions
 

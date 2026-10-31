@@ -795,8 +795,19 @@
   function toolRoot() {
     return refState.root || (A.agent && A.agent.cwd ? A.agent.cwd.replace(/\/$/, "") : "");
   }
+  // renderAll asks every row for its turn's items, files and severities: one
+  // pass answers each once, not once per row (VISUAL_CHAT_PLAN V7 render gate)
+  let turnMemo = null;
+  function memo(key, make) {
+    if (!turnMemo) return make();
+    if (!turnMemo.has(key)) turnMemo.set(key, make());
+    return turnMemo.get(key);
+  }
+  function itemsOfTurn(turn) {
+    return memo("i" + turn, () => A.items.filter((x) => x.turn === turn));
+  }
   function turnTouched(item) {
-    return RF && item && item.turn ? RF.touched(A.items.filter((x) => x.turn === item.turn), toolRoot()) : null;
+    return RF && item && item.turn ? memo("t" + item.turn, () => RF.touched(itemsOfTurn(item.turn), toolRoot())) : null;
   }
   // a path a tool used is a fact: it is a chip, in the tree or not
   function fileChip(path, touched) {
@@ -821,7 +832,7 @@
   }
   // D8: a failed call whose class later worked is "recovered" (amber); one that never did stays "failed" (red)
   function turnSeverity(item) {
-    return item && item.turn ? TL.severities(A.items.filter((x) => x.turn === item.turn), turnTouched(item)) : new Map();
+    return item && item.turn ? memo("s" + item.turn, () => TL.severities(itemsOfTurn(item.turn), turnTouched(item))) : new Map();
   }
   function stepState(item, sev) {
     const running = item.status === "running" || (item.kind === "thinking" && item.ms == null);
@@ -1122,7 +1133,7 @@
 
   /* D12: a step's facts — the calls it made, their files, tests and commands, and its progress */
   function stepFactsOf(prog, step, seqs) {
-    const items = prog.turnId ? A.items.filter((x) => x.turn === prog.turnId) : seqs.map((q) => A.bySeq.get(q)).filter(Boolean);
+    const items = prog.turnId ? itemsOfTurn(prog.turnId) : seqs.map((q) => A.bySeq.get(q)).filter(Boolean);
     const touched = items.length ? turnTouched(items[0]) : null;
     return P.stepFacts(step, seqs, items, touched, RF ? (p) => RF.rel(p, toolRoot()) : undefined);
   }
@@ -1310,7 +1321,7 @@
     const card = el("div", "ax-card ax-changes");
     const files = item.files || [];
     const touchOf = (f) => (f.deleted ? "deleted" : f.new ? "created" : "modified");
-    const touched = item.turn && RF ? RF.touched(A.items.filter((x) => x.turn === item.turn), toolRoot()) : new Map();
+    const touched = (item.turn && turnTouched(item)) || new Map();
     const changed = new Set(files.map((f) => f.path));
     const reads = [...touched].filter(([p, t]) => t === "read" && !changed.has(p)).map(([p]) => p);
     const count = {modified: 0, created: 0, deleted: 0};
@@ -1490,7 +1501,7 @@
   /* D8: the turn's outcome in one line, facts only — state, time, cost, files,
      the last run per runner, steps, failures (by class past 3, as a bar) */
   function outcomeStrip(item) {
-    const turnItems = item.turn ? A.items.filter((x) => x.turn === item.turn) : [];
+    const turnItems = item.turn ? itemsOfTurn(item.turn) : [];
     if (!turnItems.some((x) => x.kind === "tool" || x.kind === "changes" || x.kind === "error")) return null;
     const o = TL.outcome(turnItems, item, turnTouched(item));
     const st = B.status(o.state === "done" ? "done" : o.state);
@@ -1627,8 +1638,11 @@
     if (!A.items.length) { renderEmpty(); return; }
     // the transcript's render time, for scripts/perf/render_chat.py (VISUAL_CHAT_PLAN V0)
     const t0 = performance.now();
-    for (const it of A.items) append(it);
-    for (const g of log.querySelectorAll(".ax-act")) paintActivity(g);
+    turnMemo = new Map();
+    try {
+      for (const it of A.items) append(it);
+      for (const g of log.querySelectorAll(".ax-act")) paintActivity(g);
+    } finally { turnMemo = null; }
     markLast();
     toBottom();
     try { performance.measure("ax:render", {start: t0, detail: A.items.length}); } catch { /* an old engine */ }

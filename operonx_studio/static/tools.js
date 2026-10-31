@@ -51,7 +51,16 @@ const oxTools = (() => {
     return (String(rest || "").split(/\s+/).find((w) => w && !w.startsWith("-")) || "").replace(/^['"]|['"]$/g, "");
   }
 
+  // a call is classed by every view of its turn; only a Write's class depends on the turn's facts
+  const classed = new WeakMap();
   function classOf(item, touched) {
+    if (!item || typeof item !== "object" || item.name === "Write") return classOfCall(item, touched);
+    let c = classed.get(item);
+    if (!c) classed.set(item, (c = classOfCall(item, touched)));
+    return c;
+  }
+
+  function classOfCall(item, touched) {
     const n = item.name || "";
     const inp = inputOf(item);
     const file = (p) => (p ? {kind: "file", value: p} : null);
