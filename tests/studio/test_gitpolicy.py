@@ -159,6 +159,22 @@ def test_the_guard_comes_first_on_the_assistants_path_only(tmp_path, repo):
     assert "OPERONX_STUDIO_GIT_POLICY" not in os.environ  # the studio's own git is untouched
 
 
+def test_another_copy_of_the_guard_on_the_path_is_not_the_real_git(tmp_path, repo):
+    # a studio started inside an assistant turn, or a studio checkout whose tests import the installed copy: two
+    # guards' bin/ on one PATH; the guard used to take the other's shim for git and exec it forever
+    import shutil
+    from operonx_studio.gitguard import HERE
+    other = tmp_path / "other-studio" / "gitguard" / "bin"
+    shutil.copytree(HERE / "bin", other)
+    env = _env(tmp_path, repo, identity=OWNER)
+    first, rest = env["PATH"].split(os.pathsep, 1)
+    for path in (os.pathsep.join([first, str(other), rest]), os.pathsep.join([str(other), first, rest])):
+        _change(repo)
+        got = subprocess.run(["git", "commit", "-qam", "nested"], cwd=repo, env={**env, "PATH": path},
+                             capture_output=True, text=True, timeout=20)
+        assert got.returncode == 0, got.stderr
+
+
 def test_the_routes_read_and_change_the_policy(tmp_path, repo):
     with TestClient(build_studio_app(Recents(state_file=tmp_path / "studio.json"))) as client:
         pid = client.post("/api/open", json={"path": str(repo)}).json()["id"]
