@@ -51,9 +51,20 @@ def _at_least(policy: Dict, level: str) -> bool:
     return LEVELS.index(have) >= LEVELS.index(level)
 
 
+def _shim(directory: str, name: str) -> bool:
+    """*directory* holds a guard's ``bin/<name>`` — this studio's or another copy's (a studio started inside an
+    assistant turn, or a checkout of the studio whose tests run the installed one). Calling another copy's shim
+    runs this module again, which would pick that shim again: an exec loop at full CPU."""
+    try:
+        return b"operonx_studio.gitguard" in (Path(directory) / name).read_bytes()[:400]
+    except OSError:
+        return False
+
+
 def _real(name: str) -> Optional[str]:
     mine = (HERE / "bin").resolve()
-    path = os.pathsep.join(p for p in os.environ.get("PATH", "").split(os.pathsep) if p and Path(p).resolve() != mine)
+    path = os.pathsep.join(p for p in os.environ.get("PATH", "").split(os.pathsep)
+                           if p and Path(p).resolve() != mine and not _shim(p, name))
     return shutil.which(name, path=path)
 
 
