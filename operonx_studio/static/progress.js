@@ -57,7 +57,7 @@ const oxProgress = (() => {
     else if (tests.length) {
       const t = tests[tests.length - 1];
       const total = t.passed + t.failed + t.errors;
-      if (total) progress = {kind: "tests", done: t.passed, total};
+      if (total) progress = {kind: "tests", done: t.passed, total, ...(t.live ? {live: true, pct: t.pct} : {})};
     }
     return {calls, files: [...files].map(([path, how]) => ({path, how})), tests, commands, progress,
       ms: step.ms != null ? step.ms : null};

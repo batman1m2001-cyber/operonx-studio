@@ -134,3 +134,48 @@ def test_a_failure_context_is_its_own_section_only():
     rep = testreport.parse("pytest", read("pytest_fail.txt"))
     lane = rep["failures"][0]["context"]
     assert "KeyError" in lane and "test_eq" not in lane
+
+
+# ── a run still going (D6, live) ──────────────────────────────────────────
+
+def test_progress_counts_what_ran_so_far():
+    # pytest -q prints its dots without a newline: a growing line counts as it grows
+    assert testreport.progress("pytest -q", "")  is None
+    r = testreport.progress("pytest -q tests", ".......F...")
+    assert (r["runner"], r["passed"], r["failed"], r["live"], r["pct"]) == ("pytest", 10, 1, True, None)
+    r = testreport.progress("pytest -v", "tests/a.py::t1 PASSED   [ 10%]\ntests/a.py::t2 FAILED   [ 20%]\ntests/a.py::t3 PASS")
+    assert (r["passed"], r["failed"], r["pct"]) == (1, 1, 20)
+    r = testreport.progress("pytest", "tests/test_a.py ..s.F                          [ 40%]\n")
+    assert (r["passed"], r["failed"], r["skipped"], r["pct"]) == (3, 1, 1, 40)
+    assert testreport.progress("cargo test", "test a ... ok\ntest b ... FAILED\n")["failed"] == 1
+    assert testreport.progress("go test -v ./...", "--- PASS: TestA (0.00s)\n")["passed"] == 1
+    assert testreport.progress("node --test", "ok 1 - a\nnot ok 2 - b\n")["failed"] == 1
+    assert testreport.progress("ls", "...") is None
+
+
+def test_the_hook_rewrites_only_a_foreground_test_command(tmp_path, monkeypatch):
+    from operonx_studio import testhook
+    monkeypatch.setenv("SHELL", "/bin/bash")
+    ev = {"tool_name": "Bash", "tool_use_id": "toolu_1", "tool_input": {"command": "pytest -q", "timeout": 5}}
+    out = testhook.rewrite(ev, str(tmp_path))["hookSpecificOutput"]["updatedInput"]
+    assert out["timeout"] == 5 and "{ pytest -q\n}" in out["command"] and f"{tmp_path}/toolu_1.out" in out["command"]
+    assert testhook.rewrite({**ev, "tool_input": {"command": "ls"}}, str(tmp_path)) is None
+    assert testhook.rewrite({**ev, "tool_input": {"command": "pytest", "run_in_background": True}}, str(tmp_path)) is None
+    assert testhook.rewrite({**ev, "tool_use_id": "../x"}, str(tmp_path)) is None
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    assert testhook.rewrite(ev, str(tmp_path)) is None
+
+
+def test_the_rewritten_command_keeps_its_status_output_and_cwd(tmp_path, monkeypatch):
+    import subprocess
+    from operonx_studio import testhook
+    monkeypatch.setenv("SHELL", "/bin/bash")
+    (tmp_path / "sub").mkdir()
+    cmd = "cd sub && echo one && echo two >&2 && false # pytest"
+    wrapped = testhook.rewrite({"tool_name": "Bash", "tool_use_id": "t1", "tool_input": {"command": cmd}},
+                               str(tmp_path))["hookSpecificOutput"]["updatedInput"]["command"]
+    run = subprocess.run(["bash", "-c", 'eval "$1"; echo "rc=$? cwd=$(pwd)"', "_", wrapped], cwd=tmp_path,
+                         capture_output=True, text=True)
+    assert run.stdout.split("\n")[:2] == ["one", "two"]
+    assert f"rc=1 cwd={tmp_path}/sub" in run.stdout
+    assert (tmp_path / "t1.out").read_text() == "one\ntwo\n"

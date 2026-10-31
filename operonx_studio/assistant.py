@@ -54,9 +54,11 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import sqlite3
+import sys
 import threading
 import time
 import uuid
@@ -136,6 +138,7 @@ _MODEL_ERROR = re.compile(r"issue with the selected model|unrecognized_model|mod
 # the agent did, never a whole file.
 _TOOL_IO_LIMIT = 4000
 _FLUSH_EVERY = 0.25
+_LIVE_MAX = 8 * 1024 * 1024      # a running test's output past this is left to the end's report
 
 
 def turn_limit(name: str, default: float) -> float:
@@ -557,6 +560,7 @@ class Turn:
     think_seq: Optional[int] = None      # the thinking block being streamed
     tools: Dict[str, int] = field(default_factory=dict)   # tool_use_id → item seq
     tests: Dict[str, str] = field(default_factory=dict)   # tool_use_id → the test command it runs, whole (D6)
+    live: Optional[Path] = None           # where testhook.py copies a running test's output (D6, live)
     claude_after: Optional[str] = None
     model: Optional[str] = None           # asked for (an alias), then what the CLI resolved it to
     requested: Optional[str] = None       # the model asked for, as asked
@@ -623,6 +627,11 @@ class Relay:
                 stale.unlink()
             except OSError:
                 pass
+        for stale in self.run_dir.glob("live-*"):
+            if stale.is_dir():
+                shutil.rmtree(stale, ignore_errors=True)
+            else:
+                stale.unlink(missing_ok=True)
         # a previous studio died with its turns; say so in their transcripts
         for sid in store.interrupted():
             sess = store.session(sid)
@@ -861,6 +870,9 @@ class Relay:
                     cmd.append("--strict-mcp-config")
             if turn.deny:
                 cmd += ["--disallowedTools", *turn.deny]
+            hooks = self._live_tests(turn)
+            if hooks is not None:
+                cmd += ["--settings", str(hooks)]
             mode = (turn.reach or os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full")).strip().lower()
             if mode != "read":
                 # a card the assistant takes is worked in its worktree, outside the project: without
@@ -896,11 +908,14 @@ class Relay:
             self._item(turn, "error", text=f"The relay failed: {exc}", retry=True)
             final = "failed"
         finally:
-            if config is not None:
-                try:
-                    config.unlink()
-                except OSError:
-                    pass
+            for path in (config, turn.live and turn.live.with_suffix(".json")):
+                if path is not None:
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+            if turn.live is not None:
+                shutil.rmtree(turn.live, ignore_errors=True)
             await self._finish(turn, final)
 
     def _mcp_file(self, turn: Turn, config: Dict[str, Any]) -> Path:
@@ -912,6 +927,47 @@ class Relay:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(config, fh)
         return path
+
+    def _live_tests(self, turn: Turn) -> Optional[Path]:
+        """D6, live: the settings that hand the CLI testhook.py, and the folder it copies test output into.
+        The stream never carries a running call's output (tool_progress is a heartbeat), so a test run's
+        counts came only when it ended; with this the relay reads them as the tests pass."""
+        if os.environ.get("OPERONX_STUDIO_LIVE_TESTS", "on").lower() in ("off", "0", "false"):
+            return None
+        self.run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        turn.live = self.run_dir / f"live-{turn.id}"
+        turn.live.mkdir(exist_ok=True, mode=0o700)
+        hook = " ".join(shlex.quote(str(a)) for a in (sys.executable, "-I", Path(__file__).with_name("testhook.py"),
+                                                      turn.live))
+        path = turn.live.with_suffix(".json")
+        path.write_text(json.dumps({"hooks": {"PreToolUse": [
+            {"matcher": "Bash", "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]}}))
+        return path
+
+    async def _watch_tests(self, turn: Turn) -> None:
+        """While a test command runs, its counts so far on its item, each second they change."""
+        sizes: Dict[str, int] = {}
+        while turn.live is not None:
+            await asyncio.sleep(1.0)
+            for call, command in list(turn.tests.items()):
+                path = turn.live / f"{call}.out"
+                try:
+                    size = path.stat().st_size
+                    if size == sizes.get(call) or size > _LIVE_MAX:
+                        continue
+                    sizes[call] = size
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                seq = turn.tools.get(call)
+                report = testreport.progress(command, text)
+                if seq is None or report is None or call not in turn.tests:
+                    continue
+                item = turn.items[seq]
+                if item.get("status") == "running" and item.get("tests") != report:
+                    item["tests"] = report
+                    self._replace(turn, item)
+                    self._flush(turn)
 
     async def _relay(self, turn: Turn, cwd: Optional[Path], snap: Optional[Dict[str, Any]]) -> str:
         proc = turn.proc
@@ -933,6 +989,7 @@ class Relay:
 
         if idle:
             timers.append(loop.call_later(idle, quiet))
+        watch = loop.create_task(self._watch_tests(turn)) if turn.live is not None else None
         try:
             async for raw in proc.stdout:
                 turn.heard = time.monotonic()
@@ -961,6 +1018,8 @@ class Relay:
         finally:
             for timer in timers:
                 timer.cancel()
+            if watch is not None:
+                watch.cancel()
         if turn.stopping:
             return "stopped"
         if not got_result:
@@ -1087,6 +1146,8 @@ class Relay:
                 report = testreport.parse(turn.tests.pop(block.get("tool_use_id") or "", ""), str(content or ""))
                 if report:
                     item["tests"] = report
+                else:
+                    item.pop("tests", None)     # the counts so far were a guess the end did not confirm
                 item.update(status="error" if block.get("is_error") else "ok", output=_clip(content or ""),
                             ms=round((_now() - float(item.get("t0") or _now())) * 1000))
                 self._replace(turn, item)
