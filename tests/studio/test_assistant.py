@@ -1296,3 +1296,49 @@ def test_a_viewer_is_never_offered_a_starter_it_cannot_act_on(team, tmp_path, fa
     assert "try" in kinds(editor["token"])                      # the project serves `shout`
     offered = kinds(viewer["token"])
     assert offered and not offered & {"setup", "try"}
+
+
+def test_steps_are_checked_and_answer_with_the_active_step():
+    from operonx_studio import chat, mcp
+    step = lambda title, state, **kw: {"title": title, "state": state, **kw}   # noqa: E731
+    for bad, why in (({"steps": []}, "non-empty"), ({"steps": [step("a", "running")]}, "unknown state"),
+                     ({"steps": [step("a", "active"), step("b", "active")]}, "one step is active"),
+                     ({"steps": [{"state": "done"}]}, "no title")):
+        with pytest.raises(ValueError, match=why):
+            mcp.check_steps(bad)
+    plan = {"title": "Merge flows", "steps": [step("Read", "done"), step("Merge", "active"), step("Test", "pending")]}
+    assert mcp.t_steps(None, plan) == "step 2 of 3: Merge"
+    assert mcp.t_steps(None, {"steps": [step("Read", "done"), step("Ask", "waiting")]}) == \
+        "step 2 of 2: Ask (needs the owner)"
+    assert mcp.t_steps(None, {"steps": [step("Read", "done"), step("Merge", "failed")]}) == "1 of 2 steps done, 1 failed"
+    assert "mcp__studio__steps" in chat.STUDIO_READ_TOOLS                   # it changes nothing
+    assert "steps" in mcp.TOOLS and "steps" in mcp.HOME_TOOLS
+
+
+def test_a_steps_call_puts_the_stamped_plan_on_its_item(tmp_path, monkeypatch):
+    from operonx_studio import assistant
+    relay = Relay(ChatStore(tmp_path / "a.sqlite"))
+    turn = assistant.Turn(id="t1", session="s1", scope="p")
+    clock = [100.0]
+    monkeypatch.setattr(assistant, "_now", lambda: clock[0])
+
+    def call(uid, *states):
+        steps = [{"title": t, "state": st} for t, st in zip(("Read", "Merge", "Test"), states)]
+        relay._translate(turn, {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": uid, "name": "mcp__studio__steps", "input": {"title": "Merge flows", "steps": steps}}]}})
+        return turn.items[turn.tools[uid]]
+
+    first = call("u1", "active", "pending", "pending")
+    assert first["plan"]["title"] == "Merge flows" and first["plan"]["steps"][0]["started"] == 100.0
+    assert turn.step == "Step 1 of 3 · Read"
+    clock[0] = 102.5
+    second = call("u2", "done", "active", "pending")
+    read, merge, _ = second["plan"]["steps"]
+    assert read["ms"] == 2500 and merge["started"] == 102.5 and "ms" not in merge
+    states = [e for e in turn.events if e["t"] == "state"]
+    assert states[-1]["detail"] == "Step 2 of 3 · Merge" and states[-1]["step"] == "Step 2 of 3 · Merge"
+    relay._translate(turn, {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "u2", "content": "step 2 of 3: Merge"}]}})
+    assert turn.events[-1]["state"] == "thinking" and turn.events[-1]["detail"] == "Step 2 of 3 · Merge"
+    bad = call("u3", "active", "active", "pending")                          # the tool answers what is wrong
+    assert "plan" not in bad and turn.step == "Step 2 of 3 · Merge"

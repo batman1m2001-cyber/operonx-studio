@@ -1,7 +1,7 @@
 # Assistant: the next improvements (plan)
 
-Status: **being built, in the order of §7.** Your decisions (2026-09-27)
-are in §3 and §6; what has landed is in §8. Branch `feat/assistant-first`.
+Status: **done** — all ten phases of §7 are built (§8). §6.3 and §6.4 stay topics to discuss, not build.
+Your decisions (2026-09-27) are in §3 and §6. Branch `feat/assistant-first`.
 
 It covers five asks:
 1. choosing the model, as in Claude Code;

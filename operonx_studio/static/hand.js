@@ -86,7 +86,8 @@ const Hand = (() => {
 
   function place() {
     if (lit && !visible(lit) && litTarget) lit = find(litTarget);
-    if (!lit || !visible(lit)) { ring.classList.remove("on"); return; }
+    // its element went (a tab switched back): gone at once, not fading where the element was
+    if (!lit || !visible(lit)) { ring.style.transition = "none"; ring.classList.remove("on"); return; }
     const r = lit.getBoundingClientRect();
     Object.assign(ring.style, {left: `${r.left - 4}px`, top: `${r.top - 4}px`, width: `${r.width + 8}px`, height: `${r.height + 8}px`});
     // a small element (an icon in a bar) keeps its words beside it, not cut off above it
@@ -95,6 +96,7 @@ const Hand = (() => {
   }
   function light(n, target, words) {
     clearTimeout(fade);
+    ring.style.transition = "";
     lit = n;
     litTarget = target;
     label.textContent = words || "";
@@ -103,6 +105,8 @@ const Hand = (() => {
     void ring.offsetWidth;   // restart the ring's arrival
     ring.classList.add("on");
     place();
+    // the progress card names what the hand is on (docs/ASSISTANT_PROGRESS_PLAN.md D5)
+    document.dispatchEvent(new CustomEvent("oxhandpoint", {detail: {target, words}}));
     fade = setTimeout(() => { ring.classList.remove("on"); cursor.classList.remove("on"); lit = litTarget = null; }, LINGER);
   }
 
@@ -112,6 +116,11 @@ const Hand = (() => {
     // a soft gesture gives way to one on the same element lit after it was asked for ("2/5" before "saved")
     if (opts.soft && (lastLit.get(target) || 0) > (opts.asked || 0)) return false;
     if (typeof ProjectMode !== "undefined" && ProjectMode.reveal) ProjectMode.reveal(target);
+    // a field left at its default sits in a folded list: unfold the list it is in
+    if (/^field:/.test(target)) {
+      for (const d of document.querySelectorAll("details:not([open])"))
+        if (d.querySelector(`[data-ox-target="${CSS.escape(target)}"]`)) d.open = true;
+    }
     let n = await wait(target, opts.or ? 1200 : WAIT);
     if (!n && opts.or) { n = await wait(opts.or, 600); target = opts.or; }
     if (!n || (!active() && !opts.force)) return false;

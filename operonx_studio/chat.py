@@ -77,7 +77,7 @@ def knowledge() -> str:
 STUDIO_READ_TOOLS = ["mcp__studio__list_runs", "mcp__studio__open_run", "mcp__studio__op_values",
                      "mcp__studio__monitor", "mcp__studio__compare_runs", "mcp__studio__select_op",
                      "mcp__studio__board_status", "mcp__studio__board_card", "mcp__studio__project_status",
-                     "mcp__studio__point"]
+                     "mcp__studio__point", "mcp__studio__steps"]
 # board_models and board_practices read too, but with arguments they write: edit tools
 
 

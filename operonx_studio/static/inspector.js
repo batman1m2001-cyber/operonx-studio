@@ -175,6 +175,7 @@ function instructionsSection(n) {
     return sec;
   }
   const row = el("div", "cf-row");
+  row.dataset.oxTarget = `field:${n.name}/instructions`;
   const box = el("textarea", "cf-text agentins-text");
   box.value = ins.text;
   box.rows = Math.min(14, Math.max(4, ins.text.split("\n").length));

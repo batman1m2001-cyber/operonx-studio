@@ -560,6 +560,7 @@ const BoardView = (() => {
   function tile(c) {
     const t = el("button", `bdcard st-${c.state}${c.id === v.card ? " sel" : ""}${c.asks ? " asks" : ""}`);
     t.type = "button";
+    t.dataset.oxTarget = `card:${c.id}`;
     const top = el("div", "bdcardtop");
     top.append(el("b", "mono", c.id));
     if (c.kind === "init") top.append(el("span", "chip", "init"));

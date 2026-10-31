@@ -92,7 +92,7 @@ def test_initialize_and_list_tools():
     assert init["protocolVersion"] == mcp.PROTOCOL and "tools" in init["capabilities"]
     tools = {t["name"]: t for t in _rpc(s, "tools/list")["result"]["tools"]}
     assert set(tools) == {"list_runs", "open_run", "op_values", "monitor", "compare_runs",
-                          "select_op", "point", "run_job", "rerun_op", "play", "run_eval", "set_llm_price",
+                          "select_op", "point", "steps", "run_job", "rerun_op", "play", "run_eval", "set_llm_price",
                           "project_status", "board_status", "board_card", "board_start", "board_request", "board_act", "board_daemon", "board_take",
                           "board_submit", "board_models", "board_practices"}
     # tools that run the project's code are not read tools
@@ -148,6 +148,10 @@ def test_point_queues_the_gesture_and_refuses_what_is_not_a_target():
     s.shown.pop()
     bad = _rpc(s, "tools/call", {"name": "point", "arguments": {"target": "the plans page"}})
     assert "not a target" in bad["result"]["content"][0]["text"] and len(s.shown) == 1
+    # a board card, an op's setting (docs/ASSISTANT_PROGRESS_PLAN.md D6)
+    for target in ("card:F1", "field:score/threshold"):
+        got = _rpc(s, "tools/call", {"name": "point", "arguments": {"target": target}})
+        assert f"pointed at {target}" in got["result"]["content"][0]["text"]
 
 
 # ── the tools against the real studio API ────────────────────────────────

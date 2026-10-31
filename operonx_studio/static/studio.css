@@ -2401,6 +2401,75 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   border: 2px solid var(--signal-ring); border-top-color: var(--signal); animation: axspin .8s linear infinite; }
 @keyframes axspin { to { transform: rotate(360deg); } }
 
+/* the progress card: the turn's plan, posted with the steps tool (ASSISTANT_PROGRESS_PLAN D4) */
+.ax-prog { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); padding: 12px 14px 6px;
+  box-shadow: var(--sh-1); }
+.ax-prog.live { position: sticky; top: 0; z-index: 2; }
+.ax-prog-top { display: flex; align-items: center; gap: 8px; }
+.ax-prog-title { flex: 1; min-width: 0; font-weight: 600; font-size: var(--fs-md); color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax-prog-chip { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  background: var(--surface-2); color: var(--text-2); }
+.ax-prog-chip.run { background: var(--accent-soft); color: var(--accent-strong); }
+.ax-prog-chip.ok { background: var(--ok-soft); color: var(--ok); }
+.ax-prog-chip.warn { background: var(--warn-soft); color: var(--warn); }
+.ax-prog-chip.bad { background: var(--err-soft); color: var(--err); }
+.ax-prog-meta { display: flex; justify-content: space-between; margin: 6px 0 5px; font-size: var(--fs-sm); color: var(--text-3);
+  font-variant-numeric: tabular-nums; }
+.ax-prog-bar { height: 4px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.ax-prog-bar span { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent);
+  transition: width .2s ease; }
+.ax-prog-steps { list-style: none; margin: 10px 0 0; padding: 0; }
+.ax-pstep { position: relative; display: flex; gap: 10px; padding-bottom: 6px; }
+.ax-pstep:not(:last-child)::before { content: ""; position: absolute; left: 9px; top: 22px; bottom: 0; width: 2px;
+  background: var(--line); }
+.ax-pstep.done:not(:last-child)::before { background: var(--accent); }
+.ax-pstep-dot { flex: none; width: 20px; height: 20px; margin-top: 4px; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center; background: var(--surface-3); color: var(--text-3);
+  transition: background .2s ease, color .2s ease; }
+.ax-pstep-dot .icon { width: 12px; height: 12px; }
+.ax-pstep.pending .ax-pstep-dot::after, .ax-pstep.skipped .ax-pstep-dot::after, .ax-pstep.stopped .ax-pstep-dot::after {
+  content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+.ax-pstep.done .ax-pstep-dot { background: var(--accent); color: var(--on-accent); }
+.ax-pstep.active .ax-pstep-dot { background: var(--accent-soft); }
+.ax-pstep.failed .ax-pstep-dot { background: var(--err); color: #fff; }
+.ax-pstep.waiting .ax-pstep-dot { background: var(--warn-soft); color: var(--warn); }
+.ax-pstep-main { flex: 1; min-width: 0; border-radius: var(--r-md); transition: background .2s ease; }
+.ax-pstep.active .ax-pstep-main { background: var(--accent-soft); padding-bottom: 8px; }
+.ax-pstep.waiting .ax-pstep-main { background: var(--warn-soft); padding-bottom: 8px; }
+.ax-pstep.failed .ax-pstep-main { background: var(--err-soft); }
+.ax-pstep-head { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 3px 8px;
+  border: none; border-radius: var(--r-md); background: none; font-size: var(--fs-md); font-weight: 450; color: var(--text);
+  text-align: left; cursor: default; }
+.ax-pstep-head:hover { background: none; border: none; }
+.ax-pstep-head.more { cursor: pointer; }
+.ax-pstep-head.more:hover { background: var(--surface-2); }
+.ax-pstep-num { flex: none; color: var(--text-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.ax-pstep-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax-pstep.open .ax-pstep-title, .ax-pstep.active .ax-pstep-title { white-space: normal; }
+.ax-pstep-meta { flex: none; color: var(--text-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.ax-pstep.active .ax-pstep-meta { color: var(--accent-strong); font-weight: 600; }
+.ax-pstep.waiting .ax-pstep-meta { color: var(--warn); font-weight: 600; }
+.ax-pstep.failed .ax-pstep-meta { color: var(--err); font-weight: 600; }
+.ax-pstep.pending .ax-pstep-title, .ax-pstep.stopped .ax-pstep-title { color: var(--text-2); }
+.ax-pstep.skipped .ax-pstep-title { color: var(--text-3); text-decoration: line-through; }
+.ax-pstep-focus { margin: 2px 8px 0; padding: 8px 10px; border-radius: var(--r-md); background: var(--surface);
+  font-size: var(--fs-sm); color: var(--text-2); }
+.ax-pstep-where b { color: var(--accent-strong); font-weight: 600; }
+.ax-pstep-detail { color: var(--text-2); font-size: var(--fs-sm); }
+.ax-pstep-focus .ax-pstep-detail { margin-top: 2px; }
+.ax-pstep-now { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--text-3); font-family: var(--mono);
+  font-size: 11.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ax-pstep-ask { margin: 0 8px; font-size: var(--fs-sm); color: var(--warn); }
+.ax-pstep-body { padding: 2px 8px 8px; display: grid; gap: 4px; }
+.ax-pstep-result { font-size: var(--fs-sm); color: var(--ok); }
+.ax-pstep-error { font-size: var(--fs-sm); color: var(--err); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ax-pstep-body .ax-step { border-radius: var(--r-sm); background: var(--surface); }
+.ax-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) {
+  .ax-prog-bar span, .ax-pstep-dot, .ax-pstep-main { transition: none; }
+}
+
 /* cards: a diff, an error, a flow that changed */
 .ax-card { border-radius: var(--r-md); padding: 10px 12px;
   display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-md); }
@@ -2812,6 +2881,18 @@ body.railslim .rail .tabs button .tabbadge:not([hidden]) { display: block; posit
   .ax-askbar.busy .icon { color: var(--signal); animation: axfade .9s ease-in-out infinite alternate; }
   body.ax-sheet .ax-askbar, body:has(#sidebar:not(.off)) .ax-askbar, body.ax-focus .ax-askbar,
   body.page .ax-askbar { display: none; }
+}
+/* the closed-panel pill: a running plan's step and bar stay on screen (D4) */
+.ax-askbar.stepped::after { content: ""; position: absolute; left: 18px; right: 18px; bottom: 6px; height: 3px;
+  border-radius: 999px; background: linear-gradient(var(--accent), var(--accent)) left / var(--ax-prog, 0%) 100% no-repeat,
+  var(--surface-3); transition: background-size .2s ease; }
+@media (min-width: 1100px) {
+  body:has(#sidebar.off) .ax-askbar.stepped { position: fixed; right: 20px; bottom: 20px; z-index: 60;
+    display: flex; align-items: center; gap: 10px; max-width: 360px; height: 44px; padding: 0 16px 4px;
+    border-radius: 999px; background: var(--surface); box-shadow: var(--sh-3); color: var(--text-2);
+    font-size: var(--fs-md); font-weight: 450; }
+  body:has(#sidebar.off) .ax-askbar.stepped .icon { width: 16px; height: 16px; color: var(--signal); }
+  .ax-askbar-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 /* a tablet: the side panel floats over the content instead of taking its
    width (at 768px it left the Runs table ~150px), and the Ask bar opens it */
@@ -4668,6 +4749,12 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .cf-sec { display: flex; flex-direction: column; gap: 10px; }
 .cf-field { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: var(--surface-2); border-radius: var(--r-md); }
 .cf-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+/* an edit landed on this field (choreo D6): the new value lit, the old one struck beside it, fading */
+.cf-field.cf-changed { animation: cf-changed 4s ease-out; }
+@keyframes cf-changed { 0%, 30% { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+  100% { background: var(--surface-2); box-shadow: none; } }
+.cf-old { font-size: 11.5px; color: var(--muted); text-decoration: line-through; }
+@media (prefers-reduced-motion: reduce) { .cf-field.cf-changed { animation: none; background: var(--accent-soft); } }
 .cf-name { font-weight: 600; }
 .cf-type { font-size: var(--fs-xs); color: var(--text-3); }
 .cf-default { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); background: var(--surface-3); border-radius: 4px; padding: 0 5px; }
