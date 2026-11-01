@@ -301,6 +301,8 @@ def test_a_deploy_runs_its_stages_on_the_host_waits_on_production_and_rolls_back
         run = _wait(client, dep, client.post(dep, json={"env": eid, "op": "rollback"}).json()["deploy"]["id"])
         assert run["state"] == "ok" and run["sha"] == first and _call(port, 21) == 42
     finally:
+        for t in list(client.app.state.deploys.active.values()):  # a deploy still running would start it again
+            t.join(timeout=120)
         client.post(url, json={"op": "save", "id": eid, "production": False})
         client.post(svc, json={"env": eid, "op": "stop", "key": f"127.0.0.1:{port}"})
         shutil.rmtree(Path.home() / ".local" / "state" / "operonx-svc" / eid, ignore_errors=True)
