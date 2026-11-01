@@ -2624,6 +2624,8 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-grip::before { content: ""; position: absolute; left: 18px; right: 18px; top: 5px; height: 4px; border-radius: 2px;
   background: var(--border-strong); opacity: 0; transition: opacity var(--tr); }
 .ax-input:hover .ax-grip::before, .ax.sizing .ax-grip::before { opacity: 1; }
+/* it sits on the top border: when focus turns the border blue, a grey grip reads as a gap in the line */
+.ax-input:focus-within .ax-grip::before, .ax.editing .ax-grip::before { background: var(--signal); }
 .ax.sizing, .ax.sizing * { cursor: ns-resize !important; user-select: none; }
 @media (hover: none) { .ax-grip::before { opacity: .7; } }
 .ax-tools { display: flex; align-items: center; gap: 2px; min-height: 34px; }
