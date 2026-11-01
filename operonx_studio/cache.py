@@ -27,6 +27,8 @@ import time
 from pathlib import Path
 from typing import Any, List, Optional
 
+from .safewrite import atomic_write
+
 __all__ = ["DiskCache", "RedisCache", "LayeredCache", "studio_cache"]
 
 _NAMESPACE = "oxstudio:"
@@ -58,10 +60,10 @@ class DiskCache:
     def set_json(self, key: str, value: Any, ttl: Optional[float] = None) -> None:
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
-            self._file(key).write_text(json.dumps({
+            atomic_write(self._file(key), json.dumps({
                 "value": value,
                 "expires": (time.time() + ttl) if ttl else None,
-            }), encoding="utf-8")
+            }))
         except OSError:
             pass  # an unwritable cache is a cold start later, not an error
 

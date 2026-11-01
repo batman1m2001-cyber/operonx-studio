@@ -92,10 +92,10 @@ const EnvPage = (() => {
     const e = v.sel === "" ? null : cur();
     if (!e) { body.append(form(null)); return; }
     body.append(summary(e), work(e), el("div", "ev-out"));
-    const ready = e.kind === "ssh" && e.trusted.length && e.key_set;
+    const ready = e.kind === "local" || (e.trusted.length && e.key_set);
     if (ready) body.append(el("section", "ev-sec ev-rt"));
     if (e.kind === "ssh") body.append(trust(e), secrets(e), form(e));
-    else body.append(secrets(e));
+    else body.append(secrets(e), commands(e));
     drawOut();
     if (ready) { if (rt && rt.env === e.id) drawRuntime(e); loadRuntime(e); }
   }
@@ -178,16 +178,18 @@ const EnvPage = (() => {
     const h = el("div", "ev-h2");
     h.append(el("h3", "pm-h", "Deploy"), el("span", "note", "git → build → test → run → validate → deploy"));
     wrap.append(h);
+    const here = e.kind === "local";  // this machine runs its checkout as it is: nothing to pick
     const ref = input(v.ref || "main", "branch or commit");
-    const go = (ev) => { if (!ref.value.trim()) return; v.ref = ref.value.trim(); save();
-      act({op: "deploy", env: e.id, ref: v.ref}, `Deploy ${v.ref}`, ev.currentTarget, "deploys").then((got) => got && loadRuntime(e)); };
+    const go = (ev) => { if (!here && !ref.value.trim()) return; if (!here) { v.ref = ref.value.trim(); save(); }
+      act({op: "deploy", env: e.id, ref: here ? "HEAD" : v.ref}, here ? "Deploy the checkout" : `Deploy ${v.ref}`, ev.currentTarget, "deploys").then((got) => got && loadRuntime(e)); };
     ref.onkeydown = (ev) => { if (ev.key === "Enter") go({currentTarget: null}); };
     const line = el("div", "ev-line");
-    line.append(ref, button("primary", "Deploy", go, e.production ? "Production: asks first" : "Run the stages in order"),
+    line.append(here ? el("span", "ev-hint", "The checkout as it is") : ref,
+      button("primary", "Deploy", go, e.production ? "Production: asks first" : "Run the stages in order"),
       button("pm-chip", "Roll back", (ev) => act({op: "rollback", env: e.id}, "Roll back", ev.currentTarget, "deploys").then((got) => got && loadRuntime(e)),
         "Deploy the last good release before the current one again"));
     wrap.append(line);
-    if (!e.build && !e.test) wrap.append(el("p", "ev-hint", "No build or test command yet: set them under Connection."));
+    if (!e.build && !e.test) wrap.append(el("p", "ev-hint", `No build or test command yet: set them under ${e.kind === "local" ? "Commands" : "Connection"}.`));
     const shown = rt.deploys.find((r) => r.id === rt.open) || rt.deploys[0];
     if (shown) wrap.append(stages(e, shown));
     if (rt.deploys.length) {
@@ -295,6 +297,21 @@ const EnvPage = (() => {
     row.append(p, go);
     if (e) row.append(button("linkbtn ev-del", "Delete", (ev) => act({op: "delete", env: e.id}, "Delete", ev.currentTarget)
       .then((got) => { if (got && got.ok) { v.sel = "local"; save(); draw(); } }), "Delete it, its key and its variables"));
+    s.append(g, row);
+    return s;
+  }
+
+  function commands(e) {  // this machine: the checkout is fixed, its interpreter and commands are not
+    const s = section("Commands", "What a deploy here runs. Its folder is the checkout.");
+    const py = input(e.python, ".venv/bin/python");
+    const build = input(e.build, "uv sync");
+    const test = input(e.test, "pytest -q");
+    const prev = input(e.preview, "http://localhost:{port}");
+    const g = el("div", "ev-form");
+    g.append(field("Python", py), field("Build", build), field("Test", test), field("Preview URL", prev));
+    const row = el("div", "ev-row");
+    row.append(button("primary", "Save", (ev) => act({op: "save", id: "local", python: py.value, build: build.value,
+      test: test.value, preview: prev.value}, "Save", ev.currentTarget)));
     s.append(g, row);
     return s;
   }

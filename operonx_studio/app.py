@@ -3830,7 +3830,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     def _save_alerts(root: Path, alerts: List[Alert]) -> None:
         f = _alerts_file(root)
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps({"alerts": [a.to_dict() for a in alerts]}, indent=2), encoding="utf-8")
+        safewrite.atomic_write(f, json.dumps({"alerts": [a.to_dict() for a in alerts]}, indent=2))
 
     def _states(root: Path) -> Dict[str, AlertState]:
         f = root / ".operonx" / "alerts-state.json"
@@ -3845,7 +3845,7 @@ def build_studio_app(recents: Optional[Recents] = None):
 
         f = root / ".operonx" / "alerts-state.json"
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps({k: dataclasses.asdict(v) for k, v in states.items()}, indent=2), encoding="utf-8")
+        safewrite.atomic_write(f, json.dumps({k: dataclasses.asdict(v) for k, v in states.items()}, indent=2))
 
     def _project_name(pid: str, watcher: ProjectWatcher) -> str:
         ref = recents.get(pid)
@@ -4317,7 +4317,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         return _listeners(watcher) if watcher is not None else []
 
     _deploy.register(app, envs=envs, watcher_of=_watcher, listeners=_env_listeners, base_env=_base_env,
-                     remote_url=_origin, state_dir=lambda: recents.state_file.parent)
+                     remote_url=_origin, state_dir=lambda: recents.state_file.parent, local_procs=procs)
 
     # the run queue of a durable service: operonx_studio/runqueue.py
     from operonx_studio import runqueue as _runqueue

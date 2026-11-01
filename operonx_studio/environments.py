@@ -33,8 +33,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from .safewrite import atomic_write
+
 SECRETS = "ox-secrets"  # the folder's name: runhook refuses the assistant's tools any path through it
 LEVELS = ("none", "read", "run")  # what the assistant may do in an environment
+LOCAL_FIELDS = ("python", "build", "test", "preview")  # what this machine keeps: the rest is the checkout
 _KEY_BLOCK = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S)
 _SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 
@@ -112,8 +115,7 @@ class Secrets:
         if not _KEY_BLOCK.search(text):
             raise EnvError("not a private key (paste the whole -----BEGIN … PRIVATE KEY----- block)")
         p = self._dir(eid) / "key"
-        p.touch(mode=0o600)
-        p.write_text(text, encoding="utf-8")
+        atomic_write(p, text)  # 0600 from the start
         got = subprocess.run(["ssh-keygen", "-y", "-P", "", "-f", str(p)], capture_output=True, text=True, timeout=10)
         if got.returncode != 0:
             p.unlink()
@@ -136,9 +138,7 @@ class Secrets:
                 cur.pop(k, None)
             elif v != "":  # an empty value keeps the one stored (the page never has it)
                 cur[k] = str(v)
-        p = self._dir(eid) / "vars.json"
-        p.touch(mode=0o600)
-        p.write_text(json.dumps(cur), encoding="utf-8")
+        atomic_write(self._dir(eid) / "vars.json", json.dumps(cur))  # 0600; a run reading them sees all or none
 
     def drop(self, eid: str) -> None:
         d = self.root / eid
@@ -192,7 +192,12 @@ class SSH(Provider):
 
     def known_hosts(self) -> Path:
         p = self.secrets._dir(self.env.id) / "known_hosts"
-        p.write_text(self.env.host_keys, encoding="utf-8")
+        try:
+            same = p.read_text(encoding="utf-8") == self.env.host_keys
+        except OSError:
+            same = False
+        if not same:  # rewritten under an ssh reading it, a check could fail: only when it changed, whole
+            atomic_write(p, self.env.host_keys)
         return p
 
     def options(self) -> List[str]:
@@ -251,7 +256,10 @@ class Environments:
             raw = []
         names = {f.name for f in fields(Env)}
         envs = [Env(**{k: v for k, v in r.items() if k in names}) for r in raw if r.get("id") != "local"]
-        return [Env("local", "This machine", "local", workdir=str(root), assistant="run"), *envs]
+        mine = next((r for r in raw if r.get("id") == "local"), {})  # this machine: only its commands are kept
+        here = Env("local", "This machine", "local", workdir=str(root), assistant="run",
+                   **{k: str(mine.get(k) or "") for k in LOCAL_FIELDS})
+        return [here, *envs]
 
     def get(self, pid: str, root: Path, eid: str) -> Env:
         for e in self.all(pid, root):
@@ -260,14 +268,23 @@ class Environments:
         raise EnvError(f"no environment {eid!r}")
 
     def save(self, pid: str, root: Path, env: Env) -> None:
-        envs = [e for e in self.all(pid, root)[1:] if e.id != env.id] + ([env] if env.id != "local" else [])
+        here, *rest = self.all(pid, root)
+        here = env if env.id == "local" else here
+        envs = [{"id": "local", **{k: getattr(here, k) for k in LOCAL_FIELDS}}] + \
+            [asdict(e) for e in rest if e.id != env.id] + ([asdict(env)] if env.id != "local" else [])
+        self._write(pid, envs)
+
+    def _write(self, pid: str, rows: List[Dict[str, Any]]) -> None:
         p = self._file(pid)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps([asdict(e) for e in envs], indent=1), encoding="utf-8")
+        atomic_write(p, json.dumps(rows, indent=1))
 
     def delete(self, pid: str, root: Path, eid: str) -> None:
-        envs = [e for e in self.all(pid, root)[1:] if e.id != eid]
-        self._file(pid).write_text(json.dumps([asdict(e) for e in envs], indent=1), encoding="utf-8")
+        if eid == "local":
+            raise EnvError("this machine stays")
+        here, *rest = self.all(pid, root)
+        self._write(pid, [{"id": "local", **{k: getattr(here, k) for k in LOCAL_FIELDS}}]
+                    + [asdict(e) for e in rest if e.id != eid])
         self.secrets(pid).drop(eid)
 
     def provider(self, pid: str, root: Path, eid: str, base_env: Dict[str, str]) -> Provider:
@@ -415,7 +432,14 @@ def register(app: Any, *, watcher_of: Callable[[str], Any], state_dir: Callable[
 
     def save(pid: str, root: Path, body: Dict[str, Any]) -> Dict[str, Any]:
         eid = str(body.get("id") or "").strip().lower()
-        if eid == "local" or not _SLUG.fullmatch(eid):
+        if eid == "local":  # this machine: the checkout as it is; its interpreter and commands can be set
+            env = envs.get(pid, root, eid)
+            for k in LOCAL_FIELDS:
+                if k in body:
+                    setattr(env, k, str(body[k]).strip())
+            envs.save(pid, root, env)
+            return {"ok": True, "said": "this machine saved", "env": env.public(envs.secrets(pid))}
+        if not _SLUG.fullmatch(eid):
             raise EnvError("an id: lowercase letters, digits and dashes (staging, prod-eu), not 'local'")
         try:
             env = envs.get(pid, root, eid)

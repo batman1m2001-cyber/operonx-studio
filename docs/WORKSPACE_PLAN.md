@@ -240,6 +240,31 @@ access/hands updated. The run history is replaced whole on each write (a read mi
 ![production waits](img/workspace/w4-deploy-production-light.png)
 ![deploys on the card](img/workspace/w4-card-deploys-dark.png)
 
+*Follow-up (2026-11-01): this machine is the default.* The owner's call: SSH stays as built; the
+current PC is where things run unless an environment is named. *This machine* now has the same
+Services and Deploy sections as a host (state under `operonx-svc/local-<hash of the checkout>`). It
+keeps only its interpreter, build, test and preview (*Commands*): its folder is the checkout. The git
+stage runs the checkout as it is: it records HEAD (with any uncommitted changes listed) and refuses
+another ref rather than switching the owner's working folder. A listener the Services page started gives
+its port to the deploy. The API and the `env_*`/`deploy` tools default to `local`, and a deploy there
+needs no ref. Test: `test_environments.py` +1 (no env and no ref: the Services page's listener taken
+over, stages ok, a call to it; another branch refused at git with the rest not run). With it, every
+state file the studio rewrites (deploys, environments, secrets' vars, alerts, run states, the
+registry, the git policy, the cache) goes through `safewrite.atomic_write`: a reader sees the old file
+or the new one, never half of one (`test_safewrite.py` +1; an in-place write tore 271 of 299 reads).
+
+*A real turn (Sonnet, a clone of meeting-prep-operonx: "deploy this on this machine and check it's
+healthy").* It deployed with no env and no ref on its first try (git → validate ok, `/healthz` 200) and
+said what it had not checked. Three things in its way, fixed: `env_check` with no env failed on `'env'`;
+this machine's listener showed `open at http://:8200` (it is `http://127.0.0.1:8200` now); and
+`failing_on_base` called both of the project's failing tests "new", because the project sits in a
+subfolder of its repo and the base copy ran pytest at the repo's top — it runs in the same subfolder now
+(`test_basecheck.py` +1). A second turn on the fixed studio: both failures fail on base too, the service
+stopped.
+
+![this machine: services and a deploy](img/workspace/local-default-light.png)
+![a refused branch, then the checkout](img/workspace/local-default-dark.png)
+
 Constraints from the brief (§15) hold throughout: reuse before adding, no duplicate models, no fake
 states, no polling or model calls that are not needed, long runs supported, user data kept.
 

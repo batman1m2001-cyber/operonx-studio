@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from operonx_studio import runhook, terminals
+from operonx_studio import mcp, runhook, terminals
 from operonx_studio.app import Recents, build_studio_app
 
 SSHD = shutil.which("sshd") or "/usr/sbin/sshd"
@@ -306,3 +306,74 @@ def test_a_deploy_runs_its_stages_on_the_host_waits_on_production_and_rolls_back
         client.post(url, json={"op": "save", "id": eid, "production": False})
         client.post(svc, json={"env": eid, "op": "stop", "key": f"127.0.0.1:{port}"})
         shutil.rmtree(Path.home() / ".local" / "state" / "operonx-svc" / eid, ignore_errors=True)
+
+
+def test_this_machine_is_the_default_and_deploys_its_checkout_as_it_is(client, tmp_path):
+    import hashlib
+    import sys
+
+    from operonx_studio.services import probe_port
+
+    root, port = tmp_path / "here", _free_port()
+    root.mkdir()
+    (root / "main.py").write_text("FACTOR = 2\n" + SERVE_MAIN, encoding="utf-8")
+    (root / "operonx.toml").write_text(f'[project]\nname = "here"\n\n[[serve]]\nname = "times"\nkind = "http"\n'
+                                       f'path = "/times"\nhost = "127.0.0.1"\nport = {port}\ngraph = "main:flow"\n',
+                                       encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "double")
+    pid = client.post("/api/open", json={"path": str(root)}).json()["id"]
+    url, dep, svc = f"/api/p/{pid}/environments", f"/api/p/{pid}/deploys", f"/api/p/{pid}/env-services"
+    # this machine keeps its interpreter and commands; its folder stays the checkout
+    client.post(url, json={"op": "save", "id": "local", "python": sys.executable, "test": "grep -q FACTOR main.py",
+                           "workdir": "/elsewhere"})
+    here = client.get(url).json()["environments"][0]
+    assert here["id"] == "local" and here["python"] == sys.executable and here["workdir"] == str(root)
+    key = f"127.0.0.1:{port}"
+    try:
+        # the Services page started it: a deploy here takes the port over
+        assert client.post(f"/api/p/{pid}/services/start", json={"key": key}).status_code == 200
+        end = time.time() + 60
+        while time.time() < end and not probe_port("127.0.0.1", port):
+            time.sleep(0.3)
+        page = client.get(f"/api/p/{pid}/services").json()["listeners"][0]
+        assert page["running"] and page["managed"]
+        # no environment, no ref: this machine, its checkout as it is
+        run = _wait(client, dep, client.post(dep, json={}).json()["deploy"]["id"])
+        states = {s["name"]: s["state"] for s in run["stages"]}
+        assert run["env"] == "local" and run["state"] == "ok", run["stages"]
+        assert states == {"git": "ok", "build": "skipped", "test": "ok", "run": "ok", "validate": "ok", "deploy": "ok"}
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True).stdout.strip()
+        assert run["sha"] == head and run["ref"] == "main" and "main at" in run["stages"][0]["said"]
+        assert _call(port, 21) == 42
+        assert not client.app.state.deploys.active  # the run ended
+        listed = client.post(svc, json={}).json()
+        assert listed["listeners"][0]["running"] and listed["release"] == head
+        assert listed["listeners"][0]["url"] == f"http://{key}"  # opened from here, not "http://:port"
+        # another branch is the owner's to switch to: the git stage says so and nothing moves
+        run = _wait(client, dep, client.post(dep, json={"ref": "other"}).json()["deploy"]["id"])
+        assert run["state"] == "failed" and "this machine is on main" in run["stages"][0]["said"]
+        assert run["stages"][1]["state"] == "not run" and _call(port, 21) == 42
+    finally:
+        for t in list(client.app.state.deploys.active.values()):
+            t.join(timeout=120)
+        client.post(svc, json={"op": "stop", "key": key})
+        client.post(f"/api/p/{pid}/services/stop", json={"key": key})
+        tag = hashlib.sha1(str(root).encode()).hexdigest()[:10]
+        shutil.rmtree(Path.home() / ".local" / "state" / "operonx-svc" / f"local-{tag}", ignore_errors=True)
+
+
+
+def test_the_env_tools_name_this_machine_when_no_env_is_given():
+    seen = []
+
+    class Studio:
+        def call(self, path, body=None, **params):
+            seen.append(body)
+            return {"exit_code": 0, "said": "fine"}
+
+    assert mcp.t_env_check(Studio(), {}) == "status on local (exit 0):\nfine"
+    mcp.t_env_run(Studio(), {"command": "pwd"})
+    mcp.t_env_services(Studio(), {})
+    assert [b["env"] for b in seen] == ["local"] * 3

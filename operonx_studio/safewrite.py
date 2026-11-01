@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 __all__ = [
-    "WriteRefused", "Write", "sha", "diff", "preview", "commit", "undo", "journal",
+    "WriteRefused", "Write", "sha", "diff", "preview", "commit", "undo", "journal", "atomic_write",
     "lines_scope", "yaml_scope", "toml_scope", "env_scope", "span_scope", "pyedit_scope",
 ]
 
@@ -102,7 +102,9 @@ def _rel(root: Path, path: Path) -> str:
         return str(path)
 
 
-def _atomic_write(path: Path, text: str) -> None:
+def atomic_write(path: Path, text: str) -> None:
+    """*text* to *path* through a temporary file beside it and a rename: a reader sees the old file or the
+    new one, never half of one. An existing file keeps its mode; a new one is 0600."""
     path = Path(path)
     mode = path.stat().st_mode if path.exists() else None
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".studio", dir=str(path.parent))
@@ -151,11 +153,11 @@ def commit(
         if why:
             raise WriteRefused("scope", f"{name}: the change reaches beyond what it was for — {why}")
     was_ok = bool(watcher is not None and getattr(watcher.last, "ok", False))
-    _atomic_write(path, after)
+    atomic_write(path, after)
     if watcher is not None:
         got = watcher.extract()
         if was_ok and not got.ok:
-            _atomic_write(path, current)
+            atomic_write(path, current)
             watcher.extract()
             raise WriteRefused("build", f"{name}: the project no longer builds with this change, so it was not kept:\n"
                                + (got.error or "extraction failed"))

@@ -65,6 +65,11 @@ def base_tree(cwd: str, sha: str) -> Path:
     return dest
 
 
+def base_dir(cwd: str, sha: str) -> Path:
+    """Where *cwd* sits in the base copy: a project in a subfolder of its repo runs there, not at the repo's top."""
+    return base_tree(cwd, sha) / _git(cwd, "rev-parse", "--show-prefix")
+
+
 def interpreter(cwd: str) -> str:
     """The project's Python: its .venv if it has one (the worktree's, then the main checkout's)."""
     top = Path(_git(cwd, "rev-parse", "--show-toplevel"))
@@ -112,7 +117,7 @@ def check(cwd: str, tests: List[str], base: Optional[str] = None, timeout: float
         raise ValueError("tests: the failing test ids, as pytest printed them")
     base = base or default_base(cwd)
     sha = _git(cwd, "merge-base", "HEAD", base)
-    where = base_tree(cwd, sha)
+    where = base_dir(cwd, sha)
     py = python or interpreter(cwd)
     run = _pytest(py, where, tests, timeout)
     seen = outcomes(run.stdout + run.stderr)
@@ -149,7 +154,7 @@ def on_base(cwd: str, command: str, base: Optional[str] = None, timeout: float =
         raise ValueError("command: the check to run, as you ran it here")
     base = base or default_base(cwd)
     sha = _git(cwd, "merge-base", "HEAD", base)
-    where = base_tree(cwd, sha)
+    where = base_dir(cwd, sha)
     py = python or interpreter(cwd)
     return {"base": base, "sha": sha[:12], "command": command,
             "here": _shell(command, cwd, _env(Path(cwd), py), timeout),
