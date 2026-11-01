@@ -1472,6 +1472,12 @@ def test_a_test_run_is_read_whole_before_the_clip(tmp_path):
     assert (tested["tests"]["passed"], tested["tests"]["failed"], tested["tests"]["ms"]) == (137, 1, 4200)
     assert tested["tests"]["failures"][0]["line"] == "KeyError: 'lane'"
     assert "tests" not in listed, "not a test command, no report"
+    # the stream can say a result twice (seen live, E7); the second, clipped, must not take the report away
+    sent = len(turn.events)
+    relay._translate(turn, {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "u1", "content": out[-200:].replace("1 failed", ""), "is_error": True}]}})
+    assert tested["tests"]["passed"] == 137
+    assert not [e for e in turn.events[sent:] if e["t"] == "item"]
 
 
 # ── a running shell call's progress (docs/EXECUTION_PROGRESS_PLAN.md E4) ──
@@ -1537,7 +1543,7 @@ def test_stopping_one_call_ends_it_and_the_turn_goes_on(client, project, fake):
     events += _drain(client, turn, cursor)
     item = _tool(client, sid)
     # bash itself takes the SIGINT (no end marker, no 130): the CLI says how it ended
-    assert item["status"] == "error" and item["stopped_by_owner"] and "start" in item["output"]
+    assert item["status"] == "stopped" and item["stopped_by_owner"] and "start" in item["output"]
     assert "never" not in item["output"]
     assert events[-1]["t"] == "done" and events[-1]["state"] == "done"
 

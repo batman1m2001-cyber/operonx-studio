@@ -40,6 +40,13 @@ def test_pytest_counts_against_the_collected_total():
     assert mid["activity"] == "suite/test_a.py" and "ended" not in mid
 
 
+def test_pytest_percent_follows_the_count_not_the_line_end():
+    # pytest prints [ 1%] at the end of a line of dots: 20 tests into a 60-test file it still says 1%
+    out = "collected 61 items\n\ntests/test_base.py .                [  1%]\ntests/test_slow.py " + "." * 20
+    got = progress.read("pytest tests", out)
+    assert (got["current"], got["total"], got["pct"]) == (21, 61, 34)
+
+
 def test_pytest_before_it_has_collected_is_not_a_bar():
     command, raw, _ = fixture("pytest_v")
     got = progress.read(command, cut(raw, "collecting ..."))

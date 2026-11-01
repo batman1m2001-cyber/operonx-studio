@@ -90,7 +90,8 @@ def _tests(command: str, text: str, lines: List[str]) -> Optional[Dict[str, Any]
     if not live and not total and not stages:
         return None
     measured = bool(total) or pct is not None
-    if measured and pct is None and total:
+    if total:
+        # pytest's [ 1%] is printed at a line's end: on a long file it lags the count by a whole line
         pct = min(100, current * 100 // total)
     return _progress("measured" if measured else "indeterminate", current=current, total=total, pct=pct,
                      unit="tests", activity=activity or _activity(lines), stages=stages or None,

@@ -1281,6 +1281,8 @@ class Relay:
                 if seq is None:
                     continue
                 item = turn.items[seq]
+                if item.get("status") != "running":
+                    continue                    # the stream can say a result twice; the second has lost the live text
                 content = block.get("content")
                 if isinstance(content, list):
                     content = "\n".join(str(c.get("text") or "") for c in content if isinstance(c, dict))
@@ -1296,7 +1298,8 @@ class Relay:
                     item["tests"] = report
                 else:
                     item.pop("tests", None)     # the counts so far were a guess the end did not confirm
-                item.update(status="error" if block.get("is_error") else "ok", output=_clip(content or ""),
+                ended = "stopped" if item.get("stopped_by_owner") else "error" if block.get("is_error") else "ok"
+                item.update(status=ended, output=_clip(content or ""),
                             ms=round((_now() - float(item.get("t0") or _now())) * 1000))
                 self._call_ended(turn, block.get("tool_use_id") or "", item)
                 self._replace(turn, item)
@@ -1357,7 +1360,7 @@ class Relay:
             item["tests"] = report
         else:
             item.pop("tests", None)
-        item.update(status={"completed": "ok", "failed": "error"}.get(status, "stopped"),
+        item.update(status="stopped" if item.get("stopped_by_owner") else {"completed": "ok", "failed": "error"}.get(status, "stopped"),
                     output=_clip(text or str(event.get("summary") or "")), summary=str(event.get("summary") or ""),
                     ms=round((_now() - float(item.get("t0") or _now())) * 1000))
         self._call_ended(turn, call, item)
