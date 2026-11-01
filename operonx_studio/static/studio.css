@@ -5164,6 +5164,18 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .bdfacts dt { color: var(--text-3); }
 .bdfacts dd { margin: 0; overflow-wrap: anywhere; }
 .bdcrit { margin: 4px 0 0 18px; padding: 0; font-size: var(--fs-sm); }
+.bdcard.lit { box-shadow: 0 0 0 2px var(--accent-soft); border-left-color: var(--accent); }
+.bdasks { list-style: none; margin: 0; padding: 0; font-size: var(--fs-sm); }
+.bdasks > li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; }
+.bdasks .linkbtn { text-align: left; overflow-wrap: anywhere; }
+.bdturns > li > .bdqtext { flex-basis: 100%; }
+.bdturns { list-style: none; margin: 4px 0 0; padding: 0; font-size: var(--fs-sm); }
+.bdturns > li { padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.bdturns .linkbtn { text-align: left; overflow-wrap: anywhere; }
+.bdevidence { list-style: none; margin: 0; padding: 0 0 0 10px; width: 100%; font-family: var(--mono, ui-monospace, monospace); font-size: 11px; color: var(--text-2); }
+.bdevidence li { padding: 1px 0; overflow-wrap: anywhere; }
+.bdevidence li.good::before { content: "✓ "; color: var(--ok); }
+.bdevidence li.bad::before { content: "✗ "; color: var(--err); }
 .bdevents { list-style: none; margin: 4px 0 0; padding: 0; font-size: var(--fs-sm); max-height: 280px; overflow: auto; }
 .bdevents li { padding: 3px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 

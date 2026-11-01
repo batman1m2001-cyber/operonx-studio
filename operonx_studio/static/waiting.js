@@ -49,14 +49,18 @@ const Waiting = (() => {
   const allowed = () => "Notification" in window && Notification.permission === "granted";
   const askable = () => "Notification" in window && Notification.permission === "default";
 
+  /* who asks: a board's question id, or the assistant's turn (WORKSPACE_PLAN W1.5) */
+  const label = (q) => q.qid || (q.source === "assistant" ? "the assistant's question" : "a question");
+
   function notify(fresh) {
     if (!allowed()) return;
-    for (const {board, q} of fresh.slice(0, 5)) {
+    // the BRD's open questions sit in a file: on the boards and in the count, never a notification
+    for (const {board, q} of fresh.filter((f) => f.q.source !== "brd").slice(0, 5)) {
       try {
-        const n = new Notification(`${board.name}: ${q.qid || "a question"} waits for you`, {
-          body: `${q.milestone}${q.card ? `/${q.card}` : ""} — ${q.problem}`, tag: q.id,
+        const n = new Notification(`${board.name}: ${label(q)} waits for you`, {
+          body: `${q.milestone ? `${q.milestone}${q.card ? `/${q.card}` : ""} — ` : ""}${q.problem}`, tag: q.id,
         });
-        n.onclick = () => { window.focus(); location.href = `/p/${board.pid}/board`; n.close(); };
+        n.onclick = () => { window.focus(); location.href = `/p/${board.pid}/${q.session ? "" : "board"}`; n.close(); };
       } catch { /* a browser that wants a service worker for this: the title count still says it */ }
     }
   }
@@ -109,7 +113,7 @@ const Waiting = (() => {
     if (board.waiting.length) {
       const q = mk("a", "chip cwarn", `${board.waiting.length} waiting on you`);
       q.href = `/p/${board.pid}/board`;
-      q.title = board.waiting.slice(0, 3).map((w) => `${w.qid || "?"} ${w.problem}`).join("\n");
+      q.title = board.waiting.slice(0, 3).map((w) => `${label(w)}: ${w.problem}`).join("\n");
       q.onclick = (ev) => ev.stopPropagation();  // the row opens the project; this opens its board
       box.append(q);
     }

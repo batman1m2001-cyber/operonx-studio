@@ -49,6 +49,10 @@ def _git(root: Path, *args: str) -> None:
                         "GIT_COMMITTER_EMAIL": "t@t"})  # fmt: skip
 
 
+def _git_out(root: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+
+
 def make_project(root: Path, store: bool = True) -> Path:
     root.mkdir(parents=True)
     (root / "operonx.toml").write_text('[project]\nname = "calc"\n', encoding="utf-8")
@@ -486,6 +490,42 @@ def test_what_waits_on_the_owner_across_every_board(client, tmp_path):
     assert board["milestones"][0]["id"] == "m1"
 
 
+def test_one_list_of_what_waits_the_engine_the_brd_and_the_assistant(client, tmp_path):
+    """WORKSPACE_PLAN W1.5: the engine's questions, the BRD's open ones (one entry per id) and a turn that ended
+    on a question, in the waiting list and on the card the turn named."""
+    from operonx_studio.assistant import ChatStore
+
+    root = make_project(tmp_path / "calc")
+    req = root / "docs" / "brd" / "requirements"
+    req.mkdir(parents=True)
+    (req / "open_questions.md").write_text(QUESTIONS + "| Q-02 | scope | Is CSV export in v1? | open |\n"
+                                           "| Q-03 | scope | Old one | answered |\n", encoding="utf-8")
+    pid = _open(client, root)
+    store = ChatStore(tmp_path / "assistant.sqlite")
+    a = store.create_session(pid, owner="u")["id"]
+    store.add_turn("t1", a, message="continue C1", kind="message", claude_before=None)
+    store.update_turn("t1", card="m1/C1", state="done", ended=time.time())
+    store.put_items(a, [{"seq": 1, "turn": "t1", "kind": "text", "text": "Done with C1.\n\n**Shall I start C2?**"}])
+    b = store.create_session(pid, owner="u")["id"]
+    store.add_turn("t2", b, message="ship it", kind="message", claude_before=None)
+    store.update_turn("t2", state="done", ended=time.time())
+    store.put_items(b, [
+        {"seq": 1, "turn": "t2", "kind": "tool", "name": "mcp__studio__steps", "status": "ok",
+         "plan": {"steps": [{"title": "Build", "state": "done"},
+                            {"title": "Deploy", "state": "waiting", "detail": "Push to production?"}]}},
+        {"seq": 2, "turn": "t2", "kind": "text", "text": "Built. Waiting on your go."}])
+    got = client.get("/api/boards/waiting").json()
+    waiting = got["boards"][0]["waiting"]
+    assert [(w["source"], w["qid"] or w["problem"]) for w in waiting] == [
+        ("board", "Q-01"), ("brd", "Q-02"), ("assistant", "Shall I start C2?"), ("assistant", "Push to production?")]
+    assert got["count"] == 4 and waiting[2]["card"] == "m1/C1" and waiting[2]["session"] == a
+    c1 = next(c for c in client.get(f"/api/p/{pid}/board/m1").json()["cards"] if c["id"] == "C1")
+    assert c1["asks"] is True and c1["question"].endswith("C2?")
+    # the owner answered: a later turn in that session, and it waits no more
+    store.add_turn("t3", a, message="yes", kind="message", claude_before=None)
+    assert [w["id"] for w in client.get("/api/boards/waiting").json()["boards"][0]["waiting"]][2:] == ["turn:t2"]
+
+
 def test_linked_milestones_show_on_both_boards(client, tmp_path, monkeypatch):
     calc, other = make_project(tmp_path / "calc"), make_project(tmp_path / "other")
     index = tmp_path / "projects.json"
@@ -695,6 +735,27 @@ def test_project_mode_says_plainly_when_the_engine_is_missing_or_too_old(client,
     assert got.status_code == 503 and got.json()["status"] == "unavailable"
 
 
+def test_project_mode_lists_the_assistants_questions_with_the_engines(client, tmp_path, monkeypatch):
+    """WORKSPACE_PLAN W1.5: Project mode's needs-you list has a turn that ended waiting on the owner."""
+    from operonx_studio.assistant import ChatStore
+
+    root = make_project(tmp_path / "calc", store=False)
+    pid = _open(client, root)
+    eng = _bin(tmp_path, "#!/bin/sh\ncat > /dev/null\n"
+               "echo '{\"ok\": true, \"status\": \"ok\", \"project\": {\"needs_you\": []}}'\n")
+    monkeypatch.setenv("OPERONX_PROJECT_BIN", str(eng))
+    store = ChatStore(tmp_path / "assistant.sqlite")
+    a = store.create_session(pid, owner="u")["id"]
+    store.add_turn("t1", a, message="continue C1", kind="message", claude_before=None)
+    store.update_turn("t1", card="m1/C1", state="done", ended=time.time())
+    store.put_items(a, [{"seq": 1, "turn": "t1", "kind": "text", "text": "Done with C1. Shall I start C2?"}])
+    got = client.get(f"/api/p/{pid}/project/status")
+    assert got.status_code == 200, got.text
+    assert got.json()["project"]["needs_you"] == [
+        {"source": "assistant", "id": "turn:t1", "kind": "assistant", "text": "Done with C1. Shall I start C2?",
+         "card": "m1/C1", "session": a, "title": store.session(a)["title"]}]
+
+
 def test_project_mode_has_its_pages_and_the_board_lives_inside_it(client, tmp_path):
     root = make_project(tmp_path / "calc", store=False)
     pid = _open(client, root)
@@ -774,12 +835,60 @@ def test_a_plan_doc_is_put_on_the_board_from_the_checkout_or_its_worktree(client
     # the plan moves on in a worktree, its doc not on main yet: the board follows the worktree's copy
     wt = tmp_path / "wt"
     _git(root, "worktree", "add", "-q", "-b", "feat", str(wt))
+    head = _git_out(root, "rev-parse", "HEAD")
     (wt / "docs" / "EXPORT_PLAN.md").write_text(PLAN_DOC.replace("in_progress}", "done}"), encoding="utf-8")
     assert pb.plan_request(root, str(wt / "docs" / "EXPORT_PLAN.md"))["path"] == "docs/EXPORT_PLAN.md"
     got = client.post(f"/api/p/{pid}/board/plan", json={"path": str(wt / "docs" / "EXPORT_PLAN.md")})
     assert got.status_code == 200 and got.json()["milestone"] == mid, got.text
     states = [c["state"] for c in client.get(f"/api/p/{pid}/board/{mid}").json()["cards"]]
     assert sorted(states) == ["done", "done", "ready"], states
+    # WORKSPACE_PLAN W1.2: a branch's plan moves the store alone, the main checkout gets no commit
+    assert _git_out(root, "rev-parse", "HEAD") == head
+    assert pb.plan_request(root, str(root / "docs" / "EXPORT_PLAN.md")) == {"op": "plan", "path": "docs/EXPORT_PLAN.md"}
+
+    # W1.1: the doc changed from the shell (no Edit, no board_plan) is found stale, the worktree's copy
+    assert pb.stale_plans(root) == []
+    doc = wt / "docs" / "EXPORT_PLAN.md"
+    doc.write_text(PLAN_DOC.replace("open}", "done}").replace("in_progress}", "done}"), encoding="utf-8")
+    later = time.time() + 30
+    os.utime(doc, (later, later))
+    assert pb.stale_plans(root) == [str(doc)]
+    got = client.post(f"/api/p/{pid}/board/plan", json={"path": str(doc)})
+    assert got.status_code == 200 and _git_out(root, "rev-parse", "HEAD") == head, got.text
+    assert pb.stale_plans(root) == []  # the text the board read, whatever the file's time says
+
+    # W1.3–W1.4: a turn names its card (a steps call's card); the card lists it, lit while it runs, with its
+    # evidence: a green test run, base checks, commits. A done phase with nothing run reads "no evidence".
+    from operonx_studio.assistant import ChatStore, evidence
+
+    store = ChatStore(tmp_path / "assistant.sqlite")
+    sid = store.create_session(pid, owner="u")["id"]
+    store.add_turn("t1", sid, message="continue E2", kind="message", claude_before=None)
+    store.update_turn("t1", card=f"{wt}/docs/EXPORT_PLAN.md#E2", state="done")
+    store.put_items(sid, [
+        {"seq": 1, "turn": "t1", "kind": "tool", "name": "Bash", "status": "ok", "input": {"command": "pytest -q"},
+         "tests": {"passed": 3, "failed": 1, "skipped": 0, "errors": 0}},
+        {"seq": 2, "turn": "t1", "kind": "tool", "name": "Bash", "status": "ok", "input": {"command": "pytest -q"},
+         "tests": {"passed": 4, "failed": 0, "skipped": 1, "errors": 0}},
+        {"seq": 3, "turn": "t1", "kind": "tool", "name": "mcp__studio__on_base", "status": "ok",
+         "output": "`brd check` here: exit 1 · on base (merge-base 1a2b3c4d5e6f): exit 1\n…"},
+        {"seq": 4, "turn": "t1", "kind": "tool", "name": "Bash", "status": "ok",
+         "input": {"command": "git commit -m 'E2 header'"}, "output": "[feat 9f8e7d6] E2 header\n 1 file changed"}])
+    store.add_turn("t2", sid, message="E3 now", kind="message", claude_before=None)
+    store.update_turn("t2", card=f"{mid}/C3")
+    store.add_turn("t3", sid, message="other plan", kind="message", claude_before=None)
+    store.update_turn("t3", card="docs/OTHER_PLAN.md#E2")
+    ms = client.get(f"/api/p/{pid}/board/{mid}").json()
+    cards = {c["id"]: c for c in ms["cards"]}
+    assert ms["doc"] == "docs/EXPORT_PLAN.md" and ms["turns_key"]
+    assert cards["C2"]["turns"] == 1 and cards["C2"]["evidence"] == "tests" and not cards["C2"].get("working")
+    assert cards["C3"]["turns"] == 1 and cards["C3"].get("working")  # t2 still running
+    assert cards["C1"]["turns"] == 0 and cards["C1"]["evidence"] == "none"  # done in the doc, nothing run
+    got = client.get(f"/api/p/{pid}/board/{mid}/card/C2").json()
+    assert [t["id"] for t in got["turns"]] == ["t1"]
+    assert [e["kind"] for e in got["turns"][0]["evidence"]] == ["tests", "tests", "base", "commit"]
+    assert got["turns"][0]["evidence"][3] == {"kind": "commit", "branch": "feat", "sha": "9f8e7d6", "subject": "E2 header"}
+    assert evidence([{"name": "Bash", "status": "running", "tests": {"passed": 1}}]) == []  # a guess so far
 
     # a path in another repository is not this project's plan
     other = make_project(tmp_path / "other", store=False)

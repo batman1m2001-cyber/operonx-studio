@@ -159,6 +159,21 @@ class TestUnchecked:
         assert "the way the plan says (its table, its decisions)" in why
 
 
+def test_a_plan_doc_the_board_cannot_read_is_sent_back(tmp_path):
+    """WORKSPACE_PLAN R7: its own phase said ``pending``; the board dropped the doc without a word."""
+    pytest.importorskip("operonx_project.plans")
+    doc = tmp_path / "docs" / "X_PLAN.md"
+    doc.parent.mkdir()
+    doc.write_text("---\ntitle: X\nstatus: in_progress\nphases:\n  - {id: A, title: a, status: pending}\n---\n")
+    wrote = ("Write", {"file_path": str(doc), "content": doc.read_text()})
+    why = stophook.reason(turn(prompt("go"), wrote))
+    assert f"The board cannot read {doc}" in why and "pending" in why
+    doc.write_text(doc.read_text().replace("pending", "open"))
+    assert stophook.reason(turn(prompt("go"), wrote)) is None
+    (tmp_path / "docs" / "NOTES_PLAN.md").write_text("# a plan with no status block is not the board's\n")
+    assert stophook.reason(turn(prompt("go"), ("Write", {"file_path": str(tmp_path / "docs/NOTES_PLAN.md")}))) is None
+
+
 PR74 = Path("/root/.claude/projects/-home-thanglq-mr-finance/06cd02b8-f31b-448d-93ad-5592b19ceb3e.jsonl")
 
 

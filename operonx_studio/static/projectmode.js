@@ -207,7 +207,7 @@ const ProjectMode = (() => {
       const row = button("pm-item pm-q pm-one", null, () => go("questions"), `${q.id} · ${q.text}\nAnswer it on the Questions page`);
       row.dataset.key = `q:${q.source}:${q.milestone || ""}:${q.id}`;
       tgt(row, `q:${q.id}`);
-      row.append(el("span", "pm-id", q.id), el("span", "pm-text", q.text || q.kind));
+      row.append(el("span", "pm-id", q.source === "assistant" ? "assistant" : q.id), el("span", "pm-text", q.text || q.kind));
       return row;
     });
   }
@@ -495,7 +495,7 @@ const ProjectMode = (() => {
     page.textContent = "";
     page.append(pageHead("Questions", d ? plural(d.needs_you.length, "waits", "wait") + " for you" : ""));
     if (!d) { page.append(failed ? missing() : el("p", "pm-quiet", "Reading…")); return; }
-    if (!d.needs_you.length) { page.append(paneNote("Nothing waits for you", "The engine's questions and the requirements' open questions show here.")); return; }
+    if (!d.needs_you.length) { page.append(paneNote("Nothing waits for you", "The engine's questions, the requirements' open questions and the assistant's show here.")); return; }
     // the engine's questions in full (options with their words, why it blocks), from each milestone's board
     const mids = [...new Set(d.needs_you.filter((q) => q.source === "engine").map((q) => q.milestone))];
     const full = {};
@@ -507,7 +507,8 @@ const ProjectMode = (() => {
     keepDrafts();
     page.textContent = "";
     page.append(pageHead("Questions", plural(d.needs_you.length, "waits", "wait") + " for you"));
-    for (const q of d.needs_you) page.append(q.source === "engine" ? engineQuestion(q, full[`${q.milestone}:${q.id}`]) : brdQuestion(q));
+    for (const q of d.needs_you) page.append(q.source === "engine" ? engineQuestion(q, full[`${q.milestone}:${q.id}`])
+      : q.source === "assistant" ? assistantQuestion(q) : brdQuestion(q));
   }
   function keepDrafts() { for (const ta of page.querySelectorAll("textarea[data-q]")) drafts[ta.dataset.q] = ta.value; }
   function wordsBox(key, placeholder) {
@@ -550,6 +551,18 @@ const ProjectMode = (() => {
     words.hidden = !drafts[key];
     opts.append(button("linkbtn needs-edit", "In my words", () => { words.hidden = false; ta.focus(); }));
     card.append(opts, words);
+    return card;
+  }
+  /* a turn that ended on a question to the owner (WORKSPACE_PLAN W1.5): answered in its conversation */
+  function assistantQuestion(q) {
+    const card = el("section", "pm-qcard");
+    card.dataset.key = `q:assistant:${q.id}`;
+    const head = el("div", "pm-qhead");
+    head.append(el("span", "pm-id", "assistant"), el("span", "pm-where", `${q.title || "a conversation"}${q.card ? ` · ${q.card}` : ""}`));
+    card.append(head, el("p", "pm-qtext", q.text));
+    const acts = el("div", "pm-acts");
+    acts.append(button("primary", "Answer in the conversation", () => window.oxAssistant && window.oxAssistant.open(q.session, true)));
+    card.append(acts);
     return card;
   }
   function brdQuestion(q) {

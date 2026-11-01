@@ -6,8 +6,8 @@ phases:
   - {id: T2, title: "\"I haven't checked\" in the last reply sends the turn back once: check it, or say why it can't be", status: done}
   - {id: T3, title: "on_base(command): any check run on the merge-base, not only failing tests", status: done}
   - {id: W0, title: "Audit: where plans, board, checklist, questions, steps, runs and git disagree, and why", status: done}
-  - {id: W1, title: "Unified project execution model: card ↔ run ↔ steps ↔ evidence; board follows the assistant", status: in_progress}
-  - {id: W2, title: "Terminal and Git: real sessions on the existing execution layer; git page linked to cards", status: open}
+  - {id: W1, title: "Unified project execution model: card ↔ run ↔ steps ↔ evidence; board follows the assistant", status: done}
+  - {id: W2, title: "Terminal and Git: real sessions on the existing execution layer; git page linked to cards", status: in_progress}
   - {id: W3, title: "Environments: execution providers (local, SSH), secrets never reach the model", status: open}
   - {id: W4, title: "Run, test, deploy: services, health, preview URL, staged deploy with approval for production", status: open}
 rows: []
@@ -106,6 +106,30 @@ Steps, from W0 (each closes a root cause, reuses what exists, no new store):
 Gates: a scratch repo where a plan is changed by `sed` in a worktree is in line on the board at the turn's
 end with no commit on the main checkout; a turn with `card` shows on that card with its test run; the
 studio suite; screenshots of the Board card and the overview.
+
+**Done (2026-11-01).** Each root cause, closed and tested:
+- **R1/R7** — at a turn's end every plan the board mirrors is compared with the checkout's and the
+  worktrees' copy (`stale_plans`) and synced, shell edits included; a doc the board cannot read sends the
+  turn back with the engine's reason (`test_a_plan_doc_the_board_cannot_read_is_sent_back`).
+- **R6** — a plan on a branch moves the store alone; the main checkout gets no commit
+  (`test_a_plan_doc_is_put_on_the_board_from_the_checkout_or_its_worktree`).
+- **R3/R2/R4** — `steps` takes `card`; the turn row keeps it; the Board lights the card while its turn runs,
+  lists its turns with their test runs, `failing_on_base`/`on_base` results and commits, and a phase marked
+  done with no green run reads "no evidence", apart from "tests ✓".
+- **R5** — the engine's questions, `open_questions.md` and a turn that ended on a question (a `waiting`
+  step, or a last line ending in "?") are one list: the waiting count, the Board ("Also waiting on you"),
+  the card ("asks you") and Project mode's Questions page
+  (`test_one_list_of_what_waits_the_engine_the_brd_and_the_assistant`,
+  `test_project_mode_lists_the_assistants_questions_with_the_engines`).
+- A milestone mirrored from a plan has no Resume/Cancel: the engine refuses them, the doc is what changes.
+- Engine: a mirrored plan was listed twice on the Plans page; now once, as its milestone with the doc's
+  path (Operon #250; engine suite 288 passed).
+
+Studio suite: 659 passed, 5 skipped. Scratch repo, dark theme:
+
+![board](img/workspace/w1-board.png)
+![card](img/workspace/w1-card.png)
+![questions](img/workspace/w1-questions.png)
 
 The brief's goals for W1:
 - one hierarchy, adapted to what exists: project → plan → card → run → steps, logs, tests, git, evidence;

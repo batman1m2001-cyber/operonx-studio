@@ -231,6 +231,29 @@ def _looks_like_title(text: str) -> bool:
     return not (low.startswith(("i ", "i'", "sorry", "here", "title")) or "can't" in low or "cannot" in low)
 
 
+# "[feat/x 1a2b3c4] subject", "[main (root-commit) 1a2b3c4] subject": what git commit prints first
+_COMMIT = re.compile(r"^\[([^\]\s]+)(?: \([^)]*\))? ([0-9a-f]{7,40})\] (.+)$", re.M)
+
+
+def evidence(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """What a turn's tool calls left that says something was checked (WORKSPACE_PLAN W1.4): its test runs (the
+    counts testreport read), its runs on the base branch, its commits. Words in the chat are not evidence."""
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        name, output = str(it.get("name") or ""), str(it.get("output") or "")
+        if isinstance(it.get("tests"), dict) and it.get("status") != "running":
+            t = it["tests"]
+            out.append({"kind": "tests", "passed": int(t.get("passed") or 0), "skipped": int(t.get("skipped") or 0),
+                        "failed": int(t.get("failed") or 0) + int(t.get("errors") or 0),
+                        "command": str((it.get("input") or {}).get("command") or "")[:200]})
+        elif name.endswith(("__failing_on_base", "__on_base")) and it.get("status") == "ok":
+            out.append({"kind": "base", "text": output.strip().splitlines()[0][:240] if output.strip() else ""})
+        elif name == "Bash" and "commit" in str((it.get("input") or {}).get("command") or ""):
+            out += [{"kind": "commit", "branch": m.group(1), "sha": m.group(2), "subject": m.group(3)[:160]}
+                    for m in _COMMIT.finditer(output)]
+    return out
+
+
 # ── the store ──────────────────────────────────────────────────────────
 
 _SCHEMA = """
@@ -265,7 +288,8 @@ CREATE TABLE IF NOT EXISTS turns (
     usage         TEXT NOT NULL DEFAULT '{}',
     cost          REAL,
     hidden        INTEGER NOT NULL DEFAULT 0,
-    attachments   TEXT NOT NULL DEFAULT '[]'
+    attachments   TEXT NOT NULL DEFAULT '[]',
+    card          TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS turns_by_session ON turns (session, started);
 CREATE TABLE IF NOT EXISTS meta (
@@ -298,7 +322,7 @@ CREATE TABLE IF NOT EXISTS items (
 
 _SESSION_FIELDS = ("title", "title_source", "updated", "archived", "model", "claude_session", "usage",
                    "running_turn", "preview", "effort", "claude_home")
-_TURN_FIELDS = ("claude_after", "state", "ended", "usage", "cost", "hidden")
+_TURN_FIELDS = ("claude_after", "state", "ended", "usage", "cost", "hidden", "card")
 
 
 class ChatStore:
@@ -319,6 +343,8 @@ class ChatStore:
             cols = {r[1] for r in self._db.execute("PRAGMA table_info(turns)")}
             if "attachments" not in cols:
                 self._db.execute("ALTER TABLE turns ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'")
+            if "card" not in cols:  # the board card a turn works (WORKSPACE_PLAN W1.3)
+                self._db.execute("ALTER TABLE turns ADD COLUMN card TEXT NOT NULL DEFAULT ''")
             cols = {r[1] for r in self._db.execute("PRAGMA table_info(sessions)")}
             if "effort" not in cols:
                 self._db.execute("ALTER TABLE sessions ADD COLUMN effort TEXT")
@@ -483,6 +509,60 @@ class ChatStore:
         return [dict(r, usage=json.loads(r["usage"] or "{}"), attachments=json.loads(r["attachments"] or "[]"))
                 for r in rows]
 
+    def card_turns(self, scope: str, limit: int = 300) -> List[Dict[str, Any]]:
+        """WORKSPACE_PLAN W1.3–W1.4: the scope's turns that named a board card (a ``steps`` call's ``card``),
+        newest first, each with the evidence it left (:func:`evidence`)."""
+        rows = self._q("SELECT t.id, t.session, t.card, t.state, t.started, t.ended, t.cost, t.message FROM turns t"
+                       " JOIN sessions s ON s.id = t.session WHERE s.scope = ? AND t.card != '' AND t.hidden = 0"
+                       " ORDER BY t.started DESC LIMIT ?", (scope, limit))
+        out = []
+        for r in rows:
+            items = self._q("SELECT payload FROM items WHERE session = ? AND turn = ? AND kind = 'tool' AND hidden = 0"
+                            " ORDER BY seq", (r["session"], r["id"]))
+            out.append({**dict(r), "message": str(r["message"])[:200],
+                        "evidence": evidence([json.loads(i["payload"]) for i in items]),
+                        "asks": self._ask(r["session"], r["id"]) if r["state"] == "done" else ""})
+        return out
+
+    def asks(self, scope: str, days: float = 7.0) -> List[Dict[str, Any]]:
+        """WORKSPACE_PLAN W1.5: the scope's sessions whose last turn, ended in the last *days*, waits on the owner
+        (:meth:`_ask`), as entries of the studio's waiting list (``source: assistant``)."""
+        rows = self._q("SELECT t.id, t.session, t.card, t.ended, s.title FROM turns t JOIN sessions s"
+                       " ON s.id = t.session WHERE s.scope = ? AND s.archived = 0 AND t.hidden = 0"
+                       " AND t.state = 'done' AND t.ended > ? AND NOT EXISTS (SELECT 1 FROM turns u WHERE"
+                       " u.session = t.session AND u.hidden = 0 AND u.started > t.started) ORDER BY t.ended",
+                       (scope, time.time() - days * 86400))
+        out = []
+        for r in rows:
+            ask = self._ask(r["session"], r["id"])
+            if ask:
+                out.append({"id": f"turn:{r['id']}", "qid": "", "milestone": "", "kind": "assistant",
+                            "card": r["card"], "problem": ask, "created": r["ended"], "session": r["session"],
+                            "title": r["title"], "source": "assistant"})  # fmt: skip
+        return out
+
+    def _ask(self, sid: str, tid: str) -> str:
+        """What turn *tid* left waiting on the owner, when it is its session's last: its last ``steps`` list's
+        waiting step, or its last reply's closing question; ``""`` when nothing waits."""
+        later = self._q("SELECT 1 FROM turns WHERE session = ? AND hidden = 0 AND started >"
+                        " (SELECT started FROM turns WHERE id = ?) LIMIT 1", (sid, tid))
+        if later:
+            return ""
+        rows = self._q("SELECT kind, payload FROM items WHERE session = ? AND turn = ? AND hidden = 0"
+                       " AND kind IN ('text', 'tool') ORDER BY seq DESC", (sid, tid))
+        text, plan = "", None
+        for r in rows:
+            got = json.loads(r["payload"])
+            if r["kind"] == "text" and not text:
+                text = str(got.get("text") or "").strip()
+            elif r["kind"] == "tool" and plan is None and got.get("plan"):
+                plan = got["plan"]
+        step = next((s for s in (plan or {}).get("steps") or [] if s.get("state") == "waiting"), None)
+        if step:
+            return str(step.get("detail") or step.get("title") or "")[:300]
+        last = text.splitlines()[-1].strip(" *_>") if text else ""
+        return last[:300] if last.endswith("?") else ""
+
     def hide_from(self, sid: str, tid: str) -> None:
         """A regenerate or an edit: turn *tid* and every later turn leave
         the transcript (kept, hidden — never silently destroyed)."""
@@ -580,6 +660,7 @@ class Turn:
     account: str = "machine"              # the sign-in this turn runs under (chat.account_key)
     reseed: bool = False                  # a fresh Claude session, seeded with a summary
     cwd: Optional[str] = None
+    card: str = ""                        # the board card this turn works, from its steps call (WORKSPACE_PLAN W1.3)
     kill_timer: Optional[asyncio.TimerHandle] = None
     heard: float = field(default_factory=time.monotonic)   # the CLI's last line
     background: List[str] = field(default_factory=list)   # the background tasks it waits on (descriptions)
@@ -709,6 +790,10 @@ class Relay:
             step.update(stamp)
             if "started" in stamp and "ended" in stamp:
                 step["ms"] = round((stamp["ended"] - stamp["started"]) * 1000)
+        card = str(inputs.get("card") or "").strip()
+        if card and card != turn.card:
+            turn.card = card
+            self.store.update_turn(turn.id, card=card)
         line = step_line(steps)
         turn.step = line[0].upper() + line[1:].replace(": ", " · ", 1) if line.startswith("step ") else ""
         return {"title": str(inputs.get("title") or ""), "steps": steps}

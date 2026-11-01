@@ -123,7 +123,7 @@ const BoardView = (() => {
       if (mine !== token) return;
     }
     draw(ms, data, checklist, card, list);
-    last = {cursor: data.cursor, questions: data.questions.map((q) => q.id).join()};
+    last = {cursor: data.cursor, questions: data.questions.map((q) => q.id).join(), turns: data.turns_key || ""};
     schedule();
   }
 
@@ -139,7 +139,8 @@ const BoardView = (() => {
     if (force || !last) { show(); return; }
     try {
       const d = await api(`${base()}/${enc(v.mid)}`);
-      if (d.cursor !== last.cursor || d.questions.map((q) => q.id).join() !== last.questions) { show(); return; }
+      if (d.cursor !== last.cursor || d.questions.map((q) => q.id).join() !== last.questions
+          || (d.turns_key || "") !== last.turns) { show(); return; }
     } catch { /* the next tick tries again */ }
     schedule();
   }
@@ -312,6 +313,8 @@ const BoardView = (() => {
     if (asking) box.append(askBox());
     box.append(summary(m, data));
     if (data.questions.length) box.append(waiting(data.questions));
+    const more = elsewhere();
+    if (more) box.append(more);
     if (v.view === "checklist" || v.view === "project") box.append(checklistView(checklist, v.view === "project"));
     else if (v.view === "graph") box.append(graphView(data));
     else box.append(columnsView(data));
@@ -343,6 +346,8 @@ const BoardView = (() => {
       b.onclick = fn;
       wrap.append(b);
     };
+    // a plan worked in chat (its doc on the board): the engine refuses to drive it, so no Resume or Cancel here
+    if (data && data.doc) return wrap;
     const live = ["discovering", "requirements", "planning", "running", "verifying", "waiting_human", "awaiting_approval"];
     if (m.state === "paused") btn("Resume", "primary", () => act({op: "unpause"}));
     else if (live.includes(m.state)) btn("Pause", null, () => act({op: "pause"}), "Running cards end their round; nothing new starts");
@@ -475,6 +480,31 @@ const BoardView = (() => {
     return sec;
   }
 
+  /* the rest of what waits on the owner in this project (WORKSPACE_PLAN W1.5): the BRD's open questions and
+   * the assistant's turns that ended on a question — from the same list as the title count */
+  function elsewhere() {
+    const board = typeof Waiting !== "undefined" && (Waiting.data.boards || []).find((b) => b.pid === PID);
+    const rest = ((board && board.waiting) || []).filter((w) => w.source && w.source !== "board");
+    if (!rest.length) return null;
+    const sec = el("section", "bdwait bdwaitmore");
+    sec.append(el("div", "bdwaithead", `Also waiting on you (${rest.length})`));
+    const ul = el("ul", "bdasks");
+    for (const w of rest.slice(0, 12)) {
+      const li = el("li");
+      li.append(el("span", "chip cwarn", w.source === "brd" ? w.qid : "assistant"));
+      if (w.source === "assistant") {
+        const open = el("button", "linkbtn", w.problem);
+        open.type = "button";
+        open.title = `Open “${w.title || "the conversation"}”${w.card ? ` (card ${w.card})` : ""}`;
+        open.onclick = () => window.oxAssistant && window.oxAssistant.open(w.session, true);
+        li.append(open);
+      } else li.append(el("span", null, w.problem), el("span", "note", " · docs/brd/requirements/open_questions.md"));
+      ul.append(li);
+    }
+    sec.append(ul);
+    return sec;
+  }
+
   function question(q) {
     const card = el("div", "bdq" + (q.flagged ? " flagged" : ""));
     const top = el("div", "bdqtop");
@@ -558,14 +588,18 @@ const BoardView = (() => {
   }
 
   function tile(c) {
-    const t = el("button", `bdcard st-${c.state}${c.id === v.card ? " sel" : ""}${c.asks ? " asks" : ""}`);
+    const t = el("button", `bdcard st-${c.state}${c.id === v.card ? " sel" : ""}${c.asks ? " asks" : ""}${c.working ? " lit" : ""}`);
     t.type = "button";
     t.dataset.oxTarget = `card:${c.id}`;
     const top = el("div", "bdcardtop");
     top.append(el("b", "mono", c.id));
     if (c.kind === "init") top.append(el("span", "chip", "init"));
     if (c.risk === "high") top.append(el("span", "chip cwarn", "risky"));
-    if (c.asks) top.append(el("span", "chip cwarn", "asks you"));
+    if (c.asks) {
+      const ask = el("span", "chip cwarn", "asks you");
+      if (c.question) ask.title = `The assistant's last turn on it asks: ${c.question}`;
+      top.append(ask);
+    }
     if (c.red && c.red.red) {
       const r = el("span", "chip cok", "red first");
       r.title = "Strict TDD: its acceptance tests failed before the code" + (c.red.rewritten ? " (written again: the first set passed already)" : "");
@@ -579,6 +613,14 @@ const BoardView = (() => {
       chip.title = `Taken by ${c.taken}${c.waiting_for_submit ? ": the engine waits for a submit" : ""}`;
       top.append(chip);
     }
+    // WORKSPACE_PLAN W1.3–W1.4: the assistant's turn on it, and what stands behind its state
+    if (c.working) top.append(el("span", "chip crun", "assistant on it"));
+    else if (c.evidence) {
+      const ev = {tests: ["chip cok", "tests ✓", "Its last test run was green"],
+                  red: ["chip cbad", "last run red", "Its last test run had failures"],
+                  none: ["chip cwarn", "no evidence", "Marked done, with no test run behind it on the board"]}[c.evidence];
+      if (ev) { const chip = el("span", ev[0], ev[1]); chip.title = ev[2]; top.append(chip); }
+    }
     t.append(top, el("div", "bdcardtitle", c.title));
     if (c.activity && c.activity.text) {
       const live = el("div", "bdlive", c.activity.text);
@@ -590,6 +632,7 @@ const BoardView = (() => {
     if (c.state === "pending" && c.deps.length) meta.push(`needs ${c.deps.join(", ")}`);
     if (c.round) meta.push(`round ${c.round}`);
     if (c.reopens) meta.push(`re-opened ${c.reopens}×`);
+    if (c.turns) meta.push(`${c.turns} turn${c.turns > 1 ? "s" : ""}`);
     if (c.cost_usd) meta.push(money(c.cost_usd));
     if (meta.length) t.append(el("div", "bdcardmeta", meta.join(" · ")));
     if (["failed", "blocked", "cancelled"].includes(c.state) && c.reason) t.append(el("div", "bdcardwhy", c.reason.slice(0, 140)));
@@ -643,6 +686,7 @@ const BoardView = (() => {
       for (const k of c.criteria) ul.append(el("li", null, typeof k === "string" ? k : (k.text || JSON.stringify(k))));
       p.append(ul);
     }
+    if (got.turns && got.turns.length) p.append(turnsView(got.turns));
     if (got.events.length) {
       p.append(el("div", "stitle", "What happened"));
       const ol = el("ol", "bdevents");
@@ -655,6 +699,34 @@ const BoardView = (() => {
       p.append(ol);
     }
     return p;
+  }
+
+  /* the assistant's turns on a card, each with its evidence: test runs, base checks, commits (W1.3–W1.4) */
+  function turnsView(turns) {
+    const box = el("div");
+    box.append(el("div", "stitle", "Turns on this card"));
+    const ol = el("ol", "bdturns");
+    for (const t of turns.slice(0, 12)) {
+      const li = el("li");
+      const open = el("button", "linkbtn", (t.message || "a turn").slice(0, 90));
+      open.type = "button";
+      open.title = "Open this conversation";
+      open.onclick = () => window.oxAssistant && window.oxAssistant.open(t.session, true);
+      li.append(el("span", "note", fmtWhen(t.started * 1000)), el("span", `chip${t.state === "running" ? " crun" : ""}`, t.state), open);
+      if (t.asks) li.append(el("div", "bdqtext", `Asks you: ${t.asks}`));
+      const ul = el("ul", "bdevidence");
+      for (const e of t.evidence || []) {
+        const failed = e.kind === "tests" && e.failed;
+        ul.append(el("li", failed ? "bad" : e.kind === "tests" ? "good" : null,
+          e.kind === "tests" ? `tests: ${e.passed} passed${e.failed ? `, ${e.failed} failed` : ""}${e.skipped ? `, ${e.skipped} skipped` : ""}`
+          : e.kind === "base" ? `on base: ${e.text}` : `commit ${e.sha} ${e.subject}`));
+      }
+      if (!(t.evidence || []).length) ul.append(el("li", "note", "no test run, base check or commit"));
+      li.append(ul);
+      ol.append(li);
+    }
+    box.append(ol);
+    return box;
   }
 
   function eventText(e) {

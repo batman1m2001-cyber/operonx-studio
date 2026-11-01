@@ -1,4 +1,4 @@
-"""The Stop hook that holds a turn to what it says it did (docs/TURN_HONESTY_PLAN.md S1–S3, WORKSPACE_PLAN T1–T2).
+"""The Stop hook that holds a turn to what it says it did (docs/TURN_HONESTY_PLAN.md S1–S3, WORKSPACE_PLAN T1–T2, R7).
 
 On mr-finance PR #74 the assistant marked FF5 and the plan done at 24 flows against "< 20", called two failing
 tests "pre-existing" without running them anywhere else, and ended with its own steps still open. Each was one
@@ -9,6 +9,7 @@ transcript and, once, sends the model back when the turn:
     S2  ended on failing tests, never checked them   run failing_on_base: fails on base too, or new
     S3  left steps of its own pending or active      finish them, skip them with a reason, or say what is left
     T2  ends saying it has not checked something     check it now, or say why it cannot be checked
+    R7  edited a plan doc the board cannot read      fix its status block (WORKSPACE_PLAN W1.1)
 
     python -I stophook.py      stdin: the hook's JSON; stdout: {"decision": "block", "reason": …}, or nothing
 
@@ -181,6 +182,30 @@ def unchecked(entries: List[Dict[str, Any]]) -> Optional[str]:
     return " ".join(text[starts[-1] if starts else 0:end.start() if end else len(text)].split()).strip("*- ")
 
 
+def plans_unreadable(evs: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]) -> Dict[str, str]:
+    """R7: {plan doc this turn edited: why the board cannot read it}, for the docs with a status block (the ones
+    the board mirrors). WORKSPACE_PLAN's own ``pending`` phase was dropped from the board without a word."""
+    try:
+        from operonx_project import plans
+    except ImportError:
+        return {}
+    paths = {str((b.get("input") or {}).get("file_path") or "") for kind, b, _ in evs
+             if kind == "call" and b.get("name") in EDITS}  # fmt: skip
+    out = {}
+    for path in sorted(p for p in paths if _PLAN_FILE.search(p)):
+        try:
+            text = open(path, encoding="utf-8").read()
+        except OSError:
+            continue
+        try:
+            data = plans.front_matter(text)
+            if data is not None and "status" in data:
+                plans.parse(path, data, text)
+        except plans.PlanError as exc:
+            out[path] = str(exc)
+    return out
+
+
 def reason(lines: List[str]) -> Optional[str]:
     entries = this_turn(lines)
     evs = list(events(entries))
@@ -201,6 +226,11 @@ def reason(lines: List[str]) -> Optional[str]:
         out.append(f"Your steps card still has {len(left)} step(s) pending or active ({'; '.join(left[:4])}). "
                    "Finish them, mark them skipped with the reason, or post the card with what is left as "
                    "waiting or blocked.")
+    bad = plans_unreadable(evs)
+    if bad:
+        out.append("The board cannot read " + "; ".join(f"{p} ({why})" for p, why in bad.items()) + ". Fix its "
+                   "status block (plan status: plan, in_progress, done or parked; a phase's: open, in_progress, "
+                   "done or skipped), so the board shows the plan as it stands.")
     said = unchecked(entries)
     if said:
         out.append(f"You wrote \"{said}\". Check it now (on_base runs a command on the base branch), or say why "
