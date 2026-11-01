@@ -189,8 +189,12 @@ const oxTools = (() => {
     const fs = (changes && changes.files) || [];
     const files = {modified: fs.filter((f) => !f.new && !f.deleted).length, created: fs.filter((f) => f.new).length,
       deleted: fs.filter((f) => f.deleted).length};
-    const tests = new Map();
-    for (const i of items) if (i.tests) tests.set(i.tests.runner, i.tests);
+    // per runner the widest run, the later on a tie: a one-test rerun after the suite says nothing about the suite
+    const tests = new Map(), size = (t) => t.passed + t.failed + (t.errors || 0) + (t.skipped || 0);
+    for (const i of items) {
+      const was = i.tests && tests.get(i.tests.runner);
+      if (i.tests && (!was || size(i.tests) >= size(was))) tests.set(i.tests.runner, i.tests);
+    }
     const plan = items.filter((i) => i.plan).pop();
     const steps = plan && plan.plan.steps.length
       ? {done: plan.plan.steps.filter((s) => s.state === "done").length, total: plan.plan.steps.filter((s) => s.state !== "skipped").length} : null;

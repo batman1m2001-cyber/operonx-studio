@@ -88,7 +88,7 @@ test("a failed call is recovered when a later call of its class worked", () => {
   assert.deepEqual([...sev], [[1, "recovered"], [2, "failed"], [3, "warning"]]);
 });
 
-test("the outcome: files, last run per runner, steps, failures by class", () => {
+test("the outcome: files, widest run per runner, steps, failures by class", () => {
   const items = [
     {seq: 1, kind: "tool", plan: {steps: [{title: "a", state: "done"}, {title: "b", state: "active"}]}},
     {seq: 2, kind: "tool", ...bash("pytest"), status: "error", output: "Exit code 1",
@@ -105,4 +105,12 @@ test("the outcome: files, last run per runner, steps, failures by class", () => 
   assert.deepEqual(o.byClass, {test: 1, run: 1});
   assert.equal(o.state, "failed");
   assert.equal(T.outcome([{seq: 9, kind: "error", text: "x"}], {}).state, "fatal");
+});
+
+test("the outcome keeps the suite, not the one-test rerun after it", () => {
+  const items = [
+    {seq: 1, kind: "tool", ...bash("pytest"), status: "error", tests: {runner: "pytest", passed: 1216, failed: 1, skipped: 2}},
+    {seq: 2, kind: "tool", ...bash("pytest t.py::a"), status: "error", tests: {runner: "pytest", passed: 0, failed: 1, skipped: 0}},
+  ];
+  assert.equal(T.outcome(items, {}).tests[0].passed, 1216);
 });

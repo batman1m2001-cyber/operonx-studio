@@ -12,7 +12,8 @@ Lines that start with \\x1e go to the file only, never to the CLI: the shell's p
 exit status when it ends, and, for a plain chain like `ruff check . && pytest -q`, the start of each part (D3).
 
 Bash only. Anything else, a command that starts a job of its own in the background (`server &`: it would keep the
-copy open), or any doubt, and the call runs exactly as written.
+copy open), or any doubt, and the call runs exactly as written. Two shapes are refused, with the reason the model
+reads: a test, build or install left running by `&`/nohup, and a wait by `sleep` (knowledge.md: Running commands).
 """
 
 from __future__ import annotations
@@ -185,11 +186,48 @@ def stages(command: str) -> Tuple[str, List[str]]:
     return "".join(out), [t for _, _, t in keep]
 
 
+# a long run hidden from the page: a test, build or install left running by `&`/nohup, or a wait that sleeps
+_RUNNER = re.compile(r"\b(pytest|py\.test|unittest|tox|nox|jest|vitest|mocha|playwright\s+test|go\s+(test|build)"
+                     r"|cargo\s+(test|build)|(npm|pnpm|yarn|bun)\s+(test|ci|install|i|run\s+(test|build|e2e)\w*)"
+                     r"|uv\s+(sync|pip\s+install)|pip3?\s+install|make)\b")
+_LOOP = re.compile(r"\b(for|while|until)\b")
+_SLEEP = re.compile(r"\bsleep\s+(\d+(?:\.\d+)?)")
+DETACHED = ("Refused by the studio: this starts a long run with `&`, nohup or setsid, so the page cannot show it. "
+            "Run the same command with run_in_background instead (no `&`, no redirect to a log): the page shows its "
+            "progress live, and the turn wakes you when it ends.")
+POLLING = ("Refused by the studio: never wait with sleep, or poll a log or pgrep in a loop. A long run goes in "
+           "run_in_background: the page shows its progress live, and the turn wakes you when it ends, so end your "
+           "reply or do other work until then.")
+
+
+def _ran(cmd: str) -> str:
+    """The text the shell runs: quoted text blanked (a commit message that says sleep waits for nothing), except
+    what `bash -c` / `sh -c` is given, which waits just as long."""
+    return re.sub(r"(\b(?:ba|z|da)?sh\s+-c\s+)?('[^']*'|\"(?:[^\"\\]|\\.)*\")",
+                  lambda m: m.group(0) if m.group(1) else '""', cmd)
+
+
+def refusal(cmd: str, background: bool) -> Optional[str]:
+    """Why a call is refused (knowledge.md: Running commands), or None. The model read the rule and ran an 18-minute
+    suite as `(pytest > log &)` plus `sleep 20` loops anyway: the page saw neither, so the hook holds the line."""
+    run = _ran(cmd)
+    if not background and _BACKGROUND.search(run) and _RUNNER.search(run):
+        return DETACHED
+    naps = [float(s) for s in _SLEEP.findall(run)]
+    if naps and (max(naps) >= 30 or (max(naps) >= 5 and _LOOP.search(run))):
+        return POLLING
+    return None
+
+
 def rewrite(event: dict, live_dir: str) -> dict | None:
     if event.get("tool_name") != "Bash":
         return None
     inp = event.get("tool_input") or {}
     cmd, call = inp.get("command"), str(event.get("tool_use_id") or "")
+    why = refusal(cmd, bool(inp.get("run_in_background"))) if isinstance(cmd, str) else None
+    if why:
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": why}}
     if not isinstance(cmd, str) or not cmd.strip() or _BACKGROUND.search(_unquoted(cmd)):
         return None
     if not re.fullmatch(r"[\w-]{1,128}", call) or os.path.basename(os.environ.get("SHELL", "")) != "bash":

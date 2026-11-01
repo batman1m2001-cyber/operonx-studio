@@ -140,3 +140,34 @@ def test_a_job_left_in_the_background_by_redirect_does_not_hold_the_call(tmp_pat
     wrapped = runhook.rewrite(ev, str(tmp_path))["hookSpecificOutput"]["updatedInput"]["command"]
     run = subprocess.run(["bash", "-c", wrapped], capture_output=True, text=True, timeout=10)
     assert run.stdout.strip() == "back"
+
+
+SEEN = [  # what an mr-finance turn ran, 2026-11-01: an 18-minute suite the page never saw
+    "cd w && (uv run pytest -q -p no:cacheprovider tests/ui > out/ui.log 2>&1 &); sleep 1; echo started",
+    "cd w && for i in $(seq 1 28); do grep -qE \"[0-9]+ (passed|failed)\" out/ui.log && break; sleep 20; done",
+    "until grep -q \"^done$\" /tmp/ff_full.log; do sleep 20; done; tail -c 600 /tmp/ff_full.log",
+    "cd w && timeout 590 bash -c 'until ! pgrep -f \"pytest -q\" >/dev/null; do sleep 20; done'; tail out/full.log",
+    "sleep 580; tail -c 200 /tmp/ff_full.log",
+    "nohup npm run build > b.log 2>&1 &",
+    "bash -c 'pytest -q > log 2>&1 &'",
+]
+LET = [
+    "pytest -q tests",
+    "for i in $(seq 1 40); do curl -s localhost:8 && break; sleep 0.5; done",   # a server coming up: short
+    "server & sleep 1; curl x",
+    "sleep 5; cat out.txt",
+    "git commit -m 'pytest & ruff in a loop, sleep 60'",
+    'git commit -m "fix pytest & ruff" && echo "sleep 99"',
+]
+
+
+def test_a_hidden_long_run_or_a_sleeping_wait_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/bash")
+    for cmd in SEEN:
+        out = runhook.rewrite({"tool_name": "Bash", "tool_use_id": "t", "tool_input": {"command": cmd}}, str(tmp_path))
+        hook = out["hookSpecificOutput"]
+        assert hook["permissionDecision"] == "deny" and "run_in_background" in hook["permissionDecisionReason"], cmd
+    for cmd in LET:
+        assert runhook.refusal(cmd, False) is None, cmd
+    # in run_in_background a test run is what the rule asks for
+    assert runhook.refusal("pytest -q > log 2>&1 &", True) is None
