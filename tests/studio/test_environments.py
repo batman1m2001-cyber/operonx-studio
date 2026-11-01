@@ -185,3 +185,122 @@ def test_the_assistant_tools_are_refused_the_secrets_folder(event, tmp_path):
     out = runhook.rewrite(event, str(tmp_path))
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert runhook.rewrite({"tool_name": "Read", "tool_input": {"file_path": "/x/a.py"}}, str(tmp_path)) is None
+
+
+SERVE_MAIN = '''
+import os
+
+if os.environ.get("BREAK"):  # set on the host only (the environment's variables)
+    raise SystemExit("boom: BREAK is set")
+
+from operonx.core import END, START, graph, op
+from operonx.app.serve import egress, ingress
+
+
+@op(bound="sync")
+def times(item=None) -> dict:
+    return {"out": {"n": int(item["n"]) * FACTOR}}
+
+
+@graph
+def flow():
+    src = ingress()
+    d = times(item=src["item"])
+    out = egress(item=d["out"])
+    START >> src >> d >> out >> END
+'''
+
+
+def _call(port: int, n: int) -> int:
+    import json
+    import urllib.request
+
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/times", data=json.dumps({"n": n}).encode(),
+                                 headers={"content-type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as res:
+        return json.loads(res.read())["n"]
+
+
+def _wait(client, url: str, did: str) -> dict:
+    end = time.time() + 180
+    while time.time() < end:
+        run = next(r for r in client.get(url).json()["deploys"] if r["id"] == did)
+        if run["state"] not in ("queued", "running"):
+            return run
+        time.sleep(0.3)
+    raise AssertionError(f"deploy {did} did not end")
+
+
+def test_a_deploy_runs_its_stages_on_the_host_waits_on_production_and_rolls_back(client, sshd, tmp_path):
+    import sys
+
+    remote, root, port = tmp_path / "remote.git", tmp_path / "svc", _free_port()
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+    root.mkdir()
+    (root / "main.py").write_text("FACTOR = 2\n" + SERVE_MAIN, encoding="utf-8")
+    (root / "operonx.toml").write_text(f'[project]\nname = "svc"\n\n[[serve]]\nname = "times"\nkind = "http"\n'
+                                       f'path = "/times"\nhost = "127.0.0.1"\nport = {port}\ngraph = "main:flow"\n',
+                                       encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "double")
+    _git(root, "remote", "add", "origin", str(remote))
+    _git(root, "push", "-q", "-u", "origin", "main")
+    pid = client.post("/api/open", json={"path": str(root)}).json()["id"]
+    url, eid = f"/api/p/{pid}/environments", sshd["id"]
+    client.post(url, json={"op": "save", "id": eid, "host": "127.0.0.1", "port": sshd["port"], "user": getpass.getuser(),
+                           "workdir": str(tmp_path / "deploy"), "python": sys.executable,
+                           "test": "grep -q FACTOR main.py"})
+    client.post(url, json={"op": "scan", "env": eid})
+    client.post(url, json={"op": "trust", "env": eid})
+    client.post(url, json={"op": "key", "env": eid, "key": sshd["key"]})
+    dep, svc = f"/api/p/{pid}/deploys", f"/api/p/{pid}/env-services"
+    try:
+        # git → build → test → run → validate → deploy, each with its time and what it said
+        did = client.post(dep, json={"env": eid, "ref": "main", "card": "m1/C1"}).json()["deploy"]["id"]
+        run = _wait(client, dep, did)
+        states = {s["name"]: s["state"] for s in run["stages"]}
+        assert run["state"] == "ok", run["stages"]
+        assert states == {"git": "ok", "build": "skipped", "test": "ok", "run": "ok", "validate": "ok", "deploy": "ok"}
+        assert _call(port, 21) == 42
+        first = run["sha"]
+        listed = client.post(svc, json={"env": eid}).json()
+        (lst,) = listed["listeners"]
+        assert lst["running"] and lst["health"] == 200 and listed["release"] == first and lst["url"] == ""
+        assert "times" in client.post(svc, json={"env": eid, "op": "log", "key": lst["key"]}).json()["said"]
+        # a second release, then production: the assistant asks, the owner approves
+        (root / "main.py").write_text("FACTOR = 3\n" + SERVE_MAIN, encoding="utf-8")
+        _git(root, "commit", "-qam", "triple")
+        _git(root, "push", "-q")
+        client.post(url, json={"op": "save", "id": eid, "production": True})
+        asked = client.post(dep, json={"env": eid, "ref": "main"}, headers=AS_ASSISTANT).json()
+        assert asked["waiting"] and asked["deploy"]["state"] == "waiting"
+        assert client.post(dep, json={"op": "approve", "id": asked["deploy"]["id"]}, headers=AS_ASSISTANT).status_code == 400
+        assert client.post(svc, json={"env": eid, "op": "stop", "key": lst["key"]}, headers=AS_ASSISTANT).status_code == 400
+        client.post(dep, json={"op": "approve", "id": asked["deploy"]["id"]})
+        run = _wait(client, dep, asked["deploy"]["id"])
+        assert run["state"] == "ok" and run["approved_by"] == "owner" and run["sha"] != first
+        assert _call(port, 21) == 63
+        # rollback: the last good release before this one, its tests not run again
+        assert "needs_confirm" in client.post(dep, json={"env": eid, "op": "rollback"}).json()
+        did = client.post(dep, json={"env": eid, "op": "rollback", "confirm": True}).json()["deploy"]["id"]
+        run = _wait(client, dep, did)
+        assert run["state"] == "ok" and run["sha"] == first and run["stages"][2]["state"] == "skipped"
+        assert _call(port, 21) == 42
+        # history, newest first; a broken release fails at validate and says why
+        client.post(url, json={"op": "save", "id": eid, "production": False})
+        client.post(url, json={"op": "vars", "env": eid, "vars": {"BREAK": "1"}})
+        run = _wait(client, dep, client.post(dep, json={"env": eid, "ref": "main"}).json()["deploy"]["id"])
+        assert run["state"] == "failed"
+        failed = next(s for s in run["stages"] if s["state"] == "failed")
+        assert failed["name"] == "validate" and "boom" in failed["said"] and run["stages"][-1]["state"] == "not run"
+        kinds = [r["kind"] for r in client.get(dep, params={"env": eid}).json()["deploys"]]
+        assert kinds == ["deploy", "rollback", "deploy", "deploy"]
+        # it left the host on the broken code: a rollback goes back to the release that was good
+        client.post(url, json={"op": "vars", "env": eid, "vars": {"BREAK": None}})
+        run = _wait(client, dep, client.post(dep, json={"env": eid, "op": "rollback"}).json()["deploy"]["id"])
+        assert run["state"] == "ok" and run["sha"] == first and _call(port, 21) == 42
+    finally:
+        client.post(url, json={"op": "save", "id": eid, "production": False})
+        client.post(svc, json={"env": eid, "op": "stop", "key": f"127.0.0.1:{port}"})
+        shutil.rmtree(Path.home() / ".local" / "state" / "operonx-svc" / eid, ignore_errors=True)

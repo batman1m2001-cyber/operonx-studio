@@ -6256,3 +6256,37 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
 .ev-outh { padding: 6px 12px; font-size: 12px; color: var(--text-3); border-bottom: 1px solid var(--border-soft); font-family: var(--mono); }
 .ev-outh.err { color: var(--err); }
 .ev-pre { margin: 0; padding: 8px 12px; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; }
+
+/* Environments › services and deploys (WORKSPACE_PLAN W4) */
+.ev-rt { display: flex; flex-direction: column; gap: 10px; }
+.ev-h2 { display: flex; align-items: center; gap: 8px; }
+.ev-h2 .pm-h { margin: 8px 0 4px; }
+.ev-h2 .linkbtn { margin-left: auto; }
+.ev-svcs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ev-svcs li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.3fr) auto; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.ev-svcname, .ev-svcchips, .ev-svcops { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.ev-svcname code { font-size: 12px; }
+.ev-svcchips .chip { margin: 0; }
+.ev-svcops .pm-chip { margin-left: 0; }
+.ev-run { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.ev-run > .ev-row { margin-top: 0; }
+.ev-run .chip { margin: 0; }
+.ev-stages { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.ev-stage { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 8px; background: var(--bg); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.ev-sname { font-weight: 600; font-size: var(--fs-sm); }
+.ev-sstate { font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.ev-stage.s-ok { border-left-color: var(--ok); }
+.ev-stage.s-failed { border-left-color: var(--err); }
+.ev-stage.s-failed .ev-sstate { color: var(--err); }
+.ev-stage.s-running { border-left-color: var(--signal-strong); }
+.ev-stage.on { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+.ev-run .ev-outh { margin-top: 8px; }
+.ev-run .ev-outh { padding: 0 0 4px; border: 0; }
+.ev-run .ev-pre { max-height: 220px; background: var(--bg); border-radius: 6px; }
+.ev-stage.s-skipped, .ev-stage.s-not-run, .ev-stage.s-pending { opacity: .6; }
+.ev-hist { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; }
+.ev-hist li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: var(--fs-sm); }
+.ev-hist li:hover, .ev-hist li.on { background: var(--surface); }
+.ev-hist .chip { margin: 0; min-width: 64px; text-align: center; }
+.ev-hist .note { margin-left: auto; }
+@media (max-width: 900px) { .ev-svcs li { grid-template-columns: 1fr; } .ev-stages { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

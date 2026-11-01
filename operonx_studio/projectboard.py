@@ -752,7 +752,8 @@ def _actor(request: Any) -> str:
     return f"studio:{who.get('username') or 'local'}{via}"
 
 
-def register(app: Any, *, watcher_of: Any, turns_of: Any = None, asks_of: Any = None, terminals_of: Any = None) -> None:
+def register(app: Any, *, watcher_of: Any, turns_of: Any = None, asks_of: Any = None, terminals_of: Any = None,
+             deploys_of: Any = None) -> None:
     """The Board routes. ``watcher_of(pid)`` is the project's watcher (its root); ``turns_of(pid)`` the project's
     turns that named a card (the assistant's store), newest first; ``asks_of(pid)`` its turns that ended on a
     question to the owner."""
@@ -905,12 +906,14 @@ def register(app: Any, *, watcher_of: Any, turns_of: Any = None, asks_of: Any = 
     def board_card(pid: str, mid: str, cid: str) -> JSONResponse:
         def read(root: Path, m: str, c: str) -> Dict[str, Any]:
             out = card(root, m, c)
-            if turns_of or terminals_of:
+            if turns_of or terminals_of or deploys_of:
                 ms = milestone(root, m, events=0)
                 mine = lambda rows: [t for t in rows if _of(str(t.get("card") or ""), m, ms["doc"], ms["cards"]) == c]  # noqa: E731
                 out["turns"] = mine(turns_of(pid)) if turns_of else []
                 # the terminals working for it (WORKSPACE_PLAN W2)
                 out["terminals"] = mine(terminals_of(pid)) if terminals_of else []
+                # and the deploys made for it (W4)
+                out["deploys"] = mine(deploys_of(pid)) if deploys_of else []
             return out
 
         return _read(pid, read, mid, cid)

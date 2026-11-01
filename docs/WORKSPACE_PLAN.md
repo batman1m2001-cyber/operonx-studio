@@ -1,6 +1,6 @@
 ---
 title: One project, one execution model — the studio as a development workspace
-status: in_progress
+status: done
 phases:
   - {id: T1, title: "A phase marked done is checked for how it was met: the plan's way, or the owner's call", status: done}
   - {id: T2, title: "\"I haven't checked\" in the last reply sends the turn back once: check it, or say why it can't be", status: done}
@@ -9,7 +9,7 @@ phases:
   - {id: W1, title: "Unified project execution model: card ↔ run ↔ steps ↔ evidence; board follows the assistant", status: done}
   - {id: W2, title: "Terminal and Git: real sessions on the existing execution layer; git page linked to cards", status: done}
   - {id: W3, title: "Environments: execution providers (local, SSH), secrets never reach the model", status: done}
-  - {id: W4, title: "Run, test, deploy: services, health, preview URL, staged deploy with approval for production", status: in_progress}
+  - {id: W4, title: "Run, test, deploy: services, health, preview URL, staged deploy with approval for production", status: done}
 rows: []
 updated: 2026-11-01
 ---
@@ -210,6 +210,35 @@ hidden, the hook's refusals). Studio suite: 673 passed, 5 skipped (run with W4's
 and a preview URL; a light pipeline git → build → test → run → validate → deploy per environment,
 observable stage by stage, its evidence on the card; production needs approval, keeps history and a
 rollback where it can.
+
+*Done (2026-11-01).* `operonx_studio/deploy.py`, on the SSH provider of W3 — no second service model:
+- **Services** are the project's listeners from the IR (the Services page's own). On a host they start with
+  the same serve command, detached, the environment's variables loaded, pid/log/release under
+  `~/.local/state/operonx-svc/<env>/` there; *up* is asked of the port (`/healthz`). The page lists each
+  with running, health, pid, *Open* (the preview URL: the environment's `preview` with `{port}`, or
+  host:port; none for a 127.0.0.1-only listener), start/stop/restart/log. This machine's stay on the
+  Services page.
+- **Deploy** runs git (branch, or a commit detached) → build → test → run (restart) → validate (each
+  running and `/healthz` 200 within 60 s, else the log tails) → deploy (the release recorded on the host),
+  each stage with its time and output tail; a failed one stops the rest (`not run`) and its output shows
+  under the stages. One at a time per environment; every run kept (200), a lost one reads `interrupted`.
+- **Production**: the assistant's deploy waits for the owner's *Approve* (it cannot approve, stop or
+  restart there); the owner's own asks to confirm. **Rollback** deploys the last good release before the
+  current one — or the current one again when a later deploy failed and left the host on its code —
+  without re-running tests.
+- **Evidence**: a deploy names its card (`m3/C2` or `docs/X_PLAN.md#W1`) and the card lists it next to its
+  turns and terminals. The assistant gets `env_services` and `deploy` (waits up to 120 s, returns each
+  stage, a failed one with its output).
+
+Tests: `test_environments.py` +1 (a real deploy over the private sshd: stages and a call to the service,
+production waits and the assistant cannot approve, rollback with tests skipped, a broken release fails at
+validate with its reason, then a rollback restores it), `test_board.py` (deploys on the card),
+access/hands updated. The run history is replaced whole on each write (a read mid-write had seen an empty list). Studio suite: 674 passed, 5 skipped. Scratch sshd, two services:
+
+![deploy on staging](img/workspace/w4-deploy-staging-light.png)
+![a failed deploy](img/workspace/w4-deploy-failed-dark.png)
+![production waits](img/workspace/w4-deploy-production-light.png)
+![deploys on the card](img/workspace/w4-card-deploys-dark.png)
 
 Constraints from the brief (§15) hold throughout: reuse before adding, no duplicate models, no fake
 states, no polling or model calls that are not needed, long runs supported, user data kept.
