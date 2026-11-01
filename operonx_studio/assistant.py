@@ -1040,7 +1040,7 @@ class Relay:
             turn.live.mkdir(exist_ok=True, mode=0o700)
             hook = " ".join(shlex.quote(str(a)) for a in (sys.executable, "-I",
                                                           Path(__file__).with_name("runhook.py"), turn.live))
-            hooks["PreToolUse"] = [{"matcher": "Bash", "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]
+            hooks["PreToolUse"] = [{"matcher": "Bash|Read|Grep|Glob|Edit|Write", "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]
         if os.environ.get("OPERONX_STUDIO_TURN_CHECKS", "on").lower() not in off:
             hook = " ".join(shlex.quote(str(a)) for a in (sys.executable, "-I", Path(__file__).with_name("stophook.py")))
             hooks["Stop"] = [{"hooks": [{"type": "command", "command": hook, "timeout": 10}]}]

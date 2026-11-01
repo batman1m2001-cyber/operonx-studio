@@ -8,8 +8,8 @@ phases:
   - {id: W0, title: "Audit: where plans, board, checklist, questions, steps, runs and git disagree, and why", status: done}
   - {id: W1, title: "Unified project execution model: card ↔ run ↔ steps ↔ evidence; board follows the assistant", status: done}
   - {id: W2, title: "Terminal and Git: real sessions on the existing execution layer; git page linked to cards", status: done}
-  - {id: W3, title: "Environments: execution providers (local, SSH), secrets never reach the model", status: in_progress}
-  - {id: W4, title: "Run, test, deploy: services, health, preview URL, staged deploy with approval for production", status: open}
+  - {id: W3, title: "Environments: execution providers (local, SSH), secrets never reach the model", status: done}
+  - {id: W4, title: "Run, test, deploy: services, health, preview URL, staged deploy with approval for production", status: in_progress}
 rows: []
 updated: 2026-11-01
 ---
@@ -176,6 +176,35 @@ terminals, access and hands updated. Studio suite: 666 passed, 5 skipped. Scratc
 **W3 — Environments** (§7–8): one provider interface (local, SSH; containers later). SSH profiles with
 host-key checks, a connection test, remote terminals, checkout, logs and processes. Secrets stored
 apart, never shown to the model or in logs; per-environment permissions; production asks more.
+
+**Done (2026-11-01).** What was built:
+- **Providers** (`environments.py`): `Local` (the checkout) and `SSH`, one interface (`run`, `argv` for a
+  terminal); a container provider fits the same two calls later. An environment is a name, host, port,
+  user, workdir, a *production* flag and what the assistant may do there (run and read, read, none).
+- **SSH**: no trust on first use. *Scan* shows the host's fingerprints, *Trust* pins them in a known_hosts
+  of its own; `StrictHostKeyChecking=yes`, key auth only (`BatchMode`), one shared connection
+  (`ControlMaster`). A changed host key is refused and shown. *Test* connects and says where it landed.
+- **Secrets**: the private key (checked with `ssh-keygen -y`) and variables are written once and stored
+  under `<state>/ox-secrets/<pid>/<env>/` (0600); no route returns them — the page shows names, `•••` for
+  values. Variables reach the host over stdin into `~/.config/operonx-env/<env>.env` (umask 077) and are
+  loaded per command. Every output (runs, logs, terminals, the terminal websocket) has their values
+  replaced with `•••`, and a stream holds back a tail that may start one so it is never sent in halves.
+- **Work there**: status, processes, resources, logs (a file's tail), files, run a command, checkout (clone
+  from the project's remote the first time, then fetch and switch), a terminal on the host from the Terminal
+  page. The assistant gets `env_list`, `env_check` and `env_run` — named reads and one command at a time
+  through the same checks, not a shell; its tool hook refuses any Read/Grep/Bash that names `ox-secrets`
+  (a substring check: a guard, not a sandbox).
+- **Permissions**: setting up, keys, variables, trust and delete are the owner's; on production the assistant
+  only reads, and the owner's runs, kills and deletes ask first.
+
+Tests: `test_environments.py` (7, against a private sshd on a free port: trust by fingerprint, secrets never
+served, redacted run/terminal/websocket, checkout, production read vs run, delete on confirm, local variables
+hidden, the hook's refusals). Studio suite: 673 passed, 5 skipped (run with W4's backend on top). Scratch sshd:
+
+![environment](img/workspace/w3-env-staging-light.png)
+![production](img/workspace/w3-env-production-dark.png)
+![resources](img/workspace/w3-env-resources-dark.png)
+![terminal on the host](img/workspace/w3-terminal-ssh-light.png)
 
 **W4 — Run, test, deploy** (§9–10): services with start/stop/restart, ports, env, status, logs, health
 and a preview URL; a light pipeline git → build → test → run → validate → deploy per environment,
