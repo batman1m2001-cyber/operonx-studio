@@ -5567,6 +5567,16 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": "unknown turn"}, status_code=404)
         return JSONResponse({"ok": True})
 
+    @app.post("/api/assistant/turns/{tid}/calls/{call}/stop")
+    async def assistant_stop_call(tid: str, call: str, request: Request) -> JSONResponse:
+        # one shell call, not the turn (EXECUTION_PROGRESS D7): the model carries on with its result
+        if isinstance(_turn_or_404(tid, request), JSONResponse):
+            return JSONResponse({"error": "unknown turn"}, status_code=404)
+        got = relay.stop_call(tid, call)
+        if got is None:
+            return JSONResponse({"error": "unknown call"}, status_code=404)
+        return JSONResponse({"ok": got}, status_code=200 if got else 409)
+
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
     # closed by default: a route the table has no rule for answers 403
     for method, path in unclassified(app.routes):

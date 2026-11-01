@@ -15,7 +15,9 @@ nothing and the generic reading stands; none of them guesses.
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import testreport
@@ -316,3 +318,64 @@ def read(command: str, raw: str, parts: Optional[List[str]] = None) -> Dict[str,
         top = _progress(activity=_activity(lines))
     top.pop("stages", None)
     return {**top, "stages": stages, **base}
+
+
+# ── alive, quiet, stalled (D4): from the call's own processes, never from its words ──
+
+QUIET_S = 15          # no output for this long: no longer "active"
+STALL_S = 120         # no output and no CPU for this long: "stalled"
+_TICK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+
+
+def tree(pid: int) -> Optional[Tuple[int, float]]:
+    """(processes, CPU seconds) of *pid* and everything under it, from /proc; None once it has gone, or where
+    there is no /proc. Only the call's own pids are read, and only their stat and children."""
+    root = Path("/proc")
+    if not (root / str(pid)).exists():
+        return None
+    seen, todo, cpu = set(), [pid], 0.0
+    while todo and len(seen) < 512:
+        p = todo.pop()
+        if p in seen:
+            continue
+        seen.add(p)
+        try:
+            stat = (root / str(p) / "stat").read_text()
+            fields = stat[stat.rindex(")") + 2:].split()
+            if fields[0] == "Z":
+                continue
+            cpu += (int(fields[11]) + int(fields[12])) / _TICK
+            for task in (root / str(p) / "task").iterdir():
+                todo += [int(c) for c in (task / "children").read_text().split()]
+        except (OSError, ValueError, IndexError):
+            continue
+    return len(seen), cpu
+
+
+class Liveness:
+    """One running call's state, fed once a second: the newest output and CPU time decide it."""
+
+    def __init__(self, now: float) -> None:
+        self.out_at = now          # the last time the output grew (wall clock)
+        self.busy_at = now         # the last time its processes used CPU
+        self.cpu: Optional[float] = None
+
+    def see(self, now: float, grew: bool, pid: Optional[int], ended: bool) -> Optional[Dict[str, Any]]:
+        if grew:
+            self.out_at = now
+        if ended:
+            return {"state": "ended"}
+        if pid is None:
+            return None                            # no pid yet: the wrap has not started
+        got = tree(pid)
+        if got is None:
+            return {"state": "ended"} if Path("/proc").exists() else None
+        if self.cpu is not None and got[1] > self.cpu + 0.01:
+            self.busy_at = now
+        self.cpu = got[1]
+        if now - self.out_at < QUIET_S:
+            return {"state": "active"}
+        quiet = max(self.out_at, self.busy_at)
+        if now - self.busy_at < QUIET_S:
+            return {"state": "busy", "since": round(self.out_at, 3)}
+        return {"state": "stalled" if now - quiet >= STALL_S else "idle", "since": round(quiet, 3)}
