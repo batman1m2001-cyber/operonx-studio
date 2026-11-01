@@ -270,6 +270,61 @@ def t_on_base(s: Studio, a: Dict[str, Any]) -> str:
                                                       str(a.get("base") or "") or None))
 
 
+def _term_line(t: Dict[str, Any]) -> str:
+    state = f"working: {t['running']}" if t["state"] == "working" else \
+        f"ended, exit {t['exit_code']}" if t["state"] == "ended" else "idle"
+    return f"{t['id']} {t['title']} · {state} · {t['cwd']}" + (f" · card {t['card']}" if t.get("card") else "")
+
+
+def _term_out(s: Studio, tid: str, since: int, wait: float) -> str:
+    """The terminal's output since *since*, after waiting up to *wait* s for its command to finish."""
+    q = urllib.parse.quote(tid, safe="")
+    end = time.time() + max(0.0, min(float(wait), 120.0))
+    time.sleep(0.3)
+    while True:
+        got = s.call(f"/terminals/{q}/output", since=since)
+        if got["state"] != "working" or time.time() >= end:
+            break
+        time.sleep(0.4)
+    text = got["text"]
+    cut = len(text) > 12000
+    text = text[-12000:]
+    return (f"{_term_line(got)} · next since={got['bytes']}" + (" · (output cut to its last 12000 characters)" if cut else "")
+            + f"\n{text}")
+
+
+def t_terminal_open(s: Studio, a: Dict[str, Any]) -> str:
+    body = {k: a[k] for k in ("cwd", "command", "title", "card") if a.get(k)}
+    t = s.call("/terminals", body)
+    s.show("open_terminal", id=t["id"], title=t["title"])
+    out = _term_out(s, t["id"], 0, float(a.get("wait") or (5 if a.get("command") else 1)))
+    return f"Opened {out}\nIt is on the owner's Terminal page. Type with terminal_send, read with terminal_read."
+
+
+def t_terminal_send(s: Studio, a: Dict[str, Any]) -> str:
+    tid = str(a["id"])
+    text = str(a.get("text") or "")
+    if a.get("enter", True) and not text.endswith(("\n", "\r")):
+        text += "\n"
+    t = s.call(f"/terminals/{urllib.parse.quote(tid, safe='')}", {"input": text})
+    return _term_out(s, tid, int(t["bytes"]), float(a.get("wait") if a.get("wait") is not None else 10))
+
+
+def t_terminal_read(s: Studio, a: Dict[str, Any]) -> str:
+    return _term_out(s, str(a["id"]), int(a.get("since") or 0), float(a.get("wait") or 0))
+
+
+def t_terminal_list(s: Studio, a: Dict[str, Any]) -> str:
+    got = s.call("/terminals")
+    lines = [_term_line(t) + f" · by {t['by']}" for t in got["terminals"]]
+    return "\n".join(lines or ["No terminal open."]) + "\nPlaces (cwd): " + ", ".join(got["places"])
+
+
+def t_terminal_close(s: Studio, a: Dict[str, Any]) -> str:
+    got = s.call(f"/terminals/{urllib.parse.quote(str(a['id']), safe='')}", {"close": True})
+    return "Closed." if got.get("ok") else "No such terminal."
+
+
 def t_run_job(s: Studio, a: Dict[str, Any]) -> str:
     got = s.call(f"/jobs/{urllib.parse.quote(str(a['name']), safe='')}/run", {"resume": bool(a.get("resume"))})
     s.show("open_jobs", job=str(a["name"]))
@@ -819,6 +874,30 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                    "sub": {"type": "array", "items": _schema(
                        {"title": _S, "state": {"type": "string", "enum": list(SUB_STATES)}}, ["title"])},
                    "after": {"type": "array", "items": {"type": "integer"}}}, ["title", "state"])}}, ["steps"])},
+    "terminal_open": {"fn": t_terminal_open,
+                      "description": "Open a real terminal (a login shell on a PTY) in the checkout or one of its "
+                                     "worktrees (cwd), shown live on the owner's Terminal page. Use it for what runs "
+                                     "long or the owner should watch: a dev server, a watcher, an interactive tool. "
+                                     "command: run that instead of an interactive shell (the terminal ends with it). "
+                                     "card: the board card it works for (docs/X_PLAN.md#W1 or m3/C2). Returns the "
+                                     "first output after up to wait seconds.",
+                      "schema": _schema({"cwd": _S, "command": _S, "title": _S, "card": _S, "wait": _N})},
+    "terminal_send": {"fn": t_terminal_send,
+                      "description": "Type into a terminal (Enter added unless enter=false; \\u0003 is Ctrl-C) and "
+                                     "return what it printed, waiting up to wait seconds (default 10) for the "
+                                     "command to finish.",
+                      "schema": _schema({"id": _S, "text": _S, "enter": {"type": "boolean"}, "wait": _N},
+                                        ["id", "text"])},
+    "terminal_read": {"fn": t_terminal_read,
+                      "description": "A terminal's output since an offset (the last call's next since; 0 = all it "
+                                     "kept), its state (idle, working: what runs, ended with its exit code).",
+                      "schema": _schema({"id": _S, "since": _N, "wait": _N}, ["id"])},
+    "terminal_list": {"fn": t_terminal_list,
+                      "description": "The project's terminals (yours and the owner's) and the places one can open in.",
+                      "schema": _schema({})},
+    "terminal_close": {"fn": t_terminal_close,
+                       "description": "Close a terminal you opened: what runs in it stops.",
+                       "schema": _schema({"id": _S}, ["id"])},
     "failing_on_base": {"fn": t_failing_on_base,
                         "description": "Run failing tests on the base branch (the merge-base with origin's default "
                                        "branch, or base) and say for each: fails on base too, or new to this branch. "

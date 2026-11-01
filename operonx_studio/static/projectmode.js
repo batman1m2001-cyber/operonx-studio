@@ -33,8 +33,8 @@ const ProjectMode = (() => {
   const K = `pmode:${PID}`;
   const v = Object.assign({page: "now", open: {}, mid: "", filter: "open", search: "", fopen: {}, file: "",
                            fonly: false}, recall(K, {}));
-  const PAGES = {now: "Now", plans: "Plans", checklist: "Checklist", questions: "Questions", changes: "Changes",
-                 files: "Files", settings: "Settings"};
+  const PAGES = {now: "Now", plans: "Plans", checklist: "Checklist", questions: "Questions", changes: "Git",
+                 files: "Files", terminal: "Terminal", settings: "Settings"};
   let doc = null;      // the last status document
   let failed = null;   // why there is none: {message, unavailable}
   let token = 0;
@@ -46,6 +46,8 @@ const ProjectMode = (() => {
 
   // board.js's view (a top-level const: not on window)
   const HAS_BOARD = () => typeof BoardView !== "undefined";
+  const HAS_TERM = () => typeof TerminalPage !== "undefined";
+  const HAS_GIT = () => typeof GitPage !== "undefined";
   const save = () => store(K, v);
   const enc = encodeURIComponent;
   const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
@@ -867,14 +869,17 @@ const ProjectMode = (() => {
 
   function drawPage() {
     main.classList.toggle("paged", v.page !== "now");
-    page.classList.toggle("pm-page-files", v.page === "files");
+    page.classList.toggle("pm-page-files", v.page === "files" || v.page === "terminal" || v.page === "changes");
     if (v.page !== "plans" && HAS_BOARD()) BoardView.unmount();
+    if (v.page !== "terminal" && HAS_TERM()) TerminalPage.unmount();
+    if (v.page !== "changes" && HAS_GIT()) GitPage.unmount();
     if (v.page === "now") { page.textContent = ""; return; }
     if (v.page === "plans") drawPlans();
     else if (v.page === "checklist") drawChecklist();
     else if (v.page === "questions") drawQuestions();
-    else if (v.page === "changes") drawChanges();
+    else if (v.page === "changes") { if (HAS_GIT()) GitPage.mount(page); else drawChanges(); }
     else if (v.page === "files") drawFiles();
+    else if (v.page === "terminal") { if (HAS_TERM()) TerminalPage.mount(page); }
     else if (v.page === "settings") drawSettings();
   }
 
@@ -902,7 +907,7 @@ const ProjectMode = (() => {
       // the pages drawn from the document follow it; a page being typed into is left alone
       const typing = page.contains(document.activeElement) && /TEXTAREA|INPUT|SELECT/.test(document.activeElement.tagName);
       if (!typing && (v.page === "questions" || v.page === "settings" || (v.page === "plans" && !v.mid)
-        || (base && (v.page === "changes" || v.page === "checklist")))) drawPage();
+        || (base && v.page === "checklist"))) drawPage();
       else if (v.page === "files" && ftree) {
         api(`/api/p/${PID}/project/files`).then((got) => {
           const list = page.querySelector(".pm-ftree");
@@ -974,6 +979,8 @@ const ProjectMode = (() => {
     document.body.classList.remove("pmode");
     bar.hidden = true;
     if (HAS_BOARD()) BoardView.unmount();
+    if (HAS_TERM()) TerminalPage.unmount();
+    if (HAS_GIT()) GitPage.unmount();
     if (window.oxAssistant && window.oxAssistant.uncenter) window.oxAssistant.uncenter();
   }
 

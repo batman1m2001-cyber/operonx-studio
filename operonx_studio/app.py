@@ -4206,7 +4206,8 @@ def build_studio_app(recents: Optional[Recents] = None):
     from operonx_studio import projectboard as _projectboard
 
     _projectboard.register(app, watcher_of=_watcher, turns_of=lambda pid: chat_store.card_turns(pid),
-                           asks_of=lambda pid: chat_store.asks(pid))
+                           asks_of=lambda pid: chat_store.asks(pid),
+                           terminals_of=lambda pid: [t.as_dict() for t in app.state.terminals.of(pid)])
 
     # what the assistant may do with git, per project: operonx_studio/gitpolicy.py
     from operonx_studio import gitpolicy as _gitpolicy
@@ -4233,6 +4234,50 @@ def build_studio_app(recents: Optional[Recents] = None):
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse(await asyncio.to_thread(_gitpolicy.routes, policy, root))
+
+    # Project mode › Git: the repo as the owner works it (WORKSPACE_PLAN W2): operonx_studio/gitview.py
+    from operonx_studio import gitview as _gitview
+
+    _gitview.register(app, watcher_of=_watcher, state_dir=lambda: recents.state_file.parent,
+                      turns_of=lambda pid: chat_store.card_turns(pid))
+
+    # terminals: real shells on a PTY in the checkout or a worktree (WORKSPACE_PLAN W2): operonx_studio/terminals.py
+    from operonx_studio import terminals as _terminals
+
+    from .access import allows as _allows
+
+    terms = _terminals.Terminals()
+    app.state.terminals = terms
+
+    def _terminal_env(pid: str, root: Path, by: str) -> Dict[str, str]:
+        from . import chat as _chat_mod
+
+        env = _chat_mod.base_env()
+        # the assistant's terminal is the assistant's process: the git guard on its PATH, as in its turns
+        return _gitpolicy.assistant_env(recents.state_file.parent, pid, root, env) if by == "assistant" else env
+
+    def _ws_user(ws: Any) -> Optional[Dict[str, Any]]:
+        """Who opened a websocket, when they may type into a shell: an editor, from this site's own page."""
+        if not _same_origin(ws):
+            return None
+        if not auth_on:
+            admin = users.first_admin()
+            return _person(admin, "web") if admin else dict(LOCAL, via="web")
+        token = ws.cookies.get("oxsession") or ""
+        user = None
+        if token:
+            uid = agents.resolve(token)
+            if uid is not None:
+                got = users.cached_user(uid)
+                user = _person(got, "assistant") if got is not None and not got["disabled"] else None
+            else:
+                got, _session, _touched = users.resolve(token)
+                user = _person(got, "web") if got is not None else None
+        if user is None or user["must_change"] or not _allows(user.get("role"), "edit"):
+            return None
+        return user
+
+    _terminals.register(app, terms=terms, watcher_of=_watcher, env_of=_terminal_env, ws_user=_ws_user)
 
     # the run queue of a durable service: operonx_studio/runqueue.py
     from operonx_studio import runqueue as _runqueue

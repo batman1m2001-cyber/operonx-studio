@@ -7,8 +7,8 @@ phases:
   - {id: T3, title: "on_base(command): any check run on the merge-base, not only failing tests", status: done}
   - {id: W0, title: "Audit: where plans, board, checklist, questions, steps, runs and git disagree, and why", status: done}
   - {id: W1, title: "Unified project execution model: card ↔ run ↔ steps ↔ evidence; board follows the assistant", status: done}
-  - {id: W2, title: "Terminal and Git: real sessions on the existing execution layer; git page linked to cards", status: in_progress}
-  - {id: W3, title: "Environments: execution providers (local, SSH), secrets never reach the model", status: open}
+  - {id: W2, title: "Terminal and Git: real sessions on the existing execution layer; git page linked to cards", status: done}
+  - {id: W3, title: "Environments: execution providers (local, SSH), secrets never reach the model", status: in_progress}
   - {id: W4, title: "Run, test, deploy: services, health, preview URL, staged deploy with approval for production", status: open}
 rows: []
 updated: 2026-11-01
@@ -147,6 +147,31 @@ the assistant's calls already use (no second process manager); the assistant can
 tie them to a card. Git: status, branches, remotes, fetch/pull/push, staged and unstaged with line
 diffs, history and graph, branch/commit/merge/rebase, conflicts, PRs — linked to cards and runs, with
 the existing guards and commit identity, and nothing uncommitted ever dropped without a confirmation.
+
+**Done (2026-11-01).** What was built:
+- **Terminal page** (`terminals.py`, `static/terminal.js`, xterm.js vendored): login shells on a PTY in the
+  checkout or a worktree, with the environment the assistant's processes get; tabs in a side rail (idle,
+  working with the command, ended with its exit code), a two-pane split, output kept so a late reader starts
+  from the beginning; a websocket for the page, closing hangs up the process group.
+- **The assistant's terminals**: `terminal_open/send/read/list/close` studio tools; its terminal carries the
+  git guard, says *assistant*, names its card, and opens on the owner's Terminal page. A card's detail on the
+  Board lists the terminals working for it.
+- **Git page** (`gitview.py`, `static/gitview.js`): status (branch, upstream, ahead/behind, state), staged,
+  unstaged, untracked and conflicted files with line diffs; history as a lane graph with refs and the card a
+  commit came from; branches (switch, new, merge, rebase, delete), remotes, worktrees; fetch, pull
+  (fast-forward or rebase), push (sets upstream; a protected branch or a force asks first); merge/rebase
+  conflicts shown with Continue/Abort; stash; pull requests listed and opened through `gh`.
+- **Guards**: commits are made as Settings › Git's identity or refused; discarding asks, then keeps a patch and
+  the untracked files under the state folder first; a switch that would overwrite work is git's refusal.
+
+Tests: `test_terminals.py` (4, the assistant's included), `test_gitview.py` (3), the board's card lists its
+terminals, access and hands updated. Studio suite: 666 passed, 5 skipped. Scratch repo, dark theme:
+
+![git changes](img/workspace/w2-git-changes.png)
+![git history](img/workspace/w2-git-history.png)
+![git branches](img/workspace/w2-git-branches.png)
+![terminal](img/workspace/w2-terminal.png)
+![card terminals](img/workspace/w2-card-terminals.png)
 
 **W3 — Environments** (§7–8): one provider interface (local, SSH; containers later). SSH profiles with
 host-key checks, a connection test, remote terminals, checkout, logs and processes. Secrets stored

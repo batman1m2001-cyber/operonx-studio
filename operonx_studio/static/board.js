@@ -687,6 +687,21 @@ const BoardView = (() => {
       p.append(ul);
     }
     if (got.turns && got.turns.length) p.append(turnsView(got.turns));
+    if (got.terminals && got.terminals.length) {
+      p.append(el("div", "stitle", "Terminals on this card"));
+      const ul = el("ul", "bdturns");
+      for (const t of got.terminals) {
+        const li = el("li");
+        const open = el("button", "linkbtn", t.title);
+        open.type = "button";
+        open.title = `Open it on the Terminal page (${t.cwd})`;
+        open.onclick = () => { if (typeof TerminalPage !== "undefined") TerminalPage.show(t.id); ProjectMode.go("terminal"); };
+        li.append(el("span", `chip${t.state === "working" ? " crun" : ""}`, t.state === "working" ? `working · ${t.running}` : t.state), open,
+                  el("span", "note", ` by ${t.by === "assistant" ? "the assistant" : "you"}`));
+        ul.append(li);
+      }
+      p.append(ul);
+    }
     if (got.events.length) {
       p.append(el("div", "stitle", "What happened"));
       const ol = el("ol", "bdevents");

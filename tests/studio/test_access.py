@@ -66,9 +66,10 @@ def test_every_route_is_classified_and_nothing_is_stale(app):
     assert unclassified(app.routes) == []
     assert stale(app.routes) == []
     assert sorted(ACCESS) == sorted(_routes(app))
-    # the only other route is the static mount, which the wall lets through
+    # the only other routes: a terminal's socket, which checks who opened it itself (WORKSPACE_PLAN W2;
+    # test_terminals.py), and the static mount, which the wall lets through
     others = [r for r in app.routes if not isinstance(r, APIRoute)]
-    assert [getattr(r, "path", None) for r in others] == ["/static"]
+    assert [getattr(r, "path", None) for r in others] == ["/api/p/{pid}/terminals/{tid}/ws", "/static"]
 
 
 def test_only_read_level_non_gets_are_in_read_posts(app):
@@ -159,7 +160,7 @@ def test_admin_routes_refuse_editors_and_viewers(people):
 def test_edit_routes_refuse_viewers_before_the_handler_runs(people):
     team = people["team"]
     edit_routes = _by_level(team, "edit")
-    assert len(edit_routes) == 49   # + a worktree the turn left removed (TURN_HONESTY S3), a plan doc put on the Board (its milestone mirrors the doc), the practices (Board, commits docs/brd/practices.toml), an owner request (Board, B10 D14), the sessions' models (Board), Run/Stop the daemon and a new milestone (Board, B5), POST an operonx-project action (the Board tab), POST a run forked from a step (GAP S3), a failed run retried (GAP S2), a parked run answered (GAP S1), POST a knowledge-base query or eval case (K3), a run requeued (S3), a queue review (S1), GET /open (a launch ticket), undo a write (P3), an @op keyword and a YAML edit (P4), a resource added or deleted and a .env variable (P5)
+    assert len(edit_routes) == 55   # + Git acts (W2), the terminals (W2: list, open, type, read, close), a worktree the turn left removed (TURN_HONESTY S3), a plan doc put on the Board (its milestone mirrors the doc), the practices (Board, commits docs/brd/practices.toml), an owner request (Board, B10 D14), the sessions' models (Board), Run/Stop the daemon and a new milestone (Board, B5), POST an operonx-project action (the Board tab), POST a run forked from a step (GAP S3), a failed run retried (GAP S2), a parked run answered (GAP S1), POST a knowledge-base query or eval case (K3), a run requeued (S3), a queue review (S1), GET /open (a launch ticket), undo a write (P3), an @op keyword and a YAML edit (P4), a resource added or deleted and a .env variable (P5)
     team.use(people["viewer"]["token"])
     # the real project id: a handler that ran would act on it
     for method, path in edit_routes:

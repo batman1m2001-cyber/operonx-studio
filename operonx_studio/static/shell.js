@@ -849,6 +849,10 @@ async function performUi(kind, args) {
     state.jobSel = args.job; switchTab("jobs");
   } else if (kind === "open_board") {
     BoardView.open(args);
+  } else if (kind === "open_terminal") {
+    // a terminal the assistant opened: shown at once in Project mode, a word elsewhere (it waits on the Terminal page)
+    if (state.tab === "project" && typeof TerminalPage !== "undefined") { TerminalPage.show(args.id); ProjectMode.go("terminal"); }
+    else if (!args.quiet) toast(`Assistant opened a terminal: ${args.title || args.id}`);
   } else if (kind === "open_tab") {
     switchTab(args.tab);
   } else if (kind === "open_eval") {
