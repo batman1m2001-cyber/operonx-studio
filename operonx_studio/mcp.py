@@ -253,6 +253,16 @@ def t_steps(s: Studio, a: Dict[str, Any]) -> str:
     return step_line(check_steps(a))
 
 
+def t_failing_on_base(s: Studio, a: Dict[str, Any]) -> str:
+    """docs/TURN_HONESTY_PLAN.md S2: the failing tests, run on the base branch's merge-base."""
+    from operonx_studio import basecheck
+    tests = a.get("tests")
+    if isinstance(tests, str):
+        tests = tests.split()
+    return basecheck.report(basecheck.check(str(a.get("cwd") or os.getcwd()), list(tests or []),
+                                            str(a.get("base") or "") or None))
+
+
 def t_run_job(s: Studio, a: Dict[str, Any]) -> str:
     got = s.call(f"/jobs/{urllib.parse.quote(str(a['name']), safe='')}/run", {"resume": bool(a.get("resume"))})
     s.show("open_jobs", job=str(a["name"]))
@@ -799,6 +809,13 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                    "sub": {"type": "array", "items": _schema(
                        {"title": _S, "state": {"type": "string", "enum": list(SUB_STATES)}}, ["title"])},
                    "after": {"type": "array", "items": {"type": "integer"}}}, ["title", "state"])}}, ["steps"])},
+    "failing_on_base": {"fn": t_failing_on_base,
+                        "description": "Run failing tests on the base branch (the merge-base with origin's default "
+                                       "branch, or base) and say for each: fails on base too, or new to this branch. "
+                                       "Call it before you call a failure pre-existing. tests: the ids pytest printed "
+                                       "(path::name); cwd: the checkout or worktree you ran them in.",
+                        "schema": _schema({"tests": {"type": "array", "items": _S}, "cwd": _S, "base": _S},
+                                          ["tests", "cwd"])},
     "run_job": {"fn": t_run_job,
                 "description": "Start one of the application's jobs (or a job of steps); resume=true reruns only "
                                "what the last run did not finish.",

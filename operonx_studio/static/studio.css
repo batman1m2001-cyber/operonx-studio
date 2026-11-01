@@ -2542,6 +2542,10 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .ax-new { font-size: 10.5px; color: var(--text-3); background: var(--surface-3); border-radius: 4px; padding: 0 4px; }
 .ax-changes[data-state="undone"] { background: var(--surface-2); }
+.ax-tree .ax-file-head { gap: 8px; }
+.ax-tree-path { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ax-tree-branch { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.ax-tree[data-state="removed"] .ax-tree-path { text-decoration: line-through; color: var(--text-3); }
 .ax-changes[data-state="undone"] .ax-files { text-decoration: line-through; color: var(--text-3); }
 .ax-diff { max-height: 340px; overflow: auto; font: 11.5px/1.5 var(--mono); background: var(--well);
   border-radius: var(--r-sm); padding: 6px 0; margin-top: 6px; }
@@ -5915,6 +5919,10 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
 .ax-tool.recovered .ax-step-head .ax-tool-st .icon { color: var(--st-warn); }
 .ax-tool-sev { font-size: 10.5px; font-weight: 600; color: var(--st-warn); background: var(--st-warn-soft, var(--surface-2));
   border-radius: 4px; padding: 0 5px; }
+/* guarded: the studio's guard refused the call — grey, not a failure */
+.ax-tool-sev.guarded { color: var(--st-skip); background: var(--st-skip-soft); }
+.ax-outcome-guarded { color: var(--text-3); }
+.ax-outcome-open { color: var(--st-warn); font-weight: 600; }
 .ax-tool-err { padding: 0 12px 6px 33px; font: 11.5px var(--mono); color: var(--st); min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .ax-io-step { font-size: var(--fs-sm); color: var(--text); margin-bottom: 6px; }

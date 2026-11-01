@@ -4357,6 +4357,17 @@ def build_studio_app(recents: Optional[Recents] = None):
         done = _chat.undo(watcher.root, sha, files, new_files)
         return JSONResponse({"restored": done})
 
+    @app.post("/api/p/{pid}/chat/worktree/remove")
+    def chat_worktree_remove(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """TURN_HONESTY S3: remove a worktree a turn left behind, and its branch when it is merged."""
+        from . import chat as _chat
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        got = _chat.remove_worktree(watcher.root, str(body.get("path") or ""))
+        return JSONResponse(got, status_code=200 if got["removed"] else 409)
+
     # ── the playground: toys on a service's doors ───────────────────────
     # A bridge process per project (operonx.app.play, in the project's own
     # interpreter) runs the sessions; these routes relay to it and the
@@ -5431,9 +5442,15 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.post("/api/assistant/sessions/{sid}/items/{seq}")
     def assistant_item(sid: str, seq: int, body: Dict[str, Any], request: Request) -> JSONResponse:
-        """Record what the user did with a changes card: kept, or undone."""
+        """Record what the user did with a changes card (kept, or undone), or which worktrees of a worktrees
+        card they removed."""
         if isinstance(_session_or_404(sid, request), JSONResponse):
             return JSONResponse({"error": "no such item"}, status_code=404)
+        removed = body.get("removed")
+        if isinstance(removed, list):
+            item = chat_store.patch_item(sid, seq, removed=[str(p) for p in removed][:50])
+            return JSONResponse({"item": item}) if item is not None else \
+                JSONResponse({"error": "no such item"}, status_code=404)
         state = body.get("state")
         if state not in ("kept", "undone"):
             return JSONResponse({"error": "state is kept or undone"}, status_code=400)

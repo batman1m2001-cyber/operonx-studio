@@ -46,6 +46,7 @@ const oxBlocks = (() => {
     blocked: ["blocked", "ban", "Blocked"],
     skip: ["skip", "skip", "Skipped"],
     skipped: ["skip", "skip", "Skipped"],
+    guarded: ["skip", "ban", "Guarded"],
     note: ["info", "info", "Note"],
     finding: ["run", "spark", "Finding"],
   };

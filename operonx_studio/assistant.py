@@ -837,6 +837,7 @@ class Relay:
         binary = _chat.find_claude()
         final = "failed"
         config: Optional[Path] = None
+        hooks: Optional[Path] = None
         try:
             if binary is None:
                 self._item(turn, "error", text="No claude binary found on this machine — set "
@@ -921,7 +922,7 @@ class Relay:
             self._item(turn, "error", text=f"The relay failed: {exc}", retry=True)
             final = "failed"
         finally:
-            for path in (config, turn.live and turn.live.with_suffix(".json")):
+            for path in (config, hooks):
                 if path is not None:
                     try:
                         path.unlink()
@@ -942,19 +943,27 @@ class Relay:
         return path
 
     def _live_calls(self, turn: Turn) -> Optional[Path]:
-        """EXECUTION_PROGRESS D1: the settings that hand the CLI runhook.py, and the folder it copies each shell
-        call's output into. The stream never carries a running call's output (tool_progress is a heartbeat);
-        with this the relay reads it as it is printed."""
-        if os.environ.get("OPERONX_STUDIO_LIVE_TESTS", "on").lower() in ("off", "0", "false"):
+        """The turn's hook settings, given to the CLI as --settings. EXECUTION_PROGRESS D1: runhook.py, and the
+        folder it copies each shell call's output into (the stream never carries a running call's output;
+        tool_progress is a heartbeat). TURN_HONESTY S1–S3: stophook.py, which sends the model back once when the
+        turn marked plan phases done, ended on failing tests it never checked, or left its steps open."""
+        off = ("off", "0", "false")
+        hooks: Dict[str, Any] = {}
+        if os.environ.get("OPERONX_STUDIO_LIVE_TESTS", "on").lower() not in off:
+            self.run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            turn.live = self.run_dir / f"live-{turn.id}"
+            turn.live.mkdir(exist_ok=True, mode=0o700)
+            hook = " ".join(shlex.quote(str(a)) for a in (sys.executable, "-I",
+                                                          Path(__file__).with_name("runhook.py"), turn.live))
+            hooks["PreToolUse"] = [{"matcher": "Bash", "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]
+        if os.environ.get("OPERONX_STUDIO_TURN_CHECKS", "on").lower() not in off:
+            hook = " ".join(shlex.quote(str(a)) for a in (sys.executable, "-I", Path(__file__).with_name("stophook.py")))
+            hooks["Stop"] = [{"hooks": [{"type": "command", "command": hook, "timeout": 10}]}]
+        if not hooks:
             return None
         self.run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        turn.live = self.run_dir / f"live-{turn.id}"
-        turn.live.mkdir(exist_ok=True, mode=0o700)
-        hook = " ".join(shlex.quote(str(a)) for a in (sys.executable, "-I", Path(__file__).with_name("runhook.py"),
-                                                      turn.live))
-        path = turn.live.with_suffix(".json")
-        path.write_text(json.dumps({"hooks": {"PreToolUse": [
-            {"matcher": "Bash", "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]}}))
+        path = self.run_dir / f"live-{turn.id}.json"
+        path.write_text(json.dumps({"hooks": hooks}))
         return path
 
     async def _watch_calls(self, turn: Turn) -> None:
@@ -1132,6 +1141,12 @@ class Relay:
                             changed = _chat.changes_since(cwd, snap)
                         except Exception:  # noqa: BLE001 — the answer still stands
                             changed = None
+                        try:
+                            left = _chat.worktrees_since(cwd, snap)
+                        except Exception:  # noqa: BLE001 — the answer still stands
+                            left = []
+                        if left:
+                            self._item(turn, "worktrees", trees=left)
                         if changed and changed["files"]:
                             others = self._overlapping(turn)
                             self._item(turn, "changes", **changed, **({"overlap": others} if others else {}))
@@ -1275,6 +1290,12 @@ class Relay:
             return False
         if kind == "user":
             for block in (event.get("message") or {}).get("content") or []:
+                said = str(block.get("text") or "") if isinstance(block, dict) and block.get("type") == "text" else ""
+                if said.startswith("Stop hook feedback:"):
+                    # TURN_HONESTY: stophook.py sent the turn back; the owner sees what it was asked
+                    self._item(turn, "note", text="The studio sent this turn back once: "
+                               + said.split("\n", 2)[-1].strip().replace("\n- ", " · ").lstrip("- "))
+                    continue
                 if not isinstance(block, dict) or block.get("type") != "tool_result":
                     continue
                 seq = turn.tools.get(block.get("tool_use_id") or "")
