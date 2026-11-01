@@ -1529,7 +1529,7 @@ def test_a_background_call_stays_live_until_its_task_ends(client, project, fake)
 def test_stopping_one_call_ends_it_and_the_turn_goes_on(client, project, fake):
     sid = _session(client, _pid(client, project))["id"]
     turn = client.post(f"/api/assistant/sessions/{sid}/turns",
-                       json={"message": "SHELL|echo start; sleep 30; echo never"}).json()["turn"]
+                       json={"message": "SHELL|echo start; tail -f /dev/null; echo never"}).json()["turn"]
     cursor, events = 0, []
     for _ in range(40):
         got = client.get(f"/api/assistant/turns/{turn}", params={"cursor": cursor}).json()

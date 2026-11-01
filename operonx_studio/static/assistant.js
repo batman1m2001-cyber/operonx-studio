@@ -1643,7 +1643,7 @@
   }
 
   /* D8: the turn's outcome in one line, facts only — state, time, cost, files,
-     the last run per runner, steps, failures (by class past 3, as a bar) */
+     the widest run per runner, steps, failures (by class past 3, as a bar) */
   function outcomeStrip(item) {
     const turnItems = item.turn ? itemsOfTurn(item.turn) : [];
     if (!turnItems.some((x) => x.kind === "tool" || x.kind === "changes" || x.kind === "error")) return null;

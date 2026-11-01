@@ -348,6 +348,8 @@ time and Stop:
   `run_in_background`.
 - Never poll with `sleep`, `until` or `pgrep` loops. The page shows the
   run's progress, and the turn wakes you when it ends.
+- The studio refuses a test, build or install left running with `&` or
+  nohup, and any wait by `sleep`. Run it with `run_in_background` instead.
 - Keep the progress a tool already prints: `pytest` without `-q` shows
   files, uv and npm show their default progress. Never pass flags that
   silence it just to shorten the output.
