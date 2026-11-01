@@ -195,6 +195,9 @@ _SLEEP = re.compile(r"\bsleep\s+(\d+(?:\.\d+)?)")
 DETACHED = ("Refused by the studio: this starts a long run with `&`, nohup or setsid, so the page cannot show it. "
             "Run the same command with run_in_background instead (no `&`, no redirect to a log): the page shows its "
             "progress live, and the turn wakes you when it ends.")
+SECRETS = "ox-secrets"  # environments.SECRETS: the hook runs with -I, apart from the package
+SEALED = ("Refused by the studio: the environments' keys and variables are the owner's, never read by the assistant. "
+          "Run in an environment with the env tools (env_run, terminal_open env=…): its variables are there.")
 POLLING = ("Refused by the studio: never wait with sleep, or poll a log or pgrep in a loop. A long run goes in "
            "run_in_background: the page shows its progress live, and the turn wakes you when it ends, so end your "
            "reply or do other work until then.")
@@ -256,9 +259,12 @@ def refusal(cmd: str, background: bool) -> Optional[str]:
 
 
 def rewrite(event: dict, live_dir: str) -> dict | None:
+    inp = event.get("tool_input") or {}
+    if SECRETS in json.dumps(inp):  # any tool: a path or a command through the environments' secrets
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": SEALED}}
     if event.get("tool_name") != "Bash":
         return None
-    inp = event.get("tool_input") or {}
     cmd, call = inp.get("command"), str(event.get("tool_use_id") or "")
     why = refusal(cmd, bool(inp.get("run_in_background"))) if isinstance(cmd, str) else None
     if why:

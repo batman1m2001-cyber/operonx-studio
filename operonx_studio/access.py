@@ -113,6 +113,8 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/terminals/{{tid}}"): "edit",
     ("GET", f"{P}/terminals/{{tid}}/output"): "edit",
     ("DELETE", f"{P}/terminals/{{tid}}"): "edit",
+    ("GET", f"{P}/environments"): "edit",                          # W3: hosts and users are not for viewers
+    ("POST", f"{P}/environments"): "edit",                         # the owner-only ops are refused to the assistant
     ("GET", f"{P}/repo"): "read",                                  # Project mode › Git
     ("GET", f"{P}/repo/log"): "read",
     ("GET", f"{P}/repo/diff"): "read",

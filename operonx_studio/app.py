@@ -4277,7 +4277,36 @@ def build_studio_app(recents: Optional[Recents] = None):
             return None
         return user
 
-    _terminals.register(app, terms=terms, watcher_of=_watcher, env_of=_terminal_env, ws_user=_ws_user)
+    # where a project's commands run, this machine or a host over SSH: operonx_studio/environments.py
+    from operonx_studio import environments as _environments
+
+    def _origin(root: Path) -> str:
+        got = subprocess.run(["git", "remote", "get-url", "origin"], cwd=root, capture_output=True, text=True)
+        return got.stdout.strip() if got.returncode == 0 else ""
+
+    def _base_env() -> Dict[str, str]:
+        from . import chat as _chat_mod
+
+        return _chat_mod.base_env()
+
+    envs = _environments.register(app, watcher_of=_watcher, state_dir=lambda: recents.state_file.parent,
+                                  base_env=_base_env, remote_url=_origin)
+
+    def _remote_terminal(pid: str, root: Path, eid: str, by: str, command: str) -> Dict[str, Any]:
+        try:
+            env = envs.get(pid, root, eid)
+            why = _environments.may(env, by, "run")
+            if why:
+                return {"error": why}
+            p = envs.provider(pid, root, eid, _base_env())
+            return {"argv": p.argv(command, tty=True), "env": p.environ(), "cwd": p.cwd(),
+                    "where": env.public(envs.secrets(pid))["where"], "hide": p.clean,
+                    "secrets": lambda: list(envs.secrets(pid).vars(eid).values())}
+        except _environments.EnvError as exc:
+            return {"error": str(exc)}
+
+    _terminals.register(app, terms=terms, watcher_of=_watcher, env_of=_terminal_env, ws_user=_ws_user,
+                        remote_of=_remote_terminal)
 
     # the run queue of a durable service: operonx_studio/runqueue.py
     from operonx_studio import runqueue as _runqueue
