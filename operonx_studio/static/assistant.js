@@ -937,7 +937,10 @@
     box.append(refs.chip);
     if (v.stages.length > 1) {
       const done = v.stages.filter((s) => s.state === "done").length;
-      const tog = el("button", "ax-call-tog", `${v.stages.length} stages · ${done} done${v.stage ? ` · ${v.stage}` : ""}`);
+      const tog = el("button", "ax-call-tog");
+      const say = `${v.stages.length} stages · ${done} done${v.stage ? ` · ${v.stage}` : ""}`;
+      tog.append(el("span", null, say));
+      tog.title = say;
       tog.type = "button";
       const open = callOpen.has(item.seq);
       tog.setAttribute("aria-expanded", String(open));
