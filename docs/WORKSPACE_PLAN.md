@@ -5,11 +5,11 @@ phases:
   - {id: T1, title: "A phase marked done is checked for how it was met: the plan's way, or the owner's call", status: done}
   - {id: T2, title: "\"I haven't checked\" in the last reply sends the turn back once: check it, or say why it can't be", status: done}
   - {id: T3, title: "on_base(command): any check run on the merge-base, not only failing tests", status: done}
-  - {id: W0, title: "Audit: where plans, board, checklist, questions, steps, runs and git disagree, and why", status: pending}
-  - {id: W1, title: "Unified project execution model: card ↔ run ↔ steps ↔ evidence; board follows the assistant", status: pending}
-  - {id: W2, title: "Terminal and Git: real sessions on the existing execution layer; git page linked to cards", status: pending}
-  - {id: W3, title: "Environments: execution providers (local, SSH), secrets never reach the model", status: pending}
-  - {id: W4, title: "Run, test, deploy: services, health, preview URL, staged deploy with approval for production", status: pending}
+  - {id: W0, title: "Audit: where plans, board, checklist, questions, steps, runs and git disagree, and why", status: done}
+  - {id: W1, title: "Unified project execution model: card ↔ run ↔ steps ↔ evidence; board follows the assistant", status: in_progress}
+  - {id: W2, title: "Terminal and Git: real sessions on the existing execution layer; git page linked to cards", status: open}
+  - {id: W3, title: "Environments: execution providers (local, SSH), secrets never reach the model", status: open}
+  - {id: W4, title: "Run, test, deploy: services, health, preview URL, staged deploy with approval for production", status: open}
 rows: []
 updated: 2026-11-01
 ---
@@ -73,7 +73,41 @@ is stored, who writes it, who reads it, and where two of them can disagree. Know
 board (engine `plan` op, studio board_plan/auto-sync), the steps card, runhook/progress (live calls),
 the stop hook, the Files page, the worktrees card. Output: the root causes, and W1's steps with gates.
 
+**W0 — findings (2026-11-01).** Measured on mr-finance (read-only) and the studio:
+
+| | what disagrees | evidence | root cause |
+|---|---|---|---|
+| R1 | Board m33 says "2 of 7 done, FF1 open"; FEATURE_FLOWS_PLAN.md says 5 of 7, FF5 in progress | m33's cards last written 2026-11-01 02:13; the doc changed at 16:16 and 17:47 | the board follows a plan only after an `Edit`/`Write` of it (app.py `_plan_sync`) or a `board_plan` call; the PR #74 session changed the doc 4× with `python3 -`/`sed -i` in a worktree and never called `board_plan` |
+| R2 | a phase card reads done because the doc says so | `_PHASE_CARD` in the engine's `_plan`: status word → card state | no run, test or evidence stands behind a mirrored card; the stop hook (S1/T1) is the only check, and only in chat |
+| R3 | the board card, the turn and its `steps` card are three records with no link | engine `cards` · studio `turns` · studio `items` (kind steps) | nothing says which card a turn works; the Board cannot light it, the card cannot list its turns |
+| R4 | evidence stays in the chat | testreport facts, `failing_on_base`/`on_base` output, commit messages | nothing carries a turn's evidence to its card |
+| R5 | questions live in three places | engine `interactions` (engine milestones only) · `requirements/open_questions.md` · the assistant's last line ("Do you want me to plan D3 next?") | a plan worked in chat has no question record |
+| R6 | a plan's board files are committed on the main checkout's branch | `d9303f1 board: m33 from docs/FEATURE_FLOWS_PLAN.md` is on mr-finance **main** (the live :8030 checkout) while the plan is on `refactor/feature-flows-2` | the engine's `_commit_one` commits in `project.repo`, whatever branch it has out |
+| R7 | a plan the engine cannot read is dropped without a word | this plan's own `pending` was not a phase status (`open`), so `plan` answered invalid | `_plan_sync` ignores the answer (`except: pass`, `ok: false` unread) |
+
+The studio repo itself has no board (`docs/brd`, `.operonx/project`): this plan's status lives in its doc.
+
 **W1 — Unified project execution model** (brief §1–4, the most important part):
+
+Steps, from W0 (each closes a root cause, reuses what exists, no new store):
+- **W1.1** (R1, R7) The board follows the doc however it changed: at a turn's end, every plan the board
+  mirrors is read from the checkout and the project's worktrees, and synced when its text differs from
+  what was mirrored; also the Bash-edited ones. A refused sync is a note in the turn ("the board could not
+  read docs/X_PLAN.md: …"), not silence.
+- **W1.2** (R6) A plan's sync writes the store and never commits on the main checkout (engine `plan` with
+  `commit: false`; the board files are written only where the plan lives).
+- **W1.3** (R3) A turn names its card: `steps` takes `card` (`<plan path>#<phase id>` or `<milestone>/<card>`);
+  the turn row keeps it; the Board lights that card while the turn runs and the card lists its turns.
+- **W1.4** (R2, R4) A card's evidence is its turns' facts (test runs, `failing_on_base`, `on_base`, commits);
+  a phase marked done with no green run behind it shows "marked done · no evidence", apart from verified.
+- **W1.5** (R5) Open questions in one list: engine interactions, open_questions.md, and a turn that ended
+  waiting on the owner, on the overview and on its card.
+
+Gates: a scratch repo where a plan is changed by `sed` in a worktree is in line on the board at the turn's
+end with no commit on the main checkout; a turn with `card` shows on that card with its test run; the
+studio suite; screenshots of the Board card and the overview.
+
+The brief's goals for W1:
 - one hierarchy, adapted to what exists: project → plan → card → run → steps, logs, tests, git, evidence;
 - a card the assistant creates is on the board at once; a run names its card; starting moves the card,
   the run's real result moves it again; a failed run never reads done; "built", "tests pass",
