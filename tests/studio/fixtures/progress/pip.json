@@ -1,0 +1,8 @@
+{
+ "command": "python3 -m venv pvenv && pvenv/bin/pip install six",
+ "parts": [
+  "python3 -m venv pvenv",
+  "pvenv/bin/pip install six"
+ ],
+ "background": false
+}

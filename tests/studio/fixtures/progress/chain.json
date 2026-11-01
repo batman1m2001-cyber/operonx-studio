@@ -1,0 +1,9 @@
+{
+ "command": "python -m pytest suite -q -p no:randomly -p no:cacheprovider; node --test n.test.mjs && git clone --progress /src clone2",
+ "parts": [
+  "python -m pytest suite -q -p no:randomly -p no:cacheprovider",
+  "node --test n.test.mjs",
+  "git clone --progress /src clone2"
+ ],
+ "background": false
+}

@@ -1,0 +1,8 @@
+{
+ "command": "docker build --progress=plain -t ox-progress-probe . && docker rmi ox-progress-probe",
+ "parts": [
+  "docker build --progress=plain -t ox-progress-probe .",
+  "docker rmi ox-progress-probe"
+ ],
+ "background": false
+}
