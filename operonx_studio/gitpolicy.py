@@ -25,6 +25,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
+from .safewrite import atomic_write
+
 __all__ = ["LEVELS", "assistant_env", "describe", "load", "routes", "save", "summary"]
 
 LEVELS = ("off", "commit", "push", "pr", "merge")
@@ -102,7 +104,7 @@ def save(state: Path, pid: str, root: Path, body: Dict[str, Any]) -> Dict[str, A
         cur["identity"] = {"name": name, "email": email}
     f = _file(state, pid)
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({k: cur[k] for k in ("identity", "level", "protected")}, indent=1), encoding="utf-8")
+    atomic_write(f, json.dumps({k: cur[k] for k in ("identity", "level", "protected")}, indent=1))
     return load(state, pid, root)
 
 
@@ -147,7 +149,7 @@ def assistant_env(state: Path, pid: str, root: Path, env: Dict[str, str]) -> Dic
     policy = load(state, pid, root)
     f = _file(state, pid).with_suffix(".effective.json")
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({**policy, "root": str(root)}), encoding="utf-8")
+    atomic_write(f, json.dumps({**policy, "root": str(root)}))  # the guard may be reading it
     out = dict(env)
     out["OPERONX_STUDIO_GIT_POLICY"] = str(f)
     out["OPERONX_STUDIO_PY"] = sys.executable

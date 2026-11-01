@@ -115,8 +115,9 @@ class Claim:
     def announce(self, host: str, port: int) -> None:
         import os
 
-        _run_path().write_text(json.dumps({"host": host, "port": port, "pid": os.getpid(),
-                                           "at": time.time()}), encoding="utf-8")
+        from .safewrite import atomic_write
+
+        atomic_write(_run_path(), json.dumps({"host": host, "port": port, "pid": os.getpid(), "at": time.time()}))
 
     def release(self) -> None:
         try:

@@ -125,6 +125,30 @@ def test_the_write_is_atomic_and_keeps_the_files_mode(tmp_path):
     assert not [x for x in tmp_path.iterdir() if x.name.endswith(".studio")]  # no temp file left
 
 
+
+def test_the_studios_own_state_is_replaced_whole(tmp_path):
+    """A reader racing the writer sees the old file or the new one (the deploy history once read as empty)."""
+    import json
+    import threading
+
+    p = tmp_path / "runs.json"
+    sw.atomic_write(p, json.dumps([]))
+    assert oct(p.stat().st_mode & 0o777) == "0o600"  # new: private, as the secrets' files must be
+    seen, done = [], threading.Event()
+
+    def read():
+        while not done.is_set():
+            seen.append(len(json.loads(p.read_text(encoding="utf-8"))))
+
+    t = threading.Thread(target=read)
+    t.start()
+    for n in range(1, 300):
+        sw.atomic_write(p, json.dumps([{"id": i, "pad": "x" * 200} for i in range(n)]))
+    done.set()
+    t.join()
+    assert seen and seen == sorted(seen)  # never a half file, never back to an older one
+    assert [x.name for x in tmp_path.iterdir()] == ["runs.json"]
+
 def test_undo_puts_it_back_only_if_nothing_changed_since(tmp_path):
     p = _file(tmp_path)
     w = sw.commit(tmp_path, p, YAML.replace("model: a", "model: c"), sw.sha(YAML))

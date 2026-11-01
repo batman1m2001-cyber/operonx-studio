@@ -305,13 +305,13 @@ def t_env_list(s: Studio, a: Dict[str, Any]) -> str:
 
 def t_env_check(s: Studio, a: Dict[str, Any]) -> str:
     what = str(a.get("what") or "status")
-    body = {"op": what, "env": str(a["env"])} | ({"path": a["path"]} if a.get("path") else {})
-    got = s.call("/environments", body)
-    return f"{what} on {a['env']} (exit {got.get('exit_code')}):\n{got.get('said', '')}"
+    env = str(a.get("env") or "local")
+    got = s.call("/environments", {"op": what, "env": env} | ({"path": a["path"]} if a.get("path") else {}))
+    return f"{what} on {env} (exit {got.get('exit_code')}):\n{got.get('said', '')}"
 
 
 def t_env_run(s: Studio, a: Dict[str, Any]) -> str:
-    got = s.call("/environments", {"op": "run", "env": str(a["env"]), "command": str(a["command"]),
+    got = s.call("/environments", {"op": "run", "env": str(a.get("env") or "local"), "command": str(a["command"]),
                                    "timeout": a.get("timeout") or 300})
     if got.get("needs_confirm"):
         return f"Not run: {got['needs_confirm']} The owner runs it from the Environments page."
@@ -320,7 +320,7 @@ def t_env_run(s: Studio, a: Dict[str, Any]) -> str:
 
 def t_env_services(s: Studio, a: Dict[str, Any]) -> str:
     what = str(a.get("what") or "list")
-    got = s.call("/env-services", {"op": what, "env": str(a["env"])} | ({"key": a["key"]} if a.get("key") else {}))
+    got = s.call("/env-services", {"op": what, "env": str(a.get("env") or "local")} | ({"key": a["key"]} if a.get("key") else {}))
     if got.get("needs_confirm"):
         return f"Not done: {got['needs_confirm']} The owner does it from the Environments page."
     lines = [got["said"]] if got.get("said") else []
@@ -350,7 +350,7 @@ def t_deploy(s: Studio, a: Dict[str, Any]) -> str:
         if run is None:
             return "No deploy yet."
     else:
-        body = {"op": what, "env": str(a["env"])} | {k: a[k] for k in ("ref", "card") if a.get(k)}
+        body = {"op": what, "env": str(a.get("env") or "local")} | {k: a[k] for k in ("ref", "card") if a.get(k)}
         got = s.call("/deploys", body)
         if got.get("needs_confirm") or got.get("waiting"):
             return f"Not started: {got.get('needs_confirm') or got.get('said')}. The owner approves it on the Environments page."
@@ -958,24 +958,26 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                 "run). Their keys and variable values are never shown to you.",
                  "schema": _schema({})},
     "env_check": {"fn": t_env_check,
-                  "description": "Read an environment: what=status (branch, last commit, changes in its folder), "
+                  "description": "Read an environment (env, else local): what=status (branch, last commit, changes in its folder), "
                                  "processes, resources (load, memory, disk), logs (path: the file's last lines), "
                                  "files (path: a folder's listing), test (connect and say who and where).",
                   "schema": _schema({"env": _S, "what": {"type": "string", "enum": [
-                      "status", "processes", "resources", "logs", "files", "test"]}, "path": _S}, ["env"])},
+                      "status", "processes", "resources", "logs", "files", "test"]}, "path": _S})},
     "env_run": {"fn": t_env_run,
-                "description": "Run one command in an environment's folder, with its variables, to its end (timeout "
+                "description": "Run one command in an environment's folder (env, else local), with its variables, to its end (timeout "
                                "seconds, default 300), and return its exit code and output (secret values shown as "
                                "•••). Production is the owner's: you read there, you do not run.",
-                "schema": _schema({"env": _S, "command": _S, "timeout": _N}, ["env", "command"])},
+                "schema": _schema({"env": _S, "command": _S, "timeout": _N}, ["command"])},
     "env_services": {"fn": t_env_services,
-                     "description": "The project's services on a host environment: what=list (each listener running "
-                                    "or not, its /healthz, pid, preview URL, the release recorded), log (key: a "
+                     "description": "The project's services in an environment (env, else local: this machine): "
+                                    "what=list (each listener running or not, its /healthz, pid, preview URL, the "
+                                    "release recorded), log (key: a "
                                     "listener's last lines), start, stop, restart (key). Production is the owner's.",
                      "schema": _schema({"env": _S, "what": {"type": "string", "enum": [
-                         "list", "log", "start", "stop", "restart"]}, "key": _S}, ["env"])},
+                         "list", "log", "start", "stop", "restart"]}, "key": _S})},
     "deploy": {"fn": t_deploy,
-               "description": "Deploy to a host environment: git (ref: a branch or commit) → build → test → run "
+               "description": "Deploy to an environment (env, else local: this machine, which runs its checkout as "
+                              "it is — ref defaults to it): git (ref: a branch or commit) → build → test → run "
                               "(services restarted) → validate (each up and healthy) → deploy (recorded as the "
                               "release). what=deploy (ref), rollback (to the last good release before the current "
                               "one), status (id, or the newest). Waits up to wait seconds (default 120) and returns "

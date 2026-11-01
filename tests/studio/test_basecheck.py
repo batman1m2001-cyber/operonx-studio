@@ -84,3 +84,20 @@ def test_a_command_runs_here_and_on_base(repo):
     assert py_dir == str(Path(sys.executable).parent)
     with pytest.raises(ValueError, match="command"):
         basecheck.on_base(str(repo), "  ", base="main")
+
+
+
+def test_a_project_in_a_subfolder_runs_there_on_base(tmp_path, monkeypatch):
+    """A repo holding several projects: the ids and the command are the project's, not the repo top's."""
+    monkeypatch.setattr(basecheck, "ROOT", tmp_path / "checks")
+    r = tmp_path / "mono"
+    (r / "proj" / "tests").mkdir(parents=True)
+    (r / "proj" / "tests" / "test_a.py").write_text("def test_old():\n    assert False\n")
+    _git(r, "init", "-q", "-b", "main")
+    _git(r, "add", ".")
+    _git(r, "commit", "-qm", "base")
+    _git(r, "checkout", "-qb", "work")
+    proj = str(r / "proj")
+    got = basecheck.check(proj, ["tests/test_a.py::test_old"], base="main", python=sys.executable)
+    assert got["results"] == {"tests/test_a.py::test_old": "fails on base too"}
+    assert basecheck.on_base(proj, "ls tests/test_a.py", base="main")["on_base"] == {"rc": 0, "output": "tests/test_a.py\n"}

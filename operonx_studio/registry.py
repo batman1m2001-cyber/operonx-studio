@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .safewrite import atomic_write
+
 __all__ = ["ProjectRef", "Recents", "project_id", "state_dir"]
 
 MANIFEST = "operonx.toml"
@@ -111,7 +113,7 @@ class Recents:
         self._file.parent.mkdir(parents=True, exist_ok=True)
         payload = {"recents": [{"root": str(r.root), "opened_at": r.opened_at}
                                for r in self.ordered()]}
-        self._file.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+        atomic_write(self._file, json.dumps(payload, indent=1))
 
     def touch(self, root: Path) -> ProjectRef:
         ref = ProjectRef(root=Path(root).resolve(), opened_at=time.time())

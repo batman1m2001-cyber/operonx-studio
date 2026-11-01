@@ -1,22 +1,23 @@
 """Run, test, deploy: an environment's services and a light pipeline to it (docs/WORKSPACE_PLAN.md W4).
 
-Services are the project's listeners (:func:`operonx_studio.services.listeners_of` over the IR). On this machine
-the Services page starts them (:class:`~operonx_studio.services.ServiceProcs`); on a host over SSH they are started
-here the same way — the interpreter there, ``-m operonx.cli.serve --only …``, detached in a session of its own, the
-environment's variables loaded — with its pid, log and the current release under ``~/.local/state/operonx-svc/<env>/``
-on the host. What is up is asked of the port itself (``/healthz``, which every operonx listener has).
+Services are the project's listeners (:func:`operonx_studio.services.listeners_of` over the IR), on this machine
+(the environment used when none is named) or on a host over SSH, started the same way — the interpreter there,
+``-m operonx.cli.serve --only …``, detached in a session of its own, the environment's variables loaded — with its
+pid, log and the current release under ``~/.local/state/operonx-svc/<env>/`` there (``local-<hash of the
+checkout>`` here). On this machine a listener the Services page started gives its port over. What is up is asked
+of the port itself (``/healthz``, which every operonx listener has).
 
 A deploy runs its stages in order, each with its time and the tail of its output: git (the folder to a branch or a
-commit), build, test, run (the listeners restarted), validate (each up and healthy), deploy (the release recorded as
-the environment's current). On production it waits for the owner's approval first. Every deploy is kept, and a
-rollback is a deploy of the last good release before the current one, or of the current one when a deploy
-after it failed and left the host on its code (its tests are not run again).
+commit; this machine runs the checkout as it is), build, test, run (the listeners restarted), validate (each up and
+healthy), deploy (the release recorded as the environment's current). On production it waits for the owner's
+approval first. Every deploy is kept, and a rollback is a deploy of the last good release before the current one,
+or of the current one when a deploy after it failed and left the host on its code (its tests are not run again).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
-import os
 import re
 import shlex
 import threading
@@ -29,6 +30,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .environments import Env, EnvError, Environments, Provider, checkout, may, who
+from .safewrite import atomic_write
 from .services import Listener
 
 STAGES = ("git", "build", "test", "run", "validate", "deploy")
@@ -38,6 +40,8 @@ STAGES = ("git", "build", "test", "run", "validate", "deploy")
 
 
 def _dir(env: Env) -> str:
+    if env.kind == "local":  # every project has a "local": one folder per checkout
+        return f"~/.local/state/operonx-svc/local-{hashlib.sha1(env.workdir.encode()).hexdigest()[:10]}"
     return f"~/.local/state/operonx-svc/{env.id}"
 
 
@@ -97,9 +101,12 @@ def read_status(env: Env, listeners: List[Listener], out: str) -> Dict[str, Any]
 
 def preview(env: Env, lst: Listener) -> str:
     """Where to open it: the environment's preview template (``https://{port}.staging.example.com``), else the host
-    and port when the listener is on every address; one on 127.0.0.1 only is not reachable from outside."""
+    and port when the listener is on every address; one on 127.0.0.1 only is not reachable from outside. This
+    machine's listeners are opened from here, at their own address."""
     if env.preview:
         return env.preview.replace("{port}", str(lst.port))
+    if env.kind == "local":
+        return f"http://{'127.0.0.1' if lst.host in ('', '0.0.0.0', '::') else lst.host}:{lst.port}"
     if lst.host in ("", "0.0.0.0", "::"):
         return f"http://{env.host}:{lst.port}"
     return ""
@@ -143,9 +150,7 @@ class Deploys:
             runs.sort(key=lambda r: r["created"])
             p = self._file(pid)
             p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(".tmp")  # replaced whole: a reader never sees half a file
-            tmp.write_text(json.dumps(runs[-self.KEEP:], indent=1), encoding="utf-8")
-            os.replace(tmp, p)
+            atomic_write(p, json.dumps(runs[-self.KEEP:], indent=1))  # a reader never sees half a file
 
     def current(self, pid: str, eid: str) -> List[Dict[str, Any]]:
         """The environment's good releases, newest first."""
@@ -161,7 +166,8 @@ def _new(env: Env, ref: str, by: str, card: str, kind: str) -> Dict[str, Any]:
 
 def register(app: Any, *, envs: Environments, watcher_of: Callable[[str], Any],
              listeners: Callable[[str], List[Listener]], base_env: Callable[[], Dict[str, str]],
-             remote_url: Callable[[Path], str], state_dir: Callable[[], Path]) -> Deploys:
+             remote_url: Callable[[Path], str], state_dir: Callable[[], Path],
+             local_procs: Optional[Any] = None) -> Deploys:
     """``/api/p/{pid}/env-services`` (a host's listeners) and ``/api/p/{pid}/deploys`` (the pipeline)."""
     deploys = Deploys(state_dir())
 
@@ -172,11 +178,16 @@ def register(app: Any, *, envs: Environments, watcher_of: Callable[[str], Any],
         return Path(w.root)
 
     def host(pid: str, eid: str) -> tuple:
+        """The environment (this machine when none is named), its folder and where its commands run."""
         root = root_of(pid)
-        env = envs.get(pid, root, eid)
-        if env.kind == "local":
-            raise EnvError("this machine runs the checkout as it is: its services are on the Services page")
-        return root, env, envs.provider(pid, root, eid, base_env())
+        env = envs.get(pid, root, eid or "local")
+        return root, env, envs.provider(pid, root, env.id, base_env())
+
+    def take_over(pid: str, env: Env, keys: List[str]) -> None:
+        """On this machine a listener the Services page started gives its port to the environment's."""
+        if env.kind == "local" and local_procs is not None:
+            for k in keys:
+                local_procs.stop(pid, k)
 
     async def answer(fn: Callable[[], Any]) -> JSONResponse:
         import asyncio
@@ -220,6 +231,8 @@ def register(app: Any, *, envs: Environments, watcher_of: Callable[[str], Any],
             raise EnvError(f"unknown op {op!r}")
         if env.production and not body.get("confirm"):
             return {"needs_confirm": f"Production: {op} {lst.key} on {env.name or env.id}?"}
+        if op != "stop":
+            take_over(pid, env, [lst.key])
         cmd = {"start": start_cmd(env, lst), "stop": stop_cmd(env, lst.port),
                "restart": stop_cmd(env, lst.port) + "; " + start_cmd(env, lst)}[op]
         code, out = p.run(cmd, timeout=60)
@@ -268,7 +281,7 @@ def register(app: Any, *, envs: Environments, watcher_of: Callable[[str], Any],
                 raise EnvError("no earlier good release to go back to")
             ref, kind = back["sha"], "rollback"
         elif op == "deploy":
-            ref, kind = str(body.get("ref") or "").strip(), "deploy"
+            ref, kind = str(body.get("ref") or "").strip() or ("HEAD" if env.kind == "local" else ""), "deploy"
             if not ref:
                 raise EnvError("which branch or commit?")
         else:
@@ -330,6 +343,8 @@ def register(app: Any, *, envs: Environments, watcher_of: Callable[[str], Any],
     def stage(pid: str, root: Path, env: Env, p: Provider, run: Dict[str, Any], name: str) -> tuple:
         """(True | False | None for skipped, what it said)."""
         lst = listeners(pid)
+        if name == "git" and env.kind == "local":
+            return here(p, run)
         if name == "git":
             code, out = p.run(checkout(env, run["ref"], remote_url(root)) + " && git rev-parse HEAD", timeout=300)
             sha = out.strip().splitlines()[-1] if out.strip() else ""
@@ -347,6 +362,7 @@ def register(app: Any, *, envs: Environments, watcher_of: Callable[[str], Any],
         if name == "run":
             if not lst:
                 return None, "no services in the project"
+            take_over(pid, env, [x.key for x in lst])
             cmd = "; ".join(stop_cmd(env, x.port) for x in lst) + "; " + " && ".join(start_cmd(env, x) for x in lst)
             code, out = p.run(cmd, timeout=120)
             return code == 0, out
@@ -376,6 +392,24 @@ def register(app: Any, *, envs: Environments, watcher_of: Callable[[str], Any],
                               f"echo released {run['sha'][:12]}", timeout=30)
             return code == 0, out
         raise EnvError(f"unknown stage {name!r}")
+
+    def here(p: Provider, run: Dict[str, Any]) -> tuple:
+        """This machine runs the checkout as it is: the git stage records it, and refuses a ref it is not on
+        (switching the owner's working folder is the owner's, from the Git page)."""
+        code, out = p.run("git rev-parse HEAD && git rev-parse --abbrev-ref HEAD && git log -1 --format='%h %s' "
+                          "&& git status --porcelain | head -5", timeout=30)
+        lines = out.strip().splitlines()
+        if code != 0 or len(lines) < 3 or not re.fullmatch(r"[0-9a-f]{40}", lines[0]):
+            return False, out
+        sha, branch, ref = lines[0], lines[1], run["ref"]
+        if ref not in ("HEAD", branch) and not (re.fullmatch(r"[0-9a-f]{7,40}", ref) and sha.startswith(ref)):
+            return False, (f"this machine is on {branch} at {sha[:12]}, not {ref}: switch the checkout on the Git "
+                           f"page, or deploy {branch}")
+        run["sha"] = sha
+        if ref == "HEAD":  # named for what it was
+            run["ref"] = branch if branch != "HEAD" else sha[:12]
+        dirty = "\nuncommitted changes run as they are:\n" + "\n".join(lines[3:]) if lines[3:] else ""
+        return True, f"the checkout as it is: {branch} at {lines[2]}{dirty}"
 
     app.state.deploys = deploys
     return deploys
