@@ -293,8 +293,33 @@ def _term_out(s: Studio, tid: str, since: int, wait: float) -> str:
             + f"\n{text}")
 
 
+def t_env_list(s: Studio, a: Dict[str, Any]) -> str:
+    lines = []
+    for e in s.call("/environments")["environments"]:
+        flags = [w for w, on in (("production", e["production"]), ("host key trusted", bool(e["trusted"])),
+                                 ("key set", e["key_set"])) if on]
+        lines.append(f"{e['id']} · {e['name']} · {e['where']} · you may {e['assistant']}"
+                     + (f" · {', '.join(flags)}" if flags else "") + (f" · vars {', '.join(e['vars'])}" if e["vars"] else ""))
+    return "\n".join(lines)
+
+
+def t_env_check(s: Studio, a: Dict[str, Any]) -> str:
+    what = str(a.get("what") or "status")
+    body = {"op": what, "env": str(a["env"])} | ({"path": a["path"]} if a.get("path") else {})
+    got = s.call("/environments", body)
+    return f"{what} on {a['env']} (exit {got.get('exit_code')}):\n{got.get('said', '')}"
+
+
+def t_env_run(s: Studio, a: Dict[str, Any]) -> str:
+    got = s.call("/environments", {"op": "run", "env": str(a["env"]), "command": str(a["command"]),
+                                   "timeout": a.get("timeout") or 300})
+    if got.get("needs_confirm"):
+        return f"Not run: {got['needs_confirm']} The owner runs it from the Environments page."
+    return f"exit {got.get('exit_code')}\n{got.get('said', '')}"
+
+
 def t_terminal_open(s: Studio, a: Dict[str, Any]) -> str:
-    body = {k: a[k] for k in ("cwd", "command", "title", "card") if a.get(k)}
+    body = {k: a[k] for k in ("cwd", "command", "title", "card", "env") if a.get(k)}
     t = s.call("/terminals", body)
     s.show("open_terminal", id=t["id"], title=t["title"])
     out = _term_out(s, t["id"], 0, float(a.get("wait") or (5 if a.get("command") else 1)))
@@ -880,8 +905,25 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                      "long or the owner should watch: a dev server, a watcher, an interactive tool. "
                                      "command: run that instead of an interactive shell (the terminal ends with it). "
                                      "card: the board card it works for (docs/X_PLAN.md#W1 or m3/C2). Returns the "
-                                     "first output after up to wait seconds.",
-                      "schema": _schema({"cwd": _S, "command": _S, "title": _S, "card": _S, "wait": _N})},
+                                     "first output after up to wait seconds. env: an environment's id (env_list) "
+                                     "to open it there instead, over SSH (cwd is then its folder).",
+                      "schema": _schema({"cwd": _S, "command": _S, "title": _S, "card": _S, "env": _S, "wait": _N})},
+    "env_list": {"fn": t_env_list,
+                 "description": "The project's environments: local (this machine) and the hosts the owner added, "
+                                "where each runs, whether it is production, and what you may do there (none, read, "
+                                "run). Their keys and variable values are never shown to you.",
+                 "schema": _schema({})},
+    "env_check": {"fn": t_env_check,
+                  "description": "Read an environment: what=status (branch, last commit, changes in its folder), "
+                                 "processes, resources (load, memory, disk), logs (path: the file's last lines), "
+                                 "files (path: a folder's listing), test (connect and say who and where).",
+                  "schema": _schema({"env": _S, "what": {"type": "string", "enum": [
+                      "status", "processes", "resources", "logs", "files", "test"]}, "path": _S}, ["env"])},
+    "env_run": {"fn": t_env_run,
+                "description": "Run one command in an environment's folder, with its variables, to its end (timeout "
+                               "seconds, default 300), and return its exit code and output (secret values shown as "
+                               "•••). Production is the owner's: you read there, you do not run.",
+                "schema": _schema({"env": _S, "command": _S, "timeout": _N}, ["env", "command"])},
     "terminal_send": {"fn": t_terminal_send,
                       "description": "Type into a terminal (Enter added unless enter=false; \\u0003 is Ctrl-C) and "
                                      "return what it printed, waiting up to wait seconds (default 10) for the "

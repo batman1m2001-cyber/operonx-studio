@@ -13,6 +13,7 @@ const TerminalPage = (() => {
   let timer = null;
   let list = [];
   let places = [];
+  let hosts = [];        // environments over SSH (W3): a new terminal can open there
   const K = () => `terms:${PID}`;
   const v = () => Object.assign({panes: [], split: false, focus: 0}, recall(K(), {}));
   let view = null;
@@ -65,6 +66,7 @@ const TerminalPage = (() => {
     const got = await api(`/api/p/${PID}/terminals`);
     list = got.terminals;
     places = got.places;
+    try { hosts = (await api(`/api/p/${PID}/environments`)).environments.filter((e) => e.kind === "ssh"); } catch { hosts = []; }
   }
 
   async function mount(page) {
@@ -105,11 +107,15 @@ const TerminalPage = (() => {
     head.append(el("h2", "pm-title", "Terminal"),
       el("span", "pm-sub", list.length ? `${list.length} open` : ""));
     const where = el("select", "tm-where");
-    where.title = "Where the new terminal starts: the checkout or one of its worktrees";
+    where.title = "Where the new terminal starts: the checkout, one of its worktrees, or a host (Environments)";
     for (const p of places) where.append(new Option(short(p), p));
-    where.hidden = places.length < 2;
+    for (const e of hosts) where.append(new Option(`${e.name || e.id} (ssh)`, `env:${e.id}`));
+    where.hidden = places.length + hosts.length < 2;
     const add = button("primary", "New terminal", async () => {
-      const t = await api(`/api/p/${PID}/terminals`, {cwd: where.value || places[0]});
+      const env = where.value.startsWith("env:") ? where.value.slice(4) : "";
+      let t;
+      try { t = await api(`/api/p/${PID}/terminals`, env ? {env} : {cwd: where.value || places[0]}); }
+      catch (err) { toast((err.data || {}).error || err.message); return; }
       list.push(t);
       show(t.id);
     }, "A login shell in the project");
@@ -140,6 +146,7 @@ const TerminalPage = (() => {
       const meta = el("span", "tm-meta", `${state} · ${ago(t.last)} · ${short(t.cwd)}`);
       li.append(dot, name);
       if (t.by === "assistant") li.append(el("span", "chip", "assistant"));
+      if (t.env) li.append(el("span", "chip", t.env));
       if (t.card) li.append(el("span", "chip", t.card));
       const x = button("tm-x", "×", async (e) => {
         e.stopPropagation();

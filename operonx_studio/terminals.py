@@ -16,6 +16,7 @@ Terminals live as long as the studio process: a restart ends them, as it ends a 
 from __future__ import annotations
 
 import asyncio
+import codecs
 import fcntl
 import os
 import re
@@ -60,6 +61,9 @@ class Terminal:
     last: float = 0.0
     ended: Optional[float] = None
     readers: Set[asyncio.Queue] = field(default_factory=set)
+    env: str = ""  # the environment it runs in (WORKSPACE_PLAN W3): "" is this machine
+    hide: Callable[[str], str] = lambda text: text  # the environment's secrets taken out of what it printed
+    secrets: Callable[[], List[str]] = list  # their values: a stream holds back what may be the start of one
 
     @property
     def end(self) -> int:
@@ -85,7 +89,7 @@ class Terminal:
 
     def as_dict(self) -> Dict[str, Any]:
         now = self.running()
-        return {"id": self.id, "title": self.title, "cwd": self.cwd, "by": self.by, "card": self.card,
+        return {"id": self.id, "title": self.title, "cwd": self.cwd, "by": self.by, "card": self.card, "env": self.env,
                 "started": self.started, "last": self.last or self.started,
                 "state": "ended" if self.ended is not None else ("working" if now else "idle"),
                 "running": now, "exit_code": self.popen.returncode if self.ended is not None else None,
@@ -106,12 +110,14 @@ class Terminals:
         return t if t is not None and t.pid == pid else None
 
     def open(self, pid: str, cwd: Path, env: Dict[str, str], *, command: str = "", title: str = "",
-             by: str = "owner", card: str = "", rows: int = 30, cols: int = 110) -> Terminal:
+             by: str = "owner", card: str = "", rows: int = 30, cols: int = 110, argv: Optional[List[str]] = None,
+             where: str = "", env_id: str = "", hide: Optional[Callable[[str], str]] = None,
+             secrets: Optional[Callable[[], List[str]]] = None) -> Terminal:
         master, slave = os.openpty()
         _winsize(master, rows, cols)
         env = dict(env, TERM="xterm-256color", COLORTERM="truecolor")
         shell = env.get("SHELL") or "/bin/bash"
-        argv = [shell, "-lc", command] if command else [shell, "-l"]
+        argv = argv or ([shell, "-lc", command] if command else [shell, "-l"])
 
         def child() -> None:  # the PTY becomes the new session's controlling terminal
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
@@ -123,8 +129,12 @@ class Terminals:
             os.close(slave)
         os.set_blocking(master, False)
         tid = uuid.uuid4().hex[:10]
-        t = Terminal(tid, pid, str(cwd), title or (command[:60] if command else Path(cwd).name), by, card,
-                     popen, master, time.time())
+        t = Terminal(tid, pid, where or str(cwd), title or (command[:60] if command else Path(where or cwd).name), by,
+                     card, popen, master, time.time(), env=env_id)
+        if hide is not None:
+            t.hide = hide
+        if secrets is not None:
+            t.secrets = secrets
         self._all[tid] = t
         try:
             asyncio.get_running_loop().add_reader(master, self._read, t)
@@ -227,13 +237,27 @@ def worktrees(root: Path) -> List[str]:
     return found or [str(root)]
 
 
+def _maybe_secret(text: str, values: List[str]) -> int:
+    """How much of the end of *text* is the start of one of *values*: held back until the next output."""
+    keep = 0
+    for v in values:
+        for k in range(min(len(v) - 1, len(text)), keep, -1):
+            if text.endswith(v[:k]):
+                keep = k
+                break
+    return keep
+
+
 def register(app: Any, *, terms: Terminals, watcher_of: Callable[[str], Any],
              env_of: Callable[[str, Path, str], Dict[str, str]], ws_user: Callable[[Any], Optional[Dict[str, Any]]],
-             on_open: Optional[Callable[[str, Terminal], None]] = None) -> None:
+             on_open: Optional[Callable[[str, Terminal], None]] = None,
+             remote_of: Optional[Callable[..., Dict[str, Any]]] = None) -> None:
     """The terminal routes: list, open, type, read, close, and the live socket a page draws one with.
 
     *env_of(pid, root, by)* is the environment a terminal starts with; *ws_user(websocket)* is who opened the
-    socket, ``None`` when they may not (the HTTP sign-in and same-origin checks do not see a websocket)."""
+    socket, ``None`` when they may not (the HTTP sign-in and same-origin checks do not see a websocket).
+    *remote_of(pid, root, env, by, command)* is a terminal in another environment: ``{argv, env, cwd, where, hide,
+    secrets}`` or ``{error}`` (W3)."""
     def root_of(pid: str) -> Optional[Path]:
         w = watcher_of(pid)
         return Path(w.root) if w is not None else None
@@ -251,18 +275,27 @@ def register(app: Any, *, terms: Terminals, watcher_of: Callable[[str], Any],
         root = root_of(pid)
         if root is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
-        places = await asyncio.to_thread(worktrees, root)
-        cwd = str(body.get("cwd") or root)
-        if not any(cwd == p or cwd.startswith(p.rstrip("/") + "/") for p in places) or not Path(cwd).is_dir():
-            return JSONResponse({"error": f"{cwd} is not in the project's checkout or its worktrees"}, status_code=400)
         user = getattr(request.state, "user", None) or {}
         # the header too (the Board reads it the same way): it only adds the git guard, so claiming it gains nothing
         by = "assistant" if user.get("via") == "assistant" or request.headers.get("x-operonx-via") == "assistant" \
             else "owner"
+        common = dict(command=str(body.get("command") or ""), title=str(body.get("title") or ""), by=by,
+                      card=str(body.get("card") or ""), rows=int(body.get("rows") or 30), cols=int(body.get("cols") or 110))
+        if body.get("env") and body["env"] != "local" and remote_of is not None:
+            got = await asyncio.to_thread(remote_of, pid, root, str(body["env"]), by, common["command"])
+            if got.get("error"):
+                return JSONResponse({"error": got["error"]}, status_code=400)
+            t = terms.open(pid, Path(got["cwd"]), got["env"], argv=got["argv"], where=got["where"],
+                           env_id=str(body["env"]), hide=got["hide"], secrets=got["secrets"], **common)  # type: ignore[arg-type]
+            if on_open is not None:
+                on_open(pid, t)
+            return JSONResponse(t.as_dict())
+        places = await asyncio.to_thread(worktrees, root)
+        cwd = str(body.get("cwd") or root)
+        if not any(cwd == p or cwd.startswith(p.rstrip("/") + "/") for p in places) or not Path(cwd).is_dir():
+            return JSONResponse({"error": f"{cwd} is not in the project's checkout or its worktrees"}, status_code=400)
         env = await asyncio.to_thread(env_of, pid, root, by)
-        t = terms.open(pid, Path(cwd), env, command=str(body.get("command") or ""), title=str(body.get("title") or ""),
-                       by=by, card=str(body.get("card") or ""), rows=int(body.get("rows") or 30),
-                       cols=int(body.get("cols") or 110))
+        t = terms.open(pid, Path(cwd), env, **common)  # type: ignore[arg-type]
         if on_open is not None:
             on_open(pid, t)
         return JSONResponse(t.as_dict())
@@ -290,7 +323,7 @@ def register(app: Any, *, terms: Terminals, watcher_of: Callable[[str], Any],
         t = terms.get(pid, tid)
         if t is None:
             return JSONResponse({"error": "no such terminal"}, status_code=404)
-        text = t.since(since).decode("utf-8", "replace")
+        text = t.hide(t.since(since).decode("utf-8", "replace"))
         return JSONResponse({**t.as_dict(), "since": max(since, t.base), "text": text if raw else plain(text)})
 
     @app.delete("/api/p/{pid}/terminals/{tid}")
@@ -308,18 +341,30 @@ def register(app: Any, *, terms: Terminals, watcher_of: Callable[[str], Any],
         q: asyncio.Queue = asyncio.Queue()
         t.readers.add(q)
         sent = t.base
+        text = codecs.getincrementaldecoder("utf-8")("replace")
+        held = ""  # in an environment: the end of what it printed that may be the start of a secret
 
         async def pump() -> None:
-            nonlocal sent
+            nonlocal sent, held
             while True:
+                chunk = b""
                 if t.end > sent:
                     chunk = t.since(sent)
                     sent = t.end
+                if t.env and (chunk or held):
+                    out = held + text.decode(chunk)
+                    keep = 0 if not chunk else _maybe_secret(out, t.secrets())
+                    held = out[len(out) - keep:] if keep else ""
+                    chunk = t.hide(out[:len(out) - keep]).encode()
+                if chunk:
                     await ws.send_bytes(chunk)
-                if t.ended is not None:
+                if t.ended is not None and not held:
                     await ws.send_json({"ended": True, "exit_code": t.popen.returncode})
                     return
-                await q.get()
+                try:
+                    await asyncio.wait_for(q.get(), 0.3 if held else None)
+                except asyncio.TimeoutError:
+                    pass  # nothing more came: what was held is not a secret's start after all
 
         task = asyncio.create_task(pump())
         try:
