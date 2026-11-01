@@ -522,14 +522,17 @@ def test_a_plan_doc_the_turn_edited_goes_on_the_board(client, project, fake, mon
     synced = []
     monkeypatch.setattr(pb, "available", lambda root: True)
     monkeypatch.setattr(pb, "act", lambda root, req, actor: synced.append((req, actor)) or {"ok": True})
+    # WORKSPACE_PLAN W1.1: Y changed from the shell, X both edited and stale: each synced once
+    (project / "docs" / "Y_PLAN.md").write_text("---\ntitle: Y\nstatus: plan\n---\n", encoding="utf-8")
+    monkeypatch.setattr(pb, "stale_plans", lambda root: ["docs/X_PLAN.md", "docs/Y_PLAN.md"])
     sid = _session(client, _pid(client, project))["id"]
     _say(client, sid, "PLANEDIT the plan")
     for _ in range(50):
-        if synced:
+        if len(synced) == 2:
             break
         time.sleep(0.05)
-    text = (project / "docs" / "X_PLAN.md").read_text(encoding="utf-8")
-    assert synced == [({"op": "plan", "path": "docs/X_PLAN.md", "text": text}, "assistant")]  # notes.md is not
+    # the checkout's own doc: the engine reads it there (a worktree's is sent as text); notes.md is not a plan
+    assert synced == [({"op": "plan", "path": f"docs/{x}_PLAN.md"}, "assistant") for x in "XY"], synced
 
 
 def test_failures_say_so_and_offer_a_retry(client, project, fake):
@@ -1455,6 +1458,11 @@ def test_a_steps_call_puts_the_stamped_plan_on_its_item(tmp_path, monkeypatch):
     assert turn.events[-1]["state"] == "thinking" and turn.events[-1]["detail"] == "Step 2 of 3 · Merge"
     bad = call("u3", "active", "active", "pending")                          # the tool answers what is wrong
     assert "plan" not in bad and turn.step == "Step 2 of 3 · Merge"
+    # WORKSPACE_PLAN W1.3: the card a steps call names is the turn's, kept on its row
+    relay.store.add_turn("t1", "s1", message="go", kind="message", claude_before=None)
+    relay._translate(turn, {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "u4",
+        "name": "mcp__studio__steps", "input": {"card": "docs/X_PLAN.md#W1", "steps": [{"title": "a", "state": "active"}]}}]}})
+    assert turn.card == "docs/X_PLAN.md#W1" and relay.store.turn("t1")["card"] == "docs/X_PLAN.md#W1"
 
 
 def test_a_test_run_is_read_whole_before_the_clip(tmp_path):

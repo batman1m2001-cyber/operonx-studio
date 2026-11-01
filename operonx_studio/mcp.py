@@ -809,8 +809,11 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                              "does in words; result what a done step left; error why one failed; target the part of "
                              "the screen it works on (the point tool's names). Optional, only when they help: sub, one "
                              "level of subtasks (the step's progress is how many are done); after, the earlier steps "
-                             "(by number, from 1) a step waits on — the card then draws the plan as a structure.",
-              "schema": _schema({"title": _S, "steps": {"type": "array", "items": _schema(
+                             "(by number, from 1) a step waits on — the card then draws the plan as a structure. "
+                             "card: the board card this work is, when there is one — docs/X_PLAN.md#W1 for a plan's "
+                             "phase, or m3/C2; the Board lights that card while you work and lists this turn on it, "
+                             "with your test runs, base checks and commits as its evidence.",
+              "schema": _schema({"title": _S, "card": _S, "steps": {"type": "array", "items": _schema(
                   {"title": _S, "state": {"type": "string", "enum": list(STEP_STATES)}, "detail": _S,
                    "target": _S, "result": _S, "error": _S,
                    "sub": {"type": "array", "items": _schema(
