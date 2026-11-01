@@ -199,7 +199,7 @@ apart, never shown to the model or in logs; per-environment permissions; product
 
 Tests: `test_environments.py` (7, against a private sshd on a free port: trust by fingerprint, secrets never
 served, redacted run/terminal/websocket, checkout, production read vs run, delete on confirm, local variables
-hidden, the hook's refusals). Studio suite: SUITE. Scratch sshd:
+hidden, the hook's refusals). Studio suite: 673 passed, 5 skipped (run with W4's backend on top). Scratch sshd:
 
 ![environment](img/workspace/w3-env-staging-light.png)
 ![production](img/workspace/w3-env-production-dark.png)
