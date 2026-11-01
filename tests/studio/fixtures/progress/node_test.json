@@ -1,0 +1,5 @@
+{
+ "command": "node --test n.test.mjs",
+ "parts": [],
+ "background": false
+}

@@ -70,6 +70,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import chat as _chat
+from . import progress as _progress
 from . import testreport
 from .mcp import check_steps, step_line
 
@@ -129,6 +130,9 @@ def valid_model(model: Optional[str]) -> bool:
     return model is None or model in MODELS or bool(_FULL_ID.match(model))
 
 
+# a Bash call the CLI runs on in the background (run_in_background, or moved there): its tool_result at once
+_BACKGROUND_ID = re.compile(r"^Command running in background with ID: (\w+)")
+
 # the CLI's words when it is not signed in, or its sign-in no longer works
 _AUTH_ERROR = re.compile(r"please run /login|invalid api key|not logged in|oauth token (has )?expired|"
                          r"authentication_error|\b401\b|unauthorized|login required", re.I)
@@ -141,7 +145,10 @@ _MODEL_ERROR = re.compile(r"issue with the selected model|unrecognized_model|mod
 # the agent did, never a whole file.
 _TOOL_IO_LIMIT = 4000
 _FLUSH_EVERY = 0.25
-_LIVE_MAX = 8 * 1024 * 1024      # a running test's output past this is left to the end's report
+_LIVE_MAX = 8 * 1024 * 1024      # a running call's output past this is read from its tail only
+_LIVE_TAIL = 256 * 1024
+_EST_MIN_MS = 10_000             # a call shorter than this never gets an estimate (D2)
+_EST_KEEP = 400                  # past call times kept in the store's meta
 
 
 def turn_limit(name: str, default: float) -> float:
@@ -563,7 +570,8 @@ class Turn:
     think_seq: Optional[int] = None      # the thinking block being streamed
     tools: Dict[str, int] = field(default_factory=dict)   # tool_use_id → item seq
     tests: Dict[str, str] = field(default_factory=dict)   # tool_use_id → the test command it runs, whole (D6)
-    live: Optional[Path] = None           # where testhook.py copies a running test's output (D6, live)
+    live: Optional[Path] = None           # where runhook.py copies each shell call's output (EXECUTION_PROGRESS D1)
+    calls: Dict[str, Dict[str, Any]] = field(default_factory=dict)   # tool_use_id → a running shell call's watch
     claude_after: Optional[str] = None
     model: Optional[str] = None           # asked for (an alias), then what the CLI resolved it to
     requested: Optional[str] = None       # the model asked for, as asked
@@ -875,7 +883,7 @@ class Relay:
                     cmd.append("--strict-mcp-config")
             if turn.deny:
                 cmd += ["--disallowedTools", *turn.deny]
-            hooks = self._live_tests(turn)
+            hooks = self._live_calls(turn)
             if hooks is not None:
                 cmd += ["--settings", str(hooks)]
             mode = (turn.reach or os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full")).strip().lower()
@@ -933,46 +941,159 @@ class Relay:
             json.dump(config, fh)
         return path
 
-    def _live_tests(self, turn: Turn) -> Optional[Path]:
-        """D6, live: the settings that hand the CLI testhook.py, and the folder it copies test output into.
-        The stream never carries a running call's output (tool_progress is a heartbeat), so a test run's
-        counts came only when it ended; with this the relay reads them as the tests pass."""
+    def _live_calls(self, turn: Turn) -> Optional[Path]:
+        """EXECUTION_PROGRESS D1: the settings that hand the CLI runhook.py, and the folder it copies each shell
+        call's output into. The stream never carries a running call's output (tool_progress is a heartbeat);
+        with this the relay reads it as it is printed."""
         if os.environ.get("OPERONX_STUDIO_LIVE_TESTS", "on").lower() in ("off", "0", "false"):
             return None
         self.run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         turn.live = self.run_dir / f"live-{turn.id}"
         turn.live.mkdir(exist_ok=True, mode=0o700)
-        hook = " ".join(shlex.quote(str(a)) for a in (sys.executable, "-I", Path(__file__).with_name("testhook.py"),
+        hook = " ".join(shlex.quote(str(a)) for a in (sys.executable, "-I", Path(__file__).with_name("runhook.py"),
                                                       turn.live))
         path = turn.live.with_suffix(".json")
         path.write_text(json.dumps({"hooks": {"PreToolUse": [
             {"matcher": "Bash", "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]}}))
         return path
 
-    async def _watch_tests(self, turn: Turn) -> None:
-        """While a test command runs, its counts so far on its item, each second they change."""
-        sizes: Dict[str, int] = {}
+    async def _watch_calls(self, turn: Turn) -> None:
+        """Each second, every running shell call's progress from its live file (D2–D5): a ``progress`` event
+        when what the row shows has changed, the call's previous one turned into a skip."""
         while turn.live is not None:
             await asyncio.sleep(1.0)
-            for call, command in list(turn.tests.items()):
-                path = turn.live / f"{call}.out"
+            for call in list(turn.calls):
                 try:
-                    size = path.stat().st_size
-                    if size == sizes.get(call) or size > _LIVE_MAX:
-                        continue
-                    sizes[call] = size
-                    text = path.read_text(encoding="utf-8", errors="replace")
-                except OSError:
+                    self._watch_call(turn, call)
+                except Exception:  # noqa: BLE001 — a row's progress never breaks a turn
                     continue
-                seq = turn.tools.get(call)
-                report = testreport.progress(command, text)
-                if seq is None or report is None or call not in turn.tests:
-                    continue
-                item = turn.items[seq]
-                if item.get("status") == "running" and item.get("tests") != report:
-                    item["tests"] = report
-                    self._replace(turn, item)
-                    self._flush(turn)
+
+    def _watch_call(self, turn: Turn, call: str) -> None:
+        watch, seq = turn.calls.get(call), turn.tools.get(call)
+        if watch is None or seq is None or turn.live is None:
+            return
+        item = turn.items[seq]
+        if item.get("status") != "running":
+            return
+        now = _now()
+        path = turn.live / f"{call}.out"
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = -1
+        grew = size > watch["size"]
+        if grew:
+            watch["size"] = size
+            if not watch.get("parts_read"):
+                try:
+                    meta = json.loads(path.with_suffix(".json").read_text())
+                    watch["parts"], watch["parts_read"] = list(meta.get("parts") or []), True
+                except (OSError, ValueError):
+                    pass
+            try:
+                with path.open("rb") as fh:
+                    if size > _LIVE_MAX:
+                        head = fh.read(_LIVE_TAIL)
+                        fh.seek(size - _LIVE_TAIL)
+                        raw = (head + b"\n" + fh.read()).decode("utf-8", "replace")
+                    else:
+                        raw = fh.read().decode("utf-8", "replace")
+            except OSError:
+                raw = None
+            if raw is not None:
+                got = _progress.read(watch["command"], raw, watch.get("parts") or None)
+                if size > _LIVE_MAX:          # the middle is not read: no counts from it
+                    got = {k: v for k, v in got.items() if k not in ("current", "pct", "tests", "stages")}
+                    got["mode"] = "indeterminate"
+                    got["bytes"] = size
+                watch["read"] = got
+        got = dict(watch.get("read") or {})
+        live = watch["liveness"].see(now, grew, got.get("pid"), "ended" in got)
+        if live is not None:
+            got["live"] = live
+        est = watch.get("est_ms")
+        if est and got.get("mode", "indeterminate") == "indeterminate":
+            got.update(mode="estimated", est_ms=est)
+        if not got or got == watch.get("sent"):
+            return
+        self._progress_event(turn, item, watch, got, now)
+
+    def _progress_event(self, turn: Turn, item: Dict[str, Any], watch: Dict[str, Any], got: Dict[str, Any],
+                        now: float) -> None:
+        """D5: one small event for the row, the call's previous one turned into a skip, so a reader from any
+        cursor gets the newest state and nothing older."""
+        if watch.get("last_i") is not None:
+            turn.events[watch["last_i"]] = {"t": "skip", "i": watch["last_i"]}
+        watch["rev"] += 1
+        watch["events"] += 1
+        watch["max_gap"] = max(watch["max_gap"], now - watch["emitted"])
+        watch["emitted"] = now
+        watch["sent"] = got
+        item["progress"] = {**got, "rev": watch["rev"]}
+        turn.dirty.add(item["seq"])
+        watch["last_i"] = len(turn.events)
+        self._emit(turn, {"t": "progress", "seq": item["seq"], "rev": watch["rev"], "progress": item["progress"]})
+        self._flush(turn)
+
+    def _call_ended(self, turn: Turn, call: str, item: Dict[str, Any]) -> None:
+        """A shell call's result is in: its watch closes with its numbers (D5, measured), and how long it took
+        is kept for the next run's estimate (D2)."""
+        watch = turn.calls.pop(call, None)
+        if watch is None:
+            return
+        now = _now()
+        gap = max(watch["max_gap"], now - watch["emitted"])
+        item["stats"] = {"events": watch["events"], "max_gap_ms": round(gap * 1000)}
+        if item.get("progress"):
+            item["progress"] = {k: v for k, v in item["progress"].items() if k != "live"}
+        if item.get("status") == "ok" and not item.get("stopped_by_owner") and (item.get("ms") or 0) >= _EST_MIN_MS:
+            try:
+                past = dict(self.store.get_meta("call_ms", {}) or {})
+                past.pop(watch["key"], None)
+                past[watch["key"]] = item["ms"]
+                self.store.set_meta("call_ms", dict(list(past.items())[-_EST_KEEP:]))
+            except Exception:  # noqa: BLE001 — an estimate is a courtesy
+                pass
+
+    def _watch_start(self, turn: Turn, call: str, command: str) -> None:
+        key = re.sub(r"\s+", " ", command).strip()[:300]
+        try:
+            est = (self.store.get_meta("call_ms", {}) or {}).get(key)
+        except Exception:  # noqa: BLE001
+            est = None
+        now = _now()
+        turn.calls[call] = {"command": command, "key": key, "size": 0, "rev": 0, "events": 0, "max_gap": 0.0,
+                            "emitted": now, "last_i": None, "sent": None, "read": None,
+                            "liveness": _progress.Liveness(now), "est_ms": est if (est or 0) >= _EST_MIN_MS else None}
+
+    def stop_call(self, tid: str, call: str) -> Optional[bool]:
+        """D7: stop one shell call, not the turn — SIGINT to its process group, SIGTERM 5 s later. The CLI and
+        the model carry on with its result (130). None: no such call; False: it is not running any more."""
+        turn = self.turns.get(tid)
+        if turn is None or turn.done or call not in turn.tools:
+            return None
+        watch, item = turn.calls.get(call), turn.items[turn.tools[call]]
+        pid = ((watch or {}).get("read") or {}).get("pid")
+        if watch is None or item.get("status") != "running" or not pid or "ended" in (watch.get("read") or {}):
+            return False
+        try:
+            if os.getpgid(pid) != pid:          # the call's shell leads its own group; anything else is not it
+                return False
+            os.killpg(pid, signal.SIGINT)
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+
+        def term() -> None:
+            try:
+                if os.getpgid(pid) == pid:
+                    os.killpg(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+
+        asyncio.get_running_loop().call_later(5.0, term)
+        item["stopped_by_owner"] = True
+        self._replace(turn, item)
+        return True
 
     async def _relay(self, turn: Turn, cwd: Optional[Path], snap: Optional[Dict[str, Any]]) -> str:
         proc = turn.proc
@@ -995,7 +1116,7 @@ class Relay:
 
         if idle:
             timers.append(loop.call_later(idle, quiet))
-        watch = loop.create_task(self._watch_tests(turn)) if turn.live is not None else None
+        watch = loop.create_task(self._watch_calls(turn)) if turn.live is not None else None
         try:
             async for raw in proc.stdout:
                 turn.heard = time.monotonic()
@@ -1079,6 +1200,12 @@ class Relay:
                                    for t in event.get("tasks") or [] if isinstance(t, dict)]
                 if turn.background:
                     self._state(turn, "waiting", turn.background[0])
+            elif sub == "task_started" and event.get("is_backgrounded"):
+                seq = turn.tools.get(str(event.get("tool_use_id") or ""))
+                if seq is not None and event.get("task_id"):
+                    turn.items[seq]["task"] = str(event["task_id"])
+            elif sub == "task_notification":
+                self._task_ended(turn, event)
             elif sub == "status" and event.get("status") == "compacting":
                 self._state(turn, "compacting")
             elif sub == "compact_boundary":
@@ -1135,6 +1262,8 @@ class Relay:
                         turn.tools[block["id"]] = item["seq"]
                         if name == "Bash" and testreport.is_test(str(inputs.get("command") or "")):
                             turn.tests[block["id"]] = str(inputs["command"])
+                        if name == "Bash" and turn.live is not None and inputs.get("command"):
+                            self._watch_start(turn, block["id"], str(inputs["command"]))
                     turn.text_seq = None
                     self._state(turn, "tool", turn.step if plan else label)
             usage = message.get("usage") or {}
@@ -1152,17 +1281,27 @@ class Relay:
                 if seq is None:
                     continue
                 item = turn.items[seq]
+                if item.get("status") != "running":
+                    continue                    # the stream can say a result twice; the second has lost the live text
                 content = block.get("content")
                 if isinstance(content, list):
                     content = "\n".join(str(c.get("text") or "") for c in content if isinstance(c, dict))
+                task = _BACKGROUND_ID.match(str(content or "")) if item.get("name") == "Bash" else None
+                if task and not block.get("is_error"):
+                    # D6: it runs on; the row stays live until the task's notification
+                    item["task"] = task.group(1)
+                    self._replace(turn, item)
+                    continue
                 # a test run is read whole, before the clip: its summary line sits at the end (D6)
                 report = testreport.parse(turn.tests.pop(block.get("tool_use_id") or "", ""), str(content or ""))
                 if report:
                     item["tests"] = report
                 else:
                     item.pop("tests", None)     # the counts so far were a guess the end did not confirm
-                item.update(status="error" if block.get("is_error") else "ok", output=_clip(content or ""),
+                ended = "stopped" if item.get("stopped_by_owner") else "error" if block.get("is_error") else "ok"
+                item.update(status=ended, output=_clip(content or ""),
                             ms=round((_now() - float(item.get("t0") or _now())) * 1000))
+                self._call_ended(turn, block.get("tool_use_id") or "", item)
                 self._replace(turn, item)
             self._state(turn, "thinking", turn.step)
             return False
@@ -1196,6 +1335,36 @@ class Relay:
             # people on that account (never someone else's)
             self.store.set_meta(f"last_rate:{turn.account}", {**rate, "at": _now()})
         return False
+
+    def _task_ended(self, turn: Turn, event: Dict[str, Any]) -> None:
+        """D6: a background call's task ended — its row gets the result its foreground twin would have had,
+        read from the live file (the CLI's own output file is its business)."""
+        call = str(event.get("tool_use_id") or "")
+        seq = turn.tools.get(call)
+        if seq is None:
+            return
+        item = turn.items[seq]
+        if item.get("status") != "running":
+            return
+        text = ""
+        if turn.live is not None:
+            try:
+                raw = (turn.live / f"{call}.out").read_bytes()[-_LIVE_MAX:].decode("utf-8", "replace")
+                head, parts, before = _progress.marks(raw)
+                text = before + "".join(seg for *_, seg in parts)
+            except OSError:
+                pass
+        status = str(event.get("status") or "")
+        report = testreport.parse(turn.tests.pop(call, ""), text)
+        if report:
+            item["tests"] = report
+        else:
+            item.pop("tests", None)
+        item.update(status="stopped" if item.get("stopped_by_owner") else {"completed": "ok", "failed": "error"}.get(status, "stopped"),
+                    output=_clip(text or str(event.get("summary") or "")), summary=str(event.get("summary") or ""),
+                    ms=round((_now() - float(item.get("t0") or _now())) * 1000))
+        self._call_ended(turn, call, item)
+        self._replace(turn, item)
 
     async def _summarize(self, sid: str, skip_turn: str, env: Optional[Dict[str, str]]) -> str:
         """What a conversation said so far, for a fresh Claude session: the
@@ -1256,10 +1425,19 @@ class Relay:
         if turn.kill_timer is not None:
             turn.kill_timer.cancel()
         # open tool calls that never got a result were cut short
-        for seq in turn.tools.values():
+        for call, seq in turn.tools.items():
             item = turn.items[seq]
             if item.get("status") == "running":
                 item.update(status="stopped" if turn.stopping else "error")
+                pid = ((turn.calls.get(call) or {}).get("read") or {}).get("pid")
+                if turn.stopping and pid:
+                    # each call runs in its own session: the turn's Stop reaches it only from here
+                    try:
+                        if os.getpgid(pid) == pid:
+                            os.killpg(pid, signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError, OSError):
+                        pass
+                self._call_ended(turn, call, item)
                 self._replace(turn, item)
         if turn.stopping:
             state = "stopped"

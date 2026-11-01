@@ -1,0 +1,23 @@
+ox start 335639 1793504051.804882
+============================= test session starts ==============================
+platform linux -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work
+plugins: anyio-4.15.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 5 items
+
+suite/test_a.py ..F                                                      [ 60%]
+suite/test_b.py .s                                                       [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_three __________________________________
+
+>   def test_three(): assert 1 == 2
+                      ^^^^^^^^^^^^^
+E   assert 1 == 2
+
+suite/test_a.py:4: AssertionError
+=========================== short test summary info ============================
+FAILED suite/test_a.py::test_three - assert 1 == 2
+==================== 1 failed, 3 passed, 1 skipped in 0.19s ====================
+ox end 1 1793504052.577592

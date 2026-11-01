@@ -159,6 +159,46 @@ if "BGWAIT" in msg:
           "result": "Suite passed", "usage": usage, "num_turns": 1})
     sys.exit(0)
 
+if "SHELL" in msg:
+    # a Bash call as the CLI runs one: the PreToolUse hook from --settings rewrites it, its own session runs it
+    import subprocess
+    cmd = msg.split("SHELL", 1)[1].split("|", 1)[1] if "|" in msg else "echo hi"
+    bg = "SHELLBG" in msg
+    inputs = {"command": cmd, **({"run_in_background": True} if bg else {})}
+    if "--settings" in argv:
+        hook = json.load(open(argv[argv.index("--settings") + 1]))["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        got = subprocess.run(hook, shell=True, input=json.dumps({"tool_name": "Bash", "tool_use_id": "toolu_sh",
+                             "tool_input": inputs}), capture_output=True, text=True, env={**os.environ, "SHELL": "/bin/bash"})
+        if got.stdout.strip():
+            inputs = json.loads(got.stdout)["hookSpecificOutput"]["updatedInput"]
+    emit({"type": "assistant", "message": {"model": model, "content": [
+        {"type": "tool_use", "id": "toolu_sh", "name": "Bash", "input": {"command": cmd, **({"run_in_background": True} if bg else {})}}],
+        "usage": usage}, "session_id": sid})
+    proc = subprocess.Popen(["bash", "-c", inputs["command"]], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, start_new_session=True)
+    if bg:
+        emit({"type": "system", "subtype": "task_started", "task_id": "b1", "tool_use_id": "toolu_sh",
+              "description": "the run", "is_backgrounded": True, "session_id": sid})
+        emit({"type": "system", "subtype": "background_tasks_changed", "session_id": sid,
+              "tasks": [{"task_id": "b1", "task_type": "local_bash", "description": "the run"}]})
+        emit({"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_sh", "type": "tool_result",
+              "content": "Command running in background with ID: b1. Output is being written to: /x/b1.output"}]}, "session_id": sid})
+        emit({"type": "result", "subtype": "success", "session_id": sid, "is_error": False, "result": "Started",
+              "usage": usage, "num_turns": 1})
+    out = proc.communicate()[0]
+    if bg:
+        emit({"type": "system", "subtype": "task_notification", "task_id": "b1", "tool_use_id": "toolu_sh",
+              "status": "completed" if proc.returncode == 0 else "failed", "summary": f"exit code {proc.returncode}",
+              "session_id": sid})
+        emit({"type": "system", "subtype": "background_tasks_changed", "tasks": [], "session_id": sid})
+    else:
+        emit({"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_sh", "type": "tool_result",
+              "content": out + ("" if proc.returncode == 0 else f"\nExit code {proc.returncode}"),
+              **({"is_error": True} if proc.returncode else {})}]}, "session_id": sid})
+    emit({"type": "result", "subtype": "success", "session_id": sid, "is_error": False,
+          "result": f"rc {proc.returncode}", "usage": usage, "num_turns": 2})
+    sys.exit(0)
+
 if "LONGTOOL" in msg:
     # a tool that runs a while: the CLI writes only its heartbeat meanwhile
     for n in range(10):
@@ -1011,13 +1051,13 @@ def test_someone_elses_conversation_is_not_there(team, project, fake):
     # every self route that names a conversation, a turn, an image or an item
     routes = [(m, p) for (m, p), level in ACCESS.items() if level == "self"
               and any(k in p for k in ("{sid}", "{tid}", "{aid}", "{seq}"))]
-    assert len(routes) == 11
+    assert len(routes) == 12
     team.use(a["b"]["token"])
     assert [s["id"] for s in c.get("/api/assistant/sessions").json()["sessions"]] == []
     assert [s["id"] for s in c.get("/api/assistant/sessions", params={"scope": a["pid"]}).json()["sessions"]] == []
     for method, path in routes:
         url = (path.replace("{sid}", a["sid"]).replace("{tid}", a["tid"]).replace("{aid}", a["aid"])
-               .replace("{seq}", "1"))
+               .replace("{seq}", "1").replace("{call}", "toolu_1"))
         body = {"message": "mine now", "state": "kept", "title": "stolen", "mime": "image/png",
                 "data": base64.b64encode(b"x").decode()} if method in ("POST", "PATCH", "PUT") else None
         res = c.request(method, url, json=body)
@@ -1432,3 +1472,107 @@ def test_a_test_run_is_read_whole_before_the_clip(tmp_path):
     assert (tested["tests"]["passed"], tested["tests"]["failed"], tested["tests"]["ms"]) == (137, 1, 4200)
     assert tested["tests"]["failures"][0]["line"] == "KeyError: 'lane'"
     assert "tests" not in listed, "not a test command, no report"
+    # the stream can say a result twice (seen live, E7); the second, clipped, must not take the report away
+    sent = len(turn.events)
+    relay._translate(turn, {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "u1", "content": out[-200:].replace("1 failed", ""), "is_error": True}]}})
+    assert tested["tests"]["passed"] == 137
+    assert not [e for e in turn.events[sent:] if e["t"] == "item"]
+
+
+# ── a running shell call's progress (docs/EXECUTION_PROGRESS_PLAN.md E4) ──
+
+def _tool(client, sid):
+    return next(i for i in client.get(f"/api/assistant/sessions/{sid}").json()["items"] if i.get("name") == "Bash")
+
+
+def test_a_running_call_sends_its_progress_and_a_late_reader_gets_only_the_latest(client, project, fake):
+    sid = _session(client, _pid(client, project))["id"]
+    turn, events = _say(client, sid, "SHELL|for i in 1 2 3 4; do echo line $i; sleep 0.8; done")
+    seen = [e for e in events if e["t"] == "progress"]
+    assert len(seen) >= 2, events
+    assert [e["rev"] for e in seen] == sorted(e["rev"] for e in seen)
+    assert {e["seq"] for e in seen} == {seen[0]["seq"]} and seen[0]["progress"]["pid"] > 0
+    # from the start, after the fact: one progress, the newest; the ones before it are skips
+    again = client.get(f"/api/assistant/turns/{turn}", params={"cursor": 0}).json()["events"]
+    assert [e["rev"] for e in again if e["t"] == "progress"] == [seen[-1]["rev"]]
+    assert any(e["t"] == "skip" for e in again)
+    item = _tool(client, sid)
+    assert item["status"] == "ok" and "line 4" in item["output"] and "\x1e" not in item["output"]
+    assert item["stats"]["events"] == seen[-1]["rev"] and item["stats"]["events"] <= 6
+    assert item["stats"]["max_gap_ms"] > 0 and "live" not in item["progress"]
+
+
+def test_a_call_with_no_output_and_no_cpu_goes_idle_then_stalled(client, project, fake, monkeypatch):
+    from operonx_studio import progress
+    monkeypatch.setattr(progress, "QUIET_S", 1)
+    monkeypatch.setattr(progress, "STALL_S", 2.5)
+    sid = _session(client, _pid(client, project))["id"]
+    _, events = _say(client, sid, "SHELL|echo start; sleep 5; echo end")
+    states = [e["progress"].get("live", {}).get("state") for e in events if e["t"] == "progress"]
+    states = [s for i, s in enumerate(states) if s and (i == 0 or s != states[i - 1])]
+    assert states[:3] == ["active", "idle", "stalled"], states
+
+
+def test_a_background_call_stays_live_until_its_task_ends(client, project, fake):
+    sid = _session(client, _pid(client, project))["id"]
+    turn, events = _say(client, sid, "SHELLBG|echo first; sleep 2.2; echo second")
+    items = [e["item"] for e in events if e["t"] == "item" and e["item"].get("name") == "Bash"]
+    assert items[1]["status"] == "running" and items[1]["task"] == "b1"     # the "running in background" result
+    after = [e for e in events[events.index(next(e for e in events if e.get("item") is items[1])):]
+             if e["t"] == "progress"]
+    assert after, "no progress while it ran in the background"
+    item = _tool(client, sid)
+    assert item["status"] == "ok" and "second" in item["output"] and item["stats"]["events"] >= 1
+
+
+def test_stopping_one_call_ends_it_and_the_turn_goes_on(client, project, fake):
+    sid = _session(client, _pid(client, project))["id"]
+    turn = client.post(f"/api/assistant/sessions/{sid}/turns",
+                       json={"message": "SHELL|echo start; sleep 30; echo never"}).json()["turn"]
+    cursor, events = 0, []
+    for _ in range(40):
+        got = client.get(f"/api/assistant/turns/{turn}", params={"cursor": cursor}).json()
+        events += got["events"]
+        cursor = got["cursor"]
+        if any(e["t"] == "progress" and e["progress"].get("pid") for e in events):
+            break
+    assert client.post(f"/api/assistant/turns/{turn}/calls/nope/stop").status_code == 404
+    res = client.post(f"/api/assistant/turns/{turn}/calls/toolu_sh/stop")
+    assert res.json() == {"ok": True}, res.text
+    events += _drain(client, turn, cursor)
+    item = _tool(client, sid)
+    # bash itself takes the SIGINT (no end marker, no 130): the CLI says how it ended
+    assert item["status"] == "stopped" and item["stopped_by_owner"] and "start" in item["output"]
+    assert "never" not in item["output"]
+    assert events[-1]["t"] == "done" and events[-1]["state"] == "done"
+
+
+def test_a_call_that_took_long_before_is_estimated_from_that_and_only_that(client, project, fake):
+    cmd = "echo go; sleep 1.5"
+    client.app.state.chat_store.set_meta("call_ms", {cmd: 480000, "echo other": 2000})
+    sid = _session(client, _pid(client, project))["id"]
+    _, events = _say(client, sid, "SHELL|" + cmd)
+    got = [e["progress"] for e in events if e["t"] == "progress"]
+    assert got and all(p["mode"] == "estimated" and p["est_ms"] == 480000 for p in got)
+    # a short run is not a new estimate; the old one stands
+    assert client.app.state.chat_store.get_meta("call_ms")[cmd] == 480000
+
+
+def test_stopping_the_turn_ends_its_running_call(client, project, fake, tmp_path):
+    sid = _session(client, _pid(client, project))["id"]
+    mark = tmp_path / "still-here"
+    turn = client.post(f"/api/assistant/sessions/{sid}/turns",
+                       json={"message": f"SHELLBG|echo start; sleep 4; touch {mark}"}).json()["turn"]
+    cursor, events = 0, []
+    for _ in range(40):
+        got = client.get(f"/api/assistant/turns/{turn}", params={"cursor": cursor}).json()
+        events += got["events"]
+        cursor = got["cursor"]
+        if any(e["t"] == "progress" and e["progress"].get("pid") for e in events):
+            break
+    client.post(f"/api/assistant/turns/{turn}/stop")
+    _drain(client, turn, cursor)
+    import time
+    time.sleep(5)
+    assert not mark.exists() and _tool(client, sid)["status"] == "stopped"

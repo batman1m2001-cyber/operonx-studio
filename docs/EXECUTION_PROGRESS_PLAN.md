@@ -1,14 +1,14 @@
 ---
 title: A long tool call shows its stages, its real progress and whether it is alive
-status: plan
+status: done
 phases:
-  - {id: E1, title: "Every shell call observed: the hook wraps foreground and background calls, records the shell's pid", status: open}
-  - {id: E2, title: "progress.py: one parser registry (tests, install, build, lint, fetch, docker, generic) → stages and counts", status: open}
-  - {id: E3, title: "Stages of a chained command: a conservative top-level split, markers between the parts", status: open}
-  - {id: E4, title: "The relay: liveness from /proc, coalesced progress events, background calls linked to their task, stop one call", status: open}
-  - {id: E5, title: "The page: the running row's bar, counters, liveness and stages; the status line; node tests", status: open}
-  - {id: E6, title: "Knowledge: separate stages, background past two minutes, never poll", status: open}
-  - {id: E7, title: "Live gate: a Sonnet turn on the scratch studio, shots, overhead and gap measurements", status: open}
+  - {id: E1, title: "Every shell call observed: the hook wraps foreground and background calls, records the shell's pid", status: done}
+  - {id: E2, title: "progress.py: one parser registry (tests, install, build, lint, fetch, docker, generic) → stages and counts", status: done}
+  - {id: E3, title: "Stages of a chained command: a conservative top-level split, markers between the parts", status: done}
+  - {id: E4, title: "The relay: liveness from /proc, coalesced progress events, background calls linked to their task, stop one call", status: done}
+  - {id: E5, title: "The page: the running row's bar, counters, liveness and stages; the status line; node tests", status: done}
+  - {id: E6, title: "Knowledge: separate stages, background past two minutes, never poll", status: done}
+  - {id: E7, title: "Live gate: a Sonnet turn on the scratch studio, shots, overhead and gap measurements", status: done}
 rows: []
 updated: 2026-11-01
 ---
@@ -281,11 +281,13 @@ A running row gets a Stop button. `POST /api/assistant/turns/{id}/calls/{call}/s
 2. after 5 s, sends SIGTERM;
 3. records `stopped_by_owner` on the item.
 
-The command then ends with 130, and the CLI and the model carry on with
-that result. The turn's Stop is unchanged. Before E4 ships, it is checked
-on real bash and the CLI: whether a call's processes sit in the CLI's
-process group, so that the turn's Stop also ends a background run, or are
-left behind. Its access level is `edit`.
+The SIGINT ends bash itself (it does not exit 130: the call's result is an
+error), and the CLI and the model carry on with that result. The row says
+*stopped*, not *error*, because `stopped_by_owner` is set. Checked on real
+bash and the CLI: each call runs in its own process group, outside the
+CLI's, so the turn's Stop now also sends SIGTERM to every running call's
+group, background ones included. Its access level is `self`, the same as
+the turn's own Stop: whoever may stop the turn may stop one of its calls.
 
 ### D8 · Knowledge: let the work be seen
 
@@ -359,7 +361,7 @@ About 4 h 50 min in all. If it must be shorter, cut in this order:
   - a reconnect from cursor 0 gets only the latest progress per call;
   - a call with no output and no CPU goes idle, then stalled;
   - a background call stays live until its notification;
-  - stopping one call ends it with 130 while the turn goes on.
+  - stopping one call ends it (*stopped*) while the turn goes on.
 - **python, parsers:** every family in the D2 table, with a real captured
   output each. The total appears only when printed, and the mode is
   never measured without a total.
@@ -385,6 +387,36 @@ About 4 h 50 min in all. If it must be shorter, cut in this order:
   liveness state.
 - The full suite (`tests/studio`, ~8 min) and `node --test tests/js/`
   once, at the end.
+
+### E7 results (2026-11-01, Sonnet, scratch studio :8815)
+
+Four live turns on a demo with a 61-test suite (60 × 1 s, one failing):
+
+| Turn | What it showed |
+|---|---|
+| `ruff check . && pytest tests`, foreground | 61 progress events over 60 s, longest gap 1.0 s; stages `part1` done, `part2` active; measured 60 / 61 |
+| `pytest tests` in the background, its row's Stop at 25 s | 22 events, longest gap 1.0 s; the group gone; row *stopped*; the model went on |
+| the same, the turn's Stop at 20 s | the background run's group gone, nothing left behind |
+| background suite + `uv sync` (cold cache, 16 packages) + chained lint-and-test | three rows live at once; all three reported |
+
+- Hook: 104 ms median per call (Python start-up). The wrap adds 11 ms per
+  shell call.
+- Watcher: the studio used 1.5 s of CPU over 60 s with three calls running
+  (2.5 % of one core).
+- No row went more than 1 s without an update, well inside the 15 s rule.
+
+The live runs found three bugs, each fixed with a test:
+- pytest's `[ 1%]` comes at a line's end and lags a long file by a whole
+  line, so the percentage is now current / total whenever a total is
+  known;
+- the stream can deliver a call's result twice, and the second copy (no
+  live text) dropped the test report from the row and from the store. A
+  result for a row that already has one is now ignored;
+- a call the owner stopped read *error*.
+
+Not shown live: the estimated bar (no past run of `uv sync` long enough
+to keep) and the idle and stalled states. Those are covered by the fake-CLI
+and node tests and the E5 replay shots.
 
 ## 5 · Out of scope
 

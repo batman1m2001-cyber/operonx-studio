@@ -1,0 +1,5 @@
+{
+ "command": "python -m pytest suite -v -p no:randomly -p no:cacheprovider",
+ "parts": [],
+ "background": false
+}

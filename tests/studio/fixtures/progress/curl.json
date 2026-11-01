@@ -1,0 +1,5 @@
+{
+ "command": "curl -o got.bin file://$PWD/big.bin",
+ "parts": [],
+ "background": false
+}

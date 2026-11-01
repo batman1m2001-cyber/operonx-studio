@@ -1,0 +1,5 @@
+{
+ "command": "git clone --progress --depth 50 https://github.com/pallets/markupsafe.git ms",
+ "parts": [],
+ "background": false
+}

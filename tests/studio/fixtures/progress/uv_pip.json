@@ -1,0 +1,8 @@
+{
+ "command": "uv venv -q uvenv && uv pip install --python uvenv six",
+ "parts": [
+  "uv venv -q uvenv",
+  "uv pip install --python uvenv six"
+ ],
+ "background": false
+}

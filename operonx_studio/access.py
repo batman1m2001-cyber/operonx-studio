@@ -228,6 +228,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{A}/turns/{{tid}}"): "self",
     ("GET", f"{A}/turns/{{tid}}/stream"): "self",
     ("POST", f"{A}/turns/{{tid}}/stop"): "self",
+    ("POST", f"{A}/turns/{{tid}}/calls/{{call}}/stop"): "self",
 
     **{key: "read" for key in READ_POSTS},
 }

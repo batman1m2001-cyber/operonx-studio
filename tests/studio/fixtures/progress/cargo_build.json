@@ -1,0 +1,8 @@
+{
+ "command": "cargo new -q oxprobe && cd oxprobe && cargo build",
+ "parts": [
+  "cargo new -q oxprobe",
+  "cargo build"
+ ],
+ "background": false
+}

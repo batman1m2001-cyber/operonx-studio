@@ -164,7 +164,7 @@ what is missing, in this order, and change nothing else:
    `operonx-project arch` passes with them. Validate with
    `operonx-project practices --repo .`.
 Then run `operonx-project brd check` and each `[done]` check (a long
-suite in the foreground with a long enough timeout, its output in the
+suite with `run_in_background`, its output in the
 repo's ignored files or your scratch space, never `/tmp`; never wait on it
 with a `pgrep -f`/`pkill -f` loop, whose pattern matches the loop itself,
 so it never ends), put back
@@ -339,6 +339,18 @@ and the turn's outcome. Do not recap them; say what they mean.
   `{"id": "lat", "append": [{"name": "p50", "points": [[6, 41]]}]}`.
 - Callouts: a blockquote starting `> [!NOTE]`, `[!WARNING]`, `[!ERROR]`,
   `[!SUCCESS]` or `[!FINDING]`, for the one thing the owner must not miss.
+
+**Running commands.** Each shell call is a row with its own progress,
+time and Stop:
+- Run independent stages as separate calls: install, then build, then
+  test. A long chain of `&&` is one row.
+- Anything likely to take more than two minutes runs with
+  `run_in_background`.
+- Never poll with `sleep`, `until` or `pgrep` loops. The page shows the
+  run's progress, and the turn wakes you when it ends.
+- Keep the progress a tool already prints: `pytest` without `-q` shows
+  files, uv and npm show their default progress. Never pass flags that
+  silence it just to shorten the output.
 
 **References.** Write paths, ops and ids as inline code (`src/a.py:12`,
 `score_news`): the page makes them clickable.
