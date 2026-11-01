@@ -171,3 +171,44 @@ def test_a_hidden_long_run_or_a_sleeping_wait_is_refused(tmp_path, monkeypatch):
         assert runhook.refusal(cmd, False) is None, cmd
     # in run_in_background a test run is what the rule asks for
     assert runhook.refusal("pytest -q > log 2>&1 &", True) is None
+
+
+def test_a_run_piped_into_tail_or_grep_is_copied_before_the_filter():
+    f, tee = runhook.filtered, '| tee -a "$__ox_o" '
+    assert f("cd w && uv run pytest -q 2>&1 | tail -8") == f"cd w && uv run pytest -q 2>&1 {tee}| tail -8 >&8"
+    assert f("pytest -q | grep -E 'passed|failed' && echo ok") == \
+        f"pytest -q {tee}| grep -E 'passed|failed' >&8 && echo ok"
+    assert f("make 2>&1 | tail -3\nmake test | tail -1  ") == f"make 2>&1 {tee}| tail -3 >&8\nmake test {tee}| tail -1 >&8  "
+    for cmd in ["pytest -q", "git log | tail -3", "pytest | tee log | tail", "pytest | tail -3 > last.txt",
+                "pytest | tail -3  # the end", "x=$(pytest | tail -1)", "(pytest | tail -1)", "{ pytest | tail; }",
+                "for t in a b; do pytest $t | tail -1; done > log", "pytest |& tail", "pytest | head -3",
+                "cat <<EOF | tail\npytest\nEOF", "pytest -q || true | tail -1"]:
+        assert f(cmd) == cmd, cmd
+
+
+def test_the_page_sees_a_run_through_tail_as_it_prints(tmp_path, monkeypatch):
+    # what the owner's turn ran on PR #74 (`uv run pytest -q 2>&1 | tail -8`): the file stayed at its start marker
+    # for the whole run; now it gets each dot as it prints, and the model still reads only the tail
+    monkeypatch.setenv("SHELL", "/bin/bash")
+    runner = tmp_path / "pytest"
+    runner.write_text("#!/bin/bash\nfor i in 1 2 3 4 5 6; do printf .; sleep 0.25; done\n"
+                      "echo ' [100%]'; echo '1 failed, 5 passed in 1.50s'; exit 1\n")
+    runner.chmod(0o755)
+    live = tmp_path / "live"
+    live.mkdir()
+    cmd = "./pytest 2>&1 | tail -1; echo rc=${PIPESTATUS[0]}"
+    proc = subprocess.Popen(["bash", "-c", 'eval "$1" < /dev/null', "_", _wrap(cmd, live)], cwd=tmp_path,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        seen = ""
+        for _ in range(40):         # up to 1 s: the run takes 1.5 s
+            seen = (live / "t1.out").read_text() if (live / "t1.out").exists() else ""
+            if "..." in seen or proc.poll() is not None:
+                break
+            subprocess.run(["sleep", "0.025"])
+        assert "..." in seen and "passed" not in seen
+    finally:
+        out, _ = proc.communicate(timeout=10)
+    assert out.splitlines() == ["1 failed, 5 passed in 1.50s", "rc=1"]
+    file = (live / "t1.out").read_text()
+    assert file.count("1 failed, 5 passed") == 1 and "......" in file and "rc=1" in file
