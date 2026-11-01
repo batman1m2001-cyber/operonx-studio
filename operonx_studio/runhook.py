@@ -25,9 +25,9 @@ import sys
 from typing import List, Optional, Tuple
 
 WRAP = ("export PYTHONUNBUFFERED=1; __ox_o={out}; "
-        "printf '\\036ox start %s %s\\n' $$ \"${{EPOCHREALTIME:-}}\" >> \"$__ox_o\"; {mark}"
+        "printf '\\036ox start %s %s\\n' $$ \"${{EPOCHREALTIME:-}}\" >> \"$__ox_o\"; {mark}{keep}"
         "exec 9> >(tee -a \"$__ox_o\" 2>/dev/null); __ox_tee=$!; {{ {cmd}\n}} "
-        ">&9 2>&1 9>&-; __ox_rc=$?; exec 9>&-; wait $__ox_tee 2>/dev/null; "
+        ">&9 2>&1 9>&-; __ox_rc=$?; exec 9>&- 8>&-; wait $__ox_tee 2>/dev/null; "
         "printf '\\036ox end %s %s\\n' $__ox_rc \"${{EPOCHREALTIME:-}}\" >> \"$__ox_o\"; (exit $__ox_rc)")
 # a part's marker keeps the status it was called with: `a && __ox_m 2 && b` runs b exactly when `a && b` would,
 # and `a; __ox_m 2; echo $?` still prints a's status
@@ -207,6 +207,42 @@ def _ran(cmd: str) -> str:
                   lambda m: m.group(0) if m.group(1) else '""', cmd)
 
 
+# a filter that keeps a run's output until the run ends: tail -8 shows nothing until the last test is done
+_FILTER = re.compile(r"(?<!\|)\|(?![|&])\s*(?:tail|grep|egrep)\b")
+_LIST_OP = re.compile(r"&&|\|\||[;\n]")
+
+
+def _blank(cmd: str) -> str:
+    """The command with quoted text and ${…} blanked, same length (so the | in 'a|b' is not a pipe)."""
+    return re.sub(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"|\$\{[^}]*\}", lambda m: "x" * len(m.group(0)), cmd)
+
+
+def filtered(cmd: str) -> str:
+    """A long run piped into tail or grep, with its output copied to the call's file before the filter. The model
+    runs `pytest -q 2>&1 | tail -8`, and tail lets nothing through until pytest ends, so the page counted no test
+    until the last one was done (mr-finance PR #74, 2026-11-01). The filter's own output goes to fd 8, the CLI's
+    stdout: the model reads what it read before, and the file does not get the tail twice. A plain top-level list
+    only: anything in a group, a loop, a substitution or a heredoc, or a filter with a redirect or a comment, as
+    written."""
+    plain = _blank(cmd)
+    if re.search(r"[(){}`]|<<", plain) or set(re.findall(r"\w+", plain)) & _COMPOUND:
+        return cmd
+    edits: List[Tuple[int, str]] = []
+    for m in _FILTER.finditer(plain):
+        start = max((e.end() for e in _LIST_OP.finditer(plain, 0, m.start())), default=0)
+        run = plain[start:m.start()]
+        if "|" in run or not _RUNNER.search(run):
+            continue                    # a filter after a filter, or nothing long before it
+        end = _LIST_OP.search(plain, m.end())
+        stop = end.start() if end else len(plain)
+        if re.search(r"[<>#]", plain[m.end():stop]):
+            continue
+        edits += [(m.start(), '| tee -a "$__ox_o" '), (len(cmd[:stop].rstrip()), " >&8")]
+    for at, text in sorted(edits, reverse=True):
+        cmd = cmd[:at] + text + cmd[at:]
+    return cmd
+
+
 def refusal(cmd: str, background: bool) -> Optional[str]:
     """Why a call is refused (knowledge.md: Running commands), or None. The model read the rule and ran an 18-minute
     suite as `(pytest > log &)` plus `sleep 20` loops anyway: the page saw neither, so the hook holds the line."""
@@ -237,7 +273,9 @@ def rewrite(event: dict, live_dir: str) -> dict | None:
     with open(os.path.join(live_dir, call + ".json"), "w", encoding="utf-8") as fh:
         json.dump({"command": cmd, "parts": parts, "background": bool(inp.get("run_in_background"))}, fh)
     quoted = "'" + out.replace("'", "'\\''") + "'"
-    wrapped = WRAP.format(out=quoted, mark=MARK.format() if parts else "", cmd=marked or cmd)
+    body = filtered(marked or cmd)
+    wrapped = WRAP.format(out=quoted, mark=MARK.format() if parts else "",
+                          keep="exec 8>&1; " if body != (marked or cmd) else "", cmd=body)
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": {**inp, "command": wrapped}}}
 
 
