@@ -6056,3 +6056,46 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
 .ax-prog.live .ax-prog-steps { max-height: min(38vh, 340px); overflow-y: auto; overscroll-behavior: contain; }
 .ax-prog.auto .ax-prog-bar, .ax-prog.auto .ax-prog-pct:empty { display: none; }
 .ax-pstep-fold .ax-pstep-head { color: var(--text-2); font-size: var(--fs-sm); justify-content: flex-start; text-align: left; }
+
+/* a running shell call (EXECUTION_PROGRESS_PLAN D3–D5): bar only when measured or estimated, the counter,
+   what it is doing, its time, a liveness chip when it is not plainly working, its stages, Stop */
+.ax-call { padding: 0 12px 8px 33px; display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: var(--fs-sm); }
+.ax-pstep-focus .ax-call, .ax-pstep-focus .ax-tests { padding-left: 0; padding-right: 0; }
+.ax-call-line { display: flex; align-items: center; gap: 7px; min-width: 0; flex-wrap: wrap; row-gap: 3px; }
+.ax-call-bar { position: relative; flex: 0 1 160px; min-width: 60px; height: 4px; border-radius: 3px; overflow: hidden;
+  background: var(--surface-2); }
+.ax-call-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--accent);
+  transition: width .6s ease; }
+.ax-call-bar.estimated { background: none; border: 1px dashed var(--line-strong, var(--text-3)); height: 6px; }
+.ax-call-bar.estimated > span { background: var(--accent); opacity: .45; }
+.ax-call-pct { font: 600 11px var(--mono); color: var(--text-2); }
+.ax-call-count { font: 11.5px var(--mono); color: var(--text); white-space: nowrap; }
+.ax-call-act { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-3); font: 11.5px var(--mono); }
+.ax-call-line > .ax-spacer { flex: 1 1 0; }
+.ax-call-last, .ax-call-time { font: 11px var(--mono); color: var(--text-3); white-space: nowrap; }
+.ax-call-stop { border: 1px solid var(--line); background: var(--surface); color: var(--text-2); border-radius: var(--r-sm);
+  font-size: 11px; padding: 1px 8px; cursor: pointer; }
+.ax-call-stop:hover:not(:disabled) { color: var(--st-err); border-color: var(--st-err); }
+.ax-call-stop:disabled { opacity: .6; cursor: default; }
+.ax-call-chip { align-self: flex-start; font-size: 11px; padding: 1px 8px; border-radius: 99px; background: var(--surface-2);
+  color: var(--text-2); }
+.ax-call-chip.idle { background: var(--st-pending-soft); color: var(--st-pending); }
+.ax-call-chip.stalled { background: var(--st-warn-soft); color: var(--st-warn); font-weight: 600; }
+.ax-call-chip.done { background: var(--st-run-soft); color: var(--st-run); }
+.ax-call-tog { align-self: flex-start; border: none; background: none; padding: 0; font-size: 11.5px; color: var(--text-2);
+  cursor: pointer; }
+.ax-call-tog::after { content: " ▸"; } .ax-call-tog[aria-expanded="true"]::after { content: " ▾"; }
+.ax-call-stages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ax-call-stages li { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-3); }
+.ax-call-stages li code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px var(--mono); }
+.ax-call-stages .icon, .ax-call-stages .ax-spin { width: 12px; height: 12px; flex: none; }
+.ax-call-stages .ax-step-ms { margin-left: auto; }
+.ax-call-stages .cs-done { color: var(--text-2); } .ax-call-stages .cs-done .icon { color: var(--st-ok); }
+.ax-call-stages .cs-active { color: var(--text); font-weight: 600; }
+.ax-call-stages .cs-failed { color: var(--st-err); }
+.ax-call-stages .cs-skipped code { text-decoration: line-through; }
+@media (max-width: 560px) {
+  .ax-call { padding-left: 12px; }
+  .ax-call-bar { flex-basis: 100%; }
+}

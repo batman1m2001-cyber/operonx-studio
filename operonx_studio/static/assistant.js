@@ -897,6 +897,91 @@
     }
     return box;
   }
+  /* EXECUTION_PROGRESS_PLAN D3–D5: a running shell call — its bar when it has one, its counter, what it is
+     doing, how long, whether it is still alive, its stages, and Stop for this call alone */
+  const CR = W.oxCallRow;
+  const callOpen = new Set();
+  const callStopping = new Set();
+  function callBlock(item) {
+    const v = CR.view(item, Date.now() / 1000);
+    const box = el("div", "ax-call");
+    const line = el("div", "ax-call-line");
+    const refs = {};
+    // a test run's own bar (testReport) already says its share
+    if (v.bar && !item.tests) {
+      const bar = el("span", `ax-call-bar ${v.bar.kind}`);
+      const fill = el("span");
+      fill.style.width = `${v.bar.pct}%`;
+      bar.append(fill);
+      bar.setAttribute("role", "progressbar");
+      bar.setAttribute("aria-valuenow", String(v.bar.pct));
+      refs.fill = fill;
+      line.append(bar, el("span", "ax-call-pct", v.bar.kind === "measured" ? `${v.bar.pct}%` : "est."));
+    }
+    if (v.counter) line.append(el("span", "ax-call-count", v.counter));
+    if (v.activity) { const a = el("span", "ax-call-act", v.activity); a.title = v.activity; line.append(a); }
+    line.append(el("span", "ax-spacer"));
+    if (v.bar && v.bar.kind === "estimated") line.append(refs.last = el("span", "ax-call-last", ""));
+    if (v.elapsed != null) line.append(refs.time = el("span", "ax-call-time", CR.secs(v.elapsed)));
+    if (item.id && A.running) {
+      const stop = el("button", "ax-call-stop", callStopping.has(item.seq) ? "Stopping…" : "Stop");
+      stop.type = "button";
+      stop.title = "Stop this command only — the assistant carries on";
+      stop.disabled = callStopping.has(item.seq);
+      stop.onclick = (e) => { e.stopPropagation(); stopCall(item); };
+      line.append(stop);
+    }
+    box.append(line);
+    refs.chip = el("div", "ax-call-chip");
+    refs.chip.hidden = true;
+    box.append(refs.chip);
+    if (v.stages.length > 1) {
+      const done = v.stages.filter((s) => s.state === "done").length;
+      const tog = el("button", "ax-call-tog", `${v.stages.length} stages · ${done} done${v.stage ? ` · ${v.stage}` : ""}`);
+      tog.type = "button";
+      const open = callOpen.has(item.seq);
+      tog.setAttribute("aria-expanded", String(open));
+      const ol = el("ol", "ax-call-stages");
+      ol.hidden = !open;
+      for (const s of v.stages) {
+        const li = el("li", "cs-" + s.state);
+        li.append(s.state === "active" ? el("span", "ax-spin") : icon(s.state === "done" ? "check" : s.state === "failed" ? "x" : "dot"),
+          el("code", null, s.title));
+        if (s.counter) li.append(el("span", "ax-call-count", s.counter));
+        if (s.ms != null && s.state !== "active") li.append(el("span", "ax-step-ms", fmt.ms(s.ms)));
+        ol.append(li);
+      }
+      tog.onclick = (e) => {
+        e.stopPropagation();
+        if (callOpen.has(item.seq)) callOpen.delete(item.seq); else callOpen.add(item.seq);
+        ol.hidden = !callOpen.has(item.seq);
+        tog.setAttribute("aria-expanded", String(!ol.hidden));
+      };
+      box.append(tog, ol);
+    }
+    box._item = item;
+    box._refs = refs;
+    tickCall(box);
+    return box;
+  }
+  // once a second: the time, the quiet time and an estimate's bar move without a new event
+  function tickCall(box) {
+    const item = box._item, refs = box._refs;
+    const v = CR.view(item, Date.now() / 1000);
+    if (refs.time && v.elapsed != null) refs.time.textContent = CR.secs(v.elapsed);
+    if (refs.fill && v.bar) refs.fill.style.width = `${v.bar.pct}%`;
+    if (refs.last && v.bar) refs.last.textContent = v.bar.over ? `longer than last run (${v.bar.last})` : `last run ${v.bar.last}`;
+    refs.chip.hidden = !v.chip;
+    if (v.chip) { refs.chip.className = "ax-call-chip " + v.chip.tone; refs.chip.textContent = v.chip.text; }
+  }
+  async function stopCall(item) {
+    const r = A.running;
+    if (!r || callStopping.has(item.seq)) return;
+    callStopping.add(item.seq);
+    repaint(item.seq);
+    try { await call(`/api/assistant/turns/${r.id}/calls/${encodeURIComponent(item.id)}/stop`, {}); }
+    catch (err) { callStopping.delete(item.seq); repaint(item.seq); toast(err.status === 409 ? "It had already finished." : err.message, true); }
+  }
   function toolDetails(item, step) {
     const io = el("div", "ax-step-io");
     if (step && item.status === "error") io.append(el("div", "ax-io-label", "Step"), el("div", "ax-io-step", step));
@@ -959,6 +1044,7 @@
       if (first) row.append(el("div", "ax-tool-err", first.slice(0, 240)));
     }
     if (item.tests && !noTests) row.append(testReport(item.tests));
+    if (item.status === "running" && item.progress) row.append(callBlock(item));
     if (item.input || item.output) withDetails(row, head, () => toolDetails(item, step));
     return row;
   }
@@ -1222,6 +1308,10 @@
         const tool = el("div", "ax-pstep-now");
         tool.append(el("span", "ax-spin"), el("span", null, now.label || now.name));
         focus.append(tool);
+        if (now.progress) {
+          if (now.tests) focus.append(testReport(now.tests));
+          focus.append(callBlock(now));
+        }
       }
       if (focus.childNodes.length) main.append(focus);
     }
@@ -1616,7 +1706,7 @@
   }
 
   function append(item) {
-    A.bySeq.set(item.seq, item);
+    A.bySeq.set(item.seq, CR.bridge(item));
     if (item.kind === "user") { newTurn(item); return; }
     if (!replyEl) newTurn(null);
     if (item.kind === "tool" && item.plan) { takePlan(item); return; }
@@ -1647,9 +1737,18 @@
   function replace(item) {
     const old = A.bySeq.get(item.seq);
     if (!old) { A.items.push(item); append(item); return; }
-    Object.assign(old, item);
-    const node = A.nodes.get(item.seq);
-    if (!node) return;
+    // a call's end drops its live counts and progress: what the old row had must not outlive them
+    if (item.kind === "tool") for (const k of ["tests", "progress"]) if (!(k in item)) delete old[k];
+    Object.assign(old, CR.bridge(item));
+    if (item.status !== "running") callStopping.delete(item.seq);
+    repaint(item.seq);
+  }
+
+  function repaint(seq) {
+    const old = A.bySeq.get(seq);
+    const node = A.nodes.get(seq);
+    if (!old || !node) return;
+    const item = old;
     if (node._prog) { paintProg(node._prog); return; }
     if (item.kind === "tool" || item.kind === "thinking") {
       const row = renderStep(old);
@@ -2532,6 +2631,11 @@
       if (phase) document.dispatchEvent(new CustomEvent("oxtool", {detail: {item: A.bySeq.get(it.seq) || it, phase}}));
       if (stick) toBottom(); else jump.hidden = false;
     } else if (ev.t === "delta") delta(ev.seq, ev.text);
+    else if (ev.t === "progress") {
+      // D5: in place, newest only; one arriving after the call ended changes nothing
+      const it = A.bySeq.get(ev.seq);
+      if (CR.accept(it, ev)) { it.progress = ev.progress; CR.bridge(it); repaint(ev.seq); paintStatus(); }
+    }
     if (ev.t === "item" && ev.item.kind === "error" && ev.item.auth) {
       refreshAccount(true).then(() => openSignin("claudeai", "The assistant's Claude sign-in didn't work. Sign in again to carry on."));
     }
@@ -2665,7 +2769,11 @@
     statusText.textContent = r.step && /^(thinking|tool|writing)$/.test(r.state) ? r.step
       : r.state === "tool" && r.detail ? r.detail
       : r.state === "waiting" && r.detail ? `Waiting for a background task · ${r.detail}` : `${words[r.state] || "Working"}…`;
+    // a shell call that says how far it is: the line says it too (D5)
+    const now = (r.state === "tool" || r.state === "waiting") && A.items.findLast((i) => i.kind === "tool" && i.status === "running" && i.progress);
+    if (now) statusText.textContent = CR.status(now, Date.now() / 1000);
     statusTime.textContent = fmt.secs((Date.now() - r.t0) / 1000);
+    for (const box of log.querySelectorAll(".ax-call")) tickCall(box);
   }
 
   async function stop() {
