@@ -1,14 +1,16 @@
-"""failing_on_base (docs/TURN_HONESTY_PLAN.md S2).
+"""failing_on_base (docs/TURN_HONESTY_PLAN.md S2) and on_base (docs/WORKSPACE_PLAN.md T3).
 
 Gates: on a real repo whose branch broke one test, added a failing one and kept one that already failed, each id
 gets its own answer — fails on base too, passes on base (new), not on base (new) — and the repo's worktree list
-is left as it was.
+is left as it was; a command (a check that is not a test) runs here and on base, each with its exit status
+and output, the project's .venv/bin first on PATH.
 """
 
 from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -69,3 +71,16 @@ def test_the_base_copy_is_made_once(repo):
 def test_no_ids_is_refused(repo):
     with pytest.raises(ValueError, match="failing test ids"):
         basecheck.check(str(repo), [" "], base="main")
+
+
+def test_a_command_runs_here_and_on_base(repo):
+    cmd = "ls tests; test ! -e tests/test_b.py"
+    r = basecheck.on_base(str(repo), cmd, base="main", python=sys.executable)
+    assert r["here"] == {"rc": 1, "output": "test_a.py\ntest_b.py\n"}
+    assert r["on_base"] == {"rc": 0, "output": "test_a.py\n"}
+    text = basecheck.on_base_report(r)
+    assert text.startswith(f"`{cmd}` here: exit 1 · on main (merge-base ") and text.endswith("test_a.py")
+    py_dir = basecheck._env(repo, sys.executable)["PATH"].split(":")[0]
+    assert py_dir == str(Path(sys.executable).parent)
+    with pytest.raises(ValueError, match="command"):
+        basecheck.on_base(str(repo), "  ", base="main")

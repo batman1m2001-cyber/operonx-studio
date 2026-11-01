@@ -1,10 +1,10 @@
 ---
 title: One project, one execution model — the studio as a development workspace
-status: proposed
+status: in_progress
 phases:
-  - {id: T1, title: "A phase marked done is checked for how it was met: the plan's way, or the owner's call", status: pending}
-  - {id: T2, title: "\"I haven't checked\" in the last reply sends the turn back once: check it, or say why it can't be", status: pending}
-  - {id: T3, title: "on_base(command): any check run on the merge-base, not only failing tests", status: pending}
+  - {id: T1, title: "A phase marked done is checked for how it was met: the plan's way, or the owner's call", status: done}
+  - {id: T2, title: "\"I haven't checked\" in the last reply sends the turn back once: check it, or say why it can't be", status: done}
+  - {id: T3, title: "on_base(command): any check run on the merge-base, not only failing tests", status: done}
   - {id: W0, title: "Audit: where plans, board, checklist, questions, steps, runs and git disagree, and why", status: pending}
   - {id: W1, title: "Unified project execution model: card ↔ run ↔ steps ↔ evidence; board follows the assistant", status: pending}
   - {id: W2, title: "Terminal and Git: real sessions on the existing execution layer; git page linked to cards", status: pending}
@@ -53,6 +53,14 @@ and exit status beside the branch's. `failing_on_base` stays as the test-shaped 
 
 Gates: stophook tests for T1/T2 on the PR #74 transcript (its last turn sent back for both);
 `test_basecheck.py` for `on_base` on a real repo; a Sonnet turn with the hook.
+
+**Done (2026-11-01).** On the PR #74 transcript the turn that marked FF6 done is sent back for T1 and T2,
+and its last turn ("hello ?") for T2 (`test_the_pr74_turns_are_sent_back`). T2 matches first person only
+("I haven't checked …"): "R12 is not verified" is a BRD status, not a check left undone.
+`on_base(cwd, command)` runs the command here and in the merge-base copy and shows both exit statuses
+(`test_a_command_runs_here_and_on_base`). A Sonnet turn told to end on "I haven't checked whether
+notes.txt exists" was sent back once, ran `ls -l notes.txt`, and answered ($0.10). Studio suite: 656
+passed, 5 skipped.
 
 ## W — the workspace (the brief)
 
