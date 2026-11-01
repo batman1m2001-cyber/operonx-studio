@@ -4,7 +4,9 @@ Gates, on transcripts shaped like the CLI's: a phase or a plan set to done (Edit
 a shell edit) is sent back with its ids; a phase already done, or done in an earlier turn, is not; a last test run
 with failures is sent back unless failing_on_base came after it, a passing run is not; steps left pending or
 active are sent back, waiting and blocked ones are not; once only (stop_hook_active), and a broken transcript
-lets the turn end.
+lets the turn end. WORKSPACE_PLAN T1–T2: S1 also asks how the target was met; a last reply that says it has not
+checked something is sent back with that sentence, a reply that only reports a status is not; on the PR #74
+transcript, the turn that marked FF6 done is sent back for both and its last turn ("hello ?") for T2.
 """
 
 from __future__ import annotations
@@ -127,6 +129,45 @@ class TestOpenSteps:
 
     def test_finished_skipped_waiting_or_blocked_is_fine(self):
         assert stophook.reason(turn(prompt("go"), self.steps("done", "skipped", "failed", "waiting"))) is None
+
+
+def say(*texts, tool=False):
+    content = [{"type": "text", "text": t} for t in texts]
+    if tool:
+        content.append({"type": "tool_use", "id": f"t{next(N)}", "name": "Bash", "input": {"command": "ls"}})
+    return {"type": "assistant", "message": {"content": content}}
+
+
+class TestUnchecked:
+    def test_the_last_reply_saying_it_did_not_check_is_sent_back(self):
+        why = stophook.reason(turn(prompt("go"), say("Done.\n\n**Still open:** `brd check` reports 4 errors. "
+                                                     "I haven\u2019t checked whether they exist on main.")))
+        assert "\"I haven't checked whether notes.txt exists\"" in stophook.reason(
+            turn(prompt("go"), say("Wrote it. I haven't checked whether notes.txt exists.")))
+        assert "\"I haven\u2019t checked whether they exist on main\"" in why and "on_base" in why
+
+    def test_only_the_reply_after_the_last_call_counts(self):
+        assert stophook.reason(turn(prompt("go"), say("I didn't run it yet.", tool=True), say("Ran it: 3 passed."))) \
+            is None
+
+    def test_a_status_is_not_an_unchecked_claim(self):
+        assert stophook.reason(turn(prompt("go"), say("R12 is not verified in the matrix; R13 stays unverified."))) \
+            is None
+
+    def test_a_phase_done_asks_how_the_target_was_met(self):
+        why = stophook.reason(turn(prompt("go"), edit(PH.format("FF6", "open"), PH.format("FF6", "done"))))
+        assert "the way the plan says (its table, its decisions)" in why
+
+
+PR74 = Path("/root/.claude/projects/-home-thanglq-mr-finance/06cd02b8-f31b-448d-93ad-5592b19ceb3e.jsonl")
+
+
+@pytest.mark.skipif(not PR74.exists(), reason="the PR #74 transcript is on the owner's machine")
+def test_the_pr74_turns_are_sent_back():
+    lines = PR74.read_text().splitlines()
+    ff6 = stophook.reason(lines[:550])
+    assert "the way the plan says" in ff6 and "I haven't checked whether they exist on main" in ff6
+    assert "I haven't checked them against main" in stophook.reason(lines)
 
 
 def _hook(tmp_path: Path, lines, active=False) -> str:

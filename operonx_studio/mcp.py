@@ -263,6 +263,13 @@ def t_failing_on_base(s: Studio, a: Dict[str, Any]) -> str:
                                             str(a.get("base") or "") or None))
 
 
+def t_on_base(s: Studio, a: Dict[str, Any]) -> str:
+    """docs/WORKSPACE_PLAN.md T3: any check, run here and on the base branch's merge-base."""
+    from operonx_studio import basecheck
+    return basecheck.on_base_report(basecheck.on_base(str(a.get("cwd") or os.getcwd()), str(a.get("command") or ""),
+                                                      str(a.get("base") or "") or None))
+
+
 def t_run_job(s: Studio, a: Dict[str, Any]) -> str:
     got = s.call(f"/jobs/{urllib.parse.quote(str(a['name']), safe='')}/run", {"resume": bool(a.get("resume"))})
     s.show("open_jobs", job=str(a["name"]))
@@ -816,6 +823,12 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                        "(path::name); cwd: the checkout or worktree you ran them in.",
                         "schema": _schema({"tests": {"type": "array", "items": _S}, "cwd": _S, "base": _S},
                                           ["tests", "cwd"])},
+    "on_base": {"fn": t_on_base,
+                "description": "Run a shell command here and on the base branch (the merge-base with origin's "
+                               "default branch, or base), and show both exit statuses and outputs: is this error "
+                               "new to the branch? For any check that is not a failing test (brd check, a lint, a "
+                               "script). cwd: the checkout or worktree; the project's .venv/bin is first on PATH.",
+                "schema": _schema({"command": _S, "cwd": _S, "base": _S}, ["command", "cwd"])},
     "run_job": {"fn": t_run_job,
                 "description": "Start one of the application's jobs (or a job of steps); resume=true reruns only "
                                "what the last run did not finish.",

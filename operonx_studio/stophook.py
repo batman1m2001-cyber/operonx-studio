@@ -1,13 +1,14 @@
-"""The Stop hook that holds a turn to what it says it did (docs/TURN_HONESTY_PLAN.md S1–S3).
+"""The Stop hook that holds a turn to what it says it did (docs/TURN_HONESTY_PLAN.md S1–S3, WORKSPACE_PLAN T1–T2).
 
 On mr-finance PR #74 the assistant marked FF5 and the plan done at 24 flows against "< 20", called two failing
 tests "pre-existing" without running them anywhere else, and ended with its own steps still open. Each was one
 line in a long turn, and the owner found them only by reading everything. Before the turn ends, this reads its
 transcript and, once, sends the model back when the turn:
 
-    S1  marked a plan phase (or a plan) done        name the evidence per phase, or set it back to in_progress
+    S1  marked a plan phase (or a plan) done        name the evidence per phase, and that it was met the plan's way
     S2  ended on failing tests, never checked them   run failing_on_base: fails on base too, or new
     S3  left steps of its own pending or active      finish them, skip them with a reason, or say what is left
+    T2  ends saying it has not checked something     check it now, or say why it cannot be checked
 
     python -I stophook.py      stdin: the hook's JSON; stdout: {"decision": "block", "reason": …}, or nothing
 
@@ -32,6 +33,12 @@ _SUMMARY = re.compile(r"((?:\d+ (?:failed|passed|skipped|errors?|deselected|xfai
                       r"(?:, )?)+) in [\d.]+s\b")
 _FAILED = re.compile(r"(\d+) (?:failed|errors?)\b")
 OPEN = ("pending", "active")
+# "I haven't checked whether they exist on main." First person only: "R12 is not verified" is a BRD status.
+_BREAK = re.compile(r"[.!?:](?=\s|$)|\n")  # a sentence's edge, not the dot in "notes.txt"
+_A = r"[’']"
+_UNCHECKED = re.compile(
+    rf"\b(?:I|we)\s+(?:have\s+not|haven{_A}t|did\s+not|didn{_A}t|could\s+not|couldn{_A}t|cannot|can{_A}t|"
+    rf"was\s+not\s+able\s+to|wasn{_A}t\s+able\s+to)\s+(?:yet\s+)?(?:check|verif|run|ran|test|confirm)\w*", re.I)
 
 
 def _text(content: Any) -> str:
@@ -152,15 +159,39 @@ def steps_open(evs: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]) -> List[st
     return [str(s.get("title")) for s in last if isinstance(s, dict) and str(s.get("state") or "pending") in OPEN]
 
 
+def unchecked(entries: List[Dict[str, Any]]) -> Optional[str]:
+    """T2: the sentence of the turn's last reply (its text after the last tool call) that says something is
+    not checked."""
+    reply: List[str] = []
+    for e in entries:
+        content = (e.get("message") or {}).get("content")
+        if e.get("type") != "assistant" or not isinstance(content, list):
+            continue
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_use":
+                reply = []
+            elif isinstance(b, dict) and b.get("type") == "text":
+                reply.append(str(b.get("text") or ""))
+    text = "\n".join(reply)
+    m = _UNCHECKED.search(text)
+    if not m:
+        return None
+    starts = [x.end() for x in _BREAK.finditer(text, 0, m.start())]
+    end = _BREAK.search(text, m.end())
+    return " ".join(text[starts[-1] if starts else 0:end.start() if end else len(text)].split()).strip("*- ")
+
+
 def reason(lines: List[str]) -> Optional[str]:
-    evs = list(events(this_turn(lines)))
+    entries = this_turn(lines)
+    evs = list(events(entries))
     out = []
     plans = plans_done(evs)
     if plans:
         what = "; ".join(f"{p}: {', '.join(ids) or 'a phase'}" for p, ids in plans.items())
         out.append(f"You marked done: {what}. For each, quote the evidence that its exit criteria are met (the "
-                   "command and the numbers it printed). If one is not met, set it back to in_progress: skipping "
-                   "or deferring a phase, or changing its criteria, is the owner's call, so ask.")
+                   "command and the numbers it printed), and say that you met them the way the plan says (its "
+                   "table, its decisions): a target reached another way, or criteria skipped, deferred or changed, "
+                   "is the owner's call, so set the phase back to in_progress, say what you did and ask.")
     failed = failing_unchecked(evs)
     if failed:
         out.append(f"The last test run ended with \"{failed}\". Call failing_on_base with those test ids before "
@@ -170,6 +201,10 @@ def reason(lines: List[str]) -> Optional[str]:
         out.append(f"Your steps card still has {len(left)} step(s) pending or active ({'; '.join(left[:4])}). "
                    "Finish them, mark them skipped with the reason, or post the card with what is left as "
                    "waiting or blocked.")
+    said = unchecked(entries)
+    if said:
+        out.append(f"You wrote \"{said}\". Check it now (on_base runs a command on the base branch), or say why "
+                   "it cannot be checked in this turn.")
     if not out:
         return None
     return "Before you end the turn (the studio checks this once):\n- " + "\n- ".join(out)

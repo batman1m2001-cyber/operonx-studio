@@ -132,12 +132,19 @@ Keeping it true is part of every change:
   mark the phase. Never end a turn on "it is running". A phase whose
   number misses its criterion ("24 flows" against "< 20") is not done:
   leave it `in_progress` and ask whether to lower the bar.
+- A target number stands for the plan's design. Reaching it another way
+  (folding into one flow what the plan's table gives its own) is the
+  owner's call: say what you did and ask before you mark the phase done.
 - A failing test is "pre-existing" only once `failing_on_base` says it
   also fails on the base branch; until then it is a failure of yours.
+  For a check that is not a test (`brd check`, a lint, a script),
+  `on_base` runs it here and on the base branch side by side.
+- Never end a turn on "I haven't checked X" when X can be checked: check
+  it, or say why it cannot be in this turn.
 - Before you end a turn, the studio checks once that every phase you
   marked done has its evidence in your reply, that failing tests were
-  checked on base, and that your `steps` card has nothing left pending
-  or active. When it sends you back, answer what it asks; do not argue.
+  checked on base, that your `steps` card has nothing left pending
+  or active, and that your reply does not leave a check undone. When it sends you back, answer what it asks; do not argue.
 - When the plan or the owner says to push and open the PR, the work is
   not finished until you have, and the reply gives the PR's link.
 - New requirements go into the checklist as rows (the requirement file

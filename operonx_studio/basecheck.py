@@ -1,10 +1,11 @@
-"""Do these failing tests also fail on the base branch? (docs/TURN_HONESTY_PLAN.md S2)
+"""Do these failing tests also fail on the base branch? (docs/TURN_HONESTY_PLAN.md S2) Does this command? (WORKSPACE T3)
 
 The assistant ended a turn on "2 failed, all pre-existing" with nothing that showed it. This runs the same test ids
 on the base branch's merge-base, in a copy of that commit (``git archive``: the repo's worktree list stays as it
 was), with the project's own interpreter, and says for each one: fails on base too, or new.
 
     check("/path/to/worktree", ["tests/ui/test_book.py::test_rows"])
+    on_base("/path/to/worktree", "operonx-project brd check")     # any check: its exit status here and on base
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from typing import Dict, List, Optional
 
 ROOT = Path(os.path.expanduser("~/.operonx/base-checks"))
 KEEP_DAYS = 2
+TAIL = 3000  # of a command's output, per side
 _LINE = re.compile(r"^(PASSED|FAILED|ERROR|XFAIL|XPASS|SKIPPED)\s+(\S+)", re.M)
 
 
@@ -89,9 +91,16 @@ def verdict(test: str, seen: Dict[str, str]) -> str:
     return "passes on base: NEW failure"
 
 
-def _pytest(py: str, where: Path, tests: List[str], timeout: float) -> subprocess.CompletedProcess:
+def _env(where: Path, py: str) -> Dict[str, str]:
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(p) for p in (where / "src", where) if p.exists())}
     env.pop("VIRTUAL_ENV", None)
+    if os.sep in py:
+        env["PATH"] = os.pathsep.join([str(Path(py).parent), env.get("PATH", "")])
+    return env
+
+
+def _pytest(py: str, where: Path, tests: List[str], timeout: float) -> subprocess.CompletedProcess:
+    env = _env(where, py)
     return subprocess.run([py, "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider", *tests], cwd=where, env=env,
                           capture_output=True, text=True, timeout=timeout)
 
@@ -120,3 +129,38 @@ def report(r: Dict[str, object]) -> str:
     head = f"on {r['base']} (merge-base {r['sha']}): " + (
         f"{new} of {len(results)} fail only on this branch" if new else "none of these is new to this branch")
     return "\n".join([head, *(f"  {t}: {v}" for t, v in results.items())])
+
+
+def _shell(command: str, where: str, env: Dict[str, str], timeout: float) -> Dict[str, object]:
+    try:
+        run = subprocess.run(["bash", "-c", command], cwd=where, env=env, capture_output=True, text=True,
+                             timeout=timeout)
+        return {"rc": run.returncode, "output": (run.stdout + run.stderr)[-TAIL:]}
+    except subprocess.TimeoutExpired as e:
+        out = (e.stdout or b"").decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+        return {"rc": None, "output": out[-TAIL:] + f"\n(stopped after {timeout:.0f}s)"}
+
+
+def on_base(cwd: str, command: str, base: Optional[str] = None, timeout: float = 900,
+            python: Optional[str] = None) -> Dict[str, object]:
+    """The command run here and in the merge-base copy, with the project's .venv/bin first on PATH."""
+    command = (command or "").strip()
+    if not command:
+        raise ValueError("command: the check to run, as you ran it here")
+    base = base or default_base(cwd)
+    sha = _git(cwd, "merge-base", "HEAD", base)
+    where = base_tree(cwd, sha)
+    py = python or interpreter(cwd)
+    return {"base": base, "sha": sha[:12], "command": command,
+            "here": _shell(command, cwd, _env(Path(cwd), py), timeout),
+            "on_base": _shell(command, str(where), _env(where, py), timeout)}
+
+
+def on_base_report(r: Dict[str, object]) -> str:
+    here, there = r["here"], r["on_base"]  # type: ignore[index]
+    head = f"`{r['command']}` here: exit {here['rc']} · on {r['base']} (merge-base {r['sha']}): exit {there['rc']}"
+    same = "the same output on both" if here["output"] == there["output"] else ""
+    parts = [head + (f" — {same}" if same else "")]
+    for name, got in (("here", here), ("on base", there)):
+        parts += [f"--- {name} (last lines) ---", str(got["output"]).rstrip()[-1500:] or "(no output)"]
+    return "\n".join(parts)
