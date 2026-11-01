@@ -838,6 +838,7 @@
     const running = item.status === "running" || (item.kind === "thinking" && item.ms == null);
     const s = sev && sev.get(item.seq);
     return B.status(running ? (A.running ? "running" : "stopped")
+      : s === "guarded" ? "guarded"
       : item.status === "error" ? (s === "recovered" ? "recovered" : "error") : s === "warning" ? "warning" : "done");
   }
   function stateMark(st) {
@@ -1029,7 +1030,7 @@
     const c = TL.classOf(item, touched);
     const st = stepState(item, sev || turnSeverity(item));
     const row = el("div", `ax-step ax-tool tc-${c.cls}` + (st.kind === "recovered" ? " recovered st-warn"
-      : item.status === "error" ? " bad st-err" : ""));
+      : st.kind === "guarded" ? " guarded st-skip" : item.status === "error" ? " bad st-err" : ""));
     const head = el("div", "ax-step-head");
     const verb = el("span", "ax-tool-verb");
     verb.append(icon(c.icon), el("span", null, c.verb));
@@ -1039,10 +1040,11 @@
     else if (c.cls === "tool" && item.label && item.label !== item.name) head.append(el("span", "ax-tool-res", item.label));
     head.append(el("span", "ax-spacer"));
     if (st.kind === "recovered") head.append(el("span", "ax-tool-sev", "recovered"));
+    else if (st.kind === "guarded") head.append(el("span", "ax-tool-sev guarded", "guarded"));
     head.append(stateMark(st), el("span", "ax-step-ms", item.ms != null ? fmt.ms(item.ms) : ""));
     row.append(head);
     // the first line of what went wrong, without opening the row
-    if (item.status === "error" && item.output && !item.tests) {
+    if (item.status === "error" && item.output && !item.tests && st.kind !== "guarded") {
       const first = String(item.output).split("\n").find((l) => l.trim() && !/^Exit code \d+$/.test(l)) || "";
       if (first) row.append(el("div", "ax-tool-err", first.slice(0, 240)));
     }
@@ -1571,6 +1573,54 @@
     return card;
   }
 
+  // TURN_HONESTY S3: the worktrees a turn made and left; Remove keeps git's own checks (a dirty
+  // worktree and an unmerged branch are kept, and the card says why)
+  function renderWorktrees(item) {
+    const card = el("div", "ax-card ax-worktrees");
+    const trees = item.trees || [];
+    const gone = new Set(item.removed || []);
+    const top = el("div", "ax-card-head ax-act-strip");
+    top.append(icon("folder"), el("span", null,
+      `${trees.length} worktree${trees.length === 1 ? "" : "s"} left behind`));
+    const list = el("div", "ax-files");
+    for (const t of trees) {
+      const row = el("div", "ax-file ax-tree");
+      const head = el("div", "ax-file-head");
+      const note = el("span", "ax-card-note");
+      const rm = tbtn("Remove", "ax-btn ax-btn-quiet needs-edit");
+      rm.title = "git worktree remove (kept if it has changes), then its branch if merged";
+      const paint = () => {
+        row.dataset.state = gone.has(t.path) ? "removed" : "";
+        rm.hidden = gone.has(t.path) || !PROJECT;
+        if (gone.has(t.path) && !note.textContent) note.textContent = "Removed";
+      };
+      rm.onclick = async () => {
+        rm.disabled = true;
+        try {
+          const got = await call(`/api/p/${PROJECT}/chat/worktree/remove`, {path: t.path});
+          gone.add(t.path);
+          note.textContent = !got.branch ? "Removed" : got.branch_deleted
+            ? `Removed, branch ${got.branch} deleted` : `Removed; branch ${got.branch} kept (not merged)`;
+          item.removed = [...gone];
+          if (A.session) call(`/api/assistant/sessions/${A.session.id}/items/${item.seq}`,
+            {removed: item.removed}).catch(() => {});
+        } catch (err) {
+          note.textContent = `Kept: ${err.message}`;
+          rm.disabled = false;
+        }
+        paint();
+      };
+      head.append(el("code", "ax-tree-path", t.path), t.branch ? el("span", "ax-tree-branch", t.branch) : "",
+                  el("span", "ax-spacer"), note, rm);
+      row.append(head);
+      list.append(row);
+      paint();
+    }
+    card.append(top, list);
+    A.nodes.set(item.seq, card);
+    return card;
+  }
+
   function renderError(item) {
     const card = el("div", "ax-card ax-error st-err");
     const top = el("div", "ax-card-head");
@@ -1670,7 +1720,14 @@
           + (t.skipped ? ` · ${t.skipped} skipped` : "")));
       parts.push(b);
     }
-    if (o.steps) add("ax-outcome-n", `Steps ${o.steps.done}/${o.steps.total}`);
+    // a turn that ends with steps of its own plan not done says so, not just "2/5"
+    if (o.steps && o.steps.open) add("ax-outcome-n ax-outcome-open st-warn", `Steps ${o.steps.done}/${o.steps.total} · ${o.steps.open} left open`);
+    else if (o.steps) add("ax-outcome-n", `Steps ${o.steps.done}/${o.steps.total}`);
+    if (o.guarded) {
+      const g = el("span", "ax-outcome-n ax-outcome-guarded", `${o.guarded} guarded`);
+      g.title = "Calls the studio's guard refused and the assistant redid its way — not failures";
+      parts.push(g);
+    }
     let list = null;
     if (o.failures.length) {
       const failed = o.failures.filter((f) => f.severity === "failed").length;
@@ -1720,6 +1777,7 @@
     if (node) A.nodes.set(item.seq, node);
     else if (item.kind === "text") node = renderText(item);
     else if (item.kind === "changes") node = renderChanges(item);
+    else if (item.kind === "worktrees") node = renderWorktrees(item);
     else if (item.kind === "error") node = renderError(item);
     else if (item.kind === "compact") {
       node = el("div", "ax-divider");

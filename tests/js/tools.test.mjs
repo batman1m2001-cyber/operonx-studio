@@ -101,7 +101,7 @@ test("the outcome: files, widest run per runner, steps, failures by class", () =
   assert.deepEqual(o.files, {modified: 1, created: 1, deleted: 1});
   assert.equal(o.tests.length, 1);
   assert.equal(o.tests[0].passed, 3);
-  assert.deepEqual(o.steps, {done: 1, total: 2});
+  assert.deepEqual(o.steps, {done: 1, total: 2, open: 1});
   assert.deepEqual(o.byClass, {test: 1, run: 1});
   assert.equal(o.state, "failed");
   assert.equal(T.outcome([{seq: 9, kind: "error", text: "x"}], {}).state, "fatal");
@@ -113,4 +113,27 @@ test("the outcome keeps the suite, not the one-test rerun after it", () => {
     {seq: 2, kind: "tool", ...bash("pytest t.py::a"), status: "error", tests: {runner: "pytest", passed: 0, failed: 1, skipped: 0}},
   ];
   assert.equal(T.outcome(items, {}).tests[0].passed, 1216);
+});
+
+test("a call the studio's guard refused is guarded, not failed", () => {
+  const items = [
+    {seq: 1, kind: "tool", ...bash("(pytest > out.log 2>&1 &)"), status: "error",
+     output: "PreToolUse:Bash hook error: Refused by the studio: this starts a long run with `&`"},
+    {seq: 2, kind: "tool", ...bash("gh pr create"), status: "error",
+     output: "Exit code 1\nrefused by the studio: this project's assistant may not open pull requests"},
+    {seq: 3, kind: "tool", ...bash("pytest"), status: "ok", tests: {runner: "pytest", passed: 3, failed: 0, skipped: 0}},
+  ];
+  assert.deepEqual([...T.severities(items)], [[1, "guarded"], [2, "guarded"]]);
+  const o = T.outcome(items, {kind: "turn_end"});
+  assert.equal(o.state, "done");
+  assert.equal(o.failures.length, 0);
+  assert.equal(o.guarded, 2);
+  // a command that merely prints the words is not a refusal
+  assert.equal(T.guarded({status: "error", output: "Exit code 1\ngrep: Refused by the studio: no match"}), false);
+});
+
+test("steps left open are counted", () => {
+  const plan = {seq: 1, kind: "tool", plan: {steps: [{title: "a", state: "done"}, {title: "b", state: "active"},
+    {title: "c", state: "pending"}, {title: "d", state: "skipped"}]}};
+  assert.deepEqual(T.outcome([plan], {}).steps, {done: 1, total: 3, open: 2});
 });

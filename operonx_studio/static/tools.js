@@ -168,12 +168,18 @@ const oxTools = (() => {
     return out;
   }
 
-  /* severity of each call (D8): failed · recovered (a later call of its class worked) · warning (skips) */
+  /* a call the studio's own guard refused (runhook, gitguard): the guard worked, nothing failed */
+  const GUARDED = /^(?:PreToolUse:\w+ hook error: |Exit code \d+\n)?refused by the studio:/i;
+  const guarded = (it) => it.status === "error" && GUARDED.test(String(it.output || ""));
+
+  /* severity of each call (D8): failed · recovered (a later call of its class worked) · warning (skips)
+     · guarded (refused by the studio's guard, not a failure) */
   function severities(items, touched) {
     const calls = items.filter((i) => i.kind === "tool" && !i.plan);
     const sev = new Map();
     calls.forEach((it, k) => {
-      if (it.status === "error") {
+      if (guarded(it)) sev.set(it.seq, "guarded");
+      else if (it.status === "error") {
         const cls = classOf(it, touched).cls;
         const later = calls.slice(k + 1).some((x) => x.status === "ok" && classOf(x, touched).cls === cls);
         sev.set(it.seq, later ? "recovered" : "failed");
@@ -198,6 +204,7 @@ const oxTools = (() => {
     const plan = items.filter((i) => i.plan).pop();
     const steps = plan && plan.plan.steps.length
       ? {done: plan.plan.steps.filter((s) => s.state === "done").length, total: plan.plan.steps.filter((s) => s.state !== "skipped").length} : null;
+    if (steps) steps.open = steps.total - steps.done;
     const failures = items.filter((i) => sev.get(i.seq) === "failed" || sev.get(i.seq) === "recovered")
       .map((i) => ({seq: i.seq, cls: classOf(i, touched).cls, severity: sev.get(i.seq), line: i.tests && i.tests.failures && i.tests.failures.length
         ? `${i.tests.failures[0].id}: ${i.tests.failures[0].line}`
@@ -207,10 +214,12 @@ const oxTools = (() => {
     const fatal = items.some((i) => i.kind === "error") || (end && /^(killed|timeout|timed_out)$/.test(end.state || ""));
     const state = fatal ? "fatal" : end && end.state === "stopped" ? "stopped"
       : failures.some((f) => f.severity === "failed") ? "failed" : "done";
-    return {state, ms: end && end.ms, cost: end && end.cost, files, tests: [...tests.values()], steps, failures, byClass};
+    const guardedN = [...sev.values()].filter((v) => v === "guarded").length;
+    return {state, ms: end && end.ms, cost: end && end.cost, files, tests: [...tests.values()], steps, failures, byClass,
+      guarded: guardedN};
   }
 
-  const api = {classOf, fold, words, filesOf, exitOf, mainCommand, inputOf, splitDiff, severities, outcome, ICON};
+  const api = {classOf, fold, words, filesOf, exitOf, mainCommand, inputOf, splitDiff, severities, outcome, guarded, ICON};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   return api;
 })();

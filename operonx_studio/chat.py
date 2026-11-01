@@ -146,7 +146,43 @@ def snapshot(repo: Optional[Path]) -> Optional[Dict[str, Any]]:
     if not sha:
         return None
     untracked = [p for p in (_git(repo, "ls-files", "--others", "--exclude-standard") or "").splitlines() if p]
-    return {"sha": sha, "untracked": untracked}
+    return {"sha": sha, "untracked": untracked, "worktrees": [w["path"] for w in worktrees(repo)]}
+
+
+def worktrees(repo: Path) -> List[Dict[str, str]]:
+    """The repo's linked worktrees (not the main one): [{path, branch}], branch "" when detached."""
+    out: List[Dict[str, str]] = []
+    for block in (_git(repo, "worktree", "list", "--porcelain") or "").strip().split("\n\n")[1:]:
+        fields = dict(ln.split(" ", 1) if " " in ln else (ln, "") for ln in block.splitlines())
+        if fields.get("worktree"):
+            out.append({"path": fields["worktree"], "branch": fields.get("branch", "").removeprefix("refs/heads/")})
+    return out
+
+
+def worktrees_since(repo: Path, snap: Dict[str, Any]) -> List[Dict[str, str]]:
+    """TURN_HONESTY S3: the worktrees the turn created and left behind (a card's own, under the engine's
+    worktree root, are the engine's to remove)."""
+    before = set(snap.get("worktrees") or [])
+    cards = card_worktrees()
+    return [w for w in worktrees(repo) if w["path"] not in before
+            and not (cards is not None and Path(w["path"]).resolve().is_relative_to(cards.resolve()))]
+
+
+def remove_worktree(repo: Path, path: str) -> Dict[str, Any]:
+    """Remove one linked worktree of *repo* and its branch, with git's own checks: a worktree with changes is
+    kept (no --force), and a branch not merged is kept (``branch -d``)."""
+    tree = next((w for w in worktrees(repo) if w["path"] == path), None)
+    if tree is None:
+        return {"removed": False, "error": "not a linked worktree of this project"}
+    run = subprocess.run(["git", "-C", str(repo), "worktree", "remove", path], capture_output=True, text=True,
+                         timeout=60)
+    if run.returncode != 0:
+        said = (run.stderr or run.stdout).strip().splitlines()
+        return {"removed": False, "error": said[-1] if said else "git refused"}
+    got: Dict[str, Any] = {"removed": True, "branch": tree["branch"]}
+    if tree["branch"]:
+        got["branch_deleted"] = _git(repo, "branch", "-d", tree["branch"]) is not None
+    return got
 
 
 def changes_since(repo: Path, snap: Dict[str, Any], limit: int = 200_000) -> Dict[str, Any]:

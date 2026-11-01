@@ -129,7 +129,15 @@ Keeping it true is part of every change:
 - A phase is `done` when its check has passed and you have read that it
   did. A test run you started in the background has not passed yet: wait
   for its result in this turn (it comes back to you when it ends), then
-  mark the phase. Never end a turn on "it is running".
+  mark the phase. Never end a turn on "it is running". A phase whose
+  number misses its criterion ("24 flows" against "< 20") is not done:
+  leave it `in_progress` and ask whether to lower the bar.
+- A failing test is "pre-existing" only once `failing_on_base` says it
+  also fails on the base branch; until then it is a failure of yours.
+- Before you end a turn, the studio checks once that every phase you
+  marked done has its evidence in your reply, that failing tests were
+  checked on base, and that your `steps` card has nothing left pending
+  or active. When it sends you back, answer what it asks; do not argue.
 - When the plan or the owner says to push and open the PR, the work is
   not finished until you have, and the reply gives the PR's link.
 - New requirements go into the checklist as rows (the requirement file

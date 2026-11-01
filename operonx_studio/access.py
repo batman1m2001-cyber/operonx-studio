@@ -181,6 +181,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("PATCH", f"{P}/datasets/{{name}}/rows/{{case}}"): "edit",       # operonx Dataset.update: one line of the JSONL
     ("POST", f"{P}/evals/{{name}}/run"): "edit",                     # operonx eval run: runs code, writes the score store
     ("POST", f"{P}/chat/undo"): "edit",                  # git checkout / unlink of project files
+    ("POST", f"{P}/chat/worktree/remove"): "edit",       # git worktree remove + branch -d (git's own checks)
     ("POST", f"{P}/play/open"): "edit",
     ("POST", f"{P}/play/simulate"): "edit",              # spends LLM money
     ("POST", f"{P}/play/send"): "edit",
