@@ -96,12 +96,13 @@ def test_initialize_and_list_tools():
                           "project_status", "board_status", "board_card", "board_start", "board_plan", "board_request", "board_act", "board_daemon", "board_take",
                           "board_submit", "board_models", "board_practices", "failing_on_base", "on_base",
                           "terminal_open", "terminal_send", "terminal_read", "terminal_list", "terminal_close",
-                          "env_list", "env_check", "env_run"}
+                          "env_list", "env_check", "env_run", "env_services", "deploy"}
     # tools that run the project's code are not read tools
     assert not {"mcp__studio__rerun_op", "mcp__studio__play", "mcp__studio__run_job", "mcp__studio__board_take",
                 "mcp__studio__board_act", "mcp__studio__board_daemon", "mcp__studio__board_models",
                 "mcp__studio__failing_on_base", "mcp__studio__on_base", "mcp__studio__terminal_open",
-                "mcp__studio__terminal_send", "mcp__studio__terminal_read", "mcp__studio__env_run"} & set(chat.STUDIO_READ_TOOLS)
+                "mcp__studio__terminal_send", "mcp__studio__terminal_read", "mcp__studio__env_run", "mcp__studio__env_services",
+                "mcp__studio__deploy"} & set(chat.STUDIO_READ_TOOLS)
     assert tools["open_run"]["inputSchema"]["required"] == ["run"]
     # every read tool the read-only chat mode allows is a real tool
     assert {n.split("__")[-1] for n in chat.STUDIO_READ_TOOLS} <= set(tools)

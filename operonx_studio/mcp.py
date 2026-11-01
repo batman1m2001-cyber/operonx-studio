@@ -318,6 +318,50 @@ def t_env_run(s: Studio, a: Dict[str, Any]) -> str:
     return f"exit {got.get('exit_code')}\n{got.get('said', '')}"
 
 
+def t_env_services(s: Studio, a: Dict[str, Any]) -> str:
+    what = str(a.get("what") or "list")
+    got = s.call("/env-services", {"op": what, "env": str(a["env"])} | ({"key": a["key"]} if a.get("key") else {}))
+    if got.get("needs_confirm"):
+        return f"Not done: {got['needs_confirm']} The owner does it from the Environments page."
+    lines = [got["said"]] if got.get("said") else []
+    for x in got.get("listeners") or []:
+        lines.append(f"{x['key']} ({', '.join(x['services'])}): {'running' if x['running'] else 'stopped'}"
+                     f", /healthz {x['health'] or 'no answer'}" + (f", pid {x['pid']}" if x["pid"] else "")
+                     + (f", open at {x['url']}" if x["url"] else ""))
+    if "release" in got:
+        lines.append(f"release: {got['release'] or 'none recorded'}")
+    return "\n".join(lines) or "No services in the project."
+
+
+def _deploy_text(r: Dict[str, Any]) -> str:
+    lines = [f"{r['kind']} {r['id']} of {r['ref']} to {r['env']}: {r['state']}" + (f" ({r['sha'][:12]})" if r["sha"] else "")]
+    for st in r["stages"]:
+        lines.append(f"  {st['name']}: {st['state']}" + (f" in {st['ms'] / 1000:.1f}s" if st["ms"] is not None else ""))
+        if st["state"] == "failed" and st["said"]:
+            lines += [f"    {x}" for x in st["said"].splitlines()[-15:]]
+    return "\n".join(lines)
+
+
+def t_deploy(s: Studio, a: Dict[str, Any]) -> str:
+    what, wait = str(a.get("what") or "deploy"), min(float(a.get("wait") if a.get("wait") is not None else 120), 600)
+    if what == "status":
+        runs = s.call("/deploys", env=a.get("env") or "")["deploys"]
+        run = next((r for r in runs if r["id"] == a.get("id")), None) if a.get("id") else (runs[0] if runs else None)
+        if run is None:
+            return "No deploy yet."
+    else:
+        body = {"op": what, "env": str(a["env"])} | {k: a[k] for k in ("ref", "card") if a.get(k)}
+        got = s.call("/deploys", body)
+        if got.get("needs_confirm") or got.get("waiting"):
+            return f"Not started: {got.get('needs_confirm') or got.get('said')}. The owner approves it on the Environments page."
+        run = got["deploy"]
+    end = time.monotonic() + wait
+    while run["state"] in ("queued", "running") and time.monotonic() < end:
+        time.sleep(2)
+        run = next(r for r in s.call("/deploys", env=run["env"])["deploys"] if r["id"] == run["id"])
+    return _deploy_text(run) + ("\nStill running: deploy what=status id=… to follow it." if run["state"] == "running" else "")
+
+
 def t_terminal_open(s: Studio, a: Dict[str, Any]) -> str:
     body = {k: a[k] for k in ("cwd", "command", "title", "card", "env") if a.get(k)}
     t = s.call("/terminals", body)
@@ -924,6 +968,21 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                "seconds, default 300), and return its exit code and output (secret values shown as "
                                "•••). Production is the owner's: you read there, you do not run.",
                 "schema": _schema({"env": _S, "command": _S, "timeout": _N}, ["env", "command"])},
+    "env_services": {"fn": t_env_services,
+                     "description": "The project's services on a host environment: what=list (each listener running "
+                                    "or not, its /healthz, pid, preview URL, the release recorded), log (key: a "
+                                    "listener's last lines), start, stop, restart (key). Production is the owner's.",
+                     "schema": _schema({"env": _S, "what": {"type": "string", "enum": [
+                         "list", "log", "start", "stop", "restart"]}, "key": _S}, ["env"])},
+    "deploy": {"fn": t_deploy,
+               "description": "Deploy to a host environment: git (ref: a branch or commit) → build → test → run "
+                              "(services restarted) → validate (each up and healthy) → deploy (recorded as the "
+                              "release). what=deploy (ref), rollback (to the last good release before the current "
+                              "one), status (id, or the newest). Waits up to wait seconds (default 120) and returns "
+                              "each stage, a failed one with its output. card: the board card it is for (m3/C2 or "
+                              "docs/X_PLAN.md#W1; listed on that card). On production it waits for the owner's approval.",
+               "schema": _schema({"env": _S, "what": {"type": "string", "enum": ["deploy", "rollback", "status"]},
+                                  "ref": _S, "card": _S, "id": _S, "wait": _N})},
     "terminal_send": {"fn": t_terminal_send,
                       "description": "Type into a terminal (Enter added unless enter=false; \\u0003 is Ctrl-C) and "
                                      "return what it printed, waiting up to wait seconds (default 10) for the "

@@ -4207,7 +4207,8 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     _projectboard.register(app, watcher_of=_watcher, turns_of=lambda pid: chat_store.card_turns(pid),
                            asks_of=lambda pid: chat_store.asks(pid),
-                           terminals_of=lambda pid: [t.as_dict() for t in app.state.terminals.of(pid)])
+                           terminals_of=lambda pid: [t.as_dict() for t in app.state.terminals.of(pid)],
+                           deploys_of=lambda pid: app.state.deploys.all(pid))
 
     # what the assistant may do with git, per project: operonx_studio/gitpolicy.py
     from operonx_studio import gitpolicy as _gitpolicy
@@ -4307,6 +4308,16 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     _terminals.register(app, terms=terms, watcher_of=_watcher, env_of=_terminal_env, ws_user=_ws_user,
                         remote_of=_remote_terminal)
+
+    # an environment's services and the pipeline to it: operonx_studio/deploy.py
+    from operonx_studio import deploy as _deploy
+
+    def _env_listeners(pid: str):
+        watcher = _watcher(pid)
+        return _listeners(watcher) if watcher is not None else []
+
+    _deploy.register(app, envs=envs, watcher_of=_watcher, listeners=_env_listeners, base_env=_base_env,
+                     remote_url=_origin, state_dir=lambda: recents.state_file.parent)
 
     # the run queue of a durable service: operonx_studio/runqueue.py
     from operonx_studio import runqueue as _runqueue

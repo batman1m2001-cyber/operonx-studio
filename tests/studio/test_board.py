@@ -896,6 +896,10 @@ def test_a_plan_doc_is_put_on_the_board_from_the_checkout_or_its_worktree(client
     assert [(t["id"], t["title"]) for t in got["terminals"]] == [(mine["id"], "dev")]
     for t in (mine, other_t):
         client.request("DELETE", f"/api/p/{pid}/terminals/{t['id']}")
+    # W4: and a deploy made for it
+    for i, c in enumerate(("C2", "C3")):
+        client.app.state.deploys.put(pid, {"id": f"d-{i}", "env": "staging", "card": f"{mid}/{c}", "state": "ok", "created": i})
+    assert [r["id"] for r in client.get(f"/api/p/{pid}/board/{mid}/card/C2").json()["deploys"]] == ["d-0"]
 
     # a path in another repository is not this project's plan
     other = make_project(tmp_path / "other", store=False)

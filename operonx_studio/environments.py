@@ -55,6 +55,10 @@ class Env:
     production: bool = False
     assistant: str = "run"  # LEVELS
     host_keys: str = ""  # the known_hosts lines the owner trusted
+    python: str = ""  # the interpreter there that serves the project (default: .venv/bin/python, else python3)
+    build: str = ""  # a deploy's build and test commands, in the folder
+    test: str = ""
+    preview: str = ""  # where a service is opened: https://{port}.staging.example.com (default: the host and port)
 
     def public(self, secrets: "Secrets") -> Dict[str, Any]:
         out = {k: v for k, v in asdict(self).items() if k != "host_keys"}
@@ -271,6 +275,13 @@ class Environments:
         return (Local if env.kind == "local" else SSH)(env, self.secrets(pid), base_env)
 
 
+def who(request: Request) -> str:
+    """``assistant`` when the assistant's tools call, else ``owner``."""
+    user = getattr(request.state, "user", None) or {}
+    return "assistant" if user.get("via") == "assistant" or request.headers.get("x-operonx-via") == "assistant" \
+        else "owner"
+
+
 def may(env: Env, by: str, need: str) -> Optional[str]:
     """Why *by* may not do what needs *need* ("read" or "run") in *env*, or None."""
     if by != "assistant":
@@ -303,11 +314,6 @@ def register(app: Any, *, watcher_of: Callable[[str], Any], state_dir: Callable[
         if w is None:
             raise EnvError("unknown project")
         return Path(w.root)
-
-    def who(request: Request) -> str:
-        user = getattr(request.state, "user", None) or {}
-        return "assistant" if user.get("via") == "assistant" or request.headers.get("x-operonx-via") == "assistant" \
-            else "owner"
 
     async def answer(fn: Callable[[], Any]) -> JSONResponse:
         try:
@@ -415,7 +421,7 @@ def register(app: Any, *, watcher_of: Callable[[str], Any], state_dir: Callable[
             env = envs.get(pid, root, eid)
         except EnvError:
             env = Env(eid)
-        for k in ("name", "host", "user", "workdir"):
+        for k in ("name", "host", "user", "workdir", "python", "build", "test", "preview"):
             if k in body:
                 setattr(env, k, str(body[k]).strip())
         if "port" in body:
@@ -436,12 +442,15 @@ def register(app: Any, *, watcher_of: Callable[[str], Any], state_dir: Callable[
 
 
 def checkout(env: Env, branch: str, url: str) -> str:
-    """Bring the environment's folder to *branch*: clone it there the first time, then fetch and fast-forward."""
+    """Bring the environment's folder to *branch* (or a commit): clone it there the first time, then fetch and
+    fast-forward (a commit is checked out detached)."""
     if not branch or not re.fullmatch(r"[\w./-]{1,200}", branch) or branch.startswith("-"):
         raise EnvError("which branch?")
     if not env.workdir:
         raise EnvError("the environment has no folder: set one")
     b, wd = shlex.quote(branch), shlex.quote(env.workdir)
     clone = f"git clone --quiet {shlex.quote(url)} {wd} && cd {wd}" if url else f"echo 'no remote to clone from'; exit 1"
+    to = (f"git switch --quiet --detach {b}" if re.fullmatch(r"[0-9a-f]{7,40}", branch)
+          else f"git switch --quiet {b} && git pull --ff-only --quiet")
     return (f"cd / && if [ -d {wd}/.git ]; then cd {wd}; else {clone}; fi && git fetch --all --prune --quiet "
-            f"&& git switch --quiet {b} && git pull --ff-only --quiet && git log -1 --format='%h %s'")
+            f"&& {to} && git log -1 --format='%h %s'")

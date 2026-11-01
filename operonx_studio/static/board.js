@@ -702,6 +702,22 @@ const BoardView = (() => {
       }
       p.append(ul);
     }
+    if (got.deploys && got.deploys.length) {
+      p.append(el("div", "stitle", "Deploys on this card"));
+      const ul = el("ul", "bdturns");
+      const cls = {ok: " cok", failed: " cbad", running: " crun", queued: " crun", waiting: " cwarn", interrupted: " cbad"};
+      for (const r of got.deploys.slice().reverse()) {
+        const li = el("li");
+        const open = el("button", "linkbtn", `${r.kind} ${r.ref.length > 20 ? r.ref.slice(0, 7) : r.ref} → ${r.env}`);
+        open.type = "button";
+        open.title = "Open it on the Environments page";
+        open.onclick = () => { store(`envs:${PID}`, {...recall(`envs:${PID}`, {}), sel: r.env}); ProjectMode.go("environments"); };
+        li.append(el("span", `chip${cls[r.state] || ""}`, r.state), open,
+                  el("span", "note", ` ${r.sha ? r.sha.slice(0, 7) + " · " : ""}by ${r.by === "assistant" ? "the assistant" : "you"}`));
+        ul.append(li);
+      }
+      p.append(ul);
+    }
     if (got.events.length) {
       p.append(el("div", "stitle", "What happened"));
       const ol = el("ol", "bdevents");
