@@ -889,6 +889,13 @@ def test_a_plan_doc_is_put_on_the_board_from_the_checkout_or_its_worktree(client
     assert [e["kind"] for e in got["turns"][0]["evidence"]] == ["tests", "tests", "base", "commit"]
     assert got["turns"][0]["evidence"][3] == {"kind": "commit", "branch": "feat", "sha": "9f8e7d6", "subject": "E2 header"}
     assert evidence([{"name": "Bash", "status": "running", "tests": {"passed": 1}}]) == []  # a guess so far
+    # W2: a terminal opened for the card is listed on it; one for another card is not
+    mine = client.post(f"/api/p/{pid}/terminals", json={"card": f"{mid}/C2", "title": "dev"}).json()
+    other_t = client.post(f"/api/p/{pid}/terminals", json={"card": f"{mid}/C3"}).json()
+    got = client.get(f"/api/p/{pid}/board/{mid}/card/C2").json()
+    assert [(t["id"], t["title"]) for t in got["terminals"]] == [(mine["id"], "dev")]
+    for t in (mine, other_t):
+        client.request("DELETE", f"/api/p/{pid}/terminals/{t['id']}")
 
     # a path in another repository is not this project's plan
     other = make_project(tmp_path / "other", store=False)

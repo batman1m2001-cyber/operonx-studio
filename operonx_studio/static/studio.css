@@ -6123,3 +6123,97 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
   .ax-call { padding-left: 12px; }
   .ax-call-bar { flex-basis: 100%; }
 }
+
+/* Project mode › Terminal (WORKSPACE_PLAN W2): the rail of shells, one or two live */
+.tm-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); gap: 12px; }
+.tm-rail { list-style: none; margin: 0; padding: 6px 0; overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.tm-rail > .pm-quiet { padding: 8px 12px; }
+.tm-item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 10px; cursor: pointer; font-size: var(--fs-sm); }
+.tm-item:hover, .tm-item.on { background: var(--accent-soft); }
+.tm-item .chip { margin: 0; font-size: 10.5px; }
+.tm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.tm-meta { flex-basis: 100%; padding-left: 14px; font-size: 11.5px; color: var(--text-3); }
+.tm-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--text-3); }
+.tm-dot.working { background: var(--signal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 25%, transparent); }
+.tm-dot.idle { background: var(--ok); }
+.tm-x { border: 0; background: none; color: var(--text-3); font-size: 15px; line-height: 1; padding: 0 2px; cursor: pointer; }
+.tm-x:hover { color: var(--err); }
+.tm-where { margin-left: auto; font: inherit; font-size: var(--fs-sm); }
+.tm-panes { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.tm-panes.split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.tm-pane { min-height: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 6px; overflow: hidden; }
+.tm-pane.focus { border-color: var(--accent); }
+.tm-pane > .pm-quiet { padding: 8px; }
+.tm-term { height: 100%; }
+/* Project mode › Git (W2): changes, history as a graph, branches, pull requests */
+.gv-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gv-head .pm-title { margin: 0 4px 0 0; }
+.gv-tools .pm-chip, .gv-tools .tm-where { margin-left: 0; }
+.gv-commit.gv-nb { margin-top: 0; border-top: 0; border-bottom: 1px solid var(--border-soft); }
+.gv-pad .pm-h { margin: 12px 0 4px; }
+.gv-pad .pm-h:first-child { margin-top: 2px; }
+.gv-branch { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); }
+.gv-tools { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.gv-head .tm-where { margin-left: 0; }
+.chip.warn { color: var(--warn); }
+.gv-state { display: flex; gap: 8px; align-items: center; padding: 8px 12px; margin-bottom: 8px; border-radius: 10px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid var(--warn); font-size: var(--fs-sm); }
+.gv-state .pm-chip:first-of-type { margin-left: auto; }
+.gv-tabs { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.gv-said { margin-left: auto; font-size: 12px; color: var(--text-3); max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gv-said.err { color: var(--err); white-space: normal; }
+.gv-grid { grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); }
+.gv-left { display: flex; flex-direction: column; }
+.gv-pad { padding: 8px 12px; }
+.gv-group { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px 4px; font-size: 11.5px;
+  font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); }
+.gv-file .chip { margin: 0; font-size: 10.5px; }
+.gv-x { width: 14px; flex: none; font: 600 11px var(--mono); text-align: center; color: var(--text-3); }
+.gv-x.x-M { color: var(--warn); } .gv-x.x-A, .gv-x.x-U { color: var(--ok); } .gv-x.x-D { color: var(--err); } .gv-x.x-\! { color: var(--err); }
+.gv-act { border: 0; background: none; color: var(--text-3); width: 20px; font-size: 14px; cursor: pointer; visibility: hidden; }
+.gv-file:hover .gv-act { visibility: visible; }
+.gv-act:hover { color: var(--text); }
+.gv-commit { display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-top: auto; border-top: 1px solid var(--border-soft); }
+.gv-commit textarea, .gv-prform textarea { font: inherit; font-size: var(--fs-sm); resize: vertical; box-sizing: border-box; width: 100%; }
+.gv-commit .linkbtn { align-self: flex-start; }
+.gv-who { font-size: 11.5px; color: var(--text-3); }
+.gv-prform { display: flex; flex-direction: column; gap: 8px; max-width: 560px; }
+.gv-prform .primary { align-self: flex-start; }
+.gv-diff { margin: 0; padding: 8px 0; font: 12px/1.5 var(--mono); white-space: pre; min-width: max-content; }
+.gv-diff .gl { display: block; padding: 0 12px; }
+.gv-diff .add { background: color-mix(in srgb, var(--ok) 13%, transparent); }
+.gv-diff .del { background: color-mix(in srgb, var(--err) 13%, transparent); }
+.gv-diff .hunk { color: var(--signal); background: color-mix(in srgb, var(--signal) 7%, transparent); }
+.gv-diff .meta { color: var(--text-3); }
+.gv-hist { padding: 0; }
+.gv-crow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 8px; align-items: center; height: 26px;
+  padding: 0 10px 0 4px; cursor: pointer; font-size: var(--fs-sm); color: var(--text-2); text-decoration: none; }
+.gv-crow:hover, .gv-crow.on { background: var(--accent-soft); color: var(--text); }
+.gv-csub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 4px; align-items: center; min-width: 0; }
+.gv-csub .chip { margin: 0; font-size: 10.5px; flex: none; }
+.gv-cmeta { font-size: 11px; color: var(--text-3); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gv-pr { grid-template-columns: minmax(0, 1fr); height: auto; padding: 6px 12px; }
+.gv-ref { flex: none; font: 600 10.5px var(--mono); padding: 0 5px; border-radius: 4px; border: 1px solid var(--border); }
+.gv-ref.head { color: var(--accent); border-color: var(--accent); }
+.gv-ref.local { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+.gv-ref.remote { color: var(--signal); border-color: color-mix(in srgb, var(--signal) 50%, transparent); }
+.gv-ref.tag { color: var(--warn); }
+.gv-graph { flex: none; overflow: visible; }
+.gv-graph .ln { fill: none; stroke-width: 2; }
+.gv-graph .dot { stroke: var(--bg); stroke-width: 2; }
+.gv-graph .dot.merge { fill: var(--bg) !important; stroke-width: 2; }
+.gv-graph .c0 { stroke: var(--accent); } .gv-graph .dot.c0 { fill: var(--accent); }
+.gv-graph .c1 { stroke: var(--ok); } .gv-graph .dot.c1 { fill: var(--ok); }
+.gv-graph .c2 { stroke: var(--signal); } .gv-graph .dot.c2 { fill: var(--signal); }
+.gv-graph .c3 { stroke: var(--warn); } .gv-graph .dot.c3 { fill: var(--warn); }
+.gv-graph .c4 { stroke: var(--k-llm); } .gv-graph .dot.c4 { fill: var(--k-llm); }
+.gv-graph .c5 { stroke: var(--k-graph); } .gv-graph .dot.c5 { fill: var(--k-graph); }
+.gv-graph .dot.merge.c0 { stroke: var(--accent); } .gv-graph .dot.merge.c1 { stroke: var(--ok); } .gv-graph .dot.merge.c2 { stroke: var(--signal); }
+.gv-graph .dot.merge.c3 { stroke: var(--warn); } .gv-graph .dot.merge.c4 { stroke: var(--k-llm); } .gv-graph .dot.merge.c5 { stroke: var(--k-graph); }
+.gv-bcard { padding: 10px 12px; border-bottom: 1px solid var(--border-soft); }
+@media (max-width: 760px) {
+  .tm-grid, .gv-grid { display: flex; flex-direction: column; }
+  .tm-rail { max-height: 30vh; }
+  .tm-pane { height: 60vh; }
+  .tm-panes.split { grid-template-columns: minmax(0, 1fr); }
+}

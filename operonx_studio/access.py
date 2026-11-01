@@ -108,6 +108,16 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/project/file"): "read",
     ("GET", f"{P}/git"): "read",                                   # what the assistant may do with git
     ("POST", f"{P}/git"): "admin",                                 # it reaches the machine's push credentials
+    ("GET", f"{P}/terminals"): "edit",                             # a terminal is a shell on the machine
+    ("POST", f"{P}/terminals"): "edit",
+    ("POST", f"{P}/terminals/{{tid}}"): "edit",
+    ("GET", f"{P}/terminals/{{tid}}/output"): "edit",
+    ("DELETE", f"{P}/terminals/{{tid}}"): "edit",
+    ("GET", f"{P}/repo"): "read",                                  # Project mode › Git
+    ("GET", f"{P}/repo/log"): "read",
+    ("GET", f"{P}/repo/diff"): "read",
+    ("GET", f"{P}/repo/prs"): "read",
+    ("POST", f"{P}/repo"): "edit",                                 # stage, commit, push… as a terminal could
     ("GET", f"{P}/trace/{{run}}"): "read",
     ("GET", f"{P}/trace/{{run}}/flow"): "read",
     ("GET", f"{P}/trace/{{run}}/tree"): "read",
