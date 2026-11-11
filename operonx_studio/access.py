@@ -101,7 +101,6 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/board"): "read",                                 # an operonx-project milestone, read-only
     ("GET", f"{P}/brd"): "read",                                   # the project checklist from the checkout
     ("GET", f"{P}/board/{{mid}}"): "read",
-    ("GET", f"{P}/board/{{mid}}/checklist"): "read",
     ("GET", f"{P}/board/{{mid}}/card/{{cid}}"): "read",
     ("GET", f"{P}/project/status"): "read",                        # Project mode: the engine's status document
     ("GET", f"{P}/project/files"): "read",                         # Project mode › Files: what git tracks
@@ -207,15 +206,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/runs/fork"): "edit",         # a new run from one step, its output changed
     ("POST", f"{P}/play/restart"): "edit",
     ("POST", f"{P}/kb/{{service}}/{{path:path}}"): "edit",     # a query runs the project's code and its answer model
-    ("POST", f"{P}/board/daemon"): "edit",                      # Run / Stop the project's daemon
-    ("POST", f"{P}/board/new"): "edit",
-    ("POST", f"{P}/board/request"): "edit",
     ("POST", f"{P}/board/plan"): "edit",                         # a plan doc onto the board; commits its board file
-    ("GET", f"{P}/board/practices"): "read",
-    ("POST", f"{P}/board/practices"): "edit",                       # commits docs/brd/practices.toml on the checkout
-    ("GET", f"{P}/board/settings"): "read",
-    ("POST", f"{P}/board/settings"): "edit",                         # a milestone for rows of the checklist
-    ("POST", f"{P}/board/{{mid}}/act"): "edit",                # answers, approves, pauses: the engine acts on it
 
     # ── the assistant's hands on your own screen ──
     ("POST", f"{P}/ui/action"): "self",

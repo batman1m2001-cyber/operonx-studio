@@ -36,11 +36,11 @@ test("a plan edit that ends reads the status again, then a soft 'saved'", () => 
   assert.deepEqual(C.steps(tool("Edit", {file_path: "/r/docs/EXPORT_PLAN.md"}, "error"), "end", PLANS), []);
 });
 
-test("the checklist matrix and the open questions go to their pages", () => {
+test("the checklist matrix and the open questions ring their sections on Now", () => {
   const m = C.steps(tool("Edit", {file_path: "/r/docs/brd/requirements/requirements_traceability.md"}), "start", NOW);
-  assert.deepEqual(m[0], {go: {tab: "project", page: "checklist"}});
-  const q = C.steps(tool("Edit", {file_path: "/r/docs/brd/requirements/open_questions.md"}), "start", NOW);
-  assert.deepEqual(q[0], {go: {tab: "project", page: "questions"}});
+  assert.deepEqual(m, [{point: "status:checklist", words: "editing rows"}]);
+  const q = C.steps(tool("Edit", {file_path: "/r/docs/brd/requirements/open_questions.md"}), "start", PLANS);
+  assert.deepEqual(q, [{go: {tab: "project", page: "now"}}, {point: "status:needs", words: "editing"}]);
 });
 
 test("reading moves nothing: a plan is ringed only where it already shows", () => {
@@ -63,14 +63,10 @@ test("a commit rings the changes, and the new commit once it lands", () => {
   assert.deepEqual(C.steps(tool("Bash", {command: "ls"}), "start", NOW), []);
 });
 
-test("the studio's own tools: status sweeps the column, an answer presses its option", () => {
+test("the studio's own tools: status sweeps the column", () => {
   const sweep = C.steps(tool("mcp__studio__project_status", {}), "start", NOW);
   assert.deepEqual(sweep.map((x) => x.point), ["status:needs", "status:working", "status:checklist", "status:plans", "status:changes"]);
   assert.ok(sweep.every((x) => x.quick));
-  const a = C.steps(tool("mcp__studio__board_act", {op: "answer", ref: "Q3", answer: {choice: "b"}}), "start", NOW);
-  assert.deepEqual(a, [{go: {tab: "project", page: "questions"}}, {press: "qopt:Q3:b", words: "answering"}]);
-  const w = C.steps(tool("mcp__studio__board_act", {op: "answer", ref: "Q3", answer: "use CSV"}), "start", NOW);
-  assert.deepEqual(w[1], {point: "q:Q3", words: "answering"});
 });
 
 test("what changed between two status documents", () => {
@@ -98,7 +94,7 @@ test("what changed between two status documents", () => {
 });
 
 test("where a target lives: the page to go to before pointing", () => {
-  assert.deepEqual(C.where("q:Q-16"), {tab: "project", page: "questions"});
+  assert.deepEqual(C.where("q:Q-16"), {tab: "project", page: "now"});
   assert.deepEqual(C.where("phase:docs/X_PLAN.md#P2"), {tab: "project", page: "plans"});
   assert.deepEqual(C.where("commit:abc"), {tab: "project", page: "changes"});
   assert.deepEqual(C.where("status:needs"), {tab: "project", page: "now"});
@@ -132,7 +128,7 @@ test("the shell: a heredoc into a plan, sed -i on the matrix, git -c … commit;
   assert.deepEqual(C.steps(heredoc, "start", NOW),
     [{go: {tab: "project", page: "plans"}}, {point: "plan:docs/CSV_EXPORT_PLAN.md", words: "editing", or: "pagehead"}]);
   const sed = bash("sed -i 's/| 120 |/| 123 |/' docs/brd/requirements/requirements_traceability.md && uv run python scripts/check_brd_docs.py");
-  assert.deepEqual(C.steps(sed, "start", NOW).slice(0, 2), [{go: {tab: "project", page: "checklist"}}, {point: "page:checklist", words: "editing rows"}]);
+  assert.deepEqual(C.steps(sed, "start", NOW).slice(0, 2), [{point: "status:checklist", words: "editing rows"}, {point: "status:checklist", words: "checking"}]);
   const commit = bash("git add docs/CSV_EXPORT_PLAN.md docs/brd/requirements/requirements_traceability.md && git -c user.email=a@b -c user.name=a commit -q -m 'plan'");
   assert.deepEqual(C.steps(commit, "start", NOW), [{point: "status:changes", words: "committing"}]);
   // reading with the shell moves nothing; a bare name after `cd docs` is still the plan
@@ -142,9 +138,6 @@ test("the shell: a heredoc into a plan, sed -i on the matrix, git -c … commit;
   // an Edit's input clipped mid-string still names its file
   const edit = {kind: "tool", name: "Edit", status: "running", input: '{"file_path": "/r/docs/X_PLAN.md", "old_string": "abc'};
   assert.equal(C.steps(edit, "start", PLANS)[0].point, "plan:docs/X_PLAN.md");
-  // an answer through board_act, as text
-  const ans = {kind: "tool", name: "mcp__studio__board_act", status: "running", input: '{"op": "answer", "ref": "Q3", "answer": {"choice": "b", "text": ""}}'};
-  assert.equal(C.steps(ans, "start", NOW)[1].press, "qopt:Q3:b");
 });
 
 test("the screen follows the plan: a newly active step's target, then what an ended step left", () => {
@@ -158,17 +151,15 @@ test("the screen follows the plan: a newly active step's target, then what an en
   assert.deepEqual(C.focus(a, a, NOW), []);
   // it ends, the next needs the owner: ring what it left, then the question
   const b = plan(["Read", "done", "op:score"], ["Ask", "waiting", "q:Q-3"]);
-  assert.deepEqual(C.focus(a, b, {tab: "project", page: "questions"}),
+  assert.deepEqual(C.focus(a, b, NOW),
     [{point: "op:score", words: "done", soft: true}, {point: "q:Q-3", words: "Ask"}]);
   // a step with no target moves nothing
   assert.deepEqual(C.focus(null, plan(["Think", "active"]), NOW), []);
 });
 
-test("board_card rings the card it reads, board_act presses the card it moved (D6)", () => {
+test("board_card rings the card it reads (D6)", () => {
   assert.deepEqual(C.steps(tool("mcp__studio__board_card", {milestone: "m2", card: "F1"}), "start", NOW),
     [{go: {tab: "project", page: "plans"}}, {point: "card:F1", words: "reading", or: "ms:m2"}]);
-  assert.deepEqual(C.steps(tool("mcp__studio__board_act", {milestone: "m2", op: "retry", card: "F1"}, "ok"), "end", PLANS),
-    [{press: "card:F1", words: "retry", or: "ms:m2"}]);
   // a clipped input still names the card
   assert.equal(C.inputOf({input: '{"milestone": "m2", "card": "F3", "notes": "…'}).card, "F3");
   assert.deepEqual(C.where("card:F1"), {tab: "project", page: "plans"});

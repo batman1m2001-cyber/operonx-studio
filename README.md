@@ -81,25 +81,14 @@ open the cited page with the cited boxes lit. The studio finds it by asking
 the running service (`/.well-known/operonx-kb`) and reads it over HTTP; it
 never imports operonx-kb.
 
-A project with `docs/brd/` (what `operonx init` writes) gets a **Board**
-tab. It is the owner's console for
-[operonx-project](https://github.com/batman1m2001-cyber/Operonx/tree/main/packages/operonx-project):
+A project with an
+[operonx-project](https://github.com/batman1m2001-cyber/Operonx/tree/main/packages/operonx-project)
+store shows its milestones on Project mode's Plans page: each one's
+columns, with a live line on every running card showing what its session
+does now, and each card attempt as a run page. The assistant reads the
+same through `board_status`, `board_card`, `board_plan` and
+`project_status`.
 
-- **The checklist**: tick rows and **Build** them as a milestone. It
-  works before the first milestone too.
-- **Run** and **Stop** for the engine's daemon.
-- **Each milestone's columns**, with a live line on every running card
-  showing what its session does now, and who works a taken card.
-- **The questions waiting on you**.
-- **The card graph**, and each card attempt as a run page.
-
-The assistant has the same powers as tools (`board_status`, `board_card`,
-`board_start`, `board_act`, `board_daemon`, `board_take` and
-`board_submit`), so you can run a project from the chat. With
-`board_take` and `board_submit` it works a card itself, through the
-engine's checks.
-
-The studio reads the engine's store read-only, and acts only through
-`operonx-project api` (on `PATH`, or `OPERONX_PROJECT_BIN`), so its
-actions follow the engine's rules: a second or stale answer is refused.
+The studio reads the engine's store read-only; it writes only a plan's
+mirror, through `operonx-project api` (on `PATH`, or `OPERONX_PROJECT_BIN`).
 The guide is operonx-project's `guide/01-project.md`.

@@ -13,11 +13,9 @@
  *
  *   Now        the conversation, and beside it where the project stands
  *   Plans      every plan doc and milestone, phase by phase; a milestone opens its board
- *   Checklist  the requirements: done, open, and their tests
- *   Questions  what waits for the owner, answered in place
- *   Changes    the commits, newest first
+ *   Git        what changed, the branches, the history (git.js)
  *   Files      the project's files, read-only; what changed lately is marked
- *   Settings   how it is built, the models, the engine's daemon
+ *   Settings   the standard, and what the assistant may do with git
  *
  * On a page other than Now the page takes the centre and the conversation
  * moves to the right, so it is always one glance away.
@@ -31,10 +29,9 @@ const ProjectMode = (() => {
   const box = $("#project");
   const bar = $("#prail");
   const K = `pmode:${PID}`;
-  const v = Object.assign({page: "now", open: {}, mid: "", filter: "open", search: "", fopen: {}, file: "",
-                           fonly: false}, recall(K, {}));
-  const PAGES = {now: "Now", plans: "Plans", checklist: "Checklist", questions: "Questions", changes: "Git",
-                 files: "Files", terminal: "Terminal", environments: "Environments", settings: "Settings"};
+  const v = Object.assign({page: "now", open: {}, mid: "", fopen: {}, file: "", fonly: false}, recall(K, {}));
+  const PAGES = {now: "Now", plans: "Plans", changes: "Git", files: "Files", terminal: "Terminal",
+                 environments: "Environments", settings: "Settings"};
   let doc = null;      // the last status document
   let failed = null;   // why there is none: {message, unavailable}
   let token = 0;
@@ -42,7 +39,7 @@ const ProjectMode = (() => {
   let timer = null;
   let busy = false;    // the assistant's turn, as last heard
   let on = false;      // the mode is showing
-  const drafts = {};   // words being typed on the Questions page, kept across redraws
+  const drafts = {};   // words being typed on Settings, kept across redraws
 
   // board.js's view (a top-level const: not on window)
   const HAS_BOARD = () => typeof BoardView !== "undefined";
@@ -108,66 +105,6 @@ const ProjectMode = (() => {
   };
   grip.ondblclick = () => { v.chatw = 0; chatWidth(0); save(); };
 
-  /* ── the builder island and a question's toast ────────────────────
-   * Glass over the conversation (docs/LIQUID_GLASS_PLAN.md G5). While a
-   * milestone is being built, a capsule says the card and what it has cost,
-   * and grows into the plan; a question that arrives says so once, and grows
-   * into Questions. At the top: the composer has the bottom. */
-  const floats = el("div", "pm-floats");
-  const island = button("pm-island", null, () => {
-    const from = island.getBoundingClientRect();
-    v.mid = island.dataset.mid || "";
-    go("plans");
-    Glass.growFrom(page, from);
-  });
-  island.hidden = true;
-  tgt(island, "island");
-  const qtoast = el("div", "pm-qtoast");
-  qtoast.hidden = true;
-  qtoast.setAttribute("role", "status");
-  floats.append(island, qtoast);
-  chat.append(floats);
-  const STATES = {waiting_human: "waits for you", running: "building", in_progress: "building", review: "in review", qa: "in QA"};
-  const usd = (n) => `$${(+n || 0).toFixed(2).replace(/\.00$/, "")}`;
-
-  function paintIsland() {
-    const runs = doc ? doc.plans.filter((p) => p.source === "engine" && p.status === "in_progress" && p.current) : [];
-    island.hidden = !runs.length;
-    if (!runs.length) return;
-    const p = runs[0];
-    island.textContent = "";
-    island.dataset.mid = p.milestone || "";
-    island.dataset.state = p.state || "";
-    island.title = `${p.title}${p.reason ? ` · ${p.reason}` : ""}\nOpen its plan`;
-    island.append(el("span", "pm-island-dot"), el("b", null, p.current),
-      el("span", "pm-island-state", STATES[p.state] || String(p.state || "").replace(/_/g, " ")),
-      el("span", "pm-island-cost", p.budget_usd ? `${usd(p.cost_usd)} of ${usd(p.budget_usd)}` : usd(p.cost_usd)));
-    if (runs.length > 1) island.append(el("span", "pm-island-more", `+${runs.length - 1}`));
-  }
-
-  // only a question that arrived while the mode shows: the rail's badge has the rest
-  function noticeQuestions(before) {
-    if (!before || !doc || v.page === "questions") return;
-    const had = new Set(before.needs_you.map((q) => q.id));
-    const fresh = doc.needs_you.filter((q) => !had.has(q.id));
-    if (!fresh.length) return;
-    const q = fresh[0];
-    qtoast.textContent = "";
-    const open = button("pm-qtoast-open", null, () => {
-      const from = qtoast.getBoundingClientRect();
-      qtoast.hidden = true;
-      go("questions");
-      Glass.growFrom(page, from);
-    }, "Answer it on the Questions page");
-    open.append(el("b", null, fresh.length > 1 ? `${q.id} and ${fresh.length - 1} more need you` : `${q.id} needs you`),
-      el("span", null, q.text));
-    const close = button("pm-qtoast-x", "×", () => { qtoast.hidden = true; }, "Dismiss");
-    close.setAttribute("aria-label", "Dismiss");
-    qtoast.append(open, close);
-    qtoast.hidden = false;
-    Glass.growFrom(qtoast, island.hidden ? null : island.getBoundingClientRect());
-  }
-
   /* ── the status column ─────────────────────────────────────────── */
   function section(key, title, count, body, opts) {
     const s = tgt(el("section", "pm-sec"), `status:${key}`);
@@ -207,7 +144,11 @@ const ProjectMode = (() => {
   function needsYou(items) {
     if (!items.length) return el("p", "pm-quiet", "Nothing waits for you.");
     return capped("more-needs", items, 3, (q) => {
-      const row = button("pm-item pm-q pm-one", null, () => go("questions"), `${q.id} · ${q.text}\nAnswer it on the Questions page`);
+      // the assistant's question is answered in its conversation; a BRD question is talked through
+      const act = q.source === "assistant" && window.oxAssistant ? () => window.oxAssistant.open(q.session, true)
+        : () => ask(`Open question ${q.id} (${q.text}) in docs/brd/requirements/open_questions.md: `
+          + "what does it say, what are the options, and what do you recommend?");
+      const row = button("pm-item pm-q pm-one", null, act, `${q.id} · ${q.text}`);
       row.dataset.key = `q:${q.source}:${q.milestone || ""}:${q.id}`;
       tgt(row, `q:${q.id}`);
       row.append(el("span", "pm-id", q.source === "assistant" ? "assistant" : q.id), el("span", "pm-text", q.text || q.kind));
@@ -322,9 +263,9 @@ const ProjectMode = (() => {
     const sum = el("summary", "pm-handle");
     sum.append(head);
     wrap.append(sum,
-      section("needs", "Needs you", needs, needsYou(d.needs_you), {hot: needs > 0, page: "questions"}),
+      section("needs", "Needs you", needs, needsYou(d.needs_you), {hot: needs > 0}),
       section("working", "Working on", d.working_on.length || null, workingOn(d.working_on), {page: "plans"}),
-      section("checklist", "Checklist", null, checklistBox(d.checklist), {page: "checklist"}),
+      section("checklist", "Checklist", null, checklistBox(d.checklist)),
       section("plans", "Plans", d.plans.length || null, plansBox(d), {page: "plans"}),
       section("changes", "Recent changes", null, changesBox(d.changes), {page: "changes"}));
     // the standard, only while something is missing: one line, the rest on Settings
@@ -422,200 +363,13 @@ const ProjectMode = (() => {
     }
   }
 
-  /* a milestone the engine builds: its board (the kanban, the checklist, the graph), here */
+  /* a milestone on the board: its columns, here */
   function drawMilestone() {
     const back = button("linkbtn pm-back", "← All plans", () => { v.mid = ""; save(); drawPlans(); });
     page.append(back);
     const slot = el("div", "pm-board");
     page.append(slot);
     if (HAS_BOARD()) BoardView.mount(slot, {mid: v.mid});
-  }
-
-  let ck = null;   // the checklist, as last read
-  async function drawChecklist() {
-    const mine = ++pageToken;
-    page.textContent = "";
-    page.append(pageHead("Checklist", doc && doc.checklist.total ? `${doc.checklist.verified} of ${doc.checklist.total} verified` : ""));
-    if (!ck) page.append(el("p", "pm-quiet", "Reading the checklist…"));
-    try { ck = await api(`/api/p/${PID}/brd`); } catch (err) { ck = {error: err.message}; }
-    if (mine !== pageToken || v.page !== "checklist") return;
-    page.textContent = "";
-    page.append(pageHead("Checklist", doc && doc.checklist.total ? `${doc.checklist.verified} of ${doc.checklist.total} verified` : ""));
-    if (ck.error || ck.available === false) { page.append(el("div", "errbox", ck.error || "No docs/brd here.")); return; }
-    if (!(ck.rows || []).length) { page.append(paneNote("No checklist yet", ck.note || "docs/brd has no rows.")); return; }
-    const CLOSED = new Set(["implemented_verified", "out_of_scope_demo", "not_applicable", "superseded"]);
-    const rows = ck.rows;
-    const counts = {open: rows.filter((r) => !CLOSED.has(r.status)).length, all: rows.length,
-                    verified: rows.filter((r) => r.status === "implemented_verified").length};
-    const tools = el("div", "pm-tools");
-    for (const [f, label] of [["open", "Open"], ["verified", "Verified"], ["all", "All"]]) {
-      const b = button(`pm-chip${v.filter === f ? " on" : ""}`, `${label} ${counts[f]}`, () => { v.filter = f; save(); drawChecklist(); });
-      b.setAttribute("aria-pressed", String(v.filter === f));
-      tools.append(b);
-    }
-    const search = el("input", "pm-search");
-    search.type = "search";
-    search.placeholder = "Find a row…";
-    search.value = v.search || "";
-    tools.append(search);
-    page.append(tools);
-    const list = el("div", "pm-rows");
-    page.append(list);
-    const paint = () => {
-      const q = (v.search || "").toLowerCase();
-      list.textContent = "";
-      const shown = rows.filter((r) => (v.filter === "all" || (v.filter === "open" ? !CLOSED.has(r.status) : r.status === "implemented_verified"))
-        && (!q || `${r.id} ${r.text} ${r.cells.join(" ")}`.toLowerCase().includes(q)));
-      if (!shown.length) list.append(el("p", "pm-quiet", v.filter === "open" && !q ? "Every row is done." : "No row matches."));
-      for (const r of shown.slice(0, 500)) {
-        const key = `row:${r.id}`;
-        const item = el("div", `pm-reqrow${CLOSED.has(r.status) ? "" : " open"}`);
-        item.dataset.key = key;
-        tgt(item, key);
-        const top = button("pm-reqtop", null, () => { v.open[key] = !v.open[key]; save(); paint(); });
-        top.append(el("span", "pm-id", r.id), el("span", "pm-text", r.text || r.cells.slice(1, 3).join(" · ")),
-          el("span", `pm-pill rs-${r.status}`, r.status.replace(/_/g, " ")),
-          el("span", "pm-where", r.tests.length ? plural(r.tests.length, "test") : "no test"));
-        item.append(top);
-        if (v.open[key]) {
-          const more = el("div", "pm-reqmore");
-          more.append(el("p", null, r.cells.slice(1).filter((c) => c && c !== r.status && c !== "—").join(" · ")));
-          for (const t of r.tests) more.append(el("div", "mono pm-test", t));
-          if (!CLOSED.has(r.status)) more.append(button("needs-edit", "Work on this row", () => ask(
-            `Make checklist row ${r.id} true: build what it needs, cite a passing test, and set its status in the matrix.`)));
-          item.append(more);
-        }
-        list.append(item);
-      }
-    };
-    search.oninput = () => { v.search = search.value; save(); paint(); };
-    paint();
-  }
-
-  async function drawQuestions() {
-    const mine = ++pageToken;
-    const d = doc;
-    page.textContent = "";
-    page.append(pageHead("Questions", d ? plural(d.needs_you.length, "waits", "wait") + " for you" : ""));
-    if (!d) { page.append(failed ? missing() : el("p", "pm-quiet", "Reading…")); return; }
-    if (!d.needs_you.length) { page.append(paneNote("Nothing waits for you", "The engine's questions, the requirements' open questions and the assistant's show here.")); return; }
-    // the engine's questions in full (options with their words, why it blocks), from each milestone's board
-    const mids = [...new Set(d.needs_you.filter((q) => q.source === "engine").map((q) => q.milestone))];
-    const full = {};
-    await Promise.all(mids.map(async (mid) => {
-      try { for (const q of (await api(`/api/p/${PID}/board/${enc(mid)}`)).questions || []) full[`${mid}:${q.qid}`] = q; }
-      catch { /* the summary is enough to answer in words */ }
-    }));
-    if (mine !== pageToken || v.page !== "questions") return;
-    keepDrafts();
-    page.textContent = "";
-    page.append(pageHead("Questions", plural(d.needs_you.length, "waits", "wait") + " for you"));
-    for (const q of d.needs_you) page.append(q.source === "engine" ? engineQuestion(q, full[`${q.milestone}:${q.id}`])
-      : q.source === "assistant" ? assistantQuestion(q) : brdQuestion(q));
-  }
-  function keepDrafts() { for (const ta of page.querySelectorAll("textarea[data-q]")) drafts[ta.dataset.q] = ta.value; }
-  function wordsBox(key, placeholder) {
-    const ta = el("textarea");
-    ta.dataset.q = key;
-    ta.rows = 2;
-    ta.placeholder = placeholder;
-    ta.value = drafts[key] || "";
-    return ta;
-  }
-  async function answer(q, body, done) {
-    try {
-      const got = await api(`/api/p/${PID}/board/${enc(q.milestone)}/act`, {op: "answer", ref: q.id, answer: body});
-      toast(got.message || "Answered");
-      if (done) done();
-    } catch (err) { toast((err.data || {}).message || err.message, true); }
-    refresh();
-  }
-  function engineQuestion(q, f) {
-    const card = el("section", "pm-qcard");
-    card.dataset.key = `q:${q.milestone}:${q.id}`;
-    tgt(card, `q:${q.id}`);
-    const head = el("div", "pm-qhead");
-    head.append(el("span", "pm-id", q.id), el("span", "pm-where", `${q.milestone}${q.card ? " · " + q.card : ""} · ${q.kind}`));
-    head.append(button("linkbtn", "Open the board", () => { v.mid = q.milestone; go("plans"); }));
-    card.append(head, el("p", "pm-qtext", (f && f.problem) || q.text));
-    if (f && f.why) card.append(fold(`why:${q.milestone}:${q.id}`, "Why it blocks", () => el("p", "pm-where", f.why)));
-    const opts = el("div", "pm-acts");
-    for (const o of (f && f.options) || q.options.map((k) => ({key: k, label: k}))) {
-      const rec = (f ? f.recommended : q.recommended) === o.key;
-      const b = button(`${rec ? "primary" : ""} needs-edit`, `${o.label}${rec ? " (recommended)" : ""}`,
-        () => answer(q, {choice: o.key, text: ""}), o.description || "");
-      tgt(b, `qopt:${q.id}:${o.key}`);
-      opts.append(b);
-    }
-    const key = `${q.milestone}:${q.id}`;
-    const words = el("div", "pm-words needs-edit");
-    const ta = wordsBox(key, "Your answer…");
-    words.append(ta, button(null, "Send", () => { const t = ta.value.trim(); if (!t) { ta.focus(); return; } answer(q, t, () => { delete drafts[key]; }); }));
-    words.hidden = !drafts[key];
-    opts.append(button("linkbtn needs-edit", "In my words", () => { words.hidden = false; ta.focus(); }));
-    card.append(opts, words);
-    return card;
-  }
-  /* a turn that ended on a question to the owner (WORKSPACE_PLAN W1.5): answered in its conversation */
-  function assistantQuestion(q) {
-    const card = el("section", "pm-qcard");
-    card.dataset.key = `q:assistant:${q.id}`;
-    const head = el("div", "pm-qhead");
-    head.append(el("span", "pm-id", "assistant"), el("span", "pm-where", `${q.title || "a conversation"}${q.card ? ` · ${q.card}` : ""}`));
-    card.append(head, el("p", "pm-qtext", q.text));
-    const acts = el("div", "pm-acts");
-    acts.append(button("primary", "Answer in the conversation", () => window.oxAssistant && window.oxAssistant.open(q.session, true)));
-    card.append(acts);
-    return card;
-  }
-  function brdQuestion(q) {
-    const card = el("section", "pm-qcard");
-    card.dataset.key = `q:brd:${q.id}`;
-    tgt(card, `q:${q.id}`);
-    const head = el("div", "pm-qhead");
-    head.title = `${q.kind} · ${q.state} · docs/brd/requirements/open_questions.md`;
-    head.append(el("span", "pm-id", q.id), el("span", "pm-qtext", q.text));
-    card.append(head);
-    const key = `brd:${q.id}`;
-    const ta = wordsBox(key, "Your decision…");
-    const decide = el("div", "pm-words needs-edit");
-    decide.hidden = !drafts[key];
-    const acts = el("div", "pm-acts");
-    acts.append(button(null, "Talk it through", () => ask(`Open question ${q.id} (${q.text}) in docs/brd/requirements/open_questions.md: `
-      + "what does it say, what are the options, and what do you recommend?")));
-    acts.append(button("needs-edit", "Decide", () => { decide.hidden = false; ta.focus(); }));
-    decide.append(ta, button("primary", "Record", () => {
-      const t = ta.value.trim();
-      if (!t) { ta.focus(); return; }
-      delete drafts[key];
-      ask(`The owner decided open question ${q.id} (${q.text}): "${t}". Record it in docs/brd/requirements/open_questions.md `
-        + "(the entry's resolution and its state), update the requirement rows it touches, and commit.");
-    }));
-    card.append(acts, decide);
-    return card;
-  }
-
-  async function drawChanges() {
-    const mine = ++pageToken;
-    page.textContent = "";
-    page.append(pageHead("Changes", ""));
-    let list = doc ? doc.changes : [];
-    try { list = (await api(`/api/p/${PID}/project/status?changes=60`)).project.changes; } catch { /* the last ones */ }
-    if (mine !== pageToken || v.page !== "changes") return;
-    page.textContent = "";
-    page.append(pageHead("Changes", plural(list.length, "commit")));
-    if (!list.length) { page.append(el("p", "pm-quiet", "No commits yet.")); return; }
-    let day = "";
-    for (const ch of list) {
-      const d = (ch.at || "").slice(0, 10);
-      if (d !== day) { day = d; page.append(el("h3", "pm-h pm-day", d)); }
-      const row = el("div", "pm-change");
-      row.dataset.key = `c:${ch.sha}`;
-      tgt(row, `commit:${ch.sha}`);
-      row.append(el("span", "pm-text", ch.subject),
-        el("span", "pm-where", `${ch.sha} · ${ch.author} · ${(ch.at || "").slice(11, 16)}`));
-      page.append(row);
-    }
   }
 
   /* ── Files: the tree on the left, the file on the right ─────────── */
@@ -730,17 +484,11 @@ const ProjectMode = (() => {
     const mine = ++pageToken;
     page.textContent = "";
     page.append(pageHead("Settings", ""));
-    let info = {};
     let git = null;
-    await Promise.all([
-      api(`/api/p/${PID}/board`).then((x) => { info = x; }, (err) => { info = {error: err.message}; }),
-      api(`/api/p/${PID}/git`).then((x) => { git = x; }, (err) => { git = {error: err.message}; }),
-    ]);
+    try { git = await api(`/api/p/${PID}/git`); } catch (err) { git = {error: err.message}; }
     if (mine !== pageToken || v.page !== "settings") return;
-    keepDrafts();
     page.textContent = "";
     page.append(pageHead("Settings", ""));
-    const s = doc ? doc.setup : null;
     // one row per setting: its name, its value, its action; the why is on hover
     let rows = null;
     const group = (title) => {
@@ -759,43 +507,7 @@ const ProjectMode = (() => {
 
     standardRows(group, row);
     gitRows(group, row, git);
-    group("Building");
-    row("How it is built", s && s.practices.file ? `From ${s.practices.file}, committed: tests, architecture rules, the checks a change must pass`
-      : "No docs/brd/practices.toml: the defaults", el("span", "pm-setval", s ? s.practices.line.replace(/^no practices file /, "defaults ") : "…"),
-      button("needs-edit", "Change", () => ask("Show me the project's practices (docs/brd/practices.toml) "
-        + "in plain words and what each preset would change; change nothing until I choose.")));
-
-    if (info.installed === false || failed) {
-      row("Builder", "operonx-project builds and checks the project; the studio talks to it", failed ? missing() : el("span", "pm-bad", "not installed"));
-      return;
-    }
-    const ms = info.models || {};
-    const pick = el("select", "needs-edit");
-    for (const m of ["", "sonnet", "opus", "haiku", "fable"]) {
-      const o = el("option", null, m || "default");
-      o.value = m;
-      o.selected = (ms.model || "") === m;
-      pick.append(o);
-    }
-    pick.onchange = async () => {
-      try { toast((await api(`/api/p/${PID}/board/settings`, {model: pick.value})).message); }
-      catch (err) { toast((err.data || {}).message || err.message, true); }
-    };
-    const roles = Object.entries(ms.models || {});
-    row("Engine model", "The model the engine's sessions run on; a change applies to the next session"
-      + (roles.length ? `\nPer role: ${roles.map(([r, m]) => `${r} ${m}`).join(", ")}` : ""), pick);
-
-    const dmn = info.daemon || {};
-    const run = button(`${dmn.running ? "" : "primary"} needs-edit`, dmn.running ? "Stop" : "Run", async () => {
-      run.disabled = true;
-      try { toast((await api(`/api/p/${PID}/board/daemon`, {action: dmn.running ? "stop" : "start"})).message); }
-      catch (err) { toast((err.data || {}).message || err.message, true); }
-      drawSettings();
-      refresh();
-    });
-    row("Engine daemon", "It drives the milestones the engine builds; work done in the conversation does not need it",
-      el("span", `pm-setval ${dmn.running ? "" : "pm-quiet"}`, dmn.running ? "running" : "stopped"), run);
-    if (info.sandbox === false) row("Sandbox", "This machine runs the engine's coders without the shell sandbox", el("span", "pm-bad", "off"));
+    if (failed) { group("Builder"); row("Builder", "operonx-project reads the project's status; the studio talks to it", missing()); }
   }
 
   /* ── the standard (PROJECT_STANDARD_PLAN D1, D3) ─────────────────── */
@@ -877,9 +589,7 @@ const ProjectMode = (() => {
     if (v.page !== "environments" && HAS_ENV()) EnvPage.unmount();
     if (v.page === "now") { page.textContent = ""; return; }
     if (v.page === "plans") drawPlans();
-    else if (v.page === "checklist") drawChecklist();
-    else if (v.page === "questions") drawQuestions();
-    else if (v.page === "changes") { if (HAS_GIT()) GitPage.mount(page); else drawChanges(); }
+    else if (v.page === "changes") { if (HAS_GIT()) GitPage.mount(page); }
     else if (v.page === "files") drawFiles();
     else if (v.page === "terminal") { if (HAS_TERM()) TerminalPage.mount(page); }
     else if (v.page === "environments") { if (HAS_ENV()) EnvPage.mount(page); }
@@ -905,12 +615,9 @@ const ProjectMode = (() => {
     if (on) {
       drawSide();
       paintBar();
-      paintIsland();
-      noticeQuestions(before);
       // the pages drawn from the document follow it; a page being typed into is left alone
       const typing = page.contains(document.activeElement) && /TEXTAREA|INPUT|SELECT/.test(document.activeElement.tagName);
-      if (!typing && (v.page === "questions" || v.page === "settings" || (v.page === "plans" && !v.mid)
-        || (base && v.page === "checklist"))) drawPage();
+      if (!typing && (v.page === "settings" || (v.page === "plans" && !v.mid))) drawPage();
       else if (v.page === "files" && ftree) {
         api(`/api/p/${PID}/project/files`).then((got) => {
           const list = page.querySelector(".pm-ftree");
@@ -951,15 +658,12 @@ const ProjectMode = (() => {
       b.classList.toggle("active", here);
       b.setAttribute("aria-selected", String(here));
     }
-    const badge = bar.querySelector('button[data-ppage="questions"] .pm-badge');
-    if (badge) { const n = doc ? doc.needs_you.length : 0; badge.textContent = n ? String(n) : ""; badge.hidden = !n; }
   }
   for (const b of bar.querySelectorAll("button[data-ppage]")) b.addEventListener("click", () => go(b.dataset.ppage));
   bar.querySelector("[data-pback]").onclick = () => switchTab(recall(`pmodeFrom:${PID}`, "flow"));
 
   function go(name) {
     v.page = PAGES[name] ? name : "now";
-    if (v.page === "questions") qtoast.hidden = true;
     save();
     paintBar();
     drawPage();
@@ -1002,7 +706,6 @@ const ProjectMode = (() => {
     save();
     enter();
     paintBar();
-    paintIsland();
     drawSide();
     drawPage();
     refresh();
@@ -1023,7 +726,7 @@ const ProjectMode = (() => {
     if (busy && !now) {
       clearTimeout(baseEnd);
       baseEnd = setTimeout(() => { base = null; }, 30000);
-      if (on) { refresh(); if (v.page === "checklist" || v.page === "changes") drawPage(); }
+      if (on) { refresh(); if (v.page === "changes") drawPage(); }
     }
     busy = now;
   });
