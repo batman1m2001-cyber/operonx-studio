@@ -241,14 +241,21 @@ def evidence(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for it in items:
         name, output = str(it.get("name") or ""), str(it.get("output") or "")
+        inp = it.get("input")
+        if isinstance(inp, str):  # a stored item keeps its input as JSON text
+            try:
+                inp = json.loads(inp)
+            except ValueError:
+                inp = None
+        command = str(inp.get("command") or "") if isinstance(inp, dict) else ""
         if isinstance(it.get("tests"), dict) and it.get("status") != "running":
             t = it["tests"]
             out.append({"kind": "tests", "passed": int(t.get("passed") or 0), "skipped": int(t.get("skipped") or 0),
                         "failed": int(t.get("failed") or 0) + int(t.get("errors") or 0),
-                        "command": str((it.get("input") or {}).get("command") or "")[:200]})
+                        "command": command[:200]})
         elif name.endswith(("__failing_on_base", "__on_base")) and it.get("status") == "ok":
             out.append({"kind": "base", "text": output.strip().splitlines()[0][:240] if output.strip() else ""})
-        elif name == "Bash" and "commit" in str((it.get("input") or {}).get("command") or ""):
+        elif name == "Bash" and "commit" in command:
             out += [{"kind": "commit", "branch": m.group(1), "sha": m.group(2), "subject": m.group(3)[:160]}
                     for m in _COMMIT.finditer(output)]
     return out
@@ -510,8 +517,9 @@ class ChatStore:
                 for r in rows]
 
     def card_turns(self, scope: str, limit: int = 300) -> List[Dict[str, Any]]:
-        """WORKSPACE_PLAN W1.3–W1.4: the scope's turns that named a board card (a ``steps`` call's ``card``),
-        newest first, each with the evidence it left (:func:`evidence`)."""
+        """WORKSPACE_PLAN W1.3–W1.4: the scope's turns that named a board card (a ``steps`` call's ``card``, or
+        a ``board_move`` to doing), newest first, each with the evidence it left (:func:`evidence`) and, while it
+        runs, the step it is on (its last tool when it shows no steps)."""
         rows = self._q("SELECT t.id, t.session, t.card, t.state, t.started, t.ended, t.cost, t.message FROM turns t"
                        " JOIN sessions s ON s.id = t.session WHERE s.scope = ? AND t.card != '' AND t.hidden = 0"
                        " ORDER BY t.started DESC LIMIT ?", (scope, limit))
@@ -519,8 +527,12 @@ class ChatStore:
         for r in rows:
             items = self._q("SELECT payload FROM items WHERE session = ? AND turn = ? AND kind = 'tool' AND hidden = 0"
                             " ORDER BY seq", (r["session"], r["id"]))
-            out.append({**dict(r), "message": str(r["message"])[:200],
-                        "evidence": evidence([json.loads(i["payload"]) for i in items]),
+            calls = [json.loads(i["payload"]) for i in items]
+            plan = next((c["plan"] for c in reversed(calls) if c.get("plan")), None) or {}
+            step = next((s for s in plan.get("steps") or [] if s.get("state") == "active"), None)
+            now = (step or {}).get("title") or (calls[-1].get("label") if calls else "")  # no steps: the last tool
+            out.append({**dict(r), "message": str(r["message"])[:200], "evidence": evidence(calls),
+                        "now": str(now or "")[:160] if r["state"] == "running" else "",
                         "asks": self._ask(r["session"], r["id"]) if r["state"] == "done" else ""})
         return out
 
@@ -536,7 +548,7 @@ class ChatStore:
         for r in rows:
             ask = self._ask(r["session"], r["id"])
             if ask:
-                out.append({"id": f"turn:{r['id']}", "qid": "", "milestone": "", "kind": "assistant",
+                out.append({"id": f"turn:{r['id']}", "qid": "", "kind": "assistant",
                             "card": r["card"], "problem": ask, "created": r["ended"], "session": r["session"],
                             "title": r["title"], "source": "assistant"})  # fmt: skip
         return out
@@ -772,6 +784,13 @@ class Relay:
         turn.state = state
         self._emit(turn, {"t": "state", "state": state, "detail": detail, **({"step": turn.step} if turn.step else {})})
 
+    def _take(self, turn: Turn, card: Any) -> None:
+        """The board card this turn works: a ``steps`` call's ``card``, or the card it moves to doing."""
+        card = str(card or "").strip()
+        if card and card != turn.card:
+            turn.card = card
+            self.store.update_turn(turn.id, card=card)
+
     def _plan(self, turn: Turn, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """A ``steps`` call's list, stamped (docs/ASSISTANT_PROGRESS_PLAN.md D1):
         a step starts the first time it is seen active and ends the first time
@@ -790,10 +809,7 @@ class Relay:
             step.update(stamp)
             if "started" in stamp and "ended" in stamp:
                 step["ms"] = round((stamp["ended"] - stamp["started"]) * 1000)
-        card = str(inputs.get("card") or "").strip()
-        if card and card != turn.card:
-            turn.card = card
-            self.store.update_turn(turn.id, card=card)
+        self._take(turn, inputs.get("card"))
         line = step_line(steps)
         turn.step = line[0].upper() + line[1:].replace(": ", " · ", 1) if line.startswith("step ") else ""
         return {"title": str(inputs.get("title") or ""), "steps": steps}
@@ -1354,6 +1370,8 @@ class Relay:
                     label = _tool_label(name, inputs, turn.cwd)
                     if name in ("Edit", "Write", "MultiEdit") and isinstance(inputs.get("file_path"), str):
                         turn.edited.append(str(Path(turn.cwd or ".", inputs["file_path"])))
+                    if name == "mcp__studio__board_move" and inputs.get("to") == "doing":
+                        self._take(turn, inputs.get("card"))
                     plan = self._plan(turn, inputs) if name == "mcp__studio__steps" else None
                     item = self._item(turn, "tool", id=block.get("id"), name=name, label=label,
                                       input=_clip(inputs), status="running", t0=_now(),

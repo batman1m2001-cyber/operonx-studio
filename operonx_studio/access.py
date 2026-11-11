@@ -98,10 +98,9 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/media/{{sha}}"): "read",
     ("GET", f"{P}/monitor"): "read",
     ("GET", f"{P}/monitor/scores"): "read",
-    ("GET", f"{P}/board"): "read",                                 # an operonx-project milestone, read-only
+    ("GET", f"{P}/board"): "read",                                 # docs/brd/board.md, its cards
     ("GET", f"{P}/brd"): "read",                                   # the project checklist from the checkout
-    ("GET", f"{P}/board/{{mid}}"): "read",
-    ("GET", f"{P}/board/{{mid}}/card/{{cid}}"): "read",
+    ("GET", f"{P}/board/card/{{cid}}"): "read",
     ("GET", f"{P}/project/status"): "read",                        # Project mode: the engine's status document
     ("GET", f"{P}/project/files"): "read",                         # Project mode › Files: what git tracks
     ("GET", f"{P}/project/file"): "read",
@@ -206,7 +205,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/runs/fork"): "edit",         # a new run from one step, its output changed
     ("POST", f"{P}/play/restart"): "edit",
     ("POST", f"{P}/kb/{{service}}/{{path:path}}"): "edit",     # a query runs the project's code and its answer model
-    ("POST", f"{P}/board/plan"): "edit",                         # a plan doc onto the board; commits its board file
+    ("POST", f"{P}/board/card"): "edit",                         # add, change or move a card in board.md
 
     # ── the assistant's hands on your own screen ──
     ("POST", f"{P}/ui/action"): "self",

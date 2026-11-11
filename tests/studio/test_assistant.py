@@ -221,11 +221,6 @@ emit({"type": "assistant", "message": {"model": model, "content": [
 if "EDIT" in msg:
     with open("added.py", "w") as f:
         f.write("X = 1\n")
-if "PLANEDIT" in msg:
-    emit({"type": "assistant", "message": {"model": model, "content": [
-        {"type": "tool_use", "id": "toolu_2", "name": "Edit", "input": {"file_path": "docs/X_PLAN.md"}},
-        {"type": "tool_use", "id": "toolu_3", "name": "Write", "input": {"file_path": "notes.md"}}],
-        "usage": usage}, "session_id": sid})
 emit({"type": "user", "message": {"role": "user", "content": [
     {"tool_use_id": "toolu_1", "type": "tool_result", "content": "1\tfrom operonx.core import op\n",
      **({"is_error": True} if "TOOLFAIL" in msg else {})}]}, "session_id": sid})
@@ -510,29 +505,6 @@ def test_a_cap_on_the_whole_run_still_holds_when_set(client, project, fake, monk
     assert _drain(client, turn)[-1]["state"] == "stopped"
     errors = [i for i in client.get(f"/api/assistant/sessions/{sid}").json()["items"] if i["kind"] == "error"]
     assert "longer than the studio allows" in errors[-1]["text"]
-
-
-def test_a_plan_doc_the_turn_edited_goes_on_the_board(client, project, fake, monkeypatch):
-    """mr-finance: FEATURE_FLOWS_PLAN moved phase by phase in chat and the Board never showed it."""
-    from operonx_studio import projectboard as pb
-
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
-    (project / "docs").mkdir()
-    (project / "docs" / "X_PLAN.md").write_text("---\ntitle: X\nstatus: in_progress\n---\n", encoding="utf-8")
-    synced = []
-    monkeypatch.setattr(pb, "available", lambda root: True)
-    monkeypatch.setattr(pb, "act", lambda root, req, actor: synced.append((req, actor)) or {"ok": True})
-    # WORKSPACE_PLAN W1.1: Y changed from the shell, X both edited and stale: each synced once
-    (project / "docs" / "Y_PLAN.md").write_text("---\ntitle: Y\nstatus: plan\n---\n", encoding="utf-8")
-    monkeypatch.setattr(pb, "stale_plans", lambda root: ["docs/X_PLAN.md", "docs/Y_PLAN.md"])
-    sid = _session(client, _pid(client, project))["id"]
-    _say(client, sid, "PLANEDIT the plan")
-    for _ in range(50):
-        if len(synced) == 2:
-            break
-        time.sleep(0.05)
-    # the checkout's own doc: the engine reads it there (a worktree's is sent as text); notes.md is not a plan
-    assert synced == [({"op": "plan", "path": f"docs/{x}_PLAN.md"}, "assistant") for x in "XY"], synced
 
 
 def test_failures_say_so_and_offer_a_retry(client, project, fake):
@@ -1463,6 +1435,11 @@ def test_a_steps_call_puts_the_stamped_plan_on_its_item(tmp_path, monkeypatch):
     relay._translate(turn, {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "u4",
         "name": "mcp__studio__steps", "input": {"card": "docs/X_PLAN.md#W1", "steps": [{"title": "a", "state": "active"}]}}]}})
     assert turn.card == "docs/X_PLAN.md#W1" and relay.store.turn("t1")["card"] == "docs/X_PLAN.md#W1"
+    # LEAN_PROJECT_PLAN L4: moving a card to doing makes it the turn's card too; a move to done does not
+    for uid, card, to in (("u5", "C3", "doing"), ("u6", "C4", "done")):
+        relay._translate(turn, {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": uid,
+            "name": "mcp__studio__board_move", "input": {"card": card, "to": to}}]}})
+    assert turn.card == "C3" and relay.store.turn("t1")["card"] == "C3"
 
 
 def test_a_test_run_is_read_whole_before_the_clip(tmp_path):

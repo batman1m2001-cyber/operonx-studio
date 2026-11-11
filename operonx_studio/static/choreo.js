@@ -27,7 +27,7 @@ const Choreo = (() => {
   const QUESTIONS = /docs\/brd\/requirements\/open_questions\.md$/;
   const PLAN = /(?:^|\/)(docs\/(?:[^/]+\/)*[^/]+\.md)$/;
 
-  const COLUMN = {needs: "now", working: "plans", checklist: "now", plans: "plans", changes: "changes"};
+  const COLUMN = {needs: "now", working: "board", checklist: "now", plans: "board", changes: "changes"};
   // the shell: what writes a file, a commit (`git -c user.email=… commit`), the files a command names
   const WRITES = /(?:^|[^<>&2])>>?\s*(?!\/dev\/null)[^\s&|;>]|\btee\b|\bsed\s+(?:-\w*\s+)*-i|\bperl\s+-\w*i|\bpython3?\b[^|;&]*(?:<<|-c\b)|\bmv\b|\bcp\b/;
   const COMMIT = /\bgit\b(?:\s+-[cC]\s+\S+)*\s+commit\b/;
@@ -46,7 +46,7 @@ const Choreo = (() => {
   }
   /* A tool's input reaches the page as the server clipped it: JSON text, cut off when long (a heredoc). The
    * fields that matter are read from the text when it no longer parses. */
-  const FIELDS = ["file_path", "notebook_path", "command", "old_string", "new_string", "content", "op", "ref", "milestone", "card"];
+  const FIELDS = ["file_path", "notebook_path", "command", "old_string", "new_string", "content", "op", "ref", "card", "to"];
   function inputOf(item) {
     const raw = item && item.input;
     if (raw && typeof raw === "object") return raw;
@@ -88,7 +88,7 @@ const Choreo = (() => {
       const plan = planPath(file);
       if (plan) {
         if (phase === "start") {
-          goPage("plans");
+          goPage("board");
           // a plan being written is not on the page yet: the page's head instead
           out.push({point: `plan:${plan}`, words: name === "Write" ? "writing" : "editing", or: "pagehead"});
         } else if (ok) {
@@ -117,9 +117,9 @@ const Choreo = (() => {
       const plans = commit ? [] : shellPlans(cmd);
       const writes = !commit && WRITES.test(cmd);
       for (const plan of plans) {
-        if (writes && phase === "start") { goPage("plans"); out.push({point: `plan:${plan}`, words: "editing", or: "pagehead"}); }
+        if (writes && phase === "start") { goPage("board"); out.push({point: `plan:${plan}`, words: "editing", or: "pagehead"}); }
         else if (writes && ok) out.push({refresh: true}, {point: `plan:${plan}`, words: "saved", soft: true, or: "pagehead"});
-        else if (!writes && pm && where.page === "plans" && phase === "start") out.push({point: `plan:${plan}`, words: "reading"});
+        else if (!writes && pm && where.page === "board" && phase === "start") out.push({point: `plan:${plan}`, words: "reading"});
         break;   // one plan is enough to follow
       }
       if (writes && !plans.length && MATRIX_NAME.test(cmd)) {
@@ -142,17 +142,13 @@ const Choreo = (() => {
       for (const s of secs) out.push({point: col(s), words: "reading", quick: true});
       return out;
     }
-    // a card read rings the card (D6). The board shows a
-    // milestone's cards once it is open: its row on Plans until then
-    if (name === "studio:board_card" && input.card && phase === "start") {
-      goPage("plans");
-      out.push({point: `card:${input.card}`, words: "reading", or: input.milestone ? `ms:${input.milestone}` : "page:plans"});
+    // a card read or moved rings the card (D6)
+    if ((name === "studio:board_card" || name === "studio:board_move") && input.card && phase === "start") {
+      goPage("board");
+      out.push({point: `card:${input.card}`, words: name === "studio:board_move" ? `to ${input.to || ""}` : "reading", or: "page:board"});
       return out;
     }
-    if (name === "studio:board_status" && input.milestone && phase === "start") {
-      goPage("plans");
-      out.push({point: `ms:${input.milestone}`, words: "reading"});
-    }
+    if (name === "studio:board_status" && phase === "start") goPage("board");
     return out;
   }
 
@@ -160,10 +156,10 @@ const Choreo = (() => {
   function changed(before, after) {
     if (!before || !after) return [];
     const out = [];
-    const old = new Map((before.plans || []).map((p) => [p.path || `m:${p.milestone}`, p]));
+    const old = new Map((before.plans || []).map((p) => [p.path, p]));
     for (const p of after.plans || []) {
-      const was = old.get(p.path || `m:${p.milestone}`);
-      const target = p.path ? `plan:${p.path}` : `ms:${p.milestone}`;
+      const was = old.get(p.path);
+      const target = `plan:${p.path}`;
       if (!was) out.push({point: target, words: "new plan"});
       else if (was.status !== p.status || was.done !== p.done) out.push({point: target, words: p.status === "done" ? "done" : `${p.done}/${p.total}`});
     }
@@ -217,8 +213,8 @@ const Choreo = (() => {
   }
 
   /* where a target lives: the screen to go to before pointing at it (null: anywhere, as it is) */
-  const PAGE_OF = {status: "now", q: "now", plan: "plans", phase: "plans", ms: "plans", row: "now",
-                   commit: "changes", setting: "settings", card: "plans"};
+  const PAGE_OF = {status: "now", q: "now", plan: "board", phase: "board", row: "now",
+                   commit: "changes", setting: "settings", card: "board"};
   const TAB_OF = {op: "flow", field: "flow", run: "traces", job: "jobs", eval: "evals"};
   // setting:<section>/<name> on a settings screen of its own; a bare setting:<name> is Project's Settings
   const SECTION_TAB = {retention: "settings"};

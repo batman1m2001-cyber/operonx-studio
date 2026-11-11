@@ -76,7 +76,7 @@ test("without a plan, tool calls group into steps by what they did", () => {
     tool("Edit", {file_path: "/p/app/ops.py"}),
     tool("Edit", {file_path: "/p/app/ops.py"}),
     tool("Bash", {command: "pytest -q"}, "error"),
-    tool("mcp__studio__board_card", {milestone: "m1", card: "F1"}, "running"),
+    tool("mcp__studio__board_card", {card: "F1"}, "running"),
   ]);
   assert.deepEqual(steps.map((s) => [s.title, s.state]), [
     ["Read 2 files", "done"], ["Edited ops.py", "done"], ["Ran the tests", "failed"], ["Read F1", "active"]]);

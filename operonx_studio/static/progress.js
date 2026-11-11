@@ -5,7 +5,7 @@
 const oxProgress = (() => {
   const TARGET_KIND = {op: "op", row: "requirement", q: "question", qopt: "question", plan: "plan", phase: "phase",
     run: "run", commit: "commit", setting: "setting", card: "card", field: "field", job: "job", eval: "eval",
-    ms: "milestone", page: "", tab: "", status: ""};
+    page: "", tab: "", status: ""};
 
   /* a target in words: op:score_news → "op score_news" */
   function targetWords(t) {

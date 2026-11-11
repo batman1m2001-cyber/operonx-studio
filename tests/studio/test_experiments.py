@@ -183,7 +183,7 @@ def test_the_list_carries_each_experiments_verdict_ci_fingerprint_and_cost(clien
     v1, v2, v3 = rows[2], rows[1], rows[0]
     assert (v1["variant"], v2["variant"], v3["variant"]) == ("v1", "v2", "v3")
     # the numbers are operonx's: the record's summary, as written
-    record = load_experiment(ids[2], record_dirs=[project / "evals"])
+    record = load_experiment(ids[2], record_dirs=[project / ".operonx" / "evals"])
     assert v3["verdict"] == record.gate["verdict"] == "regressed"
     assert v3["pass"] == record.metrics["pass"] and set(v3["pass"]) >= {"mean", "ci_lo", "ci_hi", "n", "method"}
     assert v3["reasons"] == record.gate["reasons"] and v3["baseline"] == ids[1]
@@ -198,7 +198,7 @@ def test_the_list_carries_each_experiments_verdict_ci_fingerprint_and_cost(clien
 
 def test_an_experiment_only_the_store_holds_is_listed_and_opened(client, project, three):
     pid, ids = three
-    record = project / "evals" / "labels" / ids[1]
+    record = project / ".operonx" / "evals" / "labels" / ids[1]
     record.rename(project / "elsewhere")  # ran in CI: this machine has only the store's rows
     rows = client.get(f"/api/p/{pid}/experiments", params={"eval": "labels"}).json()["experiments"]
     assert [r["id"] for r in rows] == ids[::-1]
@@ -225,7 +225,7 @@ def test_a_store_that_cannot_be_opened_is_said_and_the_records_still_read(client
 def test_an_experiment_with_its_gate_metrics_and_cases(client, project, three):
     pid, ids = three
     got = client.get(f"/api/p/{pid}/experiments/{ids[2]}").json()
-    record = load_experiment(ids[2], record_dirs=[project / "evals"])
+    record = load_experiment(ids[2], record_dirs=[project / ".operonx" / "evals"])
     assert got["gate"]["verdict"] == "regressed" and got["gate"]["reasons"] == record.gate["reasons"]
     assert got["gate"]["comparison"]["baseline"] == ids[1]
     assert [m["name"] for m in got["metrics"]][0] == "pass"
@@ -264,8 +264,8 @@ def test_a_case_drills_down_to_its_runs_and_its_history(client, project, three):
 def test_compare_is_operonxs_compare(client, project, three):
     pid, ids = three
     got = client.get(f"/api/p/{pid}/experiments/compare", params={"a": ids[1], "b": ids[2]}).json()
-    a = load_experiment(ids[1], record_dirs=[project / "evals"])
-    b = load_experiment(ids[2], record_dirs=[project / "evals"])
+    a = load_experiment(ids[1], record_dirs=[project / ".operonx" / "evals"])
+    b = load_experiment(ids[2], record_dirs=[project / ".operonx" / "evals"])
     want = compare(a, b, tolerance=0.1)  # the tolerance B's gate was run with
     assert got["tolerance"] == {"value": 0.1, "from": f"the gate {ids[2]} ran with"}
     assert got["verdict"] == want["verdict"] and got["comparison"] == want["comparison"]
@@ -282,7 +282,7 @@ def test_compare_is_operonxs_compare(client, project, three):
     # an inconclusive comparison says so, with the reason operonx gives
     tight = client.get(f"/api/p/{pid}/experiments/compare",
                        params={"a": ids[0], "b": ids[1], "tolerance": "0.01"}).json()
-    assert tight["verdict"] == compare(load_experiment(ids[0], record_dirs=[project / "evals"]),
+    assert tight["verdict"] == compare(load_experiment(ids[0], record_dirs=[project / ".operonx" / "evals"]),
                                        a, tolerance=0.01)["verdict"]
     assert client.get(f"/api/p/{pid}/experiments/compare", params={"a": ids[0], "b": "nope"}).status_code == 404
     assert client.get(f"/api/p/{pid}/experiments/compare",

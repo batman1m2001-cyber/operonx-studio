@@ -15,12 +15,6 @@
 
 const Waiting = (() => {
   const SEEN = "ox:waiting:seen";
-  const STATE = {
-    created: "created", discovering: "discovering", requirements: "requirements", planning: "planning",
-    awaiting_approval: "waits for your approval", running: "running", waiting_human: "waiting on you",
-    paused: "paused", verifying: "verifying", done: "done", failed: "failed", cancelled: "cancelled",
-    budget_exhausted: "budget spent", waiting_dependency: "waits for another board",
-  };
   let data = {count: 0, boards: []};
   let timer = null;
 
@@ -50,7 +44,7 @@ const Waiting = (() => {
   const askable = () => "Notification" in window && Notification.permission === "default";
 
   /* who asks: a board's question id, or the assistant's turn (WORKSPACE_PLAN W1.5) */
-  const label = (q) => q.qid || (q.source === "assistant" ? "the assistant's question" : "a question");
+  const label = (q) => q.qid || q.card || (q.source === "assistant" ? "the assistant's question" : "a question");
 
   function notify(fresh) {
     if (!allowed()) return;
@@ -58,7 +52,7 @@ const Waiting = (() => {
     for (const {board, q} of fresh.filter((f) => f.q.source !== "brd").slice(0, 5)) {
       try {
         const n = new Notification(`${board.name}: ${label(q)} waits for you`, {
-          body: `${q.milestone ? `${q.milestone}${q.card ? `/${q.card}` : ""} — ` : ""}${q.problem}`, tag: q.id,
+          body: `${q.card ? `${q.card} — ` : ""}${q.problem}`, tag: q.id,
         });
         n.onclick = () => { window.focus(); location.href = `/p/${board.pid}/${q.session ? "" : "board"}`; n.close(); };
       } catch { /* a browser that wants a service worker for this: the title count still says it */ }
@@ -102,14 +96,14 @@ const Waiting = (() => {
     return b;
   }
 
-  /* a board's line: its newest milestone, and what waits on the owner */
+  /* a board's line: its cards by state, and what waits on the owner */
   function line(board) {
     const box = mk("div", "projboard");
-    const m = board.milestones[board.milestones.length - 1];
-    if (m) box.append(mk("span", null, `board ${m.id} · ${m.title} — ${STATE[m.state] || m.state}`
-      + (m.cards ? ` · ${m.done}/${m.cards} cards` : "")));
+    const n = board.counts || {};
+    const total = Object.values(n).reduce((a, b) => a + b, 0);
+    if (total) box.append(mk("span", null, `board · ${n.done || 0}/${total} done` + (n.doing ? ` · ${n.doing} doing` : "")));
     else if (board.error) box.append(mk("span", null, board.error));
-    else box.append(mk("span", null, "board: no milestones yet"));
+    else box.append(mk("span", null, "board: no cards yet"));
     if (board.waiting.length) {
       const q = mk("a", "chip cwarn", `${board.waiting.length} waiting on you`);
       q.href = `/p/${board.pid}/board`;
