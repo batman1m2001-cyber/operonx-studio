@@ -93,13 +93,11 @@ def test_initialize_and_list_tools():
     tools = {t["name"]: t for t in _rpc(s, "tools/list")["result"]["tools"]}
     assert set(tools) == {"list_runs", "open_run", "op_values", "monitor", "compare_runs",
                           "select_op", "point", "steps", "run_job", "rerun_op", "play", "run_eval", "set_llm_price",
-                          "project_status", "board_status", "board_card", "board_start", "board_plan", "board_request", "board_act", "board_daemon", "board_take",
-                          "board_submit", "board_models", "board_practices", "failing_on_base", "on_base",
+                          "project_status", "board_status", "board_card", "board_plan", "failing_on_base", "on_base",
                           "terminal_open", "terminal_send", "terminal_read", "terminal_list", "terminal_close",
                           "env_list", "env_check", "env_run", "env_services", "deploy"}
     # tools that run the project's code are not read tools
-    assert not {"mcp__studio__rerun_op", "mcp__studio__play", "mcp__studio__run_job", "mcp__studio__board_take",
-                "mcp__studio__board_act", "mcp__studio__board_daemon", "mcp__studio__board_models",
+    assert not {"mcp__studio__rerun_op", "mcp__studio__play", "mcp__studio__run_job",
                 "mcp__studio__failing_on_base", "mcp__studio__on_base", "mcp__studio__terminal_open",
                 "mcp__studio__terminal_send", "mcp__studio__terminal_read", "mcp__studio__env_run", "mcp__studio__env_services",
                 "mcp__studio__deploy"} & set(chat.STUDIO_READ_TOOLS)

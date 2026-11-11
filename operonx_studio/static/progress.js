@@ -92,8 +92,6 @@ const oxProgress = (() => {
     const studio = /^mcp__studio__(.+)$/.exec(n);
     if (studio) {
       const tool = studio[1];
-      if (tool === "board_act" && inp.card) return {kind: "act:" + inp.card, words: `Moved ${inp.card}`};
-      if (tool === "board_act" && inp.question) return {kind: "q:" + inp.question, words: `Answered ${inp.question}`};
       if (tool === "board_card" && inp.card) return {kind: "card:" + inp.card, words: `Read ${inp.card}`};
       const words = tool.replace(/_/g, " ");
       return {kind: "studio:" + tool, words: words[0].toUpperCase() + words.slice(1)};

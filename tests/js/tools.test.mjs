@@ -15,7 +15,7 @@ test("classes from the tool's name", () => {
   assert.equal(cls({name: "MultiEdit", input: {file_path: "/p/a.py"}}), "edit");
   assert.equal(cls({name: "Grep", input: {pattern: "lane"}}), "search");
   assert.equal(cls({name: "WebFetch", input: {url: "https://x.dev"}}), "web");
-  assert.equal(cls({name: "mcp__studio__board_act", input: {card: "F1"}}), "studio");
+  assert.equal(cls({name: "mcp__studio__board_card", input: {card: "F1"}}), "studio");
   assert.equal(cls({name: "ToolSearch", input: {}}), "plumbing");
   assert.equal(cls({name: "Agent", input: {}}), "tool");
 });

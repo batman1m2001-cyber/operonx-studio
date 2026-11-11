@@ -24,7 +24,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 __all__ = ["HOME_TOOLS", "TOOLS", "handle", "main"]
 
@@ -511,75 +511,9 @@ def t_run_eval(s: Studio, a: Dict[str, Any]) -> str:
 
 
 def _ms_line(m: Dict[str, Any]) -> str:
-    asks = f", {m['open_questions']} question(s) for the owner" if m.get("open_questions") else ""
     budget = f" of ${m['budget_usd']}" if m.get("budget_usd") is not None else ""
     return (f"- {m['id']} · {m['title']} — {m['state']}{' (' + m['reason'] + ')' if m.get('reason') else ''}; "
-            f"{m['done']}/{m['cards']} cards done; ${m['cost_usd']:.2f}{budget}{asks}")
-
-
-def _tdd_note(c: Dict[str, Any]) -> str:
-    """What test-first showed for a card: nothing to say, no tests (off), or strict's red evidence."""
-    if c.get("tdd") == "off":
-        return "no tests written (TDD off)"
-    red = c.get("red")
-    if not red:
-        return ""
-    if not red.get("red"):
-        return f"its tests passed before the code ({red.get('passed')} passed)"
-    return "red before the code" + (" (written again: the first set passed already)" if red.get("rewritten") else "")
-
-
-def _retro_lines(retro: Optional[Dict[str, Any]]) -> List[str]:
-    """A delivered milestone's retrospective: where its money and rounds went, and what it taught."""
-    if not retro:
-        return []
-    rep = retro.get("report") or {}
-    cards = rep.get("cards") or []
-    costly = sorted((c for c in cards if c.get("rounds", 0) > 1 or c.get("questions") or c.get("rewritten")),
-                    key=lambda c: -c.get("cost_usd", 0))  # fmt: skip
-    stages = ", ".join(f"{k} ${v:.2f}" for k, v in (rep.get("by_stage") or {}).items())
-    lines = [f"Retrospective: ${rep.get('cost_usd', 0):.2f} over {len(cards)} card(s), {rep.get('rounds', 0)} "
-             f"round(s)" + (f"; stages {stages}" if stages else "")]  # fmt: skip
-    for c in costly[:8]:
-        bits = [f"{c['rounds']} rounds", f"${c['cost_usd']:.2f}"]
-        if c.get("failed_checks"):
-            bits.append("failed on " + ", ".join(c["failed_checks"]))
-        bits += [f"the owner decided: {(q.get('question') or '')[:120]} → {q.get('choice') or ''} {q.get('answer') or ''}".rstrip()
-                 for q in c.get("questions") or []]  # fmt: skip
-        if c.get("rewritten"):
-            bits.append(f"tests written again {len(c['rewritten'])}×")
-        lines.append(f"  {c['id']} · {c.get('title', '')}: " + "; ".join(bits))
-    for x in retro.get("lessons") or []:
-        lines.append(f"  Lesson ({retro.get('file')}): {x.get('rule')} — {x.get('evidence')}")
-    return lines
-
-
-def t_board_practices(s: Studio, a: Dict[str, Any]) -> str:
-    body = {k: a[k] for k in ("preset", "force", "toml") if k in a and a[k] not in (None, "")}
-    try:
-        got = s.call("/board/practices", body) if body else s.call("/board/practices", preview=a.get("preview"))
-    except RuntimeError as exc:
-        return f"refused: {exc}"
-    if not got.get("ok"):
-        return f"refused: {got.get('message')}" + (f"\nThe file now:\n{got['text']}" if got.get("text") else "")
-    s.show("open_board", view="board")
-    lines = [("Changed: " if body else "") + str(got.get("message")) + ".", "", str(got.get("summary") or "")]
-    found = got.get("violations") or []
-    if found:
-        lines += ["", f"Architecture check on the checkout ({got.get('violation_count')}):"]
-        lines += [f"- {v['file']}:{v['line']} {v['message']}" for v in found[:30]]
-        if got.get("violation_count", 0) > 30:
-            lines.append("- …")
-    seen = got.get("preview")
-    if seen:
-        lines += ["", f"The {seen['preset']} preset would flag {seen['violation_count']} on the checkout today "
-                      "(nothing written; they would be the baseline, costing no card anything):"]  # fmt: skip
-        lines += [f"- {v['file']}:{v['line']} {v['message']}" for v in seen["violations"][:30]]
-    if got.get("text"):
-        lines += ["", f"The file ({got.get('file')}):", got["text"]]
-    else:
-        lines += ["", f"No {got.get('file')} yet. Presets: {', '.join(got.get('presets') or [])}."]
-    return "\n".join(lines)
+            f"{m['done']}/{m['cards']} cards done; ${m['cost_usd']:.2f}{budget}")
 
 
 def t_project_status(s: Studio, a: Dict[str, Any]) -> str:
@@ -617,48 +551,18 @@ def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
             lines.append(f"{col['title']}:")
             for cid in col["cards"]:
                 c = by[cid]
-                extra = [c["stage"] or "", f"taken by {c['taken']}" if c.get("taken") else "",
-                         "waits for a submit" if c.get("waiting_for_submit") else "",
-                         "asks the owner" if c.get("asks") else "", (c.get("activity") or {}).get("text", ""),
+                extra = [c["stage"] or "", "asks the owner" if c.get("asks") else "",
+                         (c.get("activity") or {}).get("text", ""),
                          c["reason"] if c["state"] in ("failed", "blocked") else ""]  # fmt: skip
-                extra.append(_tdd_note(c))
                 lines.append(f"  {cid} · {c['title']} [{c['state']}] rows {', '.join(c['rows']) or '—'}"
                              + "".join(f" — {x}" for x in extra if x))
-        for q in got["questions"]:
-            opts = "; ".join(f"{o['key']}) {o['label']}" for o in q["options"])
-            lines.append(f"Open question {q.get('qid') or q.get('short') or q['id']} ({q['kind']}{', card ' + q['card'] if q['card'] else ''}): "
-                         f"{q['problem']}" + (f" — options: {opts}" if opts else "")
-                         + (f" (recommended {q['recommended']})" if q.get("recommended") else ""))
-            if q.get("evidence"):  # what the engine saw (tipcalc m3/C5: the held-out failures the owner had to know)
-                lines += [f"    {x}" for x in str(q["evidence"]).splitlines()[-12:]]
-            if q.get("kind") == "approval":  # the plan being approved: its cards are not on the board until then
-                for c in q.get("plan_cards") or []:
-                    lines.append(f"  Plan {c['id']}{' [risky]' if c.get('risk') == 'high' else ''} · {c['title']}"
-                                 + (f" — needs {', '.join(c['deps'])}" if c.get("deps") else "")
-                                 + (f" — paths {', '.join(c['paths'])}" if c.get("paths") else ""))
-                    if c.get("intent"):
-                        lines.append(f"    {c['intent'][:600]}")
-                    lines += [f"    - {k[:240]}" for k in (c.get("criteria") or [])[:6]]
-        arch = got.get("architecture")
-        if arch:
-            lines.append("Architecture check: " + ("clean on the milestone's base" if arch.get("ok") else
-                                                   f"{arch['violations']} violation(s) already on the milestone's "
-                                                   "base (they cost its cards nothing; a new one fails a round)"))
-            end = arch.get("after")
-            if end:
-                lines.append("  At final verification: " + ("clean" if end.get("ok") else
-                                                            f"{end['violations']} violation(s)"))
-        lines += _retro_lines(got.get("retro"))
         return "\n".join(lines)
     got = s.call("/board")
     if not got.get("available"):
         return ("This project has no docs/brd/ and no operonx-project state: `operonx-project brd init` "
                 "(or `operonx-project adopt` for built code) makes one.")
     s.show("open_board", view="board")
-    d = got.get("daemon") or {}
-    lines = [f"Daemon: {'running (' + d.get('owner', '') + ')' if d.get('running') else 'stopped'}"
-             + ("" if got.get("sandbox", True) else "; coders run unsandboxed")]
-    lines += [_ms_line(m) for m in got.get("milestones") or []] or ["No milestones yet."]
+    lines = [_ms_line(m) for m in got.get("milestones") or []] or ["No milestones yet."]
     if got.get("brd"):
         ck = s.call("/brd")
         counts = ", ".join(f"{k} {n}" for k, n in sorted((ck.get("counts") or {}).items()))
@@ -674,8 +578,8 @@ def t_board_card(s: Studio, a: Dict[str, Any]) -> str:
     mid, cid = str(a["milestone"]), str(a["card"])
     try:
         got = s.call(f"/board/{urllib.parse.quote(mid)}/card/{urllib.parse.quote(cid)}")
-    except RuntimeError as exc:  # not on the board: a plan waiting for approval holds its cards until then
-        return _proposed_card(s, mid, cid) or f"failed: {exc}"
+    except RuntimeError as exc:
+        return f"failed: {exc}"
     if got.get("error"):
         return f"failed: {got['error']}"
     s.show("open_board", mid=mid, card=cid)
@@ -692,42 +596,6 @@ def t_board_card(s: Studio, a: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _proposed_card(s: Studio, mid: str, cid: str) -> str:
-    """A card of the plan waiting for the owner's approval, in full (board_status shortens them)."""
-    got = s.call(f"/board/{urllib.parse.quote(mid)}")
-    for q in got.get("questions") or []:
-        for c in q.get("plan_cards") or [] if q.get("kind") == "approval" else []:
-            if c.get("id") == cid:
-                lines = [f"{c['id']} · {c['title']} [proposed, waits for approval{', risky' if c.get('risk') == 'high' else ''}]"
-                         f" — {c['intent']}",
-                         f"rows {', '.join(c['rows']) or '—'}; deps {', '.join(c['deps']) or '—'}; "
-                         f"files {', '.join(c['paths']) or 'anywhere'}"]  # fmt: skip
-                return "\n".join(lines + [f"  - {x}" for x in c["criteria"]])
-    return ""
-
-
-def _board_act(s: Studio, mid: str, body: Dict[str, Any]) -> Dict[str, Any]:
-    try:
-        return s.call(f"/board/{urllib.parse.quote(mid)}/act", body)
-    except RuntimeError as exc:  # the engine's refusal comes back as the HTTP error's message
-        return {"ok": False, "message": str(exc)}
-
-
-def t_board_start(s: Studio, a: Dict[str, Any]) -> str:
-    body = {k: a[k] for k in ("title", "rows", "goal", "mode", "max_usd", "from_board", "needs")
-            if a.get(k) not in (None, "", [])}
-    try:
-        got = s.call("/board/new", body)
-    except RuntimeError as exc:
-        return f"refused: {exc}"
-    if not got.get("ok"):
-        return f"refused: {got.get('message')}"
-    if got.get("milestone"):
-        s.show("open_board", mid=got["milestone"], view="board")
-    return (f"{got.get('message') or 'queued'}. The daemon plans it, then the plan waits for the owner's approval "
-            "(board_act approve) — it must be running (board_daemon start).")
-
-
 def t_board_plan(s: Studio, a: Dict[str, Any]) -> str:
     try:
         got = s.call("/board/plan", {"path": str(a.get("path") or "")})
@@ -736,125 +604,6 @@ def t_board_plan(s: Studio, a: Dict[str, Any]) -> str:
     if got.get("milestone"):
         s.show("open_board", mid=got["milestone"], view="board")
     return ("done: " if got.get("ok") else "refused: ") + str(got.get("message"))
-
-
-def t_board_request(s: Studio, a: Dict[str, Any]) -> str:
-    body = {k: a[k] for k in ("text", "title", "mode", "max_usd", "needs") if a.get(k) not in (None, "", [])}
-    try:
-        got = s.call("/board/request", body)
-    except RuntimeError as exc:
-        return f"refused: {exc}"
-    if not got.get("ok"):
-        return f"refused: {got.get('message')}"
-    s.show("open_board", mid=got["milestone"], view="board")
-    return (f"{got['message']}. The words are {got.get('source')} in the BRD. The daemon must be running "
-            "(board_daemon start); when the plan waits, show it to the owner (board_status) — approving is theirs.")
-
-
-ACTS = ("answer", "approve", "pause", "unpause", "cancel", "replan", "retry", "prioritize", "edit", "release", "ship",
-        "merge")  # fmt: skip
-
-
-def t_board_act(s: Studio, a: Dict[str, Any]) -> str:
-    op = str(a.get("op") or "")
-    if op not in ACTS:
-        return f"no op {op!r}; there are: {', '.join(ACTS)} (take and submit are board_take and board_submit)"
-    body = {k: a[k] for k in ("op", "ref", "answer", "notes", "card", "priority", "usd", "hours", "paths", "criteria",
-                              "title", "intent") if k in a}  # fmt: skip
-    got = _board_act(s, str(a["milestone"]), body)
-    s.show("open_board", mid=str(a["milestone"]))
-    return ("done: " if got.get("ok") else "refused: ") + str(got.get("message") or got.get("status"))
-
-
-def t_board_daemon(s: Studio, a: Dict[str, Any]) -> str:
-    action = str(a.get("action") or "")
-    if action not in ("start", "stop", "status"):
-        return "action: start, stop or status"
-    if action == "status":
-        d = s.call("/board").get("daemon") or {}
-        return f"running ({d.get('owner')})" if d.get("running") else "stopped"
-    try:
-        got = s.call("/board/daemon", {"action": action})
-    except RuntimeError as exc:
-        return f"failed: {exc}"
-    return str(got.get("message") or got.get("status"))
-
-
-def t_board_models(s: Studio, a: Dict[str, Any]) -> str:
-    body = {k: a[k] for k in ("model", "models") if k in a}
-    try:
-        got = s.call("/board/settings", body) if body else s.call("/board/settings")
-    except RuntimeError as exc:
-        return f"refused: {exc}"
-    if not got.get("ok"):
-        return f"refused: {got.get('message')}"
-    by: Dict[str, List[str]] = {}
-    for role, m in (got.get("effective") or {}).items():
-        by.setdefault(m, []).append(role)
-    lines = [("Changed. " if body else "") + "The next sessions run on:"]
-    lines += [f"- {m}: {', '.join(roles)}" for m, roles in sorted(by.items())]
-    lines.append("Running sessions keep their model; the daemon needs no restart.")
-    return "\n".join(lines)
-
-
-def _settle(s: Studio, mid: str, cid: str, wait: float, done: Callable[[Dict[str, Any]], bool]) -> Dict[str, Any]:
-    deadline = time.time() + wait
-    while True:
-        brief = _board_act(s, mid, {"op": "card", "card": cid})
-        if not brief.get("ok", True) and brief.get("message"):
-            return brief
-        brief = brief.get("brief") or brief
-        if done(brief) or time.time() >= deadline:
-            return brief
-        time.sleep(1.5)
-
-
-_ENDED = ("verified", "done", "failed", "cancelled")
-
-
-def _brief_text(mid: str, b: Dict[str, Any]) -> str:
-    lines = [f"{b['card']} · {b['title']} — yours ({(b.get('taken') or {}).get('actor', '')}), round {b.get('round')}",
-             f"Work in {b['worktree']} (branch {b['branch']}); commit nothing outside its files: "
-             f"{', '.join(b.get('paths') or []) or 'anywhere in the project'}.",
-             f"Intent: {b.get('intent')}", f"Rows: {', '.join(b.get('rows') or []) or '—'}",
-             f"Acceptance tests (written for you, do not change them): {b.get('acceptance_tests') or '—'}",
-             "Criteria:"] + [f"  - {c}" for c in b.get("criteria") or []]  # fmt: skip
-    if b.get("feedback"):
-        lines.append("The last round found:\n" + b["feedback"])
-    lines.append(f"When the criteria pass there, call board_submit(milestone={mid!r}, card={b['card']!r}, summary=…).")
-    return "\n".join(lines)
-
-
-def t_board_take(s: Studio, a: Dict[str, Any]) -> str:
-    mid, cid = str(a["milestone"]), str(a["card"])
-    got = _board_act(s, mid, {"op": "take", "card": cid})
-    if not got.get("ok"):
-        return f"refused: {got.get('message')}"
-    s.show("open_board", mid=mid, card=cid)
-    b = _settle(s, mid, cid, float(a.get("wait") or 60),
-                lambda b: b.get("waiting_for_submit") or b.get("state") in _ENDED or b.get("state") == "pending")
-    if b.get("state") == "pending":  # taken ahead: its dependencies first
-        return (f"{cid} is yours, taken ahead: {got.get('message')}. When it is ready the engine starts it and parks "
-                f"it for you; call board_take(milestone={mid!r}, card={cid!r}) again then for its brief.")
-    if not b.get("waiting_for_submit"):
-        return f"{cid} is {b.get('state')} ({b.get('reason') or got.get('message')}); the daemon has not parked it for you yet"
-    return _brief_text(mid, b)
-
-
-def t_board_submit(s: Studio, a: Dict[str, Any]) -> str:
-    mid, cid = str(a["milestone"]), str(a["card"])
-    got = _board_act(s, mid, {"op": "submit", "card": cid, "summary": str(a.get("summary") or "")})
-    if not got.get("ok"):
-        return f"refused: {got.get('message')}"
-    s.show("open_board", mid=mid, card=cid)
-    time.sleep(2.0)  # the daemon takes the submit before the card leaves its park
-    b = _settle(s, mid, cid, float(a.get("wait") or 600),
-                lambda b: b.get("state") in _ENDED or (b.get("waiting_for_submit") and bool(b.get("feedback"))))
-    if b.get("waiting_for_submit"):
-        return "Not passed yet — it is yours again.\n" + _brief_text(mid, b)
-    if b.get("state") in _ENDED:
-        return f"{cid}: {b['state']}{' — ' + b['reason'] if b.get('reason') else ''}"
-    return f"{cid} is still being checked ({b.get('state')}/{b.get('stage')}); board_card shows where it is."
 
 
 # ── with no project open (the home page's assistant) ─────────────────────
@@ -1051,87 +800,20 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                       "\"what needs me\" from it, never from memory; call it again after a change.",
                        "schema": _schema({"changes": _N})},
     "board_status": {"fn": t_board_status,
-                     "description": "The project's Board (operonx-project): the daemon, each milestone's state, cards "
-                                    "and spend, and the checklist's rows not built yet. With milestone: its cards by "
-                                    "column, what each running card does now, and the questions waiting on the owner. "
+                     "description": "The project's Board (operonx-project): each milestone's state, cards and spend, and "
+                                    "the checklist's rows not built yet. With milestone: its cards by column and what "
+                                    "each running card does now. "
                                     "Opens the Board on the user's screen.",
                      "schema": _schema({"milestone": _S})},
     "board_card": {"fn": t_board_card,
-                   "description": "One card of a milestone: intent, rows, criteria, files, and its last events. "
-                                  "A card of a plan waiting for approval is shown in full too.",
+                   "description": "One card of a milestone: intent, rows, criteria, files, and its last events.",
                    "schema": _schema({"milestone": _S, "card": _S, "events": _N}, ["milestone", "card"])},
-    "board_start": {"fn": t_board_start,
-                    "description": "Start a new milestone for checklist rows (rows: their IDs) and/or a goal in "
-                                   "words; mode w2 (default, a few cards at a time) or w1 (all at once); max_usd "
-                                   "caps its spend; from_board seeds it with an earlier milestone's cards; needs "
-                                   "lists milestones it waits for (\"operonx-studio#m3\" in another project, "
-                                   "\"m2\" here): it starts when they are done. The plan waits for the owner's "
-                                   "approval.",
-                    "schema": _schema({"title": _S, "rows": {"type": "array", "items": _S}, "goal": _S, "mode": _S,
-                                       "max_usd": _N, "from_board": _S, "needs": {"type": "array", "items": _S}},
-                                      ["title"])},
     "board_plan": {"fn": t_board_plan,
                    "description": "Put a plan doc on the Board, or bring its milestone back in line with the doc: "
                                   "the plan is a milestone, each phase a card in the state the doc's status block "
                                   "gives. path: docs/<NAME>_PLAN.md, or the doc's absolute path in the worktree it "
                                   "is worked in. The engine does not work these cards; the doc is the record.",
                    "schema": _schema({"path": _S}, ["path"])},
-    "board_request": {"fn": t_board_request,
-                      "description": "The owner asks for something new in their own words: text is the words as they "
-                                     "gave them (do not rewrite them into requirements; the engine extracts those). "
-                                     "It becomes a BRD source, its requirements continue the checklist's numbering, "
-                                     "and a milestone scoped to them is planned and waits for the owner's approval. "
-                                     "title is optional; mode w1 (default) or w2; max_usd caps it.",
-                      "schema": _schema({"text": _S, "title": _S, "mode": _S, "max_usd": _N,
-                                         "needs": {"type": "array", "items": _S}}, ["text"])},
-    "board_act": {"fn": t_board_act,
-                  "description": "An owner's action on a milestone, checked by the engine: answer (ref: a question's "
-                                 "short id or a card, answer: an option key, words, or {\"choice\": key, \"text\": words} for "
-                                 "both; the reply says which option was taken), approve, pause, unpause, cancel, "
-                                 "replan (notes), retry (usd or hours of extra budget), prioritize (card, priority; "
-                                 "lower runs first), edit (card; paths, criteria, title or intent, each whole: a card not running — its open "
-                                 "question stays answerable), release (a taken card back to the engine), ship (a done milestone: "
-                                 "push its branch, open the PR or the GitLab link), merge (its PR, once checks "
-                                 "pass, where the repo grants it). Approve, cancel, answers, ship and merge are the "
-                                 "owner's calls: do them only when the owner asked for that.",
-                  "schema": _schema({"milestone": _S, "op": _S, "ref": _S, "answer": {}, "notes": _S, "card": _S,
-                                     "priority": _N, "usd": _N, "hours": _N, "paths": {"type": "array", "items": _S},
-                                     "criteria": {"type": "array", "items": _S}, "title": _S, "intent": _S},
-                                    ["milestone", "op"])},  # fmt: skip
-    "board_daemon": {"fn": t_board_daemon,
-                     "description": "Run (start), Stop (stop) or check (status) the project's operonx-project daemon, "
-                                    "which plans milestones and works their cards.",
-                     "schema": _schema({"action": _S}, ["action"])},
-    "board_models": {"fn": t_board_models,
-                     "description": "Read or change the models the project's sessions (planner, reviewers, "
-                                    "implementer…) run on. model: one for every role (sonnet, opus, haiku, fable or a "
-                                    "claude-… id; \"\" back to the defaults); models: {role: model} for one role. "
-                                    "No arguments: read them. Applies to the next session.",
-                     "schema": _schema({"model": _S, "models": {"type": "object"}})},
-    "board_practices": {"fn": t_board_practices,
-                        "description": "How the project is built (docs/brd/practices.toml, committed): TDD mode "
-                                       "(acceptance | strict | off), the architecture the engine checks on every "
-                                       "round (layers, forbidden imports, bounded contexts, private access), the "
-                                       "glossary and lessons every session reads, and Definition-of-Done checks. "
-                                       "No arguments: read it, with the architecture check run on the checkout; "
-                                       "preview (a preset): also what that preset's rules would flag today, "
-                                       "nothing written — the evidence for a recommendation. "
-                                       "preset (operonx | clean; force over an existing file) or toml (the whole "
-                                       "file, edited from what a read returned): the engine validates it and commits "
-                                       "that file alone. Milestones discovered after it use it. Recommend from the "
-                                       "decision guide and set it only when the owner agreed.",
-                        "schema": _schema({"preview": _S, "preset": _S, "force": {"type": "boolean"}, "toml": _S})},
-    "board_take": {"fn": t_board_take,
-                   "description": "Take a card to work it yourself instead of the engine's implementer (also ahead of "
-                                  "its dependencies: it is reserved). Waits until the daemon parks it for you, then says where (its worktree), what (criteria, "
-                                  "acceptance tests) and what the last round found. Then edit there and board_submit.",
-                   "schema": _schema({"milestone": _S, "card": _S, "wait": _N}, ["milestone", "card"])},
-    "board_submit": {"fn": t_board_submit,
-                     "description": "Submit a taken card's work: the engine runs the same checks, review and held-out "
-                                    "tests as for its own implementer, and waits (up to wait seconds, default 600) "
-                                    "for the verdict — done, or the card is yours again with what failed.",
-                     "schema": _schema({"milestone": _S, "card": _S, "summary": _S, "wait": _N},
-                                       ["milestone", "card", "summary"])},
 }
 
 HOME_TOOLS.update({

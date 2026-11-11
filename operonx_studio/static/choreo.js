@@ -27,7 +27,7 @@ const Choreo = (() => {
   const QUESTIONS = /docs\/brd\/requirements\/open_questions\.md$/;
   const PLAN = /(?:^|\/)(docs\/(?:[^/]+\/)*[^/]+\.md)$/;
 
-  const COLUMN = {needs: "questions", working: "plans", checklist: "checklist", plans: "plans", changes: "changes"};
+  const COLUMN = {needs: "now", working: "plans", checklist: "now", plans: "plans", changes: "changes"};
   // the shell: what writes a file, a commit (`git -c user.email=… commit`), the files a command names
   const WRITES = /(?:^|[^<>&2])>>?\s*(?!\/dev\/null)[^\s&|;>]|\btee\b|\bsed\s+(?:-\w*\s+)*-i|\bperl\s+-\w*i|\bpython3?\b[^|;&]*(?:<<|-c\b)|\bmv\b|\bcp\b/;
   const COMMIT = /\bgit\b(?:\s+-[cC]\s+\S+)*\s+commit\b/;
@@ -96,10 +96,10 @@ const Choreo = (() => {
           out.push({refresh: true}, {point: `plan:${plan}`, words: "saved", soft: true, or: "pagehead"});
         }
       } else if (MATRIX.test(file)) {
-        if (phase === "start") { goPage("checklist"); out.push({point: "page:checklist", words: "editing rows"}); }
+        if (phase === "start") { goPage("now"); out.push({point: "status:checklist", words: "editing rows"}); }
         else if (ok) out.push({refresh: true});
       } else if (QUESTIONS.test(file)) {
-        if (phase === "start") { goPage("questions"); out.push({point: "page:questions", words: "editing"}); }
+        if (phase === "start") { goPage("now"); out.push({point: "status:needs", words: "editing"}); }
         else if (ok) out.push({refresh: true});
       }
       return out;
@@ -123,10 +123,10 @@ const Choreo = (() => {
         break;   // one plan is enough to follow
       }
       if (writes && !plans.length && MATRIX_NAME.test(cmd)) {
-        if (phase === "start") { goPage("checklist"); out.push({point: "page:checklist", words: "editing rows"}); }
+        if (phase === "start") { goPage("now"); out.push({point: "status:checklist", words: "editing rows"}); }
         else if (ok) out.push({refresh: true});
       } else if (writes && !plans.length && QUESTIONS_NAME.test(cmd)) {
-        if (phase === "start") { goPage("questions"); out.push({point: "page:questions", words: "editing"}); }
+        if (phase === "start") { goPage("now"); out.push({point: "status:needs", words: "editing"}); }
         else if (ok) out.push({refresh: true});
       }
       if (commit) {
@@ -142,22 +142,11 @@ const Choreo = (() => {
       for (const s of secs) out.push({point: col(s), words: "reading", quick: true});
       return out;
     }
-    if (name === "studio:board_act" && input.op === "answer" && phase === "start") {
-      goPage("questions");
-      const key = typeof input.answer === "object" && input.answer ? input.answer.choice : null;
-      out.push(key ? {press: `qopt:${input.ref}:${key}`, words: "answering"} : {point: `q:${input.ref}`, words: "answering"});
-      return out;
-    }
-    // a card read rings the card; a card moved is pressed once the move is done (D6). The board shows a
+    // a card read rings the card (D6). The board shows a
     // milestone's cards once it is open: its row on Plans until then
     if (name === "studio:board_card" && input.card && phase === "start") {
       goPage("plans");
       out.push({point: `card:${input.card}`, words: "reading", or: input.milestone ? `ms:${input.milestone}` : "page:plans"});
-      return out;
-    }
-    if (name === "studio:board_act" && input.card && ok) {
-      out.push({press: `card:${input.card}`, words: String(input.op || "moved").replace(/_/g, " "),
-                or: input.milestone ? `ms:${input.milestone}` : "page:plans"});
       return out;
     }
     if (name === "studio:board_status" && input.milestone && phase === "start") {
@@ -228,8 +217,8 @@ const Choreo = (() => {
   }
 
   /* where a target lives: the screen to go to before pointing at it (null: anywhere, as it is) */
-  const PAGE_OF = {status: "now", q: "questions", qopt: "questions", plan: "plans", phase: "plans", ms: "plans",
-                   row: "checklist", commit: "changes", setting: "settings", card: "plans"};
+  const PAGE_OF = {status: "now", q: "now", plan: "plans", phase: "plans", ms: "plans", row: "now",
+                   commit: "changes", setting: "settings", card: "plans"};
   const TAB_OF = {op: "flow", field: "flow", run: "traces", job: "jobs", eval: "evals"};
   // setting:<section>/<name> on a settings screen of its own; a bare setting:<name> is Project's Settings
   const SECTION_TAB = {retention: "settings"};
