@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const C = require("../../operonx_studio/static/choreo.js");
 
 const NOW = {tab: "project", page: "now"};
-const PLANS = {tab: "project", page: "plans"};
+const PLANS = {tab: "project", page: "board"};
 const tool = (name, input, status = "running") => ({kind: "tool", name, input, status});
 
 test("a plan's path, from any absolute path that ends in docs/…_PLAN.md", () => {
@@ -22,7 +22,7 @@ test("a plan's path, from any absolute path that ends in docs/…_PLAN.md", () =
 
 test("writing a plan goes to Plans and rings it, the page's head while it is not drawn", () => {
   const s = C.steps(tool("Write", {file_path: "/r/docs/EXPORT_PLAN.md"}), "start", NOW);
-  assert.deepEqual(s, [{go: {tab: "project", page: "plans"}}, {point: "plan:docs/EXPORT_PLAN.md", words: "writing", or: "pagehead"}]);
+  assert.deepEqual(s, [{go: {tab: "project", page: "board"}}, {point: "plan:docs/EXPORT_PLAN.md", words: "writing", or: "pagehead"}]);
   // already on Plans: no going
   assert.deepEqual(C.steps(tool("Edit", {file_path: "/r/docs/EXPORT_PLAN.md"}), "start", PLANS).map((x) => x.words), ["editing"]);
 });
@@ -95,7 +95,7 @@ test("what changed between two status documents", () => {
 
 test("where a target lives: the page to go to before pointing", () => {
   assert.deepEqual(C.where("q:Q-16"), {tab: "project", page: "now"});
-  assert.deepEqual(C.where("phase:docs/X_PLAN.md#P2"), {tab: "project", page: "plans"});
+  assert.deepEqual(C.where("phase:docs/X_PLAN.md#P2"), {tab: "project", page: "board"});
   assert.deepEqual(C.where("commit:abc"), {tab: "project", page: "changes"});
   assert.deepEqual(C.where("status:needs"), {tab: "project", page: "now"});
   assert.deepEqual(C.where("op:stt"), {tab: "flow"});
@@ -126,7 +126,7 @@ test("the shell: a heredoc into a plan, sed -i on the matrix, git -c … commit;
   const heredoc = bash("cd /x/pm/ow && cat > docs/CSV_EXPORT_PLAN.md <<'EOF'\n---\ntitle: CSV export\nstatus: plan\n" + "x".repeat(200), 120);
   assert.equal(C.inputOf(heredoc).command.slice(0, 16), "cd /x/pm/ow && c");
   assert.deepEqual(C.steps(heredoc, "start", NOW),
-    [{go: {tab: "project", page: "plans"}}, {point: "plan:docs/CSV_EXPORT_PLAN.md", words: "editing", or: "pagehead"}]);
+    [{go: {tab: "project", page: "board"}}, {point: "plan:docs/CSV_EXPORT_PLAN.md", words: "editing", or: "pagehead"}]);
   const sed = bash("sed -i 's/| 120 |/| 123 |/' docs/brd/requirements/requirements_traceability.md && uv run python scripts/check_brd_docs.py");
   assert.deepEqual(C.steps(sed, "start", NOW).slice(0, 2), [{point: "status:checklist", words: "editing rows"}, {point: "status:checklist", words: "checking"}]);
   const commit = bash("git add docs/CSV_EXPORT_PLAN.md docs/brd/requirements/requirements_traceability.md && git -c user.email=a@b -c user.name=a commit -q -m 'plan'");
@@ -158,11 +158,13 @@ test("the screen follows the plan: a newly active step's target, then what an en
 });
 
 test("board_card rings the card it reads (D6)", () => {
-  assert.deepEqual(C.steps(tool("mcp__studio__board_card", {milestone: "m2", card: "F1"}), "start", NOW),
-    [{go: {tab: "project", page: "plans"}}, {point: "card:F1", words: "reading", or: "ms:m2"}]);
+  assert.deepEqual(C.steps(tool("mcp__studio__board_card", {card: "C1"}), "start", NOW),
+    [{go: {tab: "project", page: "board"}}, {point: "card:C1", words: "reading", or: "page:board"}]);
+  assert.deepEqual(C.steps(tool("mcp__studio__board_move", {card: "C2", to: "done"}), "start", NOW),
+    [{go: {tab: "project", page: "board"}}, {point: "card:C2", words: "to done", or: "page:board"}]);
   // a clipped input still names the card
-  assert.equal(C.inputOf({input: '{"milestone": "m2", "card": "F3", "notes": "…'}).card, "F3");
-  assert.deepEqual(C.where("card:F1"), {tab: "project", page: "plans"});
+  assert.equal(C.inputOf({input: '{"card": "C3", "title": "…'}).card, "C3");
+  assert.deepEqual(C.where("card:C1"), {tab: "project", page: "board"});
 });
 
 test("an op config edit rings the op, selects it, then rings the field it changes (D6)", () => {

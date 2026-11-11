@@ -119,7 +119,7 @@ def test_evals_and_datasets_are_listed(client, project):
     (ev,) = got["evals"]
     assert ev["kind"] == "eval" and ev["dataset"].endswith("datasets/labels.jsonl")
     assert [e.rsplit(":", 1)[-1] for e in ev["evaluators"]] == ["label_is"]
-    assert ev["record_dir"] == str(project / "evals") and ev["runs"] == []
+    assert ev["record_dir"] == str(project / ".operonx" / "evals") and ev["runs"] == []
     (ds,) = got["datasets"]
     assert (ds["name"], ds["cases"], ds["expected"], ds["used_by"]) == ("labels", 3, 3, ["labels"])
 

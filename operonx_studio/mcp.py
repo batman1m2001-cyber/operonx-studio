@@ -507,13 +507,7 @@ def t_run_eval(s: Studio, a: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-# ── the Board: operonx-project's milestones, cards and checklist ─────────
-
-
-def _ms_line(m: Dict[str, Any]) -> str:
-    budget = f" of ${m['budget_usd']}" if m.get("budget_usd") is not None else ""
-    return (f"- {m['id']} · {m['title']} — {m['state']}{' (' + m['reason'] + ')' if m.get('reason') else ''}; "
-            f"{m['done']}/{m['cards']} cards done; ${m['cost_usd']:.2f}{budget}")
+# ── the Board: docs/brd/board.md, one card per task ─────────────────────
 
 
 def t_project_status(s: Studio, a: Dict[str, Any]) -> str:
@@ -536,74 +530,65 @@ def t_project_status(s: Studio, a: Dict[str, Any]) -> str:
                       ensure_ascii=False, indent=1)  # fmt: skip
 
 
+def _card_line(c: Dict[str, Any]) -> str:
+    extra = [f"after {', '.join(c['waits'])}" if c.get("waits") else "", c.get("now") or "",
+             c["note"] if c["state"] == "needs you" else ""]  # fmt: skip
+    return f"  {c['id']} · {c['title']} [{c['lane']}, {c['kind']}]" + "".join(f" — {x}" for x in extra if x)
+
+
 def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
-    mid = str(a.get("milestone") or "")
-    if mid:
-        got = s.call(f"/board/{urllib.parse.quote(mid)}")
-        if got.get("error"):
-            return f"failed: {got['error']}"
-        s.show("open_board", mid=mid, view="board")
-        by = {c["id"]: c for c in got["cards"]}
-        lines = [_ms_line(got["milestone"])]
-        for col in got["columns"]:
-            if not col["cards"]:
-                continue
-            lines.append(f"{col['title']}:")
-            for cid in col["cards"]:
-                c = by[cid]
-                extra = [c["stage"] or "", "asks the owner" if c.get("asks") else "",
-                         (c.get("activity") or {}).get("text", ""),
-                         c["reason"] if c["state"] in ("failed", "blocked") else ""]  # fmt: skip
-                lines.append(f"  {cid} · {c['title']} [{c['state']}] rows {', '.join(c['rows']) or '—'}"
-                             + "".join(f" — {x}" for x in extra if x))
-        return "\n".join(lines)
     got = s.call("/board")
-    if not got.get("available"):
-        return ("This project has no docs/brd/ and no operonx-project state: `operonx-project brd init` "
-                "(or `operonx-project adopt` for built code) makes one.")
-    s.show("open_board", view="board")
-    lines = [_ms_line(m) for m in got.get("milestones") or []] or ["No milestones yet."]
-    if got.get("brd"):
-        ck = s.call("/brd")
-        counts = ", ".join(f"{k} {n}" for k, n in sorted((ck.get("counts") or {}).items()))
-        todo = [r["id"] for r in ck.get("rows") or [] if r["status"] not in
-                ("implemented_verified", "out_of_scope_demo", "not_applicable", "superseded")]  # fmt: skip
-        lines.append(f"Checklist (docs/brd on {ck.get('branch') or 'this checkout'}): {counts or 'no rows'}")
-        if todo:
-            lines.append("Rows not built yet: " + ", ".join(todo[:40]) + (" …" if len(todo) > 40 else ""))
+    if not got.get("file"):
+        return ("No board yet: docs/brd/board.md is written by board_card (one card per task). "
+                + ("" if got.get("available") else "This project has no docs/brd/ either."))
+    s.show("open_board")
+    by = {c["id"]: c for c in got["cards"]}
+    lines = [f"Board ({got['file']}): " + ", ".join(f"{len(ids)} {st}" for st, ids in got["columns"].items() if ids)]
+    for st, ids in got["columns"].items():
+        if ids and st != "done":
+            lines.append(f"{st}:")
+            lines += [_card_line(by[i]) for i in ids]
+    done = got["columns"].get("done") or []
+    if done:
+        lines.append(f"done: {', '.join(done)}")
     return "\n".join(lines)
 
 
 def t_board_card(s: Studio, a: Dict[str, Any]) -> str:
-    mid, cid = str(a["milestone"]), str(a["card"])
+    cid = str(a.get("card") or "")
+    fields = {k: [str(x) for x in a[k]] for k in ("req", "after", "files", "done") if isinstance(a.get(k), list)}
     try:
-        got = s.call(f"/board/{urllib.parse.quote(mid)}/card/{urllib.parse.quote(cid)}")
+        if a.get("title") or fields or not cid:
+            got = s.call("/board/card", {"card": cid, "title": str(a.get("title") or ""), **fields})
+            cid = got["card"]
+        got = s.call(f"/board/card/{urllib.parse.quote(cid)}")
     except RuntimeError as exc:
-        return f"failed: {exc}"
-    if got.get("error"):
-        return f"failed: {got['error']}"
-    s.show("open_board", mid=mid, card=cid)
+        return f"refused: {exc}"
+    s.show("open_board", card=cid)
     c = got["card"]
-    lines = [f"{c['id']} · {c['title']} [{c['state']}{' / ' + c['stage'] if c['stage'] else ''}] — {c['intent']}",
-             f"rows {', '.join(c['rows']) or '—'}; deps {', '.join(c['deps']) or '—'}; "
-             f"files {', '.join(c['paths']) or 'anywhere'}; ${c['cost_usd']:.2f}"]  # fmt: skip
-    lines += [f"  - {x}" for x in c["criteria"]]
-    if c["reason"]:
-        lines.append(f"reason: {c['reason']}")
-    for e in got["events"][-int(a.get("events") or 15):]:
-        text = e["data"].get("text") or e["data"].get("message") or e["data"].get("to") or ""
-        lines.append(f"  {e['kind']}{' (' + e['actor'] + ')' if e.get('actor') else ''}{': ' + str(text) if text else ''}")
+    lines = [f"{c['id']} · {c['title']} [{c['state']}] {c['lane']}, {c['kind']}"]
+    for k in ("req", "after", "files", "done"):
+        if c[k]:
+            lines.append(f"{k}: {', '.join(c[k])}")
+    if c.get("waits"):
+        lines.append(f"waits on: {', '.join(c['waits'])}")
+    if c.get("note"):
+        lines.append(f"note: {c['note']}")
+    for t in (got.get("turns") or [])[:5]:
+        lines.append(f"  turn {t['state']}: {str(t.get('message') or '')[:80]}")
     return "\n".join(lines)
 
 
-def t_board_plan(s: Studio, a: Dict[str, Any]) -> str:
+def t_board_move(s: Studio, a: Dict[str, Any]) -> str:
+    body = {"card": str(a["card"]), "to": str(a["to"])}
+    if isinstance(a.get("note"), str):
+        body["note"] = a["note"]
     try:
-        got = s.call("/board/plan", {"path": str(a.get("path") or "")})
+        got = s.call("/board/card", body)
     except RuntimeError as exc:
         return f"refused: {exc}"
-    if got.get("milestone"):
-        s.show("open_board", mid=got["milestone"], view="board")
-    return ("done: " if got.get("ok") else "refused: ") + str(got.get("message"))
+    s.show("open_board", card=got["card"])
+    return f"{got['card']} is {got['state']}" + (f" — {got['note']}" if got.get("note") else "")
 
 
 # ── with no project open (the home page's assistant) ─────────────────────
@@ -683,8 +668,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                              "the screen it works on (the point tool's names). Optional, only when they help: sub, one "
                              "level of subtasks (the step's progress is how many are done); after, the earlier steps "
                              "(by number, from 1) a step waits on — the card then draws the plan as a structure. "
-                             "card: the board card this work is, when there is one — docs/X_PLAN.md#W1 for a plan's "
-                             "phase, or m3/C2; the Board lights that card while you work and lists this turn on it, "
+                             "card: the board card this work is, when there is one (C4); the Board lights that card while you work and lists this turn on it, "
                              "with your test runs, base checks and commits as its evidence.",
               "schema": _schema({"title": _S, "card": _S, "steps": {"type": "array", "items": _schema(
                   {"title": _S, "state": {"type": "string", "enum": list(STEP_STATES)}, "detail": _S,
@@ -697,7 +681,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                      "worktrees (cwd), shown live on the owner's Terminal page. Use it for what runs "
                                      "long or the owner should watch: a dev server, a watcher, an interactive tool. "
                                      "command: run that instead of an interactive shell (the terminal ends with it). "
-                                     "card: the board card it works for (docs/X_PLAN.md#W1 or m3/C2). Returns the "
+                                     "card: the board card it works for (C4). Returns the "
                                      "first output after up to wait seconds. env: an environment's id (env_list) "
                                      "to open it there instead, over SSH (cwd is then its folder).",
                       "schema": _schema({"cwd": _S, "command": _S, "title": _S, "card": _S, "env": _S, "wait": _N})},
@@ -730,8 +714,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                               "(services restarted) → validate (each up and healthy) → deploy (recorded as the "
                               "release). what=deploy (ref), rollback (to the last good release before the current "
                               "one), status (id, or the newest). Waits up to wait seconds (default 120) and returns "
-                              "each stage, a failed one with its output. card: the board card it is for (m3/C2 or "
-                              "docs/X_PLAN.md#W1; listed on that card). On production it waits for the owner's approval.",
+                              "each stage, a failed one with its output. card: the board card it is for (C4; "
+                              "listed on that card). On production it waits for the owner's approval.",
                "schema": _schema({"env": _S, "what": {"type": "string", "enum": ["deploy", "rollback", "status"]},
                                   "ref": _S, "card": _S, "id": _S, "wait": _N})},
     "terminal_send": {"fn": t_terminal_send,
@@ -794,26 +778,32 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                          "apply": {"type": "boolean"}}, ["resource", "input_per_1m", "output_per_1m"])},
     "project_status": {"fn": t_project_status,
                        "description": "Where the project stands, as the owner's screen shows it: the checklist (verified "
-                                      "of total, the open rows), the plans and milestones with their phases, what "
+                                      "of total, the open rows), the board's cards, the plans with their phases, what "
                                       "waits for the owner, what is in progress, the last commits, the setup, and the "
                                       "plan docs with no status block. Answer \"where are we\", \"what's next\", "
                                       "\"what needs me\" from it, never from memory; call it again after a change.",
                        "schema": _schema({"changes": _N})},
     "board_status": {"fn": t_board_status,
-                     "description": "The project's Board (operonx-project): each milestone's state, cards and spend, and "
-                                    "the checklist's rows not built yet. With milestone: its cards by column and what "
-                                    "each running card does now. "
-                                    "Opens the Board on the user's screen.",
-                     "schema": _schema({"milestone": _S})},
+                     "description": "The project's board (docs/brd/board.md): its cards by state (todo, doing, "
+                                    "needs you, done), each with its lane, what it waits on and, for needs you, the "
+                                    "question. Opens the Board on the user's screen.",
+                     "schema": _schema({})},
     "board_card": {"fn": t_board_card,
-                   "description": "One card of a milestone: intent, rows, criteria, files, and its last events.",
-                   "schema": _schema({"milestone": _S, "card": _S, "events": _N}, ["milestone", "card"])},
-    "board_plan": {"fn": t_board_plan,
-                   "description": "Put a plan doc on the Board, or bring its milestone back in line with the doc: "
-                                  "the plan is a milestone, each phase a card in the state the doc's status block "
-                                  "gives. path: docs/<NAME>_PLAN.md, or the doc's absolute path in the worktree it "
-                                  "is worked in. The engine does not work these cards; the doc is the record.",
-                   "schema": _schema({"path": _S}, ["path"])},
+                   "description": "Add a card to docs/brd/board.md (no card: title, and req, after, files, done; "
+                                  "never write the file by hand), read one (card) or change one's title and "
+                                  "fields. One card per task: req the checklist rows it "
+                                  "serves, after the cards it waits on, files what it touches, done the tests "
+                                  "(tests/x.py::test_y) that pass when it is done. A card whose files go outside a "
+                                  "feature's fixed names lands in needs you until the owner says go.",
+                   "schema": _schema({"card": _S, "title": _S, "req": {"type": "array", "items": _S},
+                                      "after": {"type": "array", "items": _S}, "files": {"type": "array", "items": _S},
+                                      "done": {"type": "array", "items": _S}})},
+    "board_move": {"fn": t_board_move,
+                   "description": "Move a card: to doing when you start it (refused while an after card is not "
+                                  "done), needs you with a note (the question) when you need the owner, done when "
+                                  "its done tests pass (the studio runs them first and refuses on a red one).",
+                   "schema": _schema({"card": _S, "to": {"type": "string", "enum": ["todo", "doing", "needs you", "done"]},
+                                      "note": _S}, ["card", "to"])},
 }
 
 HOME_TOOLS.update({

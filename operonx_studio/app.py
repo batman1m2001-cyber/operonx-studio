@@ -1506,7 +1506,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             try:
                 got = _pb.overview(ref.root)
             except Exception as exc:  # noqa: BLE001 — one project's store must not hide the others
-                got = {"milestones": [], "waiting": [], "error": str(exc)[:200]}
+                got = {"counts": {}, "waiting": [], "error": str(exc)[:200]}
             got["waiting"] += asks
             count += len(got["waiting"])
             boards.append({"pid": ref.id, "name": ref.name, **got})
@@ -4202,7 +4202,7 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     _knowledge.register(app, watcher_of=_watcher)
 
-    # an operonx-project milestone's board, read from its store: operonx_studio/projectboard.py
+    # the project's board, docs/brd/board.md: operonx_studio/projectboard.py
     from operonx_studio import projectboard as _projectboard
 
     _projectboard.register(app, watcher_of=_watcher, turns_of=lambda pid: chat_store.card_turns(pid),
@@ -4881,34 +4881,6 @@ def build_studio_app(recents: Optional[Recents] = None):
         token = ((mcp or {}).get("env") or {}).get("OPERONX_STUDIO_TOKEN") or ""
         return lambda: agents.revoke(token)
 
-    def _plan_sync(scope: str, turn: Any):
-        """The plan docs a turn edited go on the board as they now stand (the engine's ``plan``), so a phase's
-        card moves when the doc does, from a branch's worktree too; and every plan the board mirrors whose doc
-        changed some other way (a shell edit, a merge: WORKSPACE_PLAN W1.1). A doc with no status block is left
-        alone."""
-        def run() -> None:
-            root = _git_root(scope) if scope != "home" else None
-            if root is None or not _projectboard.available(root):
-                return
-            edited = {p for p in turn.edited if re.search(r"(^|/)docs/(.+/)?[^/]+_PLAN\.md$", p)}
-
-            def sync() -> None:
-                reqs: Dict[str, Dict[str, Any]] = {}
-                for path in sorted(edited | set(_projectboard.stale_plans(root))):
-                    try:
-                        req = _projectboard.plan_request(root, path)
-                    except Exception:  # noqa: BLE001 — not this project's doc
-                        continue
-                    reqs.setdefault(json.dumps(req, sort_keys=True), req)  # an edited doc can be stale too
-                for req in reqs.values():
-                    try:
-                        _projectboard.act(root, req, "assistant")
-                    except Exception:  # noqa: BLE001 — the board catches up on the next turn; the stop hook
-                        pass  # has already sent back a turn that left a doc the board cannot read (R7)
-
-            threading.Thread(target=sync, name="plan-sync", daemon=True).start()
-        return run
-
     def _home_briefing() -> str:
         roster = "\n".join(f"- {r.name}: {r.root}" for r in recents.ordered() if r.exists)
         return ("# Studio briefing\nNo project is open. Projects this studio knows:\n" + (roster or "(none yet)")
@@ -5512,7 +5484,6 @@ def build_studio_app(recents: Optional[Recents] = None):
         except RuntimeError as exc:
             _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
-        turn.on_end.append(_plan_sync(sess["scope"], turn))
         return JSONResponse({"turn": turn.id, "cursor": 0})
 
     @app.post("/api/assistant/sessions/{sid}/compact")

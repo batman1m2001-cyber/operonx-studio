@@ -12,7 +12,7 @@
  * comes back.
  *
  *   Now        the conversation, and beside it where the project stands
- *   Plans      every plan doc and milestone, phase by phase; a milestone opens its board
+ *   Board      docs/brd/board.md's cards (board.js), and below them every plan doc, phase by phase
  *   Git        what changed, the branches, the history (git.js)
  *   Files      the project's files, read-only; what changed lately is marked
  *   Settings   the standard, and what the assistant may do with git
@@ -29,8 +29,10 @@ const ProjectMode = (() => {
   const box = $("#project");
   const bar = $("#prail");
   const K = `pmode:${PID}`;
-  const v = Object.assign({page: "now", open: {}, mid: "", fopen: {}, file: "", fonly: false}, recall(K, {}));
-  const PAGES = {now: "Now", plans: "Plans", changes: "Git", files: "Files", terminal: "Terminal",
+  const v = Object.assign({page: "now", open: {}, fopen: {}, file: "", fonly: false}, recall(K, {}));
+  delete v.mid;
+  if (v.page === "plans") v.page = "board";
+  const PAGES = {now: "Now", board: "Board", changes: "Git", files: "Files", terminal: "Terminal",
                  environments: "Environments", settings: "Settings"};
   let doc = null;      // the last status document
   let failed = null;   // why there is none: {message, unavailable}
@@ -146,10 +148,11 @@ const ProjectMode = (() => {
     return capped("more-needs", items, 3, (q) => {
       // the assistant's question is answered in its conversation; a BRD question is talked through
       const act = q.source === "assistant" && window.oxAssistant ? () => window.oxAssistant.open(q.session, true)
+        : q.source === "board" && HAS_BOARD() ? () => BoardView.open({card: q.id})
         : () => ask(`Open question ${q.id} (${q.text}) in docs/brd/requirements/open_questions.md: `
           + "what does it say, what are the options, and what do you recommend?");
       const row = button("pm-item pm-q pm-one", null, act, `${q.id} · ${q.text}`);
-      row.dataset.key = `q:${q.source}:${q.milestone || ""}:${q.id}`;
+      row.dataset.key = `q:${q.source}:${q.id}`;
       tgt(row, `q:${q.id}`);
       row.append(el("span", "pm-id", q.source === "assistant" ? "assistant" : q.id), el("span", "pm-text", q.text || q.kind));
       return row;
@@ -160,9 +163,11 @@ const ProjectMode = (() => {
     const list = el("div", "pm-list");
     if (!items.length) { list.append(el("p", "pm-quiet", "Nothing is in progress.")); return list; }
     for (const w of items) {
-      const row = button("pm-item pm-w", null, () => { if (w.milestone) v.mid = w.milestone; go("plans"); }, w.path || `milestone ${w.milestone}`);
-      row.dataset.key = `w:${w.path || w.milestone}`;
-      tgt(row, w.path ? `plan:${w.path}` : `ms:${w.milestone}`);
+      const row = button("pm-item pm-w", null, () => {
+        if (w.card && HAS_BOARD()) BoardView.open({card: w.card}); else go("board");
+      }, w.card ? `${w.path} · ${w.card}` : w.path);
+      row.dataset.key = `w:${w.card || w.path}`;
+      tgt(row, w.card ? `card:${w.card}` : `plan:${w.path}`);
       row.append(el("span", "pm-title", w.title), el("span", "pm-sentence", w.sentence));
       list.append(row);
     }
@@ -254,7 +259,7 @@ const ProjectMode = (() => {
     const head = el("div", "pm-summary");
     const needs = d.needs_you.length;
     head.append(el("span", needs ? "hot" : null, needs ? `${plural(needs, "thing")} need${needs === 1 ? "s" : ""} you` : "Nothing needs you"),
-      el("span", null, `${plural(d.working_on.length, "plan")} in progress`),
+      el("span", null, `${d.working_on.length} in progress`),
       el("span", null, d.checklist.total ? `${d.checklist.verified}/${d.checklist.total} verified` : "no checklist"));
     // on a phone the column folds above the conversation: the summary is its handle
     const wrap = el("details", "pm-wrap");
@@ -264,9 +269,9 @@ const ProjectMode = (() => {
     sum.append(head);
     wrap.append(sum,
       section("needs", "Needs you", needs, needsYou(d.needs_you), {hot: needs > 0}),
-      section("working", "Working on", d.working_on.length || null, workingOn(d.working_on), {page: "plans"}),
+      section("working", "Working on", d.working_on.length || null, workingOn(d.working_on), {page: "board"}),
       section("checklist", "Checklist", null, checklistBox(d.checklist)),
-      section("plans", "Plans", d.plans.length || null, plansBox(d), {page: "plans"}),
+      section("plans", "Plans", d.plans.length || null, plansBox(d), {page: "board"}),
       section("changes", "Recent changes", null, changesBox(d.changes), {page: "changes"}));
     // the standard, only while something is missing: one line, the rest on Settings
     const std = d.standard || [];
@@ -300,38 +305,43 @@ const ProjectMode = (() => {
     return strip;
   }
 
-  function drawPlans() {
+  /* the Board page: the cards on top (board.js), the plan docs below them */
+  function drawBoard() {
     page.textContent = "";
-    if (v.mid) { drawMilestone(); return; }
-    if (HAS_BOARD()) BoardView.unmount();
+    const slot = el("div", "pm-board");
+    page.append(slot);
+    if (HAS_BOARD()) BoardView.mount(slot);
+    page.append(el("div", "pm-planlist"));
+    drawPlans();
+  }
+
+  function drawPlans() {
+    const box = page.querySelector(".pm-planlist");
+    if (!box) return;
+    box.textContent = "";
     const d = doc;
-    page.append(pageHead("Plans", d ? plural(d.plans.length, "plan") : ""));
-    if (!d) { page.append(failed ? missing() : el("p", "pm-quiet", "Reading…")); return; }
+    box.append(pageHead("Plans", d ? plural(d.plans.length, "plan") : ""));
+    if (!d) { box.append(failed ? missing() : el("p", "pm-quiet", "Reading…")); return; }
     if (!d.plans.length && !d.unmarked.length) {
-      page.append(paneNote("No plan yet", "Work with more than one step gets a plan doc under docs/ that says where it "
-        + "stands. Ask the assistant to plan something new; it writes the plan before any code."));
+      box.append(el("p", "pm-quiet", "No plan doc. Work with more than one step gets a docs/*_PLAN.md that says where it stands."));
     }
-    const sentence = Object.fromEntries(d.working_on.map((w) => [w.path || w.milestone, w.sentence]));
+    const sentence = Object.fromEntries(d.working_on.filter((w) => !w.card).map((w) => [w.path, w.sentence]));
     for (const p of d.plans) {
-      const key = p.path || `m:${p.milestone}`;
+      const key = p.path;
       const card = el("div", `pm-plan st-${p.status}`);
       card.dataset.key = key;
-      tgt(card, p.path ? `plan:${p.path}` : `ms:${p.milestone}`);
-      const top = button("pm-plantop", null, () => {
-        if (p.source === "engine") { v.mid = p.milestone; save(); drawPlans(); return; }
-        v.open[key] = !v.open[key]; save(); drawPlans();
-      }, p.source === "engine" ? "Open its board" : "Show its phases");
+      tgt(card, `plan:${p.path}`);
+      const top = button("pm-plantop", null, () => { v.open[key] = !v.open[key]; save(); drawPlans(); }, "Show its phases");
       const words = el("span", "pm-planwords");
       const cur = p.status === "in_progress" && p.phases.find((ph) => ph.id === p.current);
-      words.title = p.source === "engine" ? `milestone ${p.milestone}, built by the engine` : p.path;
-      words.append(el("span", "pm-title", p.title),
-        el("span", "pm-where", cur ? `now ${cur.id} · ${cur.title || ""}` : p.source === "engine" ? `milestone ${p.milestone}` : p.path));
+      words.title = p.path;
+      words.append(el("span", "pm-title", p.title), el("span", "pm-where", cur ? `now ${cur.id} · ${cur.title || ""}` : p.path));
       top.append(el("span", `pm-pill st-${p.status}`, PLAN_WORDS[p.status] || p.status), words, phaseStrip(p),
         el("span", "pm-frac", p.total ? `${p.done}/${p.total}` : ""));
       card.append(top);
-      const said = sentence[p.path || p.milestone];
+      const said = sentence[p.path];
       if (said) top.title = said;
-      if (v.open[key] && p.source !== "engine") {
+      if (v.open[key]) {
         const list = el("ol", "pm-phaselist");
         for (const ph of p.phases) {
           const li = tgt(el("li", `ph-${ph.status}`), `phase:${p.path}#${ph.id}`);
@@ -349,7 +359,7 @@ const ProjectMode = (() => {
         acts.append(button(null, "Ask about it", () => ask(`What does the plan ${p.path} say, where does it stand, and what is left?`)));
         card.append(acts);
       }
-      page.append(card);
+      box.append(card);
     }
     if (d.unmarked.length) {
       const sec = el("section", "pm-unmarked");
@@ -359,17 +369,8 @@ const ProjectMode = (() => {
         for (const path of d.unmarked) ul.append(tgt(el("li", "mono", path), `plan:${path}`));
         return ul;
       }));
-      page.append(sec);
+      box.append(sec);
     }
-  }
-
-  /* a milestone on the board: its columns, here */
-  function drawMilestone() {
-    const back = button("linkbtn pm-back", "← All plans", () => { v.mid = ""; save(); drawPlans(); });
-    page.append(back);
-    const slot = el("div", "pm-board");
-    page.append(slot);
-    if (HAS_BOARD()) BoardView.mount(slot, {mid: v.mid});
   }
 
   /* ── Files: the tree on the left, the file on the right ─────────── */
@@ -583,12 +584,12 @@ const ProjectMode = (() => {
   function drawPage() {
     main.classList.toggle("paged", v.page !== "now");
     page.classList.toggle("pm-page-files", v.page === "files" || v.page === "terminal" || v.page === "changes" || v.page === "environments");
-    if (v.page !== "plans" && HAS_BOARD()) BoardView.unmount();
+    if (v.page !== "board" && HAS_BOARD()) BoardView.unmount();
     if (v.page !== "terminal" && HAS_TERM()) TerminalPage.unmount();
     if (v.page !== "changes" && HAS_GIT()) GitPage.unmount();
     if (v.page !== "environments" && HAS_ENV()) EnvPage.unmount();
     if (v.page === "now") { page.textContent = ""; return; }
-    if (v.page === "plans") drawPlans();
+    if (v.page === "board") drawBoard();
     else if (v.page === "changes") { if (HAS_GIT()) GitPage.mount(page); }
     else if (v.page === "files") drawFiles();
     else if (v.page === "terminal") { if (HAS_TERM()) TerminalPage.mount(page); }
@@ -617,7 +618,8 @@ const ProjectMode = (() => {
       paintBar();
       // the pages drawn from the document follow it; a page being typed into is left alone
       const typing = page.contains(document.activeElement) && /TEXTAREA|INPUT|SELECT/.test(document.activeElement.tagName);
-      if (!typing && (v.page === "settings" || (v.page === "plans" && !v.mid))) drawPage();
+      if (!typing && v.page === "settings") drawPage();
+      else if (v.page === "board") drawPlans();
       else if (v.page === "files" && ftree) {
         api(`/api/p/${PID}/project/files`).then((got) => {
           const list = page.querySelector(".pm-ftree");
@@ -694,7 +696,6 @@ const ProjectMode = (() => {
 
   function show(opts) {
     if (opts && opts.page) v.page = PAGES[opts.page] ? opts.page : "now";
-    if (opts && opts.mid !== undefined) v.mid = opts.mid;
     // studio:file/<path>#L<n>: that file, at that line (not remembered: a reload opens the file at its top)
     if (opts && opts.file) {
       v.file = opts.file;
@@ -737,7 +738,7 @@ const ProjectMode = (() => {
   /* open what holds a target the hand is about to point at: a plan's phases are drawn once it is unfolded */
   function reveal(target) {
     const m = /^phase:(.+)#[^#]+$/.exec(target || "");
-    if (!m || v.page !== "plans" || v.open[m[1]]) return;
+    if (!m || v.page !== "board" || v.open[m[1]]) return;
     v.open[m[1]] = true;
     save();
     drawPlans();

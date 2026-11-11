@@ -5097,11 +5097,7 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   .cmpgrid-h:first-child, .cmpgrid-k { grid-column: 1 / -1; }
 }
 
-/* ── Board: an operonx-project milestone (board.js) ─────────────────── */
-.bdpick { max-width: 320px; }
-.bdhead { margin: -6px 0 14px; }
-.bdsum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; font-size: var(--fs-sm); color: var(--text-2); }
-.bdreason { margin-top: 6px; font-size: var(--fs-sm); color: var(--text-2); }
+/* ── Board: docs/brd/board.md (board.js) ─────────────────── */
 .bdqtext { margin: 6px 0 4px; font-size: var(--fs-md); color: var(--text); }
 
 .bdcols { display: grid; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
@@ -5117,15 +5113,24 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   font: inherit; color: var(--text); white-space: normal; overflow-wrap: anywhere; }
 .bdcard:hover { border-color: var(--accent); }
 .bdcard.sel { box-shadow: 0 0 0 2px var(--accent-soft); border-color: var(--accent); }
-.bdcard.st-running { border-left-color: var(--accent); }
-.bdcard.st-done, .bdcard.st-verified { border-left-color: var(--ok); }
-.bdcard.st-failed, .bdcard.st-blocked { border-left-color: var(--err); }
-.bdcard.st-waiting_human, .bdcard.asks { border-left-color: var(--warn); }
+.bdcard.st-doing { border-left-color: var(--accent); }
+.bdcard.st-done { border-left-color: var(--ok); }
+.bdcard.st-needs-you, .bdcard.asks { border-left-color: var(--warn); }
+.bdcardask { font-size: 11px; color: var(--text-2); margin-top: 4px; line-height: 1.35; }
+.st-needs-you .bdcardask::before { content: "? "; color: var(--warn); font-weight: 700; }
+/* the lane: a coloured dot, the word in the text's own ink */
+.bdlane { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-2); }
+.bdlane::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--lane, var(--text-3)); }
+.lane-UI { --lane: var(--c-pink58); }
+.lane-web { --lane: var(--c-blue59); }
+.lane-core { --lane: var(--c-violet57); }
+.lane-data { --lane: var(--c-teal58); }
+.lane-AI { --lane: var(--c-amber70); }
+.lane-platform { --lane: var(--c-lime60); }
 .bdcardtop { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .bdcardtop .chip { margin: 0; }
 .bdcardtitle { font-size: var(--fs-sm); margin-top: 3px; line-height: 1.35; }
 .bdcardmeta { font-size: 11px; color: var(--text-3); margin-top: 4px; }
-.bdcardwhy { font-size: 11px; color: var(--err); margin-top: 4px; }
 .bdlive { font-size: 11px; color: var(--accent-strong); margin-top: 4px; font-family: var(--mono, ui-monospace, monospace);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bdlive::before { content: "● "; animation: bdpulse 1.6s ease-in-out infinite; }
@@ -5135,12 +5140,10 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .bdpanel { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
   padding: 12px 14px; }
 .bdpaneltop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.bdintent { margin: 8px 0; color: var(--text-2); font-size: var(--fs-sm); }
 .bdfacts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 8px 0;
   font-size: var(--fs-sm); }
 .bdfacts dt { color: var(--text-3); }
 .bdfacts dd { margin: 0; overflow-wrap: anywhere; }
-.bdcrit { margin: 4px 0 0 18px; padding: 0; font-size: var(--fs-sm); }
 .bdcard.lit { box-shadow: 0 0 0 2px var(--accent-soft); border-left-color: var(--accent); }
 .bdturns > li > .bdqtext { flex-basis: 100%; }
 .bdturns { list-style: none; margin: 4px 0 0; padding: 0; font-size: var(--fs-sm); }
@@ -5150,8 +5153,6 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .bdevidence li { padding: 1px 0; overflow-wrap: anywhere; }
 .bdevidence li.good::before { content: "✓ "; color: var(--ok); }
 .bdevidence li.bad::before { content: "✗ "; color: var(--err); }
-.bdevents { list-style: none; margin: 4px 0 0; padding: 0; font-size: var(--fs-sm); max-height: 280px; overflow: auto; }
-.bdevents li { padding: 3px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 
 @media (max-width: 760px) {
   /* a phone stacks the columns; an empty one is a header line */
@@ -5160,7 +5161,6 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   .bdcol.empty { padding: 6px 8px; }
   .bdcol.empty .bdempty { display: none; }
   .bdcol.empty .bdcolhead { padding: 0; }
-  .bdpick { max-width: 100%; }  /* the matrix scrolls sideways, its IDs whole */
 }
 
 /* ── Project mode (docs/PROJECT_MODE_PLAN.md D3): its own bar stands in for

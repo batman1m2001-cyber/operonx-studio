@@ -57,8 +57,8 @@ function coverWhileFresh(elm) {
 }
 
 function switchTab(name, opts) {
-  // the Board lives in Project mode now: a milestone opens on its Plans page (docs/PROJECT_MODE_PLAN.md P4)
-  if (name === "board") { switchTab("project", {page: "plans", mid: (opts && opts.mid) || recall(`board:${PID}`, {}).mid || ""}); return; }
+  // the Board lives in Project mode: its Board page (docs/brd/board.md)
+  if (name === "board") { switchTab("project", {page: "board"}); return; }
   // the playground runs a service's code: not a viewer's (D11); every way in stops here
   if (name === "playground" && window.Account && Account.viewOnly) { Account.toast(Account.VIEW_ONLY, true); return; }
   // where the Flow tab was: a run's pane borrows the canvas, and moving
@@ -802,12 +802,11 @@ function assistantUi(kind, args) {
                open_eval: "evals", open_tab: args.tab};
   const steps = [];
   // the board's overview is Plans: reading the project's state is no reason to leave the conversation for it
-  if (kind === "open_board" && !args.mid && state.tab === "project") return Promise.resolve();
-  if (kind === "open_board") steps.push({go: {tab: "project", page: "plans"}});
+  if (kind === "open_board") steps.push({go: {tab: "project", page: "board"}});
   else if (TAB[kind]) steps.push({go: {tab: TAB[kind], opts: {quiet: true}}});
   steps.push({run: () => performUi(kind, args)});
   const what = kind === "select_op" ? `op:${args.op}` : kind === "open_jobs" ? `job:${args.job}`
-    : kind === "open_eval" && args.name ? `eval:${args.name}` : kind === "open_board" && args.mid ? `ms:${args.mid}` : null;
+    : kind === "open_eval" && args.name ? `eval:${args.name}` : kind === "open_board" && args.card ? `card:${args.card}` : null;
   if (what) steps.push({point: what, words: args.words || ""});
   Hand.play(steps);
   return Promise.resolve();
@@ -867,7 +866,7 @@ async function performUi(kind, args) {
 
 /* `studio:` links in the assistant's replies (chat.js turns them into
  * buttons): studio:run/<id>, studio:op/<name>, studio:tab/<name>, studio:point/<target>,
- * studio:monitor/<origin>/<name>, studio:board/<milestone>[/<card>], studio:file/<path>#L<n>. */
+ * studio:monitor/<origin>/<name>, studio:board[/<card>], studio:file/<path>#L<n>. */
 window.oxStudioLink = (href) => {
   const path = String(href).replace(/^studio:/, "");
   const [kind, ...rest] = path.split("/");
@@ -875,7 +874,7 @@ window.oxStudioLink = (href) => {
   if (kind === "run") return performUi("open_run", {run: arg});
   if (kind === "op") return performUi("select_op", {op: arg});
   if (kind === "tab") return performUi("open_tab", {tab: arg === "runs" ? "traces" : arg});
-  if (kind === "board") return performUi("open_board", {mid: rest[0], card: rest[1] || ""});
+  if (kind === "board") return performUi("open_board", {card: rest[0] || ""});
   if (kind === "eval") return performUi("open_eval", {name: rest[0], run: rest[1] || ""});
   // studio:point/q:Q-16 — the hand goes to it and rings it, as when the assistant points
   if (kind === "point") return performUi("point", {target: arg, byUser: true});

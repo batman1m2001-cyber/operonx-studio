@@ -68,7 +68,7 @@ def test_the_studio_extracts_a_fresh_operonx_init_project(tmp_path):
     from operonx_studio_toolkit.manifest import Manifest
 
     root = tmp_path / "greeter"
-    init_project(root, template="http", name="greeter")
+    init_project(root, template="hello", parts=("http",), name="greeter")
     import sys
 
     sys.path.insert(0, str(root / "src"))
@@ -77,8 +77,8 @@ def test_the_studio_extracts_a_fresh_operonx_init_project(tmp_path):
     finally:
         sys.path.remove(str(root / "src"))
     (graph,) = ir["graphs"]
-    assert graph["name"] == "stats_flow"
-    assert [n["name"] for n in graph["nodes"]] == ["c", "m"]
+    assert graph["name"] == "greet_flow"
+    assert [n["name"] for n in graph["nodes"]] == ["g"]
 
 
 def test_the_old_command_names_are_core_commands(tmp_path, capsys):
