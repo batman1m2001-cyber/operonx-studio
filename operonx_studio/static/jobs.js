@@ -11,7 +11,8 @@ function renderProjectMenu() {
   const ir = state.ir || {};
   const row = (name, sub, onclick, cls) => ({name, sub, current: cls === "sel",
     pick: () => { box.hidden = true; $("#btn-project").setAttribute("aria-expanded", "false"); onclick(); }});
-  const operons = (ir.graphs || []).map(g => row(g.name, `${g.nodes.length} op${g.nodes.length === 1 ? "" : "s"}`, () => {
+  const operons = (ir.graphs || []).map(g => row(g.name, `${g.nodes.length} op${g.nodes.length === 1 ? "" : "s"}` +
+    (g.variants ? ` · ${g.variants.length} routes` : ""), () => {
     state.graph = g; $("#graph-pick").value = g.name; switchTab("flow"); render(); renderFlowInfo();
   }, state.graph && state.graph.name === g.name ? "sel" : ""));
   const services = (ir.services || ir.serves || []).map(sv => {
@@ -20,9 +21,8 @@ function renderProjectMenu() {
     const meta = `${sv.kind} ${sv.path || ""}${sv.port ? " :" + sv.port : ""}${sv.session ? " · " + sv.session : ""}` +
       (variants.length ? ` · ${variants.length} variants` : "");
     return row(sv.name || sv.path, meta, () => {
-      // one door, one compiled graph per variant: open the first, the
-      // Operons column lists them all as <graph>[<variant>]
-      const names = variants.length ? variants.map(v => `${base}[${v}]`) : [base];
+      // a door's variants are one graph, named as the door's graph is
+      const names = [base, ...variants.map(v => `${base}[${v}]`)];
       const target = sv.graph ? (ir.graphs || []).find(g => names.includes(g.name)) : null;
       if (target) { state.graph = target; $("#graph-pick").value = target.name; switchTab("flow"); render(); renderFlowInfo(); }
       else toast(sv.app ? `${sv.name}: an ASGI app, not a graph` : `${sv.name}: graph ${sv.graph} is not listed under [[graph]]`);

@@ -202,6 +202,8 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
         "finals": graph.get("finals") or [],
         # `member["x"] >> PARENT["y"]` writes — the true output links
         "exports": graph.get("exports") or [],
+        # a door's variants: one graph, its routes listed (extract.py)
+        **({"variants": graph["variants"]} if graph.get("variants") else {}),
         "width": layout.width,
         "height": layout.height,
         "nodes": [
