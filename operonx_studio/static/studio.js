@@ -167,7 +167,7 @@ function menuList(box, {placeholder, sections, footer}, keep) {
       if (r.current) b.append(Icons.svg("check", "mlcheck"));
       if (r.title) b.title = r.title;
       b.onclick = (ev) => { ev.stopPropagation(); r.pick(); };
-      b._find = `${r.name} ${r.sub || ""}`.toLowerCase();
+      b._find = `${r.name} ${r.sub || ""} ${r.find || ""}`.toLowerCase();
       list.append(b);
       rows.push(b); mine.push(b);
     }
