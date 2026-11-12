@@ -1339,6 +1339,9 @@ function render() {
     let els = [...card.querySelectorAll(card.classList.contains("cols") ? ".ntext, .brlist, .dfports" : ".ntext, .brcond, .dfports")];
     // gates: plain name line, plus the transport line below it
     if (!els.length) els = [".nname", ".nkind"].map(sel => card.querySelector(sel)).filter(Boolean);
+    // a folded graph's agent chips sit on one line when the cap allows
+    const chips = card.querySelector(".agchips");
+    if (chips) els.push(chips);
     measured.push({it, card, els});
   }
   nodesBox.classList.add("measuring");
@@ -1354,7 +1357,7 @@ function render() {
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
     const want = Math.ceil(m.it.w + need + 8);
     // a router is as wide as its zones: they never fold or cut
-    const cap = m.card.classList.contains("cols") ? 2000 : m.card.querySelector(".dfports") ? 420 : 310;
+    const cap = m.card.classList.contains("cols") ? 2000 : m.card.querySelector(".dfports") ? 420 : m.card.querySelector(".agchips") ? 400 : 310;
     const w = Math.max(180, Math.min(cap, want));
     if (want > cap) {
       // a name cut short says itself in full on hover
@@ -2361,6 +2364,48 @@ function lucideIcon(name) {
  * the count of what is inside written in it, and ▸ beside it (a kind with
  * its own glyph keeps it, the count beside). A click on the rest of the
  * card still selects it; a double-click opens it too. */
+/* The agents inside a folded graph, at any depth: one chip each on its
+ * card, so an agent buried in prepare › web_research is seen from the top
+ * of the flow. A click opens the path to it and picks it. */
+const AGENT_CHIPS = 4;   // more than this: the first 3, then "+N"
+function agentsInside(g, key, out = []) {
+  for (const n of (g && g.nodes) || []) {
+    const k = `${key}/${n.id}`;
+    if (n.op_type === "agent" && n.agent) out.push({name: n.name, key: k});
+    else if (n.graph) agentsInside(n.graph, k, out);
+  }
+  return out;
+}
+function revealAgent(key) {
+  const parts = key.split("/");
+  for (let i = 1; i < parts.length; i++) state.expanded.add(parts.slice(0, i).join("/"));
+  render();
+  if (state.sel !== key) select(key);
+  const it = state.rendered.get(key);
+  if (it) centerOn(it);
+}
+function agentChips(it) {
+  const found = agentsInside(it.node.graph, it.key);
+  if (!found.length) return null;
+  const box = el("div", "agchips");
+  const shown = found.length > AGENT_CHIPS ? found.slice(0, AGENT_CHIPS - 1) : found;
+  for (const a of shown) {
+    const c = el("button", "agchip");
+    c.append(agentMark("agchip-mark"), el("span", null, a.name));
+    const path = a.key.split("/").slice(1, -1).map(k => k.split(".").pop());
+    c.title = `Agent ${a.name}${path.length ? ` in ${[it.node.name, ...path].join(" › ")}` : ""} — open it`;
+    c.onclick = (ev) => { ev.stopPropagation(); revealAgent(a.key); };
+    c.ondblclick = (ev) => ev.stopPropagation();
+    box.append(c);
+  }
+  if (found.length > shown.length) {
+    const more = el("span", "agchip more", `+${found.length - shown.length}`);
+    more.title = found.slice(shown.length).map(a => a.name).join(", ");
+    box.append(more);
+  }
+  return box;
+}
+
 function graphBand(it) {
   const n = it.node;
   const b = el("button", "iconband gband");
@@ -2813,6 +2858,8 @@ function opCard(it) {
     const chips = state.run ? null : nameChips(n);
     if (chips) line.append(chips);
     card.append(line);
+    // a folded graph names the agents inside it, at any depth
+    if (n.graph && !state.expanded.has(it.key)) { const ag = agentChips(it); if (ag) card.append(ag); }
     // the kind line was card noise at fit-zoom; it lives in the
     // tooltip and the inspector — and on the card once it is clicked
     // (the .detail block shows on the selected card only)
