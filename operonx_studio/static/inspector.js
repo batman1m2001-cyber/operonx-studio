@@ -26,7 +26,7 @@ function select(key) {
   const panel = $("#inspector");
   const runStep = state.workflowOn && state.run && $("#wfstep");
   if (!state.sel) { if (runStep) renderRunStep(null); renderFlowInfo(); return; }
-  const it = state.rendered.get(state.sel);
+  const it = state.rendered.get(state.sel) || state.partRows.get(state.sel);
   if (!it) { state.sel = null; renderFlowInfo(); return; }
   const n = it.node;
   // a run's Workflow: what the op did goes to the step panel beside the canvas

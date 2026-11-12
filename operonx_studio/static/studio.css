@@ -117,26 +117,6 @@
   --rt-cond: #3a4a8c; --rt-led: #22a35a; --rt-led-off: #c9d1db; --rt-socket: #2b3442;
   --rt-wire: #4f5bd5; --rt-wire-else: #9aa4c4; --rt-zone-edge: #a9b5c3;
   --rt-guide: #e3e7ec;
-  /* the agent: a hive cell — its steel edge (dark → light sheen), body,
-     glow, honeycomb, parts chips and accent */
-  --ag-e1: #c9dcf3; --ag-e2: #4a6fa5; --ag-e3: #9fc0ea; --ag-e4: #2f5182;
-  --ag-b1: #f1f3f5; --ag-b2: #e1e5e9; --ag-ink: #1d2633; --ag-sub: #5b6878;
-  --ag-acc: #4a6fa5; --ag-acc-soft: #e6eef8; --ag-glow: rgba(40, 50, 62, .12);
-  --ag-shade: rgba(20, 28, 38, .28); --ag-comb: rgba(74, 111, 165, .10);
-  --ag-chip: #f3f6fa; --ag-chip-edge: #d6dfea; --ag-shine: rgba(255, 255, 255, .6); --ag-grain: rgba(70, 80, 95, .03);
-  --ag-frame: rgba(74, 111, 165, .05); --ag-bee-glow: rgba(255, 214, 102, .45);
-  /* its machine: the rim's light, mid and dark, the plate's seams, the
-     sweep a live run sends along the rim, its sensor off and on */
-  --ag-n1: #b9c0c8; --ag-n2: #8b939d; --ag-n3: #5f6772; --ag-seam: rgba(70, 78, 90, .22);
-  --ag-sweep: rgba(255, 255, 255, .55); --ag-led: #a3abb5; --ag-led-on: #3d9a8f;
-  /* a socket's recess: its floor, and the shade of its lip; the
-     connectors' metal and edge; the cables' neutral */
-  --sk-floor: #8a929c; --sk-shade: #626a75;
-  --conn: #dde1e6; --conn-edge: #a3abb4; --cable: #7b838e;
-  /* each socket's icon and the hairline on its connector: the model, its
-     memory, its tools — three hues apart for every eye (dataviz
-     validate_palette: all checks pass) */
-  --ap-model: #7c3aed; --ap-mem: #c2410c; --ap-tool: #0d9488; --ap-bg: #f8f9fb;
   --k-session: #2f6fd0;          /* a session store (an agent's memory) as an op */
   --k-io: #c8457f;
   --k-audio: #c8457f;
@@ -4482,167 +4462,111 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .wires.dflinks path.dfconn.lit, .wires.dflinks path.dfconn.focus.lit { stroke-width: .7 !important; stroke: color-mix(in srgb, var(--df) 65%, transparent) !important; }
 .wires.dflinks path.dfconn.hot { stroke-width: 1.4 !important; stroke: var(--df) !important; opacity: 1 !important; }
 
-/* ── the agent op: a hive cell (canvas.js agentCard) ─────────────────
-   A machine: a regular hexagon, a point at the top (its input) and at the
-   bottom (its output), its sides upright — as wide as its first line (the
-   bee and the name) needs, as tall as a regular hexagon that wide is; it
-   grows and shrinks whole, never stretched. Brushed aluminium on a
-   graphite rim, no glow. Its right wall is carved with its three sockets
-   (canvas.js hexCut). Three layers under the content: the floor (dark,
-   seen only down in the sockets), the hull (the rim, carved) and the
-   plate inset 2px (carved 2px wider, so the rim lines each socket). */
-.node.agentcell {
-  width: max-content; min-width: 120px; max-width: 220px; height: auto; min-height: 0;
-  aspect-ratio: 0.8660254;                       /* √3 / 2: a regular hexagon, point up */
-  display: flex; flex-direction: column; justify-content: center; align-items: center;
-  background: transparent; border: none; border-radius: 0; box-shadow: none;
-  padding: 0 30px 0 14px;                        /* the right: the sockets and their marks */
-  filter: drop-shadow(0 2px 3px var(--ag-shade));
-}
-.node.agentcell::before { display: none; }
-.node.agentcell:hover { transform: none; box-shadow: none; filter: drop-shadow(0 3px 5px var(--ag-shade)); }
-.node.agentcell .ahull, .node.agentcell .abody,
-.node.agentframe .ahull, .node.agentframe .abody {
-  position: absolute; pointer-events: none;
-  clip-path: polygon(var(--cut) 0, calc(100% - var(--cut)) 0, 100% var(--cut),
-    100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, var(--cut) 100%,
-    0 calc(100% - var(--cut)), 0 var(--cut));
-}
-.node.agentcell .ahull, .node.agentcell .abody {
-  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
-.node.agentcell .ahull, .node.agentframe .ahull { inset: 0;
-  /* the rim: machined graphite, lit from above (a live run sweeps a light along it) */
-  background:
-    linear-gradient(115deg, transparent 40%, var(--ag-sweep) 48%, transparent 56%),
-    linear-gradient(180deg, var(--ag-n1), var(--ag-n2) 50%, var(--ag-n3));
-  background-size: 260% 100%, 100% 100%; background-position: 0 0, 0 0; }
-.node.agentcell .abody { inset: 2px;
-  /* the plate: brushed aluminium, a soft light along its top */
-  background:
-    linear-gradient(180deg, var(--ag-shine) 0%, transparent 30%),
-    repeating-linear-gradient(0deg, transparent 0 2px, var(--ag-grain) 2px 3px),
-    linear-gradient(180deg, var(--ag-b1), var(--ag-b2)); }
-.node.agentframe .abody { inset: 2.5px; }
-/* its plating (canvas.js hexLines): a seam across each cap, rivets at its
-   left corners, vents below, a sensor above */
-.node.agentcell .ahex { position: absolute; inset: 0; width: 100%; height: 100%;
-  pointer-events: none; overflow: visible; }
-.node.agentcell .ahex-seam { fill: none; stroke: var(--ag-seam); stroke-width: 1;
-  vector-effect: non-scaling-stroke; }
-.node.agentcell .ahex-rivet { fill: var(--ag-n1); stroke: var(--ag-n3); stroke-width: .8;
-  vector-effect: non-scaling-stroke; }
-.node.agentcell .ahex-vent { fill: none; stroke: var(--ag-n2); stroke-width: 2;
-  stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.node.agentcell .ahex-led { fill: var(--ag-led); }
-.node.agentcell.live-active .ahex-led { fill: var(--ag-led-on); animation: agLed 1.1s ease-in-out infinite; }
-@keyframes agLed { 50% { opacity: .35; } }
-.node.agentcell > .ahead, .node.agentcell > .badges,
-.node.agentcell > .detail { position: relative; z-index: 1; }
-.node.agentcell .port { z-index: 2; }
-.node.agentcell .ahead { display: flex; flex-direction: column; align-items: center; min-width: 0;
-  max-width: 100%; }
-.node.agentcell .aline { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
-.node.agentcell .asubline { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 2px; }
-.node .abee { flex: none; width: 38px; height: 38px; position: relative;
-  background: url("/static/agent-bee.png") center / 34px 34px no-repeat; }
-.node.agentcell .abee { width: 28px; height: 28px; background-size: 26px 26px; }
-.node .abee::before { content: ""; position: absolute; inset: 0; z-index: -1;
-  background: radial-gradient(circle at 50% 42%, var(--ag-bee-glow), transparent 68%); }
-:root[data-theme="dark"] .node .abee { background-image: url("/static/agent-bee-dark.png"); }
-.node.agentcell .aline .nname { margin: 0; min-width: 0; color: var(--ag-ink); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; }
-.node.agentcell .asub { min-width: 0; font-size: 11px; color: var(--ag-sub); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; }
-/* its sockets (canvas.js agentSockets): each icon beside its socket's
-   place; opened, the socket is a slot in the wall (hexCut) and its part's
-   connector sits in it — a nose, a ferrule easing into the cable, one
-   hairline of the role's colour */
-.node.agentcell .asocks { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
-.node.agentcell .asock { position: absolute;                 /* its box: canvas.js SOCK_BOX */
-  transform: translateY(-50%); pointer-events: auto; cursor: pointer; }
-.node.agentcell .asock.s-model { color: var(--ap-model); }
-.node.agentcell .asock.s-memory { color: var(--ap-mem); }
-.node.agentcell .asock.s-tool { color: var(--ap-tool); }
-.node.agentcell .amark { position: absolute; right: calc(100% + 4px); top: 50%; transform: translateY(-50%);
-  display: grid; place-items: center; width: 11px; height: 11px; pointer-events: auto; cursor: pointer; }
-/* the icon is what is clicked to plug the parts in or out: a few px round it count */
-.node.agentcell .amark::after { content: ""; position: absolute; inset: -5px -4px -5px -6px; }
-.node.agentcell .amark .dbicon { width: 11px; height: 11px; }
-.node.agentcell .asock.empty .amark { opacity: .45; }
-.node.agentcell .asockg { position: absolute; inset: 0; display: block; width: 100%; height: 100%;
-  overflow: visible; }
-.node.agentcell .asg-cavity { fill: var(--sk-shade); }
-.node.agentcell .asg-floor { fill: var(--sk-floor); }
-.node.agentcell .asg-conn { fill: var(--conn); stroke: var(--conn-edge); stroke-width: .3;
-  stroke-linejoin: round; }
-.node.agentcell .asg-band { stroke: currentColor; stroke-width: .8; }
-.node .dbicon { display: block; width: 12px; height: 12px; fill: none; stroke: currentColor;
-  stroke-width: 1.5; }
+/* ── the agent op: one card (canvas.js agentCard) ────────────────────
+   A glass card of the LLM's colour: a header (its mark, name, "agent · N
+   tools", a run's status pill, a chevron), opened its Model, Tools and
+   Memory rows. Its tools are rows, never ops on the canvas; no wires
+   inside it. docs/AGENTOP_REDESIGN_PLAN.md */
+.ag2 { --kind: var(--k-llm); box-sizing: border-box; border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--kind) 46%, var(--og-edge));
+  background: linear-gradient(180deg, var(--og-spec) 0, transparent 60px),
+    color-mix(in srgb, var(--kind) 7%, var(--og-fill));
+  backdrop-filter: blur(var(--og-blur)) saturate(140%);
+  box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 3px color-mix(in srgb, var(--kind) 9%, transparent), var(--og-drop); }
+.node.ag2 { width: 340px; height: auto; min-height: 0; padding: 0; display: block;
+  border-radius: 18px; border-width: 1px; transition: none; text-align: left; }
+.node.ag2::before { display: none; }
+.node.ag2:hover { transform: none; }
+.node.ag2.folded { width: 320px; }
+.node.ag2.selected { border-color: var(--flow-accent);
+  box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 3px var(--flow-accent-ring), var(--og-drop); }
+.ag2-head { display: flex; align-items: center; gap: 11px; padding: 12px; }
+.ag2.folded .ag2-head { padding: 11px 12px; }
+.ag2-icon { flex: none; width: 38px; height: 38px; display: grid; place-items: center; color: var(--k-llm);
+  border-radius: 11px; background: color-mix(in srgb, var(--k-llm) 14%, transparent); }
+.ag2-icon svg, svg.ag2-mark { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round; }
+.ag2-title { flex: 1; min-width: 0; }
+.ag2-name { font-weight: 700; font-size: 15px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag2-sub { font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag2-st { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600;
+  padding: 3px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); }
+.ag2.folded .ag2-st { padding: 2px 8px; font-size: 11px; }
+.ag2-st i { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+.ag2-st.done i { background: var(--ok); }
+.ag2-st.run i, .ag2.live-active .ag2-st i { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
+  animation: ag2Pulse 1.1s ease-in-out infinite; }
+@keyframes ag2Pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--ok) 8%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .ag2.live-active .ag2-st i { animation: none; } }
+.ag2-fold { flex: none; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: none;
+  border-radius: 7px; background: transparent; color: var(--text-3); cursor: pointer; }
+.ag2-fold:hover { background: var(--surface-2); color: var(--text); }
+.ag2 svg.lucide-ic { width: 16px; height: 16px; fill: none; stroke: currentColor; }
+.ag2-body { margin: 0 8px 8px; padding: 6px; border-radius: 13px;
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.ag2-row { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: 10px; min-width: 0;
+  background: var(--og-fill); border: 1px solid color-mix(in srgb, var(--rk) 26%, var(--og-edge)); }
+.ag2-row.ag2-toggle { cursor: pointer; }
+.ag2-row.ag2-toggle:hover { border-color: color-mix(in srgb, var(--rk) 55%, var(--og-edge)); }
+.ag2-row.off { opacity: .62; border-style: dashed; }
+.ag2-ri { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px;
+  color: var(--rk); background: color-mix(in srgb, var(--rk) 13%, transparent); }
+.ag2-rt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ag2-rt b { font-size: 12.5px; font-weight: 650; color: var(--text); }
+.ag2-rt span { font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag2-n { flex: none; font-size: 11px; font-weight: 600; color: var(--text-3); }
+.ag2-chev { flex: none; display: grid; color: var(--text-3); }
+.ag2-chev svg.lucide-ic { width: 15px; height: 15px; }
+.ag2-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 2px 0 2px 14px;
+  margin-left: 13px; border-left: 1px solid var(--border); }
+.ag2-tool { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px; min-width: 0; cursor: pointer;
+  background: color-mix(in srgb, var(--og-fill) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tk) 22%, var(--og-edge)); }
+.ag2-tool:hover { border-color: color-mix(in srgb, var(--tk) 55%, var(--og-edge)); }
+.ag2-tool.sel { border-color: var(--flow-accent); box-shadow: 0 0 0 3px var(--flow-accent-ring); }
+.ag2-tool.p-deny { opacity: .5; filter: grayscale(1); }
+.ag2-tool .k { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px;
+  font-weight: 700; font-size: 12px; color: var(--tk); background: color-mix(in srgb, var(--tk) 14%, transparent); }
+.ag2-tool .k svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ag2-tool .k svg.ag2-mark, .ag2-tool .k svg:not(.lucide-ic) { stroke-width: 1.8; }
+.ag2-tool .t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ag2-tool .t b { font: 600 11.5px var(--mono, ui-monospace, monospace); color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag2-tool .t span { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag2-tool .t span:empty { display: none; }
+.ag2-tool .calls { flex: none; font: 600 11px var(--mono, ui-monospace, monospace); color: var(--text-2); }
+.ag2-tool .go { flex: none; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: none;
+  border-radius: 6px; background: transparent; color: var(--text-3); cursor: pointer; }
+.ag2-tool .go:hover { background: var(--surface-2); color: var(--accent); }
+.ag2-tool .go svg.lucide-ic { width: 13px; height: 13px; }
+.ag2-more { font-size: 11.5px; color: var(--accent); padding: 3px 8px; }
 .node svg.lucide-ic { stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.node .iconband .dbicon { width: 17px; height: 17px; }
-/* its cables (canvas.js drawAgentParts): one slim stroke each, faintly of
-   its role's colour, flaring a little onto the part. What moves shows only
-   while a run is live */
-.wires .apw-model { color: var(--ap-model); }
-.wires .apw-memory { color: var(--ap-mem); }
-.wires .apw-tool { color: var(--ap-tool); }
-.wires .apw .apw-cable { fill: none; stroke: color-mix(in srgb, currentColor 50%, var(--cable));
-  stroke-width: 2.4; stroke-linecap: butt; }
-.wires .apw .apw-term { fill: color-mix(in srgb, currentColor 50%, var(--cable)); }
-/* a tool's cable: thinner, one of a fan */
-.wires .apw .apw-cable.apw-tool { stroke-width: 1.6; }
-/* a part in focus (hovered or selected): its cable up, its agent's others back */
-.wires .apw.focus .apw-cable:not(.hot), .wires .apw.focus .apw-term:not(.hot) { opacity: .3; }
-.wires .apw .apw-cable.hot { stroke: currentColor; }
-.wires .apw .apw-term.hot { fill: currentColor; }
-.wires .apw .apw-cable.apw-tool.hot { stroke-width: 2; }
-.wires .apw-track { fill: none; stroke: none; }
-.wires .apw-dot { fill: currentColor; }
-.wires .apw-anim { display: none; }
-.wires .apw.on .apw-anim { display: inline; }
-@media (prefers-reduced-motion: reduce) { .wires .apw.on .apw-anim { display: none; } }
-/* selected: the cell's outline picked out, its shape kept */
-.node.agentcell.selected { background: transparent; border: none; box-shadow: none;
-  filter: drop-shadow(0 0 1.5px var(--glow-live)) drop-shadow(0 2px 3px var(--ag-shade)); }
-/* a live run: its sensor blinks and a light sweeps the rim */
-.node.agentcell.live-active { box-shadow: none; }
-.node.agentcell.live-active::after { display: none; }
-.node.agentcell.live-active .ahull, .node.agentframe.live-active .ahull {
-  animation: agSweep 2.4s linear infinite; }
-@keyframes agSweep { from { background-position: 100% 0, 0 0; } to { background-position: -160% 0, 0 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .node.agentcell.live-active .ahex-led, .node.agentcell.live-active .ahull,
-  .node.agentframe.live-active .ahull { animation: none; } }
 
-/* opened: the frame keeps the cell — a bigger cut, the bee in its title,
-   the agent's setup chips under it */
-.node.container.agentframe { --cut: 22px; background: transparent; border: none;
-  filter: drop-shadow(0 0 10px var(--ag-glow)); }
-.node.container.agentframe::before { display: none; }
-.node.agentframe .aframe { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
-.node.agentframe.live-active .aedge { stroke-dasharray: 60 18; animation: agMarch 1.6s linear infinite; }
-@keyframes agMarch { to { stroke-dashoffset: -78; } }
-.node.agentframe .abody { background:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='48.5' viewBox='0 0 28 48.5'%3E%3Cpath d='M14 0l14 8.08v16.17L14 32.33 0 24.25V8.08z M14 32.33v16.17' fill='none' stroke='%237a96bd' stroke-opacity='.16' stroke-width='1'/%3E%3C/svg%3E"),
-    linear-gradient(180deg, color-mix(in srgb, var(--ag-b1) 62%, transparent),
-      color-mix(in srgb, var(--ag-b2) 50%, transparent)); }
-.node.container.agentframe .chead { position: relative; z-index: 1; height: 44px;
-  align-items: center; padding: 4px 18px 0 24px; border-bottom: none; background: transparent; }
-.node.container.agentframe .chead .nname { color: var(--ag-ink); }
-.node.container.agentframe .chead .nkind { color: var(--ag-sub); }
+/* an agent opened onto its turns (a painted run): a container in the
+   card's glass, its mark in its title */
+.node.container.agentframe { border-color: color-mix(in srgb, var(--k-llm) 46%, var(--og-edge));
+  background: linear-gradient(180deg, var(--og-spec) 0, transparent 60px),
+    color-mix(in srgb, var(--k-llm) 5%, var(--og-fill)); }
+.node.container.agentframe .chead .ag2-icon { width: 28px; height: 28px; border-radius: 8px; }
+.node.container.agentframe .chead .ag2-icon svg { width: 19px; height: 19px; }
 
-/* an agent's tool: its policy only when it is not the usual allow — ask a
-   small mark after the name, deny the whole card greyed out */
+/* a tool's policy, said only when it is not the usual allow */
 .atpolicy { flex: none; font-weight: 700; font-size: 8.5px; letter-spacing: .05em; padding: 1px 4px;
   border-radius: 4px; line-height: 1.4; }
 .atpolicy.p-allow { color: var(--ok, var(--ink-green56)); background: color-mix(in srgb, var(--ok, var(--bg-green56)) 12%, transparent); }
 .atpolicy.p-deny { color: var(--err, var(--ink-red54)); background: color-mix(in srgb, var(--err, var(--bg-red54)) 12%, transparent); }
 .atpolicy.p-ask { color: var(--warn, var(--ink-amber63)); background: color-mix(in srgb, var(--warn, var(--bg-amber63)) 14%, transparent); }
-.node .atcount { flex: none; font-size: 10.5px; font-weight: 700; color: var(--k-res); }
-.node.agenttool.tool-denied { filter: grayscale(1); opacity: .5; }
-.node.agenttool.tool-denied:hover, .node.agenttool.tool-denied.selected { opacity: .8; }
-.wires .apw .apw-cable.p-deny, .wires .apw .apw-cable.p-deny.hot { stroke: var(--cable); opacity: .35; }
-.wires .apw .apw-term.p-deny, .wires .apw .apw-term.p-deny.hot { fill: var(--cable); opacity: .35; }
+
+/* toolview: a tool opened on its own (canvas.js openToolView) */
+.toolview { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); z-index: 30;
+  display: flex; align-items: center; gap: 10px; padding: 5px 12px 5px 5px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--og-drop); font-size: 12px; }
+.toolview .tvback { border: none; border-radius: 999px; padding: 4px 10px; cursor: pointer; font-weight: 600;
+  background: var(--surface-2); color: var(--text); }
+.toolview .tvback:hover { color: var(--accent); }
+.toolview .tvtrail { color: var(--text-3); }
 
 /* ── the run page (runtree.js) ─────────────────────────────────────────
    The header, the run's input and output, the turns, then the steps
@@ -4984,22 +4908,6 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
     border-radius: 2px; background: var(--surface-3); }
 }
 
-/* an agent opened onto its data (clicked, or the Data Flow view): it stays
-   a hexagon. Its rows stack in one column, inputs then outputs, every hole
-   on the left wall: the right wall is its parts' (canvas.js grows the cell
-   until the rows fit the wall's straight middle half) */
-.node.agentcell.dfcard .dfports { position: relative; z-index: 1; grid-template-columns: minmax(0, 1fr); gap: 0; width: 100%;
-  margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--ag-seam); }
-/* no plates sticking out of the card: the rows are the cell's own */
-.node.agentcell.dfcard .dfcol, .node.agentcell.dfcard .dfcol.in, .node.agentcell.dfcard .dfcol.out {
-  margin: 0; padding: 0; gap: 3px; background: none; box-shadow: none; border-radius: 0;
-  align-items: flex-start; justify-self: stretch; }
-.node.agentcell.dfcard .dfcol.in + .dfcol.out:not(:empty) { margin-top: 3px; padding-top: 3px;
-  border-top: 1px dashed var(--ag-seam); }
-.node.agentcell.dfcard .dfport, .node.agentcell.dfcard .dfport.out { position: static; flex-direction: row;
-  max-width: 100%; color: var(--ag-ink); }
-/* on the wall: the rows start inside the cell's 14px left padding */
-.node.agentcell.dfcard .dfport .dfhole { position: absolute; left: -19.5px; margin: 0; }
 
 /* Inspect, n8n's order: the op's last Input, its settings, its last Output */
 #inspector section.lastio > .stitle { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
