@@ -185,14 +185,7 @@
     const doc = status && status.project;
     if (doc) {
       for (const r of (doc.checklist && doc.checklist.open) || []) pts.set(r.id, `row:${r.id}`);
-      for (const q of doc.needs_you || []) pts.set(q.id, `q:${q.id}`);
-      const phases = new Map();
-      for (const p of doc.plans || []) {
-        if (p.path) pts.set(p.path, `plan:${p.path}`);
-        for (const ph of p.phases || []) phases.set(ph.id, phases.has(ph.id) ? null : `phase:${p.path}#${ph.id}`);
-      }
-      // a phase id names a point only when one plan has it
-      for (const [id, t] of phases) if (t && !pts.has(id)) pts.set(id, t);
+      for (const c of (doc.board && doc.board.cards) || []) pts.set(c.id, `card:${c.id}`);
     }
     refState.points = pts;
     // what was drawn before the tree came: draw again where the text names code
@@ -1883,8 +1876,8 @@
   // Project mode: building the project by its conventions (docs/PROJECT_MODE_PLAN.md D5)
   const PROJECT_STARTS = [
     {kind: "learn", label: "Where are we?", prompt: "Where does the project stand? What needs me, what is in progress, and what should come next?"},
-    {kind: "setup", label: "Build the next thing", prompt: "What should we build next? Look at the open checklist rows and the plans, propose the next step, and wait for my go."},
-    {kind: "setup", label: "Plan something new", prompt: "I want to build something new. Ask me what it is, then write a plan doc with a status block before changing any code."},
+    {kind: "setup", label: "Build the next thing", prompt: "What should we build next? Look at the open checklist rows and the board's cards, propose the next step, and wait for my go."},
+    {kind: "setup", label: "Plan something new", prompt: "I want to build something new. Ask me what it is, then write a plan doc and open its cycle on the board, its phases as cards, before changing any code."},
   ];
   const START_ICON = {failure: "alert", eval: "evals", setup: "wand", try: "play", learn: "book", op: "graph"};
 

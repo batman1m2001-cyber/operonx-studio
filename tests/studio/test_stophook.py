@@ -1,7 +1,8 @@
 """The Stop hook that holds a turn to what it says it did (docs/TURN_HONESTY_PLAN.md S1–S3).
 
-Gates, on transcripts shaped like the CLI's: a phase or a plan set to done (Edit, Write against the file before it,
-a shell edit) is sent back with its ids; a phase already done, or done in an earlier turn, is not; a last test run
+Gates, on transcripts shaped like the CLI's: a card moved to done (board_move, an Edit or a Write of board.md
+against the file before it, ``operonx-project board C4 done``) is sent back with its ids; a card already done,
+done in an earlier turn, or a refused move is not (CYCLES_PLAN K2); a last test run
 with failures is sent back unless failing_on_base came after it, a passing run is not; steps left pending or
 active are sent back, waiting and blocked ones are not; once only (stop_hook_active), and a broken transcript
 lets the turn end. WORKSPACE_PLAN T1–T2: S1 also asks how the target was met; a last reply that says it has not
@@ -22,7 +23,7 @@ from operonx_studio import stophook
 
 pytestmark = pytest.mark.unit
 
-PLAN = "/w/docs/FEATURE_FLOWS_PLAN.md"
+BOARD = "/w/docs/brd/board.md"
 N = iter(range(10**6))
 
 
@@ -57,43 +58,48 @@ def turn(*steps):
 
 
 def edit(old, new):
-    return ("Edit", {"file_path": PLAN, "old_string": old, "new_string": new})
+    return ("Edit", {"file_path": BOARD, "old_string": old, "new_string": new})
 
 
-PH = '  - {{id: {}, title: "x", status: {}}}'
+CARD = "### {} · x · {}"
 
 
-class TestPlanDone:
-    def test_a_phase_set_done_is_sent_back_with_its_id(self):
-        why = stophook.reason(turn(prompt("go"), edit(PH.format("FF5", "in_progress"), PH.format("FF5", "done"))))
-        assert "FEATURE_FLOWS_PLAN.md: FF5" in why and "in_progress" in why
+class TestCardDone:
+    def test_a_move_to_done_is_sent_back_with_its_id(self):
+        why = stophook.reason(turn(prompt("go"), ("mcp__studio__board_move", {"card": "C14", "to": "done"},
+                                                  "C14 is done")))
+        assert "You moved to done: C14." in why and "back to doing" in why
 
-    def test_the_plan_set_done(self):
-        why = stophook.reason(turn(prompt("go"), edit("status: in_progress\nphases:", "status: done\nphases:")))
-        assert "the plan" in why
+    def test_a_refused_move_or_a_move_elsewhere_is_not(self):
+        assert stophook.reason(turn(prompt("go"), ("mcp__studio__board_move", {"card": "C14", "to": "done"},
+                                                   "refused: C14 stays: not passing"),
+                                    ("mcp__studio__board_move", {"card": "C15", "to": "doing"}, "C15 is doing"))) \
+            is None
 
-    def test_a_write_is_read_against_the_file_before_it(self):
-        before = "status: in_progress\n" + PH.format("FF0", "done") + "\n" + PH.format("FF6", "pending")
-        after = "status: in_progress\n" + PH.format("FF0", "done") + "\n" + PH.format("FF6", "done")
-        why = stophook.reason(turn(prompt("go"), ("Write", {"file_path": PLAN, "content": after}, "ok",
+    def test_a_board_edit_and_a_write_read_against_the_file_before_it(self):
+        why = stophook.reason(turn(prompt("go"), edit(CARD.format("C5", "doing"), CARD.format("C5", "done"))))
+        assert ": C5." in why
+        before = CARD.format("C1", "done") + "\n" + CARD.format("C6", "todo")
+        after = CARD.format("C1", "done") + "\n" + CARD.format("C6", "done")
+        why = stophook.reason(turn(prompt("go"), ("Write", {"file_path": BOARD, "content": after}, "ok",
                                                   {"originalFile": before})))
-        assert ": FF6." in why and "FF0" not in why
+        assert ": C6." in why and "C1" not in why
 
-    def test_a_shell_edit_of_a_plan(self):
-        why = stophook.reason(turn(prompt("go"), ("Bash", {"command": f"sed -i 's/status: open/status: done/' {PLAN}"})))
-        assert "FEATURE_FLOWS_PLAN.md: a phase" in why
+    def test_the_cli_move(self):
+        why = stophook.reason(turn(prompt("go"), ("Bash", {"command": "operonx-project board C7 done --repo ."})))
+        assert ": C7." in why
 
-    def test_a_phase_already_done_or_another_file_is_not(self):
-        assert stophook.reason(turn(prompt("go"), edit(PH.format("FF0", "done"), PH.format("FF0", "done") + "\n"),
+    def test_a_card_already_done_or_another_file_is_not(self):
+        assert stophook.reason(turn(prompt("go"), edit(CARD.format("C1", "done"), CARD.format("C1", "done") + "\n"),
                                     ("Edit", {"file_path": "/w/README.md", "old_string": "a",
-                                              "new_string": PH.format("X", "done")}))) is None
+                                              "new_string": CARD.format("C9", "done")}))) is None
 
     def test_only_this_turn_counts(self):
-        assert stophook.reason(turn(prompt("go"), edit(PH.format("FF5", "open"), PH.format("FF5", "done")),
+        assert stophook.reason(turn(prompt("go"), edit(CARD.format("C5", "todo"), CARD.format("C5", "done")),
                                     prompt("thanks"))) is None
 
     def test_a_refused_edit_did_nothing(self):
-        cid, c = call("Edit", {"file_path": PLAN, "old_string": "", "new_string": PH.format("FF5", "done")})
+        cid, c = call("Edit", {"file_path": BOARD, "old_string": "", "new_string": CARD.format("C5", "done")})
         lines = [json.dumps(e) for e in (prompt("go"), c, result(cid, "refused", error=True))]
         assert stophook.reason(lines) is None
 
@@ -154,24 +160,22 @@ class TestUnchecked:
         assert stophook.reason(turn(prompt("go"), say("R12 is not verified in the matrix; R13 stays unverified."))) \
             is None
 
-    def test_a_phase_done_asks_how_the_target_was_met(self):
-        why = stophook.reason(turn(prompt("go"), edit(PH.format("FF6", "open"), PH.format("FF6", "done"))))
+    def test_a_card_done_asks_how_the_target_was_met(self):
+        why = stophook.reason(turn(prompt("go"), edit(CARD.format("C6", "doing"), CARD.format("C6", "done"))))
         assert "the way the plan says (its table, its decisions)" in why
 
 
-def test_a_plan_doc_the_board_cannot_read_is_sent_back(tmp_path):
-    """WORKSPACE_PLAN R7: its own phase said ``pending``; the board dropped the doc without a word."""
-    pytest.importorskip("operonx_project.plans")
-    doc = tmp_path / "docs" / "X_PLAN.md"
-    doc.parent.mkdir()
-    doc.write_text("---\ntitle: X\nstatus: in_progress\nphases:\n  - {id: A, title: a, status: pending}\n---\n")
-    wrote = ("Write", {"file_path": str(doc), "content": doc.read_text()})
+def test_a_board_the_board_cannot_read_is_sent_back(tmp_path):
+    """R7, on the board: an edit by hand that leaves board.md unreadable is sent back."""
+    pytest.importorskip("operonx_project.board")
+    f = tmp_path / "docs" / "brd" / "board.md"
+    f.parent.mkdir(parents=True)
+    f.write_text("# Board\n\n## FF · flows · open\n\n### C1 · a · todo\n\n## FF · again · open\n")
+    wrote = ("Write", {"file_path": str(f), "content": f.read_text()})
     why = stophook.reason(turn(prompt("go"), wrote))
-    assert f"The board cannot read {doc}" in why and "pending" in why
-    doc.write_text(doc.read_text().replace("pending", "open"))
+    assert f"The board cannot read {f}" in why and "FF" in why
+    f.write_text("# Board\n\n## FF · flows · open\n\n### C1 · a · todo\n")
     assert stophook.reason(turn(prompt("go"), wrote)) is None
-    (tmp_path / "docs" / "NOTES_PLAN.md").write_text("# a plan with no status block is not the board's\n")
-    assert stophook.reason(turn(prompt("go"), ("Write", {"file_path": str(tmp_path / "docs/NOTES_PLAN.md")}))) is None
 
 
 PR74 = Path("/root/.claude/projects/-home-thanglq-mr-finance/06cd02b8-f31b-448d-93ad-5592b19ceb3e.jsonl")
@@ -180,8 +184,8 @@ PR74 = Path("/root/.claude/projects/-home-thanglq-mr-finance/06cd02b8-f31b-448d-
 @pytest.mark.skipif(not PR74.exists(), reason="the PR #74 transcript is on the owner's machine")
 def test_the_pr74_turns_are_sent_back():
     lines = PR74.read_text().splitlines()
-    ff6 = stophook.reason(lines[:550])
-    assert "the way the plan says" in ff6 and "I haven't checked whether they exist on main" in ff6
+    ff6 = stophook.reason(lines[:550])  # FF6 was a plan phase then; a card's move is TestCardDone's
+    assert "I haven't checked whether they exist on main" in ff6
     assert "I haven't checked them against main" in stophook.reason(lines)
 
 
@@ -194,9 +198,9 @@ def _hook(tmp_path: Path, lines, active=False) -> str:
 
 
 def test_the_hook_blocks_once(tmp_path):
-    lines = turn(prompt("go"), edit(PH.format("FF5", "open"), PH.format("FF5", "done")))
+    lines = turn(prompt("go"), edit(CARD.format("C5", "todo"), CARD.format("C5", "done")))
     out = json.loads(_hook(tmp_path, lines))
-    assert out["decision"] == "block" and "FF5" in out["reason"]
+    assert out["decision"] == "block" and "C5" in out["reason"]
     assert _hook(tmp_path, lines, active=True) == ""
 
 

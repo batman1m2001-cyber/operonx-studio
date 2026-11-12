@@ -12,7 +12,7 @@ const world = {
     "docs/MAIL_PLAN.md", "operonx.toml"]),
   root: "/home/me/proj",
   ops: new Set(["triage", "route"]),
-  points: new Map([["MPO-REQ-INBOX-01", "row:MPO-REQ-INBOX-01"], ["Q-16", "q:Q-16"], ["docs/MAIL_PLAN.md", "plan:docs/MAIL_PLAN.md"]]),
+  points: new Map([["MPO-REQ-INBOX-01", "row:MPO-REQ-INBOX-01"], ["Q-16", "q:Q-16"], ["C4", "card:C4"]]),
   touched: new Map([["src/flows/triage.py", "modified"]]),
 };
 
@@ -46,7 +46,8 @@ test("file: outside a project, the paths this turn's tools used are the tree", (
 
 test("points and ops resolve against real state, before shape", () => {
   assert.deepEqual(R.classify("Q-16", world), {kind: "point", target: "q:Q-16"});
-  assert.equal(R.classify("docs/MAIL_PLAN.md", world).target, "plan:docs/MAIL_PLAN.md", "a plan is a point, not just a file");
+  assert.equal(R.classify("C4", world).target, "card:C4", "a card is a point");
+  assert.equal(R.classify("docs/MAIL_PLAN.md", world).kind, "file", "a plan doc is a file");
   assert.equal(R.classify("Q-17", world).kind, "code");
   assert.deepEqual(R.classify("triage", world), {kind: "op", name: "triage"});
   assert.equal(R.classify("triage()", world).kind, "op");

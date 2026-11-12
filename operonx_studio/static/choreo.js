@@ -23,27 +23,13 @@
 
 const Choreo = (() => {
   const EDITS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-  const MATRIX = /docs\/brd\/requirements\/requirements_traceability\.md$/;
-  const QUESTIONS = /docs\/brd\/requirements\/open_questions\.md$/;
-  const PLAN = /(?:^|\/)(docs\/(?:[^/]+\/)*[^/]+\.md)$/;
+  // the files the page reads: an edit to one reads the project's status again
+  const READ_BY_PAGE = /docs\/brd\/(?:board\.md|requirements\/(?:requirements_traceability|open_questions)\.md)/;
 
   const COLUMN = {needs: "now", working: "board"};
-  // the shell: what writes a file, a commit (`git -c user.email=… commit`), the files a command names
+  // the shell: what writes a file, a commit (`git -c user.email=… commit`)
   const WRITES = /(?:^|[^<>&2])>>?\s*(?!\/dev\/null)[^\s&|;>]|\btee\b|\bsed\s+(?:-\w*\s+)*-i|\bperl\s+-\w*i|\bpython3?\b[^|;&]*(?:<<|-c\b)|\bmv\b|\bcp\b/;
   const COMMIT = /\bgit\b(?:\s+-[cC]\s+\S+)*\s+commit\b/;
-  const MATRIX_NAME = /requirements_traceability\.md/;
-  const QUESTIONS_NAME = /open_questions\.md/;
-  function shellPlans(cmd) {
-    const out = [];
-    for (const m of cmd.matchAll(/[\w./-]*?([\w.-]+_PLAN\.md)\b/g)) {
-      const full = m[0];
-      if (/docs\/brd\//.test(full)) continue;
-      const at = full.lastIndexOf("docs/");
-      const plan = at >= 0 ? full.slice(at) : `docs/${m[1]}`;
-      if (!out.includes(plan)) out.push(plan);
-    }
-    return out;
-  }
   /* A tool's input reaches the page as the server clipped it: JSON text, cut off when long (a heredoc). The
    * fields that matter are read from the text when it no longer parses. */
   const FIELDS = ["file_path", "notebook_path", "command", "old_string", "new_string", "content", "op", "ref", "card", "to"];
@@ -65,14 +51,6 @@ const Choreo = (() => {
 
   const tool = (name) => String(name || "").replace(/^mcp__studio__/, "studio:");
 
-  /* `docs/X_PLAN.md`, relative to the project, from any path that ends in it */
-  function planPath(path) {
-    const p = String(path || "");
-    if (MATRIX.test(p) || QUESTIONS.test(p) || /docs\/brd\//.test(p)) return null;
-    const m = PLAN.exec(p);
-    return m && /_PLAN\.md$/.test(m[1]) ? m[1] : null;
-  }
-
   function steps(item, phase, where) {
     const name = tool(item && item.name);
     const input = inputOf(item);
@@ -84,43 +62,14 @@ const Choreo = (() => {
     const goPage = (page) => { if (!pm || where.page !== page) out.push({go: {tab: "project", page}}); };
 
     if (EDITS.has(name)) {
-      const file = input.file_path || input.notebook_path || "";
-      const plan = planPath(file);
-      if (plan) {
-        if (phase === "start") {
-          goPage("board");
-          // a plan being written is not on the page yet: the page's head instead
-          out.push({point: `plan:${plan}`, words: name === "Write" ? "writing" : "editing", or: "pagehead"});
-        } else if (ok) {
-          // what changed in it is lit by `changed`; "saved" only when nothing else was
-          out.push({refresh: true}, {point: `plan:${plan}`, words: "saved", soft: true, or: "pagehead"});
-        }
-      } else if (MATRIX.test(file) || QUESTIONS.test(file)) {
-        if (ok) out.push({refresh: true});
-      }
-      return out;
-    }
-    if (name === "Read") {
-      const plan = planPath(input.file_path);
-      if (plan && pm && phase === "start") out.push({point: `plan:${plan}`, words: "reading"});
+      if (ok && READ_BY_PAGE.test(input.file_path || "")) out.push({refresh: true});
       return out;
     }
     if (name === "Bash") {
       const cmd = String(input.command || "");
-      // an assistant often writes with the shell: a heredoc, sed -i, a python script
-      // a commit names the files it adds: it is a commit, nothing else
+      // an assistant often writes with the shell: a heredoc, sed -i, a python script; a commit is a commit
       const commit = COMMIT.test(cmd);
-      const plans = commit ? [] : shellPlans(cmd);
-      const writes = !commit && WRITES.test(cmd);
-      for (const plan of plans) {
-        if (writes && phase === "start") { goPage("board"); out.push({point: `plan:${plan}`, words: "editing", or: "pagehead"}); }
-        else if (writes && ok) out.push({refresh: true}, {point: `plan:${plan}`, words: "saved", soft: true, or: "pagehead"});
-        else if (!writes && pm && where.page === "board" && phase === "start") out.push({point: `plan:${plan}`, words: "reading"});
-        break;   // one plan is enough to follow
-      }
-      if (writes && !plans.length && (MATRIX_NAME.test(cmd) || QUESTIONS_NAME.test(cmd))) {
-        if (ok) out.push({refresh: true});
-      }
+      if (!commit && ok && WRITES.test(cmd) && READ_BY_PAGE.test(cmd)) out.push({refresh: true});
       if (commit) {
         if (phase === "start") out.push({point: "page:changes", words: "committing"});
         else if (ok) out.push({refresh: true}, {point: "commit:new", words: "committed", soft: true, or: "page:changes"});
@@ -138,7 +87,7 @@ const Choreo = (() => {
       out.push({point: `card:${input.card}`, words: name === "studio:board_move" ? `to ${input.to || ""}` : "reading", or: "page:board"});
       return out;
     }
-    if (name === "studio:board_status" && phase === "start") goPage("board");
+    if ((name === "studio:board_status" || name === "studio:board_cycle") && phase === "start") goPage("board");
     return out;
   }
 
@@ -193,7 +142,7 @@ const Choreo = (() => {
   }
 
   /* where a target lives: the screen to go to before pointing at it (null: anywhere, as it is) */
-  const PAGE_OF = {status: "now", q: "now", plan: "board", phase: "board", row: "now",
+  const PAGE_OF = {status: "now", q: "now", row: "now",
                    commit: "changes", setting: "settings", card: "board"};
   const TAB_OF = {op: "flow", field: "flow", run: "traces", job: "jobs", eval: "evals"};
   // setting:<section>/<name> on a settings screen of its own; a bare setting:<name> is Project's Settings
@@ -230,7 +179,7 @@ const Choreo = (() => {
     return out;
   }
 
-  const api = {steps, changed, planPath, where, opSteps, inputOf, focus, changedParams};
+  const api = {steps, changed, where, opSteps, inputOf, focus, changedParams};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   return api;
 })();

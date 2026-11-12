@@ -81,14 +81,11 @@ open the cited page with the cited boxes lit. The studio finds it by asking
 the running service (`/.well-known/operonx-kb`) and reads it over HTTP; it
 never imports operonx-kb.
 
-A project with an
+A project with
 [operonx-project](https://github.com/batman1m2001-cyber/Operonx/tree/main/packages/operonx-project)
-store shows its milestones on Project mode's Plans page: each one's
-columns, with a live line on every running card showing what its session
-does now, and each card attempt as a run page. The assistant reads the
-same through `board_status`, `board_card`, `board_plan` and
-`project_status`.
-
-The studio reads the engine's store read-only; it writes only a plan's
-mirror, through `operonx-project api` (on `PATH`, or `OPERONX_PROJECT_BIN`).
+keeps its board in `docs/brd/board.md`: cycles (a plan's round of work,
+its phases as cards) and a Backlog. Project mode's Board shows them, a
+live line on every card a session works. The assistant reads and moves
+them through `board_status`, `board_card`, `board_move`, `board_cycle`
+and `project_status`.
 The guide is operonx-project's `guide/01-project.md`.

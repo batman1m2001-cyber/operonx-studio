@@ -1,7 +1,8 @@
 """The Board tab: the project's ``docs/brd/board.md``, read and moved through operonx-project's ``board``.
 
 The board is a file in git (LEAN_PROJECT_PLAN §5): one card per heading, four fields (``req``, ``after``,
-``files``, ``done``), four states (``todo``, ``doing``, ``needs you``, ``done``). The studio reads it with the
+``files``, ``done``), four states (``todo``, ``doing``, ``needs you``, ``done``), cut into cycles (a plan's round
+of work, its phases as cards) and a Backlog (CYCLES_PLAN). The studio reads it with the
 engine's own parser and adds what only the studio knows, by card id: the assistant's turns that named the card,
 the one running now and the step it is on, the evidence they left, the terminals and deploys made for it.
 
@@ -23,7 +24,7 @@ from fastapi.responses import JSONResponse
 
 from operonx_project import board as _board
 
-__all__ = ["available", "board", "brd_questions", "card", "overview", "project_checklist"]
+__all__ = ["available", "board", "brd_questions", "card", "cycle_report", "overview", "project_checklist"]
 
 BRD_DIR = "docs/brd"
 MATRIX = "requirements/requirements_traceability.md"
@@ -46,8 +47,8 @@ def board(root: Path, turns: Optional[List[Dict[str, Any]]] = None) -> Dict[str,
     ``turns``, ``working`` and ``now`` (the step it is on) while one runs, ``asks``/``question`` when the newest
     ended on a question to the owner, and ``evidence``: ``tests`` when the newest test run was green, ``red`` when
     not, ``none`` for a card done with turns and nothing run."""
-    cards = _board.read(root)
-    out = _board.view(cards or [])
+    got = _board.read_all(root)
+    out = _board.view(*(reversed(got) if got is not None else ([],)))
     by: Dict[str, List[Dict[str, Any]]] = {}
     for t in turns or []:
         if _of(t.get("card")):
@@ -65,7 +66,7 @@ def board(root: Path, turns: Optional[List[Dict[str, Any]]] = None) -> Dict[str,
             c["evidence"] = "tests" if not runs[-1]["failed"] else "red"
         elif c["state"] == "done" and mine:
             c["evidence"] = "none"
-    out["file"] = _board.PATH if cards is not None else ""
+    out["file"] = _board.PATH if got is not None else ""
     out["turns_key"] = ",".join(f"{t['id']}:{t['state']}:{t.get('now') or ''}:{len(t.get('evidence') or [])}"
                                 for t in turns or [])  # fmt: skip
     return out
@@ -76,6 +77,27 @@ def card(root: Path, cid: str) -> Dict[str, Any]:
     if got is None:
         raise KeyError(cid)
     return got
+
+
+def cycle_report(root: Path, cid: str) -> Dict[str, Any]:
+    """A cycle as a read-only report (the Board's Completed menu): it, its cards, and its commits, the ones whose
+    message names the cycle (``FF``, ``FF5``) or one of its cards, between the day it opened and the day it closed."""
+    got = board(root)
+    y = next((x for x in got["cycles"] if x["id"] == cid), None)
+    if y is None:
+        raise KeyError(cid)
+    cards = [c for c in got["cards"] if c["cycle"] == cid]
+    names = "|".join([re.escape(cid) + r"\d*", *(re.escape(c["id"]) for c in cards)])
+    cmd = ["git", "log", "-n", "400", "--format=%h%x09%ad%x09%s", "--date=short"]
+    if y["opened"]:
+        cmd.append(f"--since={y['opened']} 00:00")
+    if y["closed"]:
+        cmd.append(f"--until={y['closed']} 23:59")
+    ran = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=20)
+    hit = re.compile(rf"(?<![\w-])(?:{names})(?![\w-])")
+    commits = [dict(zip(("sha", "date", "subject"), line.split("\t", 2)))
+               for line in ran.stdout.splitlines() if line.count("\t") >= 2 and hit.search(line.split("\t", 2)[2])]
+    return {"cycle": y, "cards": cards, "commits": commits[:40]}
 
 
 def overview(root: Path) -> Dict[str, Any]:
@@ -201,6 +223,11 @@ def register(app: Any, *, watcher_of: Any, turns_of: Any = None, asks_of: Any = 
 
         return _read(pid, read, cid)
 
+    @app.get("/api/p/{pid}/board/cycle/{cid}")
+    def board_cycle_report(pid: str, cid: str) -> JSONResponse:
+        """A cycle, read-only: its dates, plan doc, cards and commits (the Completed menu's report)."""
+        return _read(pid, cycle_report, cid)
+
     @app.post("/api/p/{pid}/board/card")
     async def board_put(pid: str, request: Request) -> JSONResponse:
         """Add a card (no ``card``) or change one's title and fields; or move it (``to``, with a ``note``).
@@ -231,10 +258,28 @@ def register(app: Any, *, watcher_of: Any, turns_of: Any = None, asks_of: Any = 
                                 note=body["note"] if isinstance(body.get("note"), str) else None)  # fmt: skip
             else:
                 fields = {k: [str(x) for x in body[k]] for k in _board.FIELDS if isinstance(body.get(k), list)}
-                c = _board.put(root, str(body.get("card") or ""), str(body.get("title") or ""), **fields)
+                cycle = str(body["cycle"]) if isinstance(body.get("cycle"), str) else None
+                c = _board.put(root, str(body.get("card") or ""), str(body.get("title") or ""), cycle=cycle, **fields)
         except (_board.BoardError, FileNotFoundError) as exc:
             return JSONResponse({"ok": False, "message": str(exc) or "no board here"}, status_code=409)
-        return JSONResponse({"ok": True, "card": c.id, "state": c.state, "note": c.note})
+        return JSONResponse({"ok": True, "card": c.id, "state": c.state, "note": c.note, "cycle": c.cycle})
+
+    @app.post("/api/p/{pid}/board/cycle")
+    async def board_cycle(pid: str, request: Request) -> JSONResponse:
+        """Open a cycle (``{"open": "FF", "title": …, "plan": …}``) or close one (``{"close": "FF"}``, refused
+        while a card in it is not done)."""
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        body = await request.json()
+        if not isinstance(body, dict) or not (body.get("open") or body.get("close")):
+            return JSONResponse({"ok": False, "message": '{"open": ID, "title": T} or {"close": ID}'}, status_code=400)
+        try:
+            y = (_board.open_cycle(root, str(body["open"]), str(body.get("title") or ""), str(body.get("plan") or ""))
+                 if body.get("open") else _board.close(root, str(body["close"])))  # fmt: skip
+        except (_board.BoardError, FileNotFoundError) as exc:
+            return JSONResponse({"ok": False, "message": str(exc) or "no board here"}, status_code=409)
+        return JSONResponse({"ok": True, "cycle": y.id, "state": y.state})
 
     @app.get("/api/p/{pid}/brd")
     def board_project(pid: str) -> JSONResponse:
@@ -244,7 +289,7 @@ def register(app: Any, *, watcher_of: Any, turns_of: Any = None, asks_of: Any = 
     @app.get("/api/p/{pid}/project/status")
     async def project_status(pid: str, changes: int = 15) -> JSONResponse:
         """Where the project stands (the engine's ``status`` op, PROJECT_MODE_PLAN D2): the checklist, the
-        board, the plans, what needs the owner, what is in progress, the last commits. The engine only reads."""
+        board's cycles and cards, what needs the owner, what is in progress, the last commits. The engine only reads."""
         import asyncio
 
         root, bad = _root(pid)

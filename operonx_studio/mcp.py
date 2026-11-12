@@ -173,16 +173,15 @@ def t_select_op(s: Studio, a: Dict[str, Any]) -> str:
     return f"{a['op']} is selected on the user's Flow canvas."
 
 
-_POINTABLE = re.compile(r"^(?:status|q|qopt|plan|phase|ms|row|commit|setting|page|tab|op|run|job|eval|card|field):\S")
+_POINTABLE = re.compile(r"^(?:status|q|qopt|row|commit|setting|page|tab|op|run|job|eval|card|field):\S")
 
 
 def t_point(s: Studio, a: Dict[str, Any]) -> str:
     """Point at one thing on the owner's screen (docs/ALIVE_ASSISTANT_PLAN.md D5): the screen goes there and rings it."""
     target = str(a.get("target") or "").strip()
     if not _POINTABLE.match(target):
-        return (f"not a target: {target!r}. Use plan:docs/X_PLAN.md, phase:docs/X_PLAN.md#P2, row:<id>, q:<id>, "
-                "commit:<sha>, setting:<name>, status:<needs|working|checklist|plans|changes>, op:<name>, run:<id>, "
-                "card:<id>, field:<op>/<param>")
+        return (f"not a target: {target!r}. Use card:<id>, row:<id>, q:<id>, commit:<sha>, setting:<name>, "
+                "status:<needs|working>, op:<name>, run:<id>, field:<op>/<param>")
     s.show("point", target=target, words=str(a.get("words") or a.get("label") or "")[:40])
     return f"pointed at {target} on the owner's screen"
 
@@ -526,7 +525,7 @@ def t_project_status(s: Studio, a: Dict[str, Any]) -> str:
     c = doc.get("checklist") or {}
     return json.dumps({"checklist": {"verified": c.get("verified"), "total": c.get("total"), "open": c.get("open")},
                        "working_on": doc.get("working_on"), "needs_you": doc.get("needs_you"),
-                       "unmarked_plans": doc.get("unmarked"), "changes": (doc.get("changes") or [])[:5]},
+                       "changes": (doc.get("changes") or [])[:5]},
                       ensure_ascii=False, indent=1)  # fmt: skip
 
 
@@ -544,6 +543,13 @@ def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
     s.show("open_board")
     by = {c["id"]: c for c in got["cards"]}
     lines = [f"Board ({got['file']}): " + ", ".join(f"{len(ids)} {st}" for st, ids in got["columns"].items() if ids)]
+    cycles = got.get("cycles") or []
+    shut = [y["id"] for y in cycles if y["state"] == "closed"]
+    lines += [f"cycle {y['id']} · {y['title']} · {y['done']}/{len(y['cards'])} done: {', '.join(y['cards'])}"
+              + (f" ({y['plan']})" if y.get("plan") else "") for y in cycles if y["state"] == "open"]  # fmt: skip
+    backlog = [c["id"] for c in got["cards"] if not c.get("cycle")]
+    if cycles:
+        lines.append(f"Backlog: {', '.join(backlog) or 'empty'}" + (f"; closed cycles: {', '.join(shut)}" if shut else ""))
     for st, ids in got["columns"].items():
         if ids and st != "done":
             lines.append(f"{st}:")
@@ -557,6 +563,8 @@ def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
 def t_board_card(s: Studio, a: Dict[str, Any]) -> str:
     cid = str(a.get("card") or "")
     fields = {k: [str(x) for x in a[k]] for k in ("req", "after", "files", "done") if isinstance(a.get(k), list)}
+    if isinstance(a.get("cycle"), str):
+        fields["cycle"] = a["cycle"]
     try:
         if a.get("title") or fields or not cid:
             got = s.call("/board/card", {"card": cid, "title": str(a.get("title") or ""), **fields})
@@ -566,7 +574,7 @@ def t_board_card(s: Studio, a: Dict[str, Any]) -> str:
         return f"refused: {exc}"
     s.show("open_board", card=cid)
     c = got["card"]
-    lines = [f"{c['id']} · {c['title']} [{c['state']}] {c['lane']}, {c['kind']}"]
+    lines = [f"{c['id']} · {c['title']} [{c['state']}] {c['lane']}, {c['kind']}" + (f" · cycle {c['cycle']}" if c.get("cycle") else "")]
     for k in ("req", "after", "files", "done"):
         if c[k]:
             lines.append(f"{k}: {', '.join(c[k])}")
@@ -589,6 +597,17 @@ def t_board_move(s: Studio, a: Dict[str, Any]) -> str:
         return f"refused: {exc}"
     s.show("open_board", card=got["card"])
     return f"{got['card']} is {got['state']}" + (f" — {got['note']}" if got.get("note") else "")
+
+
+def t_board_cycle(s: Studio, a: Dict[str, Any]) -> str:
+    body = ({"close": str(a["cycle"])} if a.get("close") else
+            {"open": str(a["cycle"]), "title": str(a.get("title") or ""), "plan": str(a.get("plan") or "")})  # fmt: skip
+    try:
+        got = s.call("/board/cycle", body)
+    except RuntimeError as exc:
+        return f"refused: {exc}"
+    s.show("open_board")
+    return f"cycle {got['cycle']} is {got['state']}"
 
 
 # ── with no project open (the home page's assistant) ─────────────────────
@@ -651,9 +670,9 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                   "schema": _schema({"op": _S}, ["op"])},
     "point": {"fn": t_point,
               "description": "Point at the one thing your answer is about, on the owner's screen: it goes to that page "
-                             "and rings it with your two or three words. Targets: plan:docs/X_PLAN.md, "
-                             "phase:docs/X_PLAN.md#P2, row:<requirement id>, q:<question id>, commit:<sha>, "
-                             "setting:<name>, status:<needs|working|checklist|plans|changes>, op:<op name>, run:<run id>, "
+                             "and rings it with your two or three words. Targets: "
+                             "row:<requirement id>, q:<question id>, commit:<sha>, "
+                             "setting:<name>, status:<needs|working>, op:<op name>, run:<run id>, "
                              "card:<card id> (on the board), field:<op name>/<param> (a setting in the op's inspector). "
                              "Once per answer at most; never as decoration. It only shows where: the answer "
                              "still says everything in words.",
@@ -778,13 +797,14 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                          "apply": {"type": "boolean"}}, ["resource", "input_per_1m", "output_per_1m"])},
     "project_status": {"fn": t_project_status,
                        "description": "Where the project stands, as the owner's screen shows it: the checklist (verified "
-                                      "of total, the open rows), the board's cards, the plans with their phases, what "
-                                      "waits for the owner, what is in progress, the last commits, the setup, and the "
-                                      "plan docs with no status block. Answer \"where are we\", \"what's next\", "
+                                      "of total, the open rows), the board's cycles and cards, what waits for the "
+                                      "owner (cards in needs you), what is in progress (cards in doing), the last "
+                                      "commits and the setup. Answer \"where are we\", \"what's next\", "
                                       "\"what needs me\" from it, never from memory; call it again after a change.",
                        "schema": _schema({"changes": _N})},
     "board_status": {"fn": t_board_status,
-                     "description": "The project's board (docs/brd/board.md): its cards by state (todo, doing, "
+                     "description": "The project's board (docs/brd/board.md): its open cycles (a plan's round of "
+                                    "work, its phases as cards), the Backlog, and the cards by state (todo, doing, "
                                     "needs you, done), each with its lane, what it waits on and, for needs you, the "
                                     "question. Opens the Board on the user's screen.",
                      "schema": _schema({})},
@@ -794,8 +814,9 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                   "fields. One card per task: req the checklist rows it "
                                   "serves, after the cards it waits on, files what it touches, done the tests "
                                   "(tests/x.py::test_y) that pass when it is done. A card whose files go outside a "
-                                  "feature's fixed names lands in needs you until the owner says go.",
-                   "schema": _schema({"card": _S, "title": _S, "req": {"type": "array", "items": _S},
+                                  "feature's fixed names lands in needs you until the owner says go. cycle: the open "
+                                  "cycle it belongs to, or Backlog (a new card goes to the Backlog unless given).",
+                   "schema": _schema({"card": _S, "title": _S, "cycle": _S, "req": {"type": "array", "items": _S},
                                       "after": {"type": "array", "items": _S}, "files": {"type": "array", "items": _S},
                                       "done": {"type": "array", "items": _S}})},
     "board_move": {"fn": t_board_move,
@@ -804,6 +825,13 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                   "its done tests pass (the studio runs them first and refuses on a red one).",
                    "schema": _schema({"card": _S, "to": {"type": "string", "enum": ["todo", "doing", "needs you", "done"]},
                                       "note": _S}, ["card", "to"])},
+    "board_cycle": {"fn": t_board_cycle,
+                    "description": "Open a cycle (cycle: an id in capitals like FF, title, plan: the plan doc it "
+                                   "works) when a plan starts its round of work; its phases are then cards "
+                                   "(board_card with cycle). close: true closes it, refused while a card in it is "
+                                   "not done: move each open card to the Backlog (board_card cycle: Backlog) or "
+                                   "finish it first.",
+                    "schema": _schema({"cycle": _S, "title": _S, "plan": _S, "close": {"type": "boolean"}}, ["cycle"])},
 }
 
 HOME_TOOLS.update({
