@@ -5093,6 +5093,7 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   font: inherit; color: var(--text); padding: 6px 8px; border-radius: var(--r-xs); cursor: pointer; }
 .bdmenuitem:hover, .bdmenuitem.sel { background: var(--surface-2); }
 .bdmenuitem .note { margin-left: auto; white-space: nowrap; }
+.bdallplans:not(:first-child) { margin-top: 4px; box-shadow: 0 -1px 0 var(--border); border-radius: 0 0 6px 6px; }
 .bdcycle { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--text-2); margin: 0 0 10px; }
 .bdreport { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; }
 .bdcols { display: grid; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
@@ -5175,6 +5176,8 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .prail .tabs .pback { margin-top: auto; color: var(--text-3); }
 body.pmode #rail, body.pmode #sidebar, body.pmode #dragbar, body.pmode #btn-right, body.pmode .ax-askbar,
 body.pmode #canvasbar { display: none !important; }
+/* project mode reads no flow: the flow crumb goes, the dot shows only a lost link */
+body.pmode #switcher + .sep, body.pmode #btn-project, body.pmode #pmenu, body.pmode #live:not(.down) { display: none !important; }
 /* the slim rail's names: on hover, beside the icon (the rail itself scrolls, so the label floats) */
 #railtip { position: fixed; z-index: 120; pointer-events: none; padding: 4px 9px; border-radius: var(--r-sm);
   background: var(--strong, #1d232b); color: #fff; font-size: var(--fs-sm); font-weight: 500; white-space: nowrap;

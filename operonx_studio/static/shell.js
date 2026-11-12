@@ -760,8 +760,10 @@ async function pulse() {
  * failing, instead of a page that silently stopped updating. */
 function setLinkState(up) {
   const live = $("#live");
-  if (!live || live.classList.contains("stale")) return;
+  if (!live) return;
   live.classList.toggle("down", !up);
+  // a lost link outranks a failed extraction: nothing updates until it is back
+  if (live.classList.contains("stale")) { $("#live-text").textContent = up ? "Extraction failed" : "Reconnecting…"; return; }
   $("#live-text").textContent = up ? "Live" : "Reconnecting…";
   live.title = up ? "Watching the project's code: the studio redraws when it changes"
     : "Lost the studio: reconnecting…";

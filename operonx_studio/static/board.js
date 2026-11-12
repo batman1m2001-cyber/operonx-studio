@@ -89,7 +89,7 @@ const BoardView = (() => {
     const tab = report ? "" : tabOf(data);
     head.append(tabsView(data, tab), el("div", "spacer"));
     const closed = cycles.filter((y) => y.state === "closed");
-    if (closed.length) head.append(completedMenu(closed));
+    head.append(completedMenu(closed));
     if (report) { box.append(reportView(report)); return; }
     const y = cycles.find((x) => x.id === tab);
     if (y) box.append(cycleLine(y));
@@ -113,7 +113,7 @@ const BoardView = (() => {
 
   function completedMenu(closed) {
     const menu = el("details", "bdcompleted");
-    const sum = el("summary", null, `Completed (${closed.length})`);
+    const sum = el("summary", null, closed.length ? `Completed (${closed.length})` : "Completed");
     menu.append(sum);
     const list = el("div", "bdmenu");
     for (const y of closed.slice().reverse()) {
@@ -121,6 +121,10 @@ const BoardView = (() => {
       b.append(el("b", "mono", y.id), el("span", null, y.title), el("span", "note", y.closed || ""));
       list.append(b);
     }
+    // every plan doc, a cycle or not: the folder on the Files page
+    const all = button("bdmenuitem bdallplans", null, () => ProjectMode.file("docs/"), "The plan docs on the Files page");
+    all.append(el("span", null, "All plans"), el("span", "note mono", "docs/"));
+    list.append(all);
     menu.append(list);
     return menu;
   }
