@@ -36,11 +36,11 @@ test("a plan edit that ends reads the status again, then a soft 'saved'", () => 
   assert.deepEqual(C.steps(tool("Edit", {file_path: "/r/docs/EXPORT_PLAN.md"}, "error"), "end", PLANS), []);
 });
 
-test("the checklist matrix and the open questions ring their sections on Now", () => {
-  const m = C.steps(tool("Edit", {file_path: "/r/docs/brd/requirements/requirements_traceability.md"}), "start", NOW);
-  assert.deepEqual(m, [{point: "status:checklist", words: "editing rows"}]);
-  const q = C.steps(tool("Edit", {file_path: "/r/docs/brd/requirements/open_questions.md"}), "start", PLANS);
-  assert.deepEqual(q, [{go: {tab: "project", page: "now"}}, {point: "status:needs", words: "editing"}]);
+test("the matrix and the open questions are not on the Board: an edit to them only refreshes (CYCLES_PLAN K1)", () => {
+  const m = tool("Edit", {file_path: "/r/docs/brd/requirements/requirements_traceability.md"});
+  assert.deepEqual(C.steps(m, "start", NOW), []);
+  assert.deepEqual(C.steps({...m, status: "ok"}, "end", NOW), [{refresh: true}]);
+  assert.deepEqual(C.steps(tool("Edit", {file_path: "/r/docs/brd/requirements/open_questions.md"}), "start", PLANS), []);
 });
 
 test("reading moves nothing: a plan is ringed only where it already shows", () => {
@@ -50,14 +50,13 @@ test("reading moves nothing: a plan is ringed only where it already shows", () =
   assert.deepEqual(C.steps(tool("Grep", {pattern: "x"}), "start", PLANS), []);
 });
 
-test("a commit rings the changes, and the new commit once it lands", () => {
+test("a commit rings the Git page, and the new commit once it lands", () => {
   const cmd = {command: "git add docs/X_PLAN.md && git commit -m 'plan: X'"};
-  assert.deepEqual(C.steps(tool("Bash", cmd), "start", NOW), [{point: "status:changes", words: "committing"}]);
+  assert.deepEqual(C.steps(tool("Bash", cmd), "start", NOW), [{point: "page:changes", words: "committing"}]);
   const end = C.steps(tool("Bash", cmd, "ok"), "end", NOW);
   assert.deepEqual(end[0], {refresh: true});
   assert.equal(end[1].point, "commit:new");
-  assert.deepEqual(C.steps(tool("Bash", {command: "uv run pytest -q"}), "start", NOW), [{point: "status:checklist", words: "checking"}]);
-  // off Now the column is not drawn: the Project bar's icon stands for it
+  assert.deepEqual(C.steps(tool("Bash", {command: "uv run pytest -q"}), "start", NOW), []);
   assert.deepEqual(C.steps(tool("Bash", cmd), "start", PLANS), [{point: "page:changes", words: "committing"}]);
   assert.equal(C.steps(tool("Bash", cmd, "ok"), "end", PLANS)[1].or, "page:changes");
   assert.deepEqual(C.steps(tool("Bash", {command: "ls"}), "start", NOW), []);
@@ -65,32 +64,18 @@ test("a commit rings the changes, and the new commit once it lands", () => {
 
 test("the studio's own tools: status sweeps the column", () => {
   const sweep = C.steps(tool("mcp__studio__project_status", {}), "start", NOW);
-  assert.deepEqual(sweep.map((x) => x.point), ["status:needs", "status:working", "status:checklist", "status:plans", "status:changes"]);
+  assert.deepEqual(sweep.map((x) => x.point), ["status:needs", "status:working"]);
   assert.ok(sweep.every((x) => x.quick));
 });
 
-test("what changed between two status documents", () => {
-  const before = {
-    plans: [{path: "docs/A_PLAN.md", status: "in_progress", done: 1, total: 3}],
-    changes: [{sha: "aaa"}],
-    checklist: {open: [{id: "R-1", status: "not_started"}, {id: "R-2", status: "in_progress"}]},
-  };
-  const after = {
-    plans: [{path: "docs/A_PLAN.md", status: "in_progress", done: 2, total: 3}, {path: "docs/B_PLAN.md", status: "plan", done: 0, total: 2}],
-    changes: [{sha: "bbb"}, {sha: "aaa"}],
-    checklist: {open: [{id: "R-1", status: "in_progress"}, {id: "R-9", status: "planned"}]},
-  };
-  assert.deepEqual(C.changed(before, after), [
-    {point: "plan:docs/A_PLAN.md", words: "2/3"},
-    {point: "plan:docs/B_PLAN.md", words: "new plan"},
-    {point: "commit:bbb", words: "new"},
-    {point: "row:R-1", words: "in progress"},
-  ]);
-  // a row the turn added is lit too (cut at four: the newest first come from the plans and commits)
-  assert.deepEqual(C.changed({...before, plans: after.plans, changes: after.changes}, after),
-    [{point: "row:R-1", words: "in progress"}, {point: "row:R-9", words: "new"}, {point: "status:checklist", words: "1 closed"}]);
+test("what changed between two status documents: the cards", () => {
+  const board = (cards) => ({board: {cards: cards.map(([id, state]) => ({id, state}))}});
+  const before = board([["C1", "todo"], ["C2", "doing"]]);
+  const after = board([["C1", "doing"], ["C2", "doing"], ["C3", "todo"]]);
+  assert.deepEqual(C.changed(before, after), [{point: "card:C1", words: "doing"}, {point: "card:C3", words: "new"}]);
   assert.deepEqual(C.changed(after, after), []);
   assert.deepEqual(C.changed(null, after), []);
+  assert.deepEqual(C.changed({}, after).length, 3);
 });
 
 test("where a target lives: the page to go to before pointing", () => {
@@ -128,9 +113,9 @@ test("the shell: a heredoc into a plan, sed -i on the matrix, git -c … commit;
   assert.deepEqual(C.steps(heredoc, "start", NOW),
     [{go: {tab: "project", page: "board"}}, {point: "plan:docs/CSV_EXPORT_PLAN.md", words: "editing", or: "pagehead"}]);
   const sed = bash("sed -i 's/| 120 |/| 123 |/' docs/brd/requirements/requirements_traceability.md && uv run python scripts/check_brd_docs.py");
-  assert.deepEqual(C.steps(sed, "start", NOW).slice(0, 2), [{point: "status:checklist", words: "editing rows"}, {point: "status:checklist", words: "checking"}]);
+  assert.deepEqual(C.steps(sed, "start", NOW), []);
   const commit = bash("git add docs/CSV_EXPORT_PLAN.md docs/brd/requirements/requirements_traceability.md && git -c user.email=a@b -c user.name=a commit -q -m 'plan'");
-  assert.deepEqual(C.steps(commit, "start", NOW), [{point: "status:changes", words: "committing"}]);
+  assert.deepEqual(C.steps(commit, "start", NOW), [{point: "page:changes", words: "committing"}]);
   // reading with the shell moves nothing; a bare name after `cd docs` is still the plan
   assert.deepEqual(C.steps(bash("cd docs && head -20 WEALTH_NAMES_PLAN.md 2>/dev/null"), "start", NOW), []);
   assert.deepEqual(C.steps(bash("cd docs && head -20 WEALTH_NAMES_PLAN.md"), "start", PLANS), [{point: "plan:docs/WEALTH_NAMES_PLAN.md", words: "reading"}]);

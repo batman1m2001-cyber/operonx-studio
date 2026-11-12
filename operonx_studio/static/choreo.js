@@ -27,7 +27,7 @@ const Choreo = (() => {
   const QUESTIONS = /docs\/brd\/requirements\/open_questions\.md$/;
   const PLAN = /(?:^|\/)(docs\/(?:[^/]+\/)*[^/]+\.md)$/;
 
-  const COLUMN = {needs: "now", working: "board", checklist: "now", plans: "board", changes: "changes"};
+  const COLUMN = {needs: "now", working: "board"};
   // the shell: what writes a file, a commit (`git -c user.email=… commit`), the files a command names
   const WRITES = /(?:^|[^<>&2])>>?\s*(?!\/dev\/null)[^\s&|;>]|\btee\b|\bsed\s+(?:-\w*\s+)*-i|\bperl\s+-\w*i|\bpython3?\b[^|;&]*(?:<<|-c\b)|\bmv\b|\bcp\b/;
   const COMMIT = /\bgit\b(?:\s+-[cC]\s+\S+)*\s+commit\b/;
@@ -95,12 +95,8 @@ const Choreo = (() => {
           // what changed in it is lit by `changed`; "saved" only when nothing else was
           out.push({refresh: true}, {point: `plan:${plan}`, words: "saved", soft: true, or: "pagehead"});
         }
-      } else if (MATRIX.test(file)) {
-        if (phase === "start") { goPage("now"); out.push({point: "status:checklist", words: "editing rows"}); }
-        else if (ok) out.push({refresh: true});
-      } else if (QUESTIONS.test(file)) {
-        if (phase === "start") { goPage("now"); out.push({point: "status:needs", words: "editing"}); }
-        else if (ok) out.push({refresh: true});
+      } else if (MATRIX.test(file) || QUESTIONS.test(file)) {
+        if (ok) out.push({refresh: true});
       }
       return out;
     }
@@ -122,23 +118,17 @@ const Choreo = (() => {
         else if (!writes && pm && where.page === "board" && phase === "start") out.push({point: `plan:${plan}`, words: "reading"});
         break;   // one plan is enough to follow
       }
-      if (writes && !plans.length && MATRIX_NAME.test(cmd)) {
-        if (phase === "start") { goPage("now"); out.push({point: "status:checklist", words: "editing rows"}); }
-        else if (ok) out.push({refresh: true});
-      } else if (writes && !plans.length && QUESTIONS_NAME.test(cmd)) {
-        if (phase === "start") { goPage("now"); out.push({point: "status:needs", words: "editing"}); }
-        else if (ok) out.push({refresh: true});
+      if (writes && !plans.length && (MATRIX_NAME.test(cmd) || QUESTIONS_NAME.test(cmd))) {
+        if (ok) out.push({refresh: true});
       }
       if (commit) {
-        if (phase === "start") out.push({point: col("changes"), words: "committing"});
-        else if (ok) out.push({refresh: true}, {point: "commit:new", words: "committed", soft: true, or: col("changes")});
-      } else if (/\b(pytest|brd\s+check|check_brd\w*|operonx-project\s+plans)\b/.test(cmd)) {
-        if (phase === "start") out.push({point: col("checklist"), words: "checking"});
+        if (phase === "start") out.push({point: "page:changes", words: "committing"});
+        else if (ok) out.push({refresh: true}, {point: "commit:new", words: "committed", soft: true, or: "page:changes"});
       }
       return out;
     }
     if (name === "studio:project_status" && phase === "start") {
-      const secs = pm && where.page === "now" ? Object.keys(COLUMN) : ["needs", "plans", "checklist", "changes"];
+      const secs = Object.keys(COLUMN);
       for (const s of secs) out.push({point: col(s), words: "reading", quick: true});
       return out;
     }
@@ -155,23 +145,13 @@ const Choreo = (() => {
   /* What changed between two status documents: the targets to light once, newest first. */
   function changed(before, after) {
     if (!before || !after) return [];
+    const cards = (doc) => new Map(((doc.board || {}).cards || []).map((c) => [c.id, c.state]));
+    const was = cards(before);
     const out = [];
-    const old = new Map((before.plans || []).map((p) => [p.path, p]));
-    for (const p of after.plans || []) {
-      const was = old.get(p.path);
-      const target = `plan:${p.path}`;
-      if (!was) out.push({point: target, words: "new plan"});
-      else if (was.status !== p.status || was.done !== p.done) out.push({point: target, words: p.status === "done" ? "done" : `${p.done}/${p.total}`});
+    for (const [id, state] of cards(after)) {
+      if (!was.has(id)) out.push({point: `card:${id}`, words: "new"});
+      else if (was.get(id) !== state) out.push({point: `card:${id}`, words: state});
     }
-    const seen = new Set((before.changes || []).map((c) => c.sha));
-    for (const c of (after.changes || []).slice(0, 3)) if (!seen.has(c.sha)) out.push({point: `commit:${c.sha}`, words: "new"});
-    const rows = new Map(((before.checklist || {}).open || []).map((r) => [r.id, r.status]));
-    for (const r of (after.checklist || {}).open || []) {
-      if (!rows.has(r.id)) out.push({point: `row:${r.id}`, words: "new"});
-      else if (rows.get(r.id) !== r.status) out.push({point: `row:${r.id}`, words: r.status.replace(/_/g, " ")});
-    }
-    const closed = [...rows.keys()].filter((id) => !((after.checklist || {}).open || []).some((r) => r.id === id));
-    if (closed.length) out.push({point: "status:checklist", words: `${closed.length} closed`});
     return out.slice(0, 4);
   }
 
