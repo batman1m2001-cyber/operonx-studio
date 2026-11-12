@@ -42,12 +42,14 @@ test("a YAML file being edited is an address", () => {
 });
 
 test("every way to read a run is an address; the tree is the bare one", () => {
-  for (const v of ["conversation", "timeline", "workflow", "data"]) {
+  for (const v of ["conversation", "timeline", "workflow"]) {
     const a = Router.addressOf({tab: "traces", run: "r", mode: v});
     assert.equal(a.full, `/p/abc123/runs/r?view=${v}`);
     assert.equal(Router.parse(at(a.full)).mode, v);
   }
   assert.equal(Router.addressOf({tab: "traces", run: "r", mode: "tree"}).full, "/p/abc123/runs/r");
+  // the Data Flow view is gone into the workflow: its old links land there
+  assert.equal(Router.parse(at("/p/abc123/runs/r?view=data")).mode, "workflow");
   // an unknown view (an old or mistyped link) is the tree
   assert.equal(Router.parse(at("/p/abc123/runs/r?view=nope")).mode, "tree");
 });

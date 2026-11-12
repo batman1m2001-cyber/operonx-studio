@@ -110,7 +110,7 @@ function switchTab(name, opts) {
  * view) — the canvas toolbar appears only then. */
 function syncChrome() {
   document.body.dataset.tab = state.tab;
-  // a run painted on the canvas: its header's switch says Workflow or Data Flow
+  // a run painted on the canvas
   document.body.classList.toggle("runwf", !!state.workflowOn);
   const stageOn = state.tab === "flow" || !!state.workflowOn;
   if (stageOn) document.body.dataset.stage = "";
@@ -262,7 +262,7 @@ function buildLegend() {
   box.append(el("div", "ltitle lkeys", "Keys"));
   box.append(el("div", "lrow lkeysrow",
     "/ or Ctrl+K find · space+drag or middle-drag pan · ctrl+scroll zoom · "
-    + "0 fit · 1 = 100% · D Workflow ⇄ Data Flow · ↑ ↓ walk the wires · Esc close"));
+    + "0 fit · 1 = 100% · [ flows · ] side panel · ↑ ↓ walk the wires · Esc close"));
 }
 
 $("#btn-legend").onclick = () => {
@@ -379,8 +379,6 @@ $("#graph-pick").onchange = (ev) => {
   render(); fit(); renderFlowInfo(); pushView();
 };
 
-for (const b of document.querySelectorAll(".viewseg button")) b.onclick = () => setCanvasView(b.dataset.view);
-showViewSeg();
 {
   const b = $("#btn-flowdots");
   const show = () => { b.setAttribute("aria-pressed", String(flowDotsOn)); b.classList.toggle("on", flowDotsOn); document.body.classList.toggle("nodots", !flowDotsOn); };
@@ -484,9 +482,6 @@ showViewSeg();
       return;
     }
     if (ev.key === "/") { ev.preventDefault(); openFind(); return; }
-    if ((ev.key === "d" || ev.key === "D") && !ev.ctrlKey && !ev.metaKey && !ev.altKey && (state.tab === "flow" || state.workflowOn)) {
-      setCanvasView(canvasView === "data" ? "workflow" : "data"); return;
-    }
     if (ev.key === " ") { spaceHeld = true; stage.classList.add("panmode"); ev.preventDefault(); return; }
     // walk the wires: ↓/→ follows an outgoing edge, ↑/← an incoming one
     if ((ev.key === "ArrowRight" || ev.key === "ArrowLeft"
@@ -836,9 +831,9 @@ async function performUi(kind, args) {
     if (state.tab !== "traces") switchTab("traces", {quiet: true});
     // errors and values are no longer lenses: failures are always marked, values are in the step panel
     if (args.lens) { state.lens = ["time", "cost"].includes(args.lens) ? args.lens : "path"; store("lens", state.lens); }
-    // the view: conversation, tree or timeline (the steps page), workflow or data (the canvas)
+    // the view: conversation, tree or timeline (the steps page), or the
+    // workflow (the canvas; an old link's "data" is the workflow now)
     const onCanvas = args.mode === "workflow" || args.mode === "data";
-    if (onCanvas && canvasView !== args.mode) { canvasView = args.mode; store(`canvasView:${PID}`, args.mode); showViewSeg(); }
     if (["conversation", "tree", "timeline"].includes(args.mode)) store("runTreeMode", args.mode);
     await (onCanvas ? showRunWorkflow(args.run) : showRunTree(args.run));
     // an execution to select: an eval's blamed op, a deep link's `op`

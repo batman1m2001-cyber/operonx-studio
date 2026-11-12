@@ -1,17 +1,14 @@
-/* operonx studio — the canvas: the Workflow and Data Flow views, cards,
+/* operonx studio — the canvas: the workflow, cards,
  * wires, loops, the agent cell, pan and zoom. Split from studio.js, same
  * bundle, same order (docs/STUDIO_EXPERIENCE_PLAN.md P1). */
 
-/* ── two views of one graph: Workflow and Data Flow ─────────────────
- * Workflow is the control flow (graph.edges): what runs before what.
- * Data Flow is lineage (the inputs' bindings): what each op reads and
- * feeds. The two are never shown at full strength together. In Workflow
- * a selected node reveals only its own bindings (a tray beside it, tags
- * on its partners); in Data Flow every card lists its bound ports and one
- * connector joins each pair of nodes that pass data, while the control
- * edges fade. A port click shows that port's lineage in either view.
+/* ── the workflow, and its data on demand ─────────────────────────────
+ * The canvas draws the control flow (graph.edges): what runs before what.
+ * Lineage (the inputs' bindings) shows only where asked: a double click
+ * opens an op's data in place (its plugs and the ops it trades with), and
+ * a port click shows that port's lineage. The Data Flow view that drew
+ * every op's data at once is gone; the double click did its job.
  * Model: static/dataflow.js. Plan: docs/WORKFLOW_DATAFLOW_VIEWS_PLAN.md */
-let canvasView = recall(`canvasView:${PID}`, "workflow") === "data" ? "data" : "workflow";
 let dfPort = null;   // {key, port, dir}: the port whose lineage is shown
 let dfPlatePin = null;    // {key, port, dir}: a selected GraphOp's plate, clicked
 /* A variable's pill singles out its wires: every drawn wire registers
@@ -29,37 +26,6 @@ function dfRowHot(row, on) {
   $("#world").classList.toggle("dftpick", on);
   if (!on && held) dfRowHot(held, true);
 }
-
-function setCanvasView(v) {
-  if (v === canvasView) return;
-  canvasView = v;
-  dfPort = null;
-  store(`canvasView:${PID}`, v);
-  showViewSeg();
-  render();
-  // on a run's page the header's switch says it, and the address keeps it
-  if (state.workflowOn) { RunView.syncViews(); pushView(); }
-}
-function showViewSeg() {
-  for (const b of document.querySelectorAll(".viewseg button")) {
-    const on = b.dataset.view === canvasView;
-    b.classList.toggle("on", on);
-    b.setAttribute("aria-checked", String(on));
-  }
-  placeDrop($(".canvasbar .viewseg"));
-}
-/* the canvas bar's switch: the picked view is a lighter drop of glass
- * that slides to the other one (studio.css .viewseg::before) */
-function placeDrop(seg) {
-  const on = seg && seg.querySelector("button.on");
-  if (!on || !on.offsetWidth) return;
-  seg.style.setProperty("--drop-x", `${on.getBoundingClientRect().left - seg.getBoundingClientRect().left}px`);
-  seg.style.setProperty("--drop-w", `${on.offsetWidth}px`);
-  seg.dataset.drop = "";
-}
-// it is measured once it shows (the bar is hidden off the canvas)
-if (window.ResizeObserver && $(".canvasbar .viewseg"))
-  new ResizeObserver(() => placeDrop($(".canvasbar .viewseg"))).observe($(".canvasbar .viewseg"));
 
 // a binding's source, in words: "rank.top", "START.question", "scratch.clock"
 function dfSourceLabel(b) {
@@ -777,8 +743,8 @@ function drawDataLayer() {
     p.dfFlow = flow;
     p.dfFlowMake = () => { if (!p.dfFlowMade && p.parentNode) { p.dfFlowMade = true; flow.push(...dfComet(p, d, flowCls)); } };
     if (/\bon\b/.test(flowCls)) queueMicrotask(p.dfFlowMake);
-    // Data Flow's many wires run UNDER the cards and surface into their
-    // holes; a focused op's few wires ride above
+    // many data wires run UNDER the cards and surface into their holes;
+    // a focused op's few wires ride above
     (under ? svg : wsvg).append(p);
     return p;
   };
@@ -992,79 +958,6 @@ function drawDataLayer() {
     if (pc) pc.classList.add("dfpeer");
   };
 
-  if (canvasView === "data") {
-    // One wire per variable, hole to hole. A NEAR wire (into the next row
-    // down) is drawn; a FAR one — rows away, or back up — is not, at rest:
-    // its holes wear a dashed ring ("plugged into something further
-    // away"), and hovering the variable draws it, a click its lineage.
-    const byRow = new Map();   // hole row element → its wires
-    const addTo = (row, p) => { if (!row) return; if (!byRow.has(row)) byRow.set(row, []); byRow.get(row).push(p); };
-    const plan = [];
-    for (const k of ["start", "scratch", "end"]) termHole(k, "");
-    for (const b of B) {
-      const a = srcHole(b), z = dstHole(b);
-      if (!a || !z) continue;
-      const A = boxOf(a), Z = boxOf(z);
-      const gap = Z.top - A.bottom;
-      // a broadcast (START, SCRATCH) or an output to END reaches far: shown
-      // on hover and in a lineage, not at rest
-      const far = DataFlow.isBroadcast(b) || !!b.to.end || gap < -4 || gap > 230;
-      plan.push({b, a, z, far, len: Math.abs(z.y - a.y) + Math.abs(z.x - a.x)});
-    }
-    // short, visible wires claim their tracks first
-    // bottom holes first: they take the inner lanes, so a card's wires nest
-    // like brackets instead of crossing
-    // what is visible routes first: a lit lineage, then near wires, then far
-    // ones hidden at rest — so the wires on screen get the free lanes
-    const rank = (x) => (lv && lv.has(x.b.id)) ? 0 : x.far ? 2 : 1;
-    plan.sort((p, q) => (rank(p) - rank(q)) || (q.a.y - p.a.y) || (q.z.y - p.z.y));
-    prepLanes(plan.filter(x => rank(x) < 2).map(x => [x.a, x.z]));
-    const draw = ({b, a, z, far}) => {
-      const p = wire(a, z, "dfconn" + litCls(b) + (far ? " far" : ""), true, `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`);
-      if (!p) return null;
-      const tip = document.createElementNS(SVGNS, "title");
-      tip.textContent = `${dfSourceLabel(b)} → ${dfTargetLabel(b)}`;
-      p.append(tip);
-      return p;
-    };
-    // a far wire hidden at rest is routed the first time it is asked for
-    // (its variable hovered): routing every one up front cost seconds
-    const later = new Map();   // hole row → its unrouted far wires
-    for (const x of plan) {
-      const {a, z, far} = x;
-      if (far) for (const h of [a, z]) if (h.row) h.row.classList.add("remote");
-      if (far && rank(x) === 2) {
-        for (const r of [a.row, z.row]) if (r) { if (!later.has(r)) later.set(r, []); later.get(r).push(x); }
-        continue;
-      }
-      const p = draw(x);
-      if (p) { addTo(a.row, p); addTo(z.row, p); }
-    }
-    for (const [row, xs] of later) if (!byRow.has(row)) byRow.set(row, []);
-    for (const [row, ps] of byRow) {
-      // a hovered variable lights its wires, with the line to their hub
-      const parts = (on) => { for (const p of ps) {
-        p.classList.toggle("hot", on);
-        if (on && p.dfFlowMake) p.dfFlowMake();
-        for (const f of p.dfFlow || []) f.classList.toggle("hot", on);
-        const r0 = p.dfRoute;
-        if (r0 && r0.hub) { const H = hubs.get(r0.hub); H.trunkEl?.classList.toggle("hot", on); H.el?.classList.toggle("hot", on); }
-      } };
-      row.onmouseenter = () => {
-        for (const x of later.get(row) || []) {
-          if (x.p !== undefined) continue;
-          x.p = draw(x);
-          if (x.p) for (const r of [x.a.row, x.z.row]) if (r && byRow.has(r)) byRow.get(r).push(x.p);
-        }
-        parts(true);
-      };
-      row.onmouseleave = () => parts(false);
-    }
-    drawHubs(svg);
-    markRows();
-    return;
-  }
-
   // Workflow. A double click opens the op (its plates are part of the card, the
   // flow laid out again round it) and every partner shows a plug tag with
   // its own hole on the matching side; the rest steps back. A hover only
@@ -1072,7 +965,7 @@ function drawDataLayer() {
   /* An open terminal lights every op its values reach and their holes,
    * but wires ONE variable at a time: the one under the pointer, or the
    * one clicked (pinned) — a whole terminal wired at once is a hairball. */
-  if (canvasView === "workflow" && !state.dfFocus && state.dfTerm && termIds) {
+  if (!state.dfFocus && state.dfTerm && termIds) {
     world.classList.add("dfpin");
     const pick = state.dfTermHover ?? state.dfTermPort ?? null;
     const portOf = (b) => state.dfTerm === "end" ? b.to.port : b.from.port;
@@ -1252,7 +1145,7 @@ function dfWireLabelMove(ev) {
 // a hover's peek ends a beat after the pointer leaves the op
 function dfHoverEnter(key) {
   clearTimeout(state.dfHoverOff);
-  if (canvasView !== "workflow" || state.dfFocus || state.dfHover === key) return;
+  if (state.dfFocus || state.dfHover === key) return;
   state.dfHover = key;
   drawDataLayer();
 }
@@ -1387,7 +1280,7 @@ function render() {
   // only the variables it shares with the op — so every wire runs from a
   // hole on one open op to a hole on another
   state.dfOpen = new Map();
-  if (canvasView === "workflow" && !state.dfFocus && state.dfTerm) {
+  if (!state.dfFocus && state.dfTerm) {
     for (const b of state.dfB) {
       const hit = state.dfTerm === "start" ? (b.from.kind === "input" && !b.from.key)
         : state.dfTerm === "scratch" ? b.from.kind === "scratch" : !!b.to.end;
@@ -1398,7 +1291,7 @@ function render() {
       state.dfOpen.get(k).add(b.id);
     }
   }
-  if (canvasView === "workflow" && state.dfFocus) {
+  if (state.dfFocus) {
     // every binding touching the selection — for an opened GraphOp that is
     // what crosses its frame both ways and what its own ops read and export
     state.dfOpen.set(state.dfFocus, null);   // null: every bound variable
@@ -1411,7 +1304,6 @@ function render() {
       state.dfOpen.get(pk).add(b.id);
     }
   }
-  $("#world").classList.toggle("dfview", canvasView === "data");
 
   // ── cards first, measured; then ONE layout places everything ──
   // Every card goes into the DOM before anything is placed: the layout
@@ -1506,14 +1398,13 @@ function render() {
     }
   }
   const sized = new Map(leaves.map(it => [it.key, it]));
-  // GraphOps whose plates will show get side room for them: every opened
-  // one in Data Flow; in Workflow those the selection's data crosses
+  // GraphOps whose plates will show get side room for them: those the
+  // selection's data crosses
   const platePad = new Map();
   {
     const B = state.dfB || [];
     const wants = new Set();
-    if (canvasView === "data") for (const k of state.expanded) wants.add(k);
-    else if (state.dfFocus) {
+    if (state.dfFocus) {
       if (state.expanded.has(state.dfFocus)) wants.add(state.dfFocus);
       for (const b of B) if (b.to.key === state.dfFocus || b.from.key === state.dfFocus)
         for (const k of [b.from.key, b.to.key]) if (state.expanded.has(k)) wants.add(k);
@@ -1527,7 +1418,7 @@ function render() {
       if (names.length) platePad.set(k, Math.max(...names.map(n => n.length)) * 6.6 + 52 + 8 * Math.max(ins, outs));
     }
   }
-  const dataShown = canvasView === "data" || !!state.dfFocus || !!state.dfTerm;
+  const dataShown = !!state.dfFocus || !!state.dfTerm;
   const L = FlowLayout.layout(g, {
     expanded: state.expanded,
     padOf: (key) => platePad.get(key) || 0,
@@ -1875,7 +1766,7 @@ function render() {
  * flow must not blink the whole canvas. */
 function refreshSelection() {
   for (const [k, c] of state.cardEls) c.classList.toggle("selected", k === state.sel);
-  if (canvasView === "workflow" && dfPort && dfPort.key !== state.dfFocus) dfPort = null;
+  if (dfPort && dfPort.key !== state.dfFocus) dfPort = null;
   state.dfHover = null;
   drawDataLayer();
   paintEdges();
@@ -1964,7 +1855,7 @@ function deselect() {
   state.route = null;
   const open = state.dfFocus;
   state.sel = state.dfFocus = null;
-  if (canvasView === "workflow" && open) renderKeeping(open);
+  if (open) renderKeeping(open);
   refreshSelection();
   pushView();
   renderFlowInfo();
@@ -2908,12 +2799,11 @@ function opensInPlace(key) {
   return !!(it && (it.node.graph || it.node.parts));
 }
 
-/* A click only selects; a double click opens. In Workflow that is the op's
- * data, in place — its plugs and the ops it trades with (a GraphOp opens its
- * members too); again closes it. Elsewhere it opens a GraphOp's members. */
+/* A click only selects; a double click opens the op's data, in place —
+ * its plugs and the ops it trades with (a GraphOp opens its members too);
+ * again closes it. */
 function openOp(key) {
   if (!key) return;
-  if (canvasView !== "workflow") { if (opensInPlace(key)) toggleExpand(key); return; }
   const open = state.dfFocus !== key;
   state.dfFocus = open ? key : null;
   if (state.sel !== key) select(key);
@@ -3056,10 +2946,10 @@ function opCard(it) {
     if (det.childNodes.length) card.append(det);
   }
 
-  if (canvasView === "data" || (state.dfOpen && state.dfOpen.has(it.key) && !it.inner)) {
-    const ports = dfPortsBlock(it, canvasView === "workflow" ? state.dfOpen.get(it.key) : null);
+  if (state.dfOpen && state.dfOpen.has(it.key) && !it.inner) {
+    const ports = dfPortsBlock(it, state.dfOpen.get(it.key));
     if (ports) {
-      card.append(ports); card.classList.add("dfcard", canvasView === "data" ? "dfdata" : "dfopen");
+      card.append(ports); card.classList.add("dfcard", "dfopen");
       // its plugs name its outputs now: the "→ key" lines would say it
       // twice (a run's painted values stay — they say something new)
       const det = card.querySelector(".detail");

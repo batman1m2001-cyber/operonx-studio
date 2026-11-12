@@ -883,7 +883,6 @@ body:not([data-stage]) .canvasbar { display: none; }
 .replaymenu button:hover { background: var(--surface-2); }
 .replaymenu button.on { font-weight: 600; color: var(--accent-strong); }
 /* a run on the canvas: its header's switch holds Workflow and Data Flow */
-body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display: none; }
 /* the KEY OPS label is the steps' filter */
 .highlights .hl-keytoggle { min-height: 22px; padding: 0 4px; border: none; background: none; border-radius: 4px;
   cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
@@ -4143,24 +4142,6 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 :root { --df: #0d9488; --df-soft: rgba(13, 148, 136, .12); --df-ink: #0f5f58;
         --df-scratch: #c2416f; --df-start: #3d7dd6; --df-panel: #ffffff; --df-line: #d5dee8; }
 
-/* the view switch at the head of the canvas toolbar */
-.viewseg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 999px;
-  background: var(--surface-2, var(--bg-gray96-6)); }
-.viewseg button { border: 0; background: transparent; border-radius: 999px; padding: 4px 11px;
-  font-size: 12px; font-weight: 600; color: var(--muted, var(--ink-blue56)); cursor: pointer; min-height: 26px; }
-.viewseg button:hover { color: var(--text, var(--ink-indigo26)); }
-.viewseg button.on { background: var(--panel, var(--rt-bay)); color: var(--text, var(--ink-indigo26));
-  box-shadow: 0 1px 3px var(--sh-blue24-a14); }
-.viewseg button[data-view="data"].on { color: var(--df-ink); }
-.viewseg button:focus-visible { outline: 2px solid var(--df); outline-offset: 1px; }
-
-/* Data Flow: control steps back, data steps forward */
-#world.dfview #edges path, #world.dfview #edges circle, #world.dfview #edges text,
-#world.dfview #edgetop path { opacity: .14; }
-#world.dfview #edges .eflow { display: none; }
-#world.dfview .node .port { opacity: .25; }
-#world.dfview .node.cell.dfcard { border-radius: 16px; }
-#world.dfview .node.cell.dfcard .iconband { top: 0; bottom: auto; height: 46px; }
 .dfports { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; margin-top: 7px;
   padding-top: 6px; border-top: 1px dashed var(--df-line); }
 .dfcol { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -4200,16 +4181,13 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .dfport { justify-content: flex-start; }
 .dfport.out { justify-content: flex-start; }
 
-.viewseg .vshort, .runviews .vshort { display: none; }
-.runviews .vlong, .viewseg .vlong { margin: 0; padding: 0; background: none; border-radius: 0; }
+.runviews .vshort { display: none; }
+.runviews .vlong { margin: 0; padding: 0; background: none; border-radius: 0; }
 @media (max-width: 640px) {
   .runviews .vlong { display: none; }
   .runviews .vshort { display: inline; }
   .runhead-top .runviews { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
   .runviews button { padding: 0 9px; flex: none; }
-  .viewseg .vlong { display: none; }
-  .viewseg .vshort { display: inline; }
-  .viewseg button { padding: 4px 9px; }
 }
 
 /* data hue, drifted from cyan toward a calmer blue */
@@ -4274,7 +4252,6 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .wires.dflinks path.dfconn.dim { opacity: .1; }
 .wires.dflinks path.dfconn.lit { opacity: 1; stroke-width: 1.4; }
 .wires.dflinks path.dfconn.lit2 { opacity: .5; stroke-dasharray: 4 3; }
-#world.dfview .wires.dflinks path.dfconn { opacity: .55; }
 #world.dfsel .wires.dflinks path.dfconn:not(.lit):not(.lit2) { opacity: .08; }
 
 /* a far wire is not drawn at rest: its holes wear a dashed ring */
@@ -4283,9 +4260,6 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
 .wires.dflinks path.dfconn.far.lit2 { opacity: .5; }
 .wires.dflinks path.dfconn.hot { opacity: 1 !important; stroke-width: 1.7; }
 .dfport.remote .dfhole:not(.mains) { box-shadow: none; outline: 1.5px dashed var(--df); outline-offset: 0; }
-#world.dfview .wires.dflinks path.dfconn.far { opacity: 0; }
-#world.dfview .wires.dflinks path.dfconn.far.hot, #world.dfview .wires.dflinks path.dfconn.far.lit { opacity: 1; }
-#world.dfview .wires.dflinks path.dfconn.far.lit2 { opacity: .5; }
 
 /* ── the electric side panels: each variable a plug pill ─────────────
    Inputs: a socket strip flush with the op's LEFT edge, each pill
@@ -5584,20 +5558,6 @@ body.floatframe:not(.ax-focus) .findbox, body.floatframe:not(.ax-focus) #legend 
     left: 12px; bottom: calc(120px + env(safe-area-inset-bottom)); }
 }
 
-/* the canvas bar's view switch: the picked view is a lighter drop that
- * slides between Workflow and Data Flow (canvas.js placeDrop) */
-.canvasbar .viewseg[data-drop] { position: relative; background: transparent;
-  box-shadow: inset 0 0 0 1px var(--glass-line); }
-.canvasbar .viewseg[data-drop]::before { content: ""; position: absolute; top: 2px; bottom: 2px; left: 0;
-  width: var(--drop-w); transform: translateX(var(--drop-x)); border-radius: 999px;
-  background: var(--glass-drop); box-shadow: inset 0 1px 0 var(--glass-rim), 0 1px 4px rgba(15,20,25,.14);
-  transition: transform .32s cubic-bezier(.3,1.35,.5,1), width .32s cubic-bezier(.3,1.35,.5,1); }
-.canvasbar .viewseg[data-drop] button { position: relative; z-index: 1; }
-.canvasbar .viewseg[data-drop] button.on,
-:root[data-theme="dark"] .canvasbar .viewseg[data-drop] button.on { background: transparent; box-shadow: none; }
-:root[data-theme="dark"] .canvasbar .viewseg[data-drop] { background: transparent; }
-:root[data-glass="solid"] .canvasbar .viewseg[data-drop]::before { background: var(--panel); }
-@media (prefers-reduced-motion: reduce) { .canvasbar .viewseg[data-drop]::before { transition: none; } }
 /* the bending (Chromium: theme.js adds .refract and the #ox-refract filter) */
 :root.refract[data-glass="glass"] .canvasbar {
   /* blur first, then bend: the other order drops the blur in Chromium */

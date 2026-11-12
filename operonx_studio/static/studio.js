@@ -118,8 +118,8 @@ function pushView() {
     lens: state.run ? (state.lens || "path") : null,
     exec: state.execSel || null,
     exec_id: state.execSel ? (state.execId || null) : null,
-    // how the run is read: workflow or data on the canvas, else the steps page's view
-    mode: state.run ? (canvasView === "data" ? "data" : "workflow")
+    // how the run is read: the workflow on the canvas, else the steps page's view
+    mode: state.run ? "workflow"
       : ((typeof RunTree !== "undefined" && RunTree.current() && RunTree.current().mode) || "tree"),
     file: state.tab === "yaml" ? (state.yamlFile || null) : null,
     page: state.tab === "project" && typeof ProjectMode !== "undefined" ? ProjectMode.page() : null,

@@ -20,7 +20,7 @@ function select(key) {
   // a click only marks the op; what a double click opened closes when the
   // pick moves off it (a re-layout, held round the card)
   if (state.dfFocus !== state.sel) state.dfFocus = null;
-  if (canvasView === "workflow" && open && !state.dfFocus) renderKeeping(state.sel || before);
+  if (open && !state.dfFocus) renderKeeping(state.sel || before);
   refreshSelection();
   pushView();
   const panel = $("#inspector");
