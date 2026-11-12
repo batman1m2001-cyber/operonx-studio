@@ -1120,26 +1120,28 @@ body.runwf .canvasbar .viewseg, body.runwf .canvasbar .viewseg + .tsep { display
 .wires path.loop-head { fill: var(--loop); stroke: none; }
 .wires circle.bouton.b-serve { fill: var(--k-serve); }
 .wires path.eglow {
-  stroke: var(--wire-glow); stroke-width: 4;
+  stroke: var(--wire-glow); stroke-width: 2.5;
   stroke-linecap: round; pointer-events: none;
 }
-.wires path.ecore { stroke: var(--wire); stroke-width: 1.6; stroke-linecap: round;
+.wires path.ecore { stroke: var(--wire); stroke-width: 1.1; stroke-linecap: round;
   pointer-events: stroke; }
 .wires path.eray {
   stroke: var(--rt-bay); stroke-width: .6; stroke-linecap: round;
   pointer-events: none;
 }
-.wires path.eglow.back { stroke: color-mix(in srgb, var(--loop) 18%, transparent); stroke-width: 5; }
-.wires path.ecore.back { stroke: var(--loop); stroke-width: 1.6; stroke-dasharray: 10 6; }
+/* a hairline core has no room for the filament: it would split the wire in two */
+.wires path.eray:not(.hot) { display: none; }
+.wires path.eglow.back { stroke: color-mix(in srgb, var(--loop) 18%, transparent); stroke-width: 3; }
+.wires path.ecore.back { stroke: var(--loop); stroke-width: 1.1; stroke-dasharray: 10 6; }
 .wires path.eray.back { display: none; }
 .wires path.eglow.hot { stroke: var(--stroke-blue54-a30); }
-.wires path.ecore.hot { stroke: var(--wire-deep); stroke-width: 2.4; }
-.wires path.eray.hot { stroke-width: .9; }
-.wires circle.espark { fill: var(--rt-bay); stroke: var(--wire); stroke-width: 1.6; }
+.wires path.ecore.hot { stroke: var(--wire-deep); stroke-width: 1.8; }
+.wires path.eray.hot { stroke-width: .6; }
+.wires circle.espark { fill: var(--rt-bay); stroke: var(--wire); stroke-width: 1.1; }
 .wires circle.espark.tailspark { fill: var(--fill-blue85); opacity: .7; stroke: none; }
 .wires circle.espark.back { stroke: var(--loop); }
 /* direction dots: small, faint, slow — a hint of flow, not a light show */
-.wires circle.eflow { fill: var(--rt-bay); stroke: var(--wire); stroke-width: 1.4; opacity: .9;
+.wires circle.eflow { fill: var(--rt-bay); stroke: var(--wire); stroke-width: 1.1; opacity: .9;
   filter: drop-shadow(0 0 2px var(--glow-signal)); pointer-events: none; }
 .wires circle.eflow.cond { stroke: var(--rt-wire); filter: drop-shadow(0 0 2px color-mix(in srgb, var(--rt-wire) 50%, transparent)); }
 .wires circle.eflow.back { fill: var(--loop); stroke: var(--rt-bay); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--loop) 60%, transparent)); }
