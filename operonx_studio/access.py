@@ -171,6 +171,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/yaml"): "read",
     ("GET", f"{P}/resources/hub"): "read",
     ("GET", f"{P}/resources/usage"): "read",
+    ("GET", f"{P}/tools"): "read",
     ("POST", f"{P}/resources/add"): "edit",
     ("POST", f"{P}/resources/delete"): "edit",
     ("POST", f"{P}/env"): "edit",

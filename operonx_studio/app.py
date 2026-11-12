@@ -1996,6 +1996,56 @@ def build_studio_app(recents: Optional[Recents] = None):
         return JSONResponse({"file": rel, "exists": path.is_file(), "categories": out,
                              "known_categories": _known_categories()})
 
+    @app.get("/api/p/{pid}/tools")
+    def tools_catalogue(pid: str) -> JSONResponse:
+        """Every tool an agent may call, once, from what the agents declare
+        (the IR's agent ``parts``): its kind, description, flags and
+        arguments, where it is defined, and each agent that uses it with that
+        agent's policy and the canvas key that opens it. Read-only: policy
+        stays per agent (docs/AGENTOP_REDESIGN_PLAN.md A3)."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        ir = (watcher.last.ir or watcher.refresh_swr().ir) or {}
+        tools: Dict[str, Dict[str, Any]] = {}
+
+        def add(agent_node, key, graph, path, via=None):
+            for part in agent_node.get("parts") or []:
+                if part.get("part") != "tool":
+                    continue
+                t = part.get("tool") or {}
+                name = t.get("name") or part.get("name")
+                row = tools.get(name)
+                if row is None:
+                    src = (part.get("source") or {}).get("defined_at")
+                    row = tools[name] = {
+                        "name": name, "kind": t.get("kind") or "function",
+                        "namespace": name.split("__", 1)[0] if "__" in name else "",
+                        "description": t.get("description") or part.get("description") or "",
+                        "readonly": bool(t.get("readonly")), "destructive": bool(t.get("destructive")),
+                        "approval": t.get("approval") or "never", "args": t.get("args"),
+                        "target": t.get("target") or t.get("agent")
+                                  or (f"{src['file']}:{src['line']}" if src else None),
+                        "code": part.get("code"), "uses": [],
+                    }
+                row["uses"].append({"agent": agent_node.get("name"), "graph": graph, "key": key,
+                                    "path": path, "policy": t.get("policy") or "allow", "via": via})
+                if part.get("parts"):   # an agent as a tool: its own tools, used through it
+                    add(part, key, graph, path, via=part.get("name"))
+
+        def walk(nodes, graph, key, path):
+            for n in nodes or []:
+                k = f"{key}/{n.get('id')}" if key else n.get("id")
+                if n.get("op_type") == "agent" and n.get("agent"):
+                    add(n, k, graph, path)
+                elif n.get("graph"):
+                    walk(n["graph"].get("nodes"), graph, k, path + [n.get("name")])
+
+        for g in ir.get("graphs") or []:
+            walk(g.get("nodes"), g.get("name"), "", [])
+        rows = sorted(tools.values(), key=lambda r: (r["namespace"] or "~", r["name"]))
+        return JSONResponse({"tools": rows})
+
     def _known_categories() -> List[str]:
         try:
             from operonx.core.registry.config_registry import REGISTRY

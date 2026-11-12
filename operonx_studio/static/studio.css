@@ -4541,7 +4541,8 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   border-radius: 6px; background: transparent; color: var(--text-3); cursor: pointer; }
 .ag2-tool .go:hover { background: var(--surface-2); color: var(--accent); }
 .ag2-tool .go svg.lucide-ic { width: 13px; height: 13px; }
-.ag2-more { font-size: 11.5px; color: var(--accent); padding: 3px 8px; }
+.ag2-more { font-size: 11.5px; color: var(--accent); padding: 3px 8px; cursor: pointer; }
+.ag2-more:hover { text-decoration: underline; }
 .node svg.lucide-ic { stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* an agent opened onto its turns (a painted run): a container in the
@@ -6085,3 +6086,37 @@ body.sidepeek #dragbar { display: none !important; }
 .node .agchip.more { padding: 0 7px; cursor: default; color: var(--muted); }
 .node svg.agchip-mark { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8;
   stroke-linecap: round; stroke-linejoin: round; }
+
+/* Resources › Tools (AGENTOP_REDESIGN_PLAN A3) */
+.rh-switch { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--surface-3); }
+.rh-switch button { min-height: 0; padding: 4px 12px; border: none; border-radius: 6px; background: none;
+  font-size: var(--fs-sm); color: var(--text-2); cursor: pointer; }
+.rh-switch button.on { background: var(--surface); color: var(--text); box-shadow: var(--sh-1); font-weight: 600; }
+.tc-top { grid-template-columns: 22px minmax(140px, 200px) minmax(0, 1fr) minmax(90px, auto) 16px; }
+.tc-kind { --tk: var(--k-func); display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border-radius: 6px; font-size: 13px; color: var(--tk); background: color-mix(in srgb, var(--tk) 14%, transparent); }
+.tc-kind svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tc-desc { font-size: var(--fs-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tc-body { padding-left: 54px; }
+.tc-flags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tc-flag { font-size: var(--fs-xs); padding: 1px 8px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); }
+.tc-flag.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.tc-where { font-size: var(--fs-xs); color: var(--text-3); }
+.tc-h { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); margin-bottom: 6px; }
+.tc-args { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 4px 14px; font-size: var(--fs-sm); }
+.tc-type { color: var(--text-3); }
+.tc-adesc { color: var(--text-2); }
+.tc-use { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: var(--fs-sm); }
+.tc-go { display: inline-flex; align-items: center; gap: 5px; min-height: 0; padding: 2px 10px 2px 5px; border-radius: 999px;
+  font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+  color: color-mix(in srgb, var(--k-llm) 80%, var(--text));
+  background: color-mix(in srgb, var(--k-llm) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--k-llm) 30%, transparent); }
+.tc-go:hover { background: color-mix(in srgb, var(--k-llm) 22%, transparent); }
+svg.tc-mark { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tc-path { color: var(--text-3); }
+.tc-pol { font-size: var(--fs-xs); padding: 1px 8px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); }
+.tc-pol.ask { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.tc-pol.deny { background: color-mix(in srgb, var(--err) 16%, transparent); color: var(--err); }
+.tc-code summary { cursor: pointer; font-size: var(--fs-sm); color: var(--text-2); }
+.tc-code pre { max-height: 260px; overflow: auto; font-size: var(--fs-xs); background: var(--surface-2); padding: 10px; border-radius: 8px; }

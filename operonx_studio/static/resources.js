@@ -10,7 +10,23 @@
  * what it is, written through safewrite; a secret's value goes to .env. A
  * resource is added with a form built from its category, and deleted only
  * when nothing uses it. */
+let resView = "resources";   // or "tools": the Resources / Tools switch
+function resSwitch(redraw) {
+  const sw = el("div", "rh-switch");
+  sw.setAttribute("role", "tablist");
+  for (const [v, label] of [["resources", "Resources"], ["tools", "Tools"]]) {
+    const b = el("button", v === resView ? "on" : null, label);
+    b.type = "button";
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(v === resView));
+    b.onclick = () => { if (resView !== v) { resView = v; redraw(); } };
+    sw.append(b);
+  }
+  return sw;
+}
+
 async function showResources() {
+  if (resView === "tools") return showTools();
   const box = $("#resources");
   let hub;
   try { hub = await api(`/api/p/${PID}/resources/hub`); }
@@ -25,7 +41,7 @@ async function showResources() {
   q.placeholder = "Find a resource";
   q.setAttribute("aria-label", "Find a resource");
   const add = Icons.button("plus", "Add a resource", "primary needs-edit", "Declare a new resource in " + hub.file);
-  head.append(el("h2", null, "Resources"), el("div", "spacer"), q, add);
+  head.append(el("h2", null, "Resources"), resSwitch(showResources), el("div", "spacer"), q, add);
   page.append(head, el("p", "panesub rh-sub",
     `The models, services and stores ops call by name, in ${hub.file}. Secret values stay in .env and never leave the server.`));
   const adder = el("div", "rh-adder");
@@ -427,6 +443,143 @@ function priceRow(name, det) {
     }
   };
   return wrap;
+}
+
+/* ── Tools (docs/AGENTOP_REDESIGN_PLAN.md A3) ─────────────────────────
+ * Every tool an agent may call, once, grouped by namespace (mail__send →
+ * mail), from what the agents declare. Read-only: the policy is each
+ * agent's own and shows per use. A use opens its agent on the canvas. */
+async function showTools() {
+  const box = $("#resources");
+  let got;
+  try { got = await api(`/api/p/${PID}/tools`); }
+  catch (e) { box.textContent = ""; box.append(loadError(e, showTools)); return; }
+  box.textContent = "";
+  const page = el("div", "rh");
+  const head = el("div", "panehead rh-head");
+  const q = el("input", "rt-search rh-search");
+  q.type = "search";
+  q.placeholder = "Find a tool";
+  q.setAttribute("aria-label", "Find a tool");
+  head.append(el("h2", null, "Resources"), resSwitch(showResources), el("div", "spacer"), q);
+  page.append(head, el("p", "panesub rh-sub",
+    "What the agents may call, from what each declares. Policy is set per agent and shows per use."));
+  const list = el("div", "rh-list");
+  page.append(list);
+  const draw = () => {
+    list.textContent = "";
+    const needle = q.value.trim().toLowerCase();
+    const rows = got.tools.filter(t => !needle
+      || `${t.name} ${t.description} ${t.uses.map(u => u.agent).join(" ")}`.toLowerCase().includes(needle));
+    if (!got.tools.length) {
+      list.append(paneNote("No agent tools", "An agent's tools show here once an agent declares them."));
+      return;
+    }
+    const groups = new Map();
+    for (const t of rows) {
+      const ns = t.namespace || "other";
+      if (!groups.has(ns)) groups.set(ns, []);
+      groups.get(ns).push(t);
+    }
+    for (const [ns, ts] of groups) {
+      const sec = el("section", "rh-cat");
+      const ch = el("div", "rh-cathead");
+      ch.append(el("h3", null, ns), el("span", "rh-count", String(ts.length)));
+      sec.append(ch);
+      for (const t of ts) sec.append(toolCatRow(t));
+      list.append(sec);
+    }
+  };
+  q.oninput = draw;
+  draw();
+  box.append(page);
+}
+
+function toolCatRow(t) {
+  const row = el("div", "rh-row tc-row");
+  const top = el("button", "rh-top tc-top");
+  top.type = "button";
+  top.setAttribute("aria-expanded", "false");
+  const [glyph, color] = TOOL_GLYPH[t.kind] || TOOL_GLYPH.function;
+  const k = el("span", "tc-kind", glyph || "");
+  if (!glyph) k.append(t.kind === "agent" ? agentMark("tc-mark") : lucideIcon("plug"));
+  k.style.setProperty("--tk", `var(${color})`);
+  k.title = TOOL_KIND_WORDS[t.kind] || t.kind;
+  const name = el("span", "rh-name mono", t.name);
+  const desc = el("span", "tc-desc", t.description || "");
+  desc.title = t.description || "";
+  const agents = [...new Set(t.uses.map(u => u.agent))];
+  const used = el("span", "rh-used", agents.join(", "));
+  const caret = el("span", "rh-caret", "▸");
+  top.append(k, name, desc, used, caret);
+  const body = el("div", "rh-body tc-body");
+  body.hidden = true;
+  top.onclick = () => {
+    body.hidden = !body.hidden;
+    caret.textContent = body.hidden ? "▸" : "▾";
+    top.setAttribute("aria-expanded", String(!body.hidden));
+    if (!body.hidden && !body.childNodes.length) toolCatDetail(body, t);
+  };
+  row.append(top, body);
+  return row;
+}
+
+function toolCatDetail(body, t) {
+  const sect = (title) => { const s = el("div", "tc-sect"); s.append(el("div", "tc-h", title)); body.append(s); return s; };
+  const flags = el("div", "tc-flags");
+  flags.append(el("span", "tc-flag", TOOL_KIND_WORDS[t.kind] || t.kind));
+  if (t.readonly) flags.append(el("span", "tc-flag", "readonly"));
+  if (t.destructive) flags.append(el("span", "tc-flag warn", "destructive"));
+  if (t.approval && t.approval !== "never") flags.append(el("span", "tc-flag warn", `approval: ${t.approval}`));
+  if (t.target) flags.append(el("span", "tc-where mono", t.target));
+  body.append(flags);
+  const a = sect("Arguments");
+  const props = (t.args && t.args.properties) || {};
+  const req = new Set((t.args && t.args.required) || []);
+  if (t.kind === "mcp") a.append(el("div", "note", "An MCP server's tools are listed when it connects."));
+  else if (!Object.keys(props).length) a.append(el("div", "note", "none"));
+  else {
+    const tb = el("div", "tc-args");
+    for (const [n, sp] of Object.entries(props)) {
+      const type = sp.type || (sp.anyOf || []).map(x => x.type).filter(Boolean).join(" | ") || (sp.enum ? "enum" : "any");
+      tb.append(el("span", "mono tc-arg", n + (req.has(n) ? "" : "?")), el("span", "tc-type mono", type),
+                el("span", "tc-adesc", sp.description || ""));
+    }
+    a.append(tb);
+  }
+  const n = new Set(t.uses.map(x => x.agent)).size;
+  const u = sect(`Used by ${n} agent${n === 1 ? "" : "s"}` + (t.uses.length > n ? `, in ${t.uses.length} places` : ""));
+  for (const use of t.uses) {
+    const line = el("div", "tc-use");
+    const go = el("button", "tc-go", use.agent);
+    go.type = "button";
+    go.prepend(agentMark("tc-mark"));
+    go.title = "Open this agent on the canvas";
+    go.onclick = () => jumpToAgent(use.graph, use.key);
+    line.append(go, el("span", "tc-path", [use.graph, ...use.path].join(" › ") + (use.via ? ` · through ${use.via}` : "")),
+                el("span", "tc-pol " + use.policy, use.policy));
+    u.append(line);
+  }
+  if (t.code) {
+    const c = el("details", "tc-code");
+    c.append(el("summary", null, "Code"), el("pre", "mono", t.code));
+    body.append(c);
+  }
+}
+
+/* The flow tab, on the graph that holds the agent, with the path to it open. */
+function jumpToAgent(graphName, key) {
+  switchTab("flow");
+  closeToolView(false);
+  const g = (state.ir.graphs || []).find(x => x.name === graphName);
+  if (g && state.graph !== g) {
+    state.graph = g;
+    $("#graph-pick").value = g.name;
+    state.sel = state.dfFocus = null;
+    state.expanded.clear();
+    render();
+  }
+  revealAgent(key);
 }
 
 function jumpToOp(graph, node) {

@@ -2236,6 +2236,8 @@ function agentCard(card, it) {
     if (tools.length > TOOL_SHOWN) {
       const more = el("div", "ag2-more", `+${tools.length - shown.length} more · all in Tools ↗`);
       more.title = tools.slice(shown.length).map(t => t.name).join(", ");
+      more.onclick = (ev) => { ev.stopPropagation(); resView = "tools"; switchTab("resources"); };
+      more.ondblclick = (ev) => ev.stopPropagation();
       list.append(more);
     }
     body.append(list);
