@@ -6173,3 +6173,62 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
 .ev-hist .chip { margin: 0; min-width: 64px; text-align: center; }
 .ev-hist .note { margin-left: auto; }
 @media (max-width: 900px) { .ev-svcs li { grid-template-columns: 1fr; } .ev-stages { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* ── the Flow screen's flows rail (flowrail.js): every flow in view, its
+   size and traffic at a glance; [ or the canvas bar's first button hides it */
+body { --flowrail-w: 310px; }
+.flowrail { width: var(--flowrail-w); flex: none; display: none; flex-direction: column; min-height: 0;
+  position: relative; background: var(--surface); border-right: 1px solid var(--border); z-index: 15; }
+body[data-tab="flow"]:not(.flowrail-off):not(.pmode) .flowrail { display: flex; }
+body[data-tab="flow"]:not(.flowrail-off):not(.pmode) .canvasbar { left: calc(var(--rail-w) + var(--flowrail-w) + 16px); }
+.flowrail .frhead { padding: 10px 12px 6px; display: flex; flex-direction: column; gap: 8px; }
+.flowrail .frfind { width: 100%; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--well); color: var(--text); font: 13px var(--font); }
+.flowrail .frsort { display: flex; gap: 4px; flex-wrap: wrap; }
+.flowrail .frsort button { height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border);
+  background: none; color: var(--text-2); font: 500 11.5px var(--font); cursor: pointer; }
+.flowrail .frsort button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+.flowrail .frcols, .flowrail .frrow { display: grid; grid-template-columns: minmax(0, 1fr) 44px 56px 34px; gap: 8px; align-items: center; }
+.flowrail .frcols { padding: 4px 12px 4px 15px; color: var(--text-3); font: 600 10px var(--font);
+  letter-spacing: .06em; text-transform: uppercase; }
+.flowrail .frcols span:last-child { text-align: right; }
+.flowrail .frrows { flex: 1; overflow-y: auto; padding-bottom: 8px; }
+.flowrail .frrow { width: 100%; padding: 7px 12px; border: 0; border-left: 3px solid transparent; background: none;
+  color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.flowrail .frrow:hover { background: var(--surface-2); }
+.flowrail .frrow.current { background: var(--accent-soft); border-left-color: var(--accent); }
+.flowrail .frname { display: block; font: 600 12.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flowrail .frsub { display: block; color: var(--text-3); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flowrail .frops { display: flex; flex-direction: column; gap: 3px; color: var(--text-3); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.flowrail .frbar { height: 5px; border-radius: 3px; background: var(--accent); min-width: 3px; }
+.flowrail .frruns { display: flex; flex-direction: column; gap: 3px; color: var(--text-3); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.flowrail .frspark { display: flex; align-items: flex-end; gap: 2px; height: 12px; }
+.flowrail .frspark:empty { height: 0; }
+.flowrail .frspark i { flex: 1; min-height: 1px; border-radius: 1px; background: var(--flow-accent, var(--accent)); opacity: .85; }
+.flowrail .frerr { text-align: right; font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.flowrail .frerr.bad { color: var(--err); font-weight: 600; }
+.flowrail .frnone { padding: 12px 15px; color: var(--text-3); font-size: 12px; }
+/* the floating frame: a glass card beside the rail, the canvas under it */
+body.floatframe:not(.ax-focus) .flowrail {
+  --glass-tint: var(--glass-frost); --glass-blur: var(--glass-blur-frost);
+  margin: 0 auto 0 var(--glass-gap); border-right: none; border-radius: var(--glass-r); overflow: hidden; z-index: 20;
+  background: var(--glass-sheen), var(--glass-tint);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: inset 0 0 0 1px var(--glass-edge), inset 0 1px 0 var(--glass-rim), 0 0 0 .5px var(--glass-outline), var(--glass-shadow);
+}
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) .flowrail {
+  background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none;
+  box-shadow: inset 0 0 0 1px var(--float-edge), var(--sh-2);
+}
+body.floatframe:not(.ax-focus)[data-tab="flow"]:not(.flowrail-off):not(.pmode) .rail { margin-right: 0; }
+body.floatframe:not(.ax-focus)[data-tab="flow"]:not(.flowrail-off):not(.pmode) .canvasbar {
+  left: calc(var(--rail-w) + var(--flowrail-w) + 4 * var(--glass-gap)); }
+body:not(.flowrail-off)[data-tab="flow"] .crumbbtn.graphname { pointer-events: none; }
+body:not(.flowrail-off)[data-tab="flow"] .crumbbtn.graphname::after { display: none; }
+@media (max-width: 760px) {
+  .flowrail, body.floatframe:not(.ax-focus) .flowrail { position: fixed; left: 0; top: 0; bottom: 0; margin: 0;
+    width: min(310px, 86vw); border-radius: 0; z-index: 70; box-shadow: var(--sh-3); }
+  body[data-tab="flow"]:not(.flowrail-off):not(.pmode) .canvasbar,
+  body.floatframe:not(.ax-focus)[data-tab="flow"]:not(.flowrail-off):not(.pmode) .canvasbar { left: 12px; }
+}

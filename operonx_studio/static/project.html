@@ -23,7 +23,7 @@
       <span class="live" id="live" role="status" title="Watching the project's code: the studio redraws when it changes"><span class="dot"></span><span id="live-text">Live</span></span>
       <div id="switcher" class="popover" role="menu" hidden></div>
       <span class="sep" aria-hidden="true">/</span>
-      <button id="btn-project" class="crumbbtn graphname" aria-haspopup="menu" title="Operons, services and jobs of this project"><span id="graph-name">…</span></button>
+      <button id="btn-project" class="crumbbtn graphname" aria-haspopup="menu" title="Flows"><span id="graph-name">…</span></button>
       <div id="pmenu" class="popover" role="menu" hidden></div>
       <select id="graph-pick" title="graph" hidden></select>
     </nav>
@@ -73,6 +73,8 @@
         <button data-pback type="button" class="pback" title="Back to the studio"><i data-icon="back"></i><span>Studio</span></button>
       </nav>
     </aside>
+    <!-- the Flow screen's flows, always in view; [ hides it (flowrail.js) -->
+    <aside id="flowrail" class="flowrail" aria-label="Flows"></aside>
     <div id="stage">
       <div id="world">
         <div id="plane">
@@ -108,6 +110,8 @@
     <!-- the canvas's own controls: they float over the canvas wherever it
          is showing (the Flow tab, or a run's workflow view) -->
     <div id="canvasbar" class="canvasbar" role="toolbar" aria-label="Canvas">
+      <button id="btn-flowrail" class="iconbtn" aria-label="Show the flows" aria-pressed="true" title="Flows panel  ( [ )"><i data-icon="panelleft"></i></button>
+      <span class="tsep" aria-hidden="true"></span>
       <div class="viewseg" role="radiogroup" aria-label="Canvas view">
         <button type="button" data-view="workflow" role="radio" title="Workflow — what runs before what  ( D )"><span class="vlong">Workflow</span><span class="vshort">Flow</span></button>
         <button type="button" data-view="data" role="radio" title="Data Flow — what each op reads and feeds  ( D )"><span class="vlong">Data Flow</span><span class="vshort">Data</span></button>
@@ -172,6 +176,7 @@
 <script src="/static/shell.js"></script>
 <script src="/static/motion.js"></script>
 <script src="/static/jobs.js"></script>
+<script src="/static/flowrail.js"></script>
 <script src="/static/runview.js"></script>
 <script src="/static/runs.js"></script>
 <script src="/static/monitor.js"></script>

@@ -1,56 +1,20 @@
 /* operonx studio — the project menu and the Jobs screen. Split from
  * studio.js, same bundle, same order. */
 
-/* ── the project menu: Operons · Services · Jobs ───────────────────────
- * The three lists the application layer declares (operonx.app), from
- * the /ir payload. An Operon opens in the Flow tab; a Service opens the
- * graph it serves; a Job opens the Jobs tab on that job. */
+/* ── the flow crumb's menu: the flows, when the flows rail is hidden ────
+ * Services are a flow's routes and jobs have the Jobs screen, so the
+ * menu lists flows only, as the rail does. */
 
 function renderProjectMenu() {
   const box = $("#pmenu");
-  const ir = state.ir || {};
-  const row = (name, sub, onclick, cls) => ({name, sub, current: cls === "sel",
-    pick: () => { box.hidden = true; $("#btn-project").setAttribute("aria-expanded", "false"); onclick(); }});
-  const openGraph = (g) => { state.graph = g; $("#graph-pick").value = g.name; switchTab("flow"); render(); renderFlowInfo(); };
-  // a service that serves a listed flow is one of that flow's routes: it
-  // folds into the flow's row (found by its name or path), not a row of its own
-  const graphOf = (sv) => {
-    if (!sv.graph) return null;
-    const base = sv.graph.split(":").pop();
-    const names = [base, ...(sv.variants || []).map(v => `${base}[${v}]`)];
-    return (ir.graphs || []).find(g => names.includes(g.name)) || null;
-  };
-  const jobNames = new Set((ir.jobs || []).map(j => j.name));
-  const routes = new Map();
-  const loose = [];
-  for (const sv of ir.services || ir.serves || []) {
-    const g = graphOf(sv);
-    if (g) { if (!routes.has(g.name)) routes.set(g.name, []); routes.get(g.name).push(sv); }
-    // a job's schedule door is the job itself, listed under Jobs
-    else if (!(sv.kind === "schedule" && jobNames.has(sv.name))) loose.push(sv);
-  }
-  const operons = (ir.graphs || []).map(g => {
-    const mine = routes.get(g.name) || [];
-    const r = row(g.name, `${g.nodes.length} op${g.nodes.length === 1 ? "" : "s"}` +
-      (g.variants ? ` · ${g.variants.length} routes` : mine.length ? ` · ${mine.map(sv => sv.path || sv.name).join(", ")}` : ""),
-      () => openGraph(g), state.graph && state.graph.name === g.name ? "sel" : "");
-    r.find = mine.map(sv => `${sv.name || ""} ${sv.path || ""}`).join(" ");
-    if (mine.length) r.title = mine.map(sv => `${sv.name || ""}  ${sv.kind} ${sv.path || ""}`).join("\n");
-    return r;
-  });
-  const services = loose.map(sv => {
-    const meta = `${sv.kind} ${sv.path || ""}${sv.port ? " :" + sv.port : ""}${sv.session ? " · " + sv.session : ""}`;
-    return row(sv.name || sv.path, meta, () =>
-      toast(sv.app ? `${sv.name}: an ASGI app, not a graph` : `${sv.name}: graph ${sv.graph} is not listed under [[graph]]`));
-  });
-  const jobs = (ir.jobs || []).map(j => row(j.name,
-    `${jobKind(j)}${j.schedule ? " · " + j.schedule : ""}`,
-    () => { state.jobSel = j.name; switchTab("jobs"); }));
-  menuList(box, {placeholder: "Find an operon, service or job", sections: [
-    {title: "Operons", icon: "graph", rows: operons},
-    ...(services.length ? [{title: "Services", icon: "server", rows: services}] : []),
-    {title: "Jobs", icon: "clock", rows: jobs},
-  ]});
+  const close = () => { box.hidden = true; $("#btn-project").setAttribute("aria-expanded", "false"); };
+  // the flows rail's rows, for when the rail is hidden (flowrail.js)
+  const rows = window.FlowRail.sorted().map(it => ({
+    name: it.g.name, sub: it.sub, find: it.find, title: it.title,
+    current: !!(state.graph && state.graph.name === it.g.name),
+    pick: () => { close(); window.FlowRail.open(it.g.name); },
+  }));
+  menuList(box, {placeholder: "Find a flow or route", sections: [{title: "Flows", icon: "graph", rows}]});
 }
 $("#btn-project").onclick = (ev) => {
   ev.stopPropagation();
