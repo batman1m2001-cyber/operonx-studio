@@ -534,16 +534,6 @@ function toolFlags(tl) {
   return flags;
 }
 
-function agentToolsLine(n) {
-  const tools = (n.agent && n.agent.tools) || [];
-  if (!tools.length) return null;
-  const names = tools.map(tl => tl.name);
-  const shown = names.slice(0, 3).join(" · ") + (names.length > 3 ? ` +${names.length - 3}` : "");
-  const row = el("div", "agtools mono", "⚒ " + shown);
-  row.title = `${n.agent.name || "agent"} can call: ${names.join(", ")}`;
-  return row;
-}
-
 function toolsSection(n) {
   // an agent's tool: what it is, and what the agent's policy lets it do
   if (n.part === "tool" && n.tool) {

@@ -1,6 +1,6 @@
 # One card per agent, one list of tools (AGENTOP_REDESIGN_PLAN)
 
-Status: A1 built (2026-11-12): the card (#168). A2 built: agent chips (#169). A3 built: the Tools catalogue; args are read from `ToolSpec.params_schema` in the studio's extract.py, with no operonx change. A4 open.
+Status: A1 built (2026-11-12): the card (#168). A2 built: agent chips (#169). A3 built: the Tools catalogue (#170); args are read from `ToolSpec.params_schema` in the studio's extract.py, with no operonx change. A4 built: the inspector cleanup (`agentToolsLine` removed; a selected tool row still shows "Tool of X"). All phases built.
 
 Owner's brief:
 1. Today's AgentOp is ugly.
