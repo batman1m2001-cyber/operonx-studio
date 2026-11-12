@@ -11,29 +11,44 @@ function renderProjectMenu() {
   const ir = state.ir || {};
   const row = (name, sub, onclick, cls) => ({name, sub, current: cls === "sel",
     pick: () => { box.hidden = true; $("#btn-project").setAttribute("aria-expanded", "false"); onclick(); }});
-  const operons = (ir.graphs || []).map(g => row(g.name, `${g.nodes.length} op${g.nodes.length === 1 ? "" : "s"}` +
-    (g.variants ? ` · ${g.variants.length} routes` : ""), () => {
-    state.graph = g; $("#graph-pick").value = g.name; switchTab("flow"); render(); renderFlowInfo();
-  }, state.graph && state.graph.name === g.name ? "sel" : ""));
-  const services = (ir.services || ir.serves || []).map(sv => {
-    const variants = sv.variants || [];
-    const base = sv.graph ? sv.graph.split(":").pop() : "";
-    const meta = `${sv.kind} ${sv.path || ""}${sv.port ? " :" + sv.port : ""}${sv.session ? " · " + sv.session : ""}` +
-      (variants.length ? ` · ${variants.length} variants` : "");
-    return row(sv.name || sv.path, meta, () => {
-      // a door's variants are one graph, named as the door's graph is
-      const names = [base, ...variants.map(v => `${base}[${v}]`)];
-      const target = sv.graph ? (ir.graphs || []).find(g => names.includes(g.name)) : null;
-      if (target) { state.graph = target; $("#graph-pick").value = target.name; switchTab("flow"); render(); renderFlowInfo(); }
-      else toast(sv.app ? `${sv.name}: an ASGI app, not a graph` : `${sv.name}: graph ${sv.graph} is not listed under [[graph]]`);
-    });
+  const openGraph = (g) => { state.graph = g; $("#graph-pick").value = g.name; switchTab("flow"); render(); renderFlowInfo(); };
+  // a service that serves a listed flow is one of that flow's routes: it
+  // folds into the flow's row (found by its name or path), not a row of its own
+  const graphOf = (sv) => {
+    if (!sv.graph) return null;
+    const base = sv.graph.split(":").pop();
+    const names = [base, ...(sv.variants || []).map(v => `${base}[${v}]`)];
+    return (ir.graphs || []).find(g => names.includes(g.name)) || null;
+  };
+  const jobNames = new Set((ir.jobs || []).map(j => j.name));
+  const routes = new Map();
+  const loose = [];
+  for (const sv of ir.services || ir.serves || []) {
+    const g = graphOf(sv);
+    if (g) { if (!routes.has(g.name)) routes.set(g.name, []); routes.get(g.name).push(sv); }
+    // a job's schedule door is the job itself, listed under Jobs
+    else if (!(sv.kind === "schedule" && jobNames.has(sv.name))) loose.push(sv);
+  }
+  const operons = (ir.graphs || []).map(g => {
+    const mine = routes.get(g.name) || [];
+    const r = row(g.name, `${g.nodes.length} op${g.nodes.length === 1 ? "" : "s"}` +
+      (g.variants ? ` · ${g.variants.length} routes` : mine.length ? ` · ${mine.map(sv => sv.path || sv.name).join(", ")}` : ""),
+      () => openGraph(g), state.graph && state.graph.name === g.name ? "sel" : "");
+    r.find = mine.map(sv => `${sv.name || ""} ${sv.path || ""}`).join(" ");
+    if (mine.length) r.title = mine.map(sv => `${sv.name || ""}  ${sv.kind} ${sv.path || ""}`).join("\n");
+    return r;
+  });
+  const services = loose.map(sv => {
+    const meta = `${sv.kind} ${sv.path || ""}${sv.port ? " :" + sv.port : ""}${sv.session ? " · " + sv.session : ""}`;
+    return row(sv.name || sv.path, meta, () =>
+      toast(sv.app ? `${sv.name}: an ASGI app, not a graph` : `${sv.name}: graph ${sv.graph} is not listed under [[graph]]`));
   });
   const jobs = (ir.jobs || []).map(j => row(j.name,
     `${jobKind(j)}${j.schedule ? " · " + j.schedule : ""}`,
     () => { state.jobSel = j.name; switchTab("jobs"); }));
   menuList(box, {placeholder: "Find an operon, service or job", sections: [
     {title: "Operons", icon: "graph", rows: operons},
-    {title: "Services", icon: "server", rows: services},
+    ...(services.length ? [{title: "Services", icon: "server", rows: services}] : []),
     {title: "Jobs", icon: "clock", rows: jobs},
   ]});
 }
