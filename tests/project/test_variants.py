@@ -154,9 +154,37 @@ def test_a_manifest_that_points_at_an_app_loads_with_no_graphs_of_its_own(declar
 
 def test_the_graphs_and_doors_come_from_the_application(declared):
     ir = extract_project(Manifest.load(declared))
-    assert [g["name"] for g in ir["graphs"]] == ["door[loud]", "door[quiet]"]
+    # a door's variants are ONE graph, named as its runs are, its variants listed
+    assert [g["name"] for g in ir["graphs"]] == ["door"]
+    assert ir["graphs"][0]["variants"] == ["loud", "quiet"]
     greet = ir["services"][0]
     assert greet["variants"] == ["loud", "quiet"]
     # the doors are the graph's own ops, which say what they are
     roles = {n["name"]: n.get("serve_role") for n in ir["graphs"][0]["nodes"]}
     assert roles["src"] == "ingress" and roles["out"] == "egress" and roles["loud"] is None
+
+
+def test_the_anchor_walk_never_enters_a_skipped_folder(tmp_path, monkeypatch):
+    """A project's .operonx holds a folder per run (2 million on mr-finance):
+    the walk is pruned, so it is never listed, let alone read."""
+    from operonx_studio_toolkit import extract as X
+
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "flow.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / ".operonx" / "runs" / "r1").mkdir(parents=True)
+    (tmp_path / ".operonx" / "runs" / "r1" / "junk.py").write_text("x = 1\n", encoding="utf-8")
+    import os
+
+    entered = []
+    real = os.walk
+    monkeypatch.setattr(os, "walk", lambda top, *a, **k: ((entered.append(d) or (d, dn, fn)) for d, dn, fn in real(top, *a, **k)))
+    assert X._python_files(tmp_path) == [tmp_path / "pkg" / "flow.py"]
+    assert not any(".operonx" in d for d in entered)
+
+
+def test_the_canvas_payload_keeps_a_doors_routes(declared):
+    """The menu labels a door "· N routes" from the placed graph."""
+    from operonx_studio.app import _placed
+
+    ir = extract_project(Manifest.load(declared))
+    assert _placed(ir["graphs"][0])["variants"] == ["loud", "quiet"]

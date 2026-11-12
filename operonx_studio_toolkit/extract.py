@@ -199,6 +199,22 @@ def _anchors_for_module(path: Path) -> Dict[str, Dict[str, int]]:
     return out
 
 
+def _python_files(root: Path) -> List[Path]:
+    """Every ``.py`` under *root*, sorted, never entering a skipped folder.
+
+    Pruned while walking, not filtered after: ``rglob`` visits a skipped
+    folder in full before its files are dropped, and a project's
+    ``.operonx`` holds a folder per run — on mr-finance 2 million folders,
+    100 s of a cold extraction for nothing."""
+    import os
+
+    found: List[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        found.extend(Path(dirpath) / f for f in filenames if f.endswith(".py"))
+    return sorted(found)
+
+
 def collect_anchors(
     root: Path, src: Sequence[str] = (".",)
 ) -> Dict[str, Dict[str, Dict[str, int]]]:
@@ -211,9 +227,7 @@ def collect_anchors(
     """
     roots = [(root / entry).resolve() for entry in (src or (".",))]
     out: Dict[str, Dict[str, Dict[str, int]]] = {}
-    for py in sorted(root.rglob("*.py")):
-        if any(part in SKIP_DIRS for part in py.parts):
-            continue
+    for py in _python_files(root):
         found = _anchors_for_module(py)
         if not found:
             continue
@@ -1035,38 +1049,72 @@ def extract_application(manifest: Manifest) -> Dict[str, Any]:
 def graph_specs(manifest: Manifest) -> List[GraphSpec]:
     """The graphs to draw. From the file when it declares them; from the
     application object when ``[project] app`` points at one — its
-    ``graphs`` carry the objects and each variant's bound values, so
-    nothing is re-parsed and nothing can drift from what production runs.
-    """
+    ``graphs`` carry the objects, so nothing is re-parsed and nothing can
+    drift from what production runs. A door's variants are one graph."""
+    return [spec for spec, _ in _specs_with_variants(manifest)]
+
+
+def _specs_with_variants(manifest: Manifest) -> List[Tuple[GraphSpec, List[Tuple[str, GraphSpec]]]]:
+    """Each graph to draw, with its variants as ``(name, bound spec)``.
+
+    The application lists a door with variants once per variant
+    (``pages_flow[dashboard]``, ``pages_flow[overview]`` …): the same graph,
+    each copy with one route bound. Drawn that way a project of 14 flows
+    shows 67, and the IR carries every copy. Here a door is ONE graph,
+    named as its runs are (``pages_flow``), built unbound so its switch
+    shows every route as the condition it is; the variants stay listed,
+    and a bound one is drawn instead only if the unbound build fails."""
     if not manifest.app:
-        return list(manifest.graphs)
+        return [(g, []) for g in manifest.graphs]
     from operonx.app import Application
 
     app = Application.load(manifest.root / "operonx.toml")
     app.bootstrap()
-    own = {g.name for g in manifest.graphs}
-    specs = list(manifest.graphs)
+    seen = {g.name for g in manifest.graphs}
+    out: List[Tuple[GraphSpec, List[Tuple[str, GraphSpec]]]] = [(g, []) for g in manifest.graphs]
+    doors: Dict[str, List[Tuple[str, GraphSpec]]] = {}
     for ref in app.graphs:
-        if ref.name in own:
-            continue
-        specs.append(
-            GraphSpec(
-                name=ref.name, entry=ref.entry, bind=dict(ref.bind), inputs={},
-                src=manifest.src, obj=ref.graph,
-            )
+        bound = GraphSpec(
+            name=ref.name, entry=ref.entry, bind=dict(ref.bind), inputs={},
+            src=manifest.src, obj=ref.graph,
         )
-    return specs
+        base, bracket, rest = ref.name.partition("[")
+        if bracket and rest.endswith("]") and ref.bind:
+            if base not in doors:
+                doors[base] = []
+                if base not in seen:
+                    seen.add(base)
+                    out.append((GraphSpec(name=base, entry=ref.entry, bind={}, inputs={},
+                                          src=manifest.src, obj=ref.graph), doors[base]))
+            doors[base].append((rest[:-1], bound))
+        elif ref.name not in seen:
+            seen.add(ref.name)
+            out.append((bound, []))
+    return out
 
 
 def extract_project(manifest: Manifest) -> Dict[str, Any]:
     """The whole project as one IR document."""
     anchors = collect_anchors(manifest.root, manifest.src)
     application = extract_application(manifest)
+    graphs = []
+    for spec, variants in _specs_with_variants(manifest):
+        try:
+            g = extract_graph(spec, manifest.root, anchors)
+        except Exception:  # noqa: BLE001 — an unbound door that cannot build is drawn bound
+            if not variants:
+                raise
+            first = variants[0][1]
+            g = extract_graph(GraphSpec(name=spec.name, entry=first.entry, bind=first.bind, inputs={},
+                                        src=first.src, obj=first.obj), manifest.root, anchors)
+        if variants:
+            g["variants"] = [name for name, _ in variants]
+        graphs.append(g)
     return {
         "ir_version": IR_VERSION,
         "project": manifest.name,
         "description": manifest.description,
-        "graphs": [extract_graph(spec, manifest.root, anchors) for spec in graph_specs(manifest)],
+        "graphs": graphs,
         # What puts work into each graph. Declared rather than derived —
         # the hop from a socket handler to `engine.start()` is not an op
         # and cannot be discovered from the graph. Without it a served

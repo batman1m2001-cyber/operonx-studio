@@ -668,7 +668,7 @@ async function load(first) {
   const current = state.graph && state.graph.name;
   pick.textContent = "";
   for (const g of data.graphs) {
-    const opt = el("option", null, `${g.name} (${g.nodes.length})`);
+    const opt = el("option", null, `${g.name} (${g.nodes.length}${g.variants ? ` · ${g.variants.length} routes` : ""})`);
     opt.value = g.name;
     pick.append(opt);
   }
