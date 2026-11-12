@@ -573,9 +573,10 @@ const ProjectMode = (() => {
   MOBILE.addEventListener("change", () => { if (on) drawSide(); });
 
   registerPane("project", {el: box, show});
-  /* a file on the Files page, its folders open (the Board's plan docs) */
+  /* a file (or "dir/") on the Files page, its folders open (the Board's plan docs) */
   function file(path) {
     v.file = path;
+    v.fonly = false;
     const parts = path.split("/");
     for (let i = 1; i < parts.length; i++) v.fopen[parts.slice(0, i).join("/") + "/"] = 1;
     go("files");
