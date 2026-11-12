@@ -6234,3 +6234,11 @@ body:not(.flowrail-off)[data-tab="flow"] .crumbbtn.graphname::after { display: n
   body[data-tab="flow"]:not(.flowrail-off):not(.pmode) .canvasbar,
   body.floatframe:not(.ax-focus)[data-tab="flow"]:not(.flowrail-off):not(.pmode) .canvasbar { left: 12px; }
 }
+
+/* the side panel peeking: hidden, but an op was picked — its Inspect
+   floats over the canvas, which keeps its layout (fixed: not docked) */
+body.sidepeek #sidebar, body.floatframe:not(.ax-focus).sidepeek #sidebar {
+  position: fixed; z-index: 60; top: calc(var(--bar-h) + 2 * var(--glass-gap, 8px)); right: var(--glass-gap, 8px);
+  bottom: var(--glass-gap, 8px); border-radius: var(--glass-r, 14px); overflow: hidden; box-shadow: var(--sh-3);
+}
+body.sidepeek #dragbar { display: none !important; }

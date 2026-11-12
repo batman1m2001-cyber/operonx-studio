@@ -155,6 +155,7 @@ function inspectServe(serve) {
   panel.classList.add("open");
   // (on a phone the panel is a sheet that only a selection opens)
   if (MOBILE.matches || (panelWanted() && recall("sideTab", "assistant") !== "inspect")) showSide("inspect");
+  else if (!panelWanted()) peekSide("inspect");
   panel.textContent = "";
   panel.append(el("h3", null, `serve · ${serve.kind}`));
   panel.append(el("div", "kind mono", serve.path || ""));

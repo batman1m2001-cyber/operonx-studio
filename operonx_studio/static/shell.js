@@ -57,6 +57,7 @@ function coverWhileFresh(elm) {
 }
 
 function switchTab(name, opts) {
+  if (typeof unpeek === "function") unpeek();
   // the Board lives in Project mode: its Board page (docs/brd/board.md)
   if (name === "board") { switchTab("project", {page: "board"}); return; }
   // the playground runs a service's code: not a viewer's (D11); every way in stops here
@@ -142,15 +143,21 @@ const WIDE = window.matchMedia("(min-width: 1100px)");
 const panelWanted = () => recall(panelKey(), WIDE.matches && !DENSE.has(state.tab));
 const inspectable = () => state.tab === "flow" || state.tab === "traces";
 
+/* A hidden panel still answers a click: picking an op shows its Inspect
+ * over the canvas (a peek) until the op is let go — Esc, ✕, the empty
+ * canvas, another screen — and the panel's own hidden choice stays. */
+let peek = null;
+
 function panelState() {
-  const tab = recall("sideTab", "assistant");
-  const on = panelWanted() && !(tab === "inspect" && !inspectable());
+  const tab = peek || recall("sideTab", "assistant");
+  const on = (panelWanted() || !!peek) && !(tab === "inspect" && !inspectable());
   return {on, tab};
 }
 
 function applyPanels() {
   const {on, tab} = panelState();
   $("#sidebar").classList.toggle("off", !on);
+  document.body.classList.toggle("sidepeek", on && !!peek);
   $("#btn-right").classList.toggle("active", on);
   $("#btn-right").setAttribute("aria-pressed", String(on));
   for (const b of document.querySelectorAll("#sidetabs button[data-side]")) {
@@ -164,12 +171,24 @@ function applyPanels() {
   document.dispatchEvent(new CustomEvent("oxdock", {detail: {on: on && tab === "assistant", panel: on}}));
 }
 function showSide(tab) {
+  peek = null;
   store(panelKey(), true);
   store("sideTab", tab);
   applyPanels();
 }
 function hideSide() {
+  peek = null;
   store(panelKey(), false);
+  applyPanels();
+}
+function peekSide(tab) {
+  if (panelWanted()) { showSide(tab); return; }
+  peek = tab;
+  applyPanels();
+}
+function unpeek() {
+  if (!peek) return;
+  peek = null;
   applyPanels();
 }
 window.oxSide = {
