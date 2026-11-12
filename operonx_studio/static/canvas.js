@@ -1973,6 +1973,7 @@ function deselect() {
 /* Nothing selected: the panel belongs to the flow itself — what this
  * graph is, its doors, and the painted run if any. */
 function renderFlowInfo() {
+  if (window.FlowRail) window.FlowRail.render();   // the rail marks the flow on screen
   if (state.sel) return;
   // an execution is open in the run's tree: a code reload (the assistant
   // editing, say) must not wipe the panel the user is working in
@@ -3130,6 +3131,8 @@ function stageInset() {
   i.t = Math.max(0, bar.bottom - s.top);
   const rail = $("#rail");
   if (docked(rail)) i.l = Math.max(0, rail.getBoundingClientRect().right - s.left);
+  const flows = $("#flowrail");
+  if (docked(flows)) i.l = Math.max(i.l, flows.getBoundingClientRect().right - s.left);
   const side = $("#sidebar");
   if (docked(side) && !side.classList.contains("off")) i.r = Math.max(0, s.right - side.getBoundingClientRect().left);
   return i;
@@ -3250,6 +3253,6 @@ new ResizeObserver(() => flushCanvas()).observe($("#stage"));
     if (key !== last) { last = key; applyView(); }
   };
   const ro = new ResizeObserver(reinset);
-  for (const el of [$("header.bar"), $("#rail"), $("#sidebar")]) if (el) ro.observe(el);
+  for (const el of [$("header.bar"), $("#rail"), $("#flowrail"), $("#sidebar")]) if (el) ro.observe(el);
 }
 

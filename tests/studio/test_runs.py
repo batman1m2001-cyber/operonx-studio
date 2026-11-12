@@ -649,3 +649,21 @@ def test_settings_shows_the_projects_retry_as_written(client, project):
         "initial": 1,
         "transient": ["crm:Throttled"],
     }
+
+
+# -- the Flow screen's flows rail ----------------------------------------------------
+
+
+def test_flow_stats_count_runs_errors_and_days_per_flow(client, project):
+    _seed(project)
+    pid = _open(client, project)
+    body = client.get(f"/api/p/{pid}/flows/stats", params={"days": 7}).json()
+    assert body["days"] == 7
+    # inside the week: call-new (today) and play-old (3 d); call-old is 20 d, item-old 400 d
+    flow = body["flows"]["flow"]
+    assert flow["runs"] == 2 and flow["errors"] == 0
+    assert len(flow["daily"]) == 7 and sum(flow["daily"]) == 2 and flow["daily"][-1] == 1
+    assert flow["avg_ms"] == 10
+    wide = client.get(f"/api/p/{pid}/flows/stats", params={"days": 30}).json()["flows"]["flow"]
+    assert wide["runs"] == 3 and wide["errors"] == 1
+    assert client.get("/api/p/nope/flows/stats").status_code == 404

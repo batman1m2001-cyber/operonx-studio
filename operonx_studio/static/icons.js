@@ -19,6 +19,7 @@ const Icons = (() => {
     fold: '<path d="m7 20 5-5 5 5M7 4l5 5 5-5"/>',
     help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.3-2.5 3.9"/><path d="M12 17.2h.01"/>',
     panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
+    panelleft: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
     chevron: '<path d="m6 9 6 6 6-6"/>',
     right: '<path d="m9 6 6 6-6 6"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',

@@ -2615,6 +2615,55 @@ def build_studio_app(recents: Optional[Recents] = None):
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
+    # The Flow screen's rail: each flow's runs over the last days. A file
+    # store refreshes its index by walking every run folder (85 s on a
+    # .operonx of 688k runs), so the rail reads the index as it stands and
+    # a background thread refreshes it at most every 10 minutes.
+    flow_stats_cache: Dict[Tuple[str, int], Tuple[float, Dict[str, Any]]] = {}
+    flow_index_refresh: Dict[int, float] = {}
+
+    def _flow_groups(store: Any, where: Any) -> List[Dict[str, Any]]:
+        index = getattr(store, "index", None)
+        if index is not None and hasattr(index, "groups") and hasattr(store, "refresh"):
+            sid = id(store)
+            if time.time() - flow_index_refresh.get(sid, 0.0) > 600:
+                flow_index_refresh[sid] = time.time()
+                threading.Thread(target=store.refresh, daemon=True, name="flow-stats-refresh").start()
+            return index.groups(where, ("workflow",))
+        return store.groups(where, by=["workflow"])
+
+    @app.get("/api/p/{pid}/flows/stats")
+    def flow_stats(pid: str, days: int = 7) -> JSONResponse:
+        """Per flow (a run's ``workflow``): runs, errors, mean duration and
+        runs per day, oldest day first — cached for a minute."""
+        pr = _runs(pid)
+        if pr is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        days = max(1, min(int(days), 30))
+        hit = flow_stats_cache.get((pid, days))
+        if hit and time.time() - hit[0] < 60:
+            return JSONResponse(hit[1])
+        start = time.time() - days * 86400
+        flows: Dict[str, Dict[str, Any]] = {}
+        try:
+            for i in range(days):
+                lo = start + i * 86400
+                for g in _flow_groups(pr.store, RunFilter(since=lo, until=lo + 86400)):
+                    f = flows.setdefault(g.get("workflow") or "?",
+                                         {"runs": 0, "errors": 0, "ms": 0.0, "daily": [0] * days})
+                    f["runs"] += g["runs"]
+                    f["errors"] += g["errors"]
+                    f["ms"] += g.get("duration_ms") or 0.0
+                    f["daily"][i] += g["runs"]
+        except Exception as exc:  # noqa: BLE001 — a store that cannot answer says so
+            return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=502)
+        for f in flows.values():
+            ms = f.pop("ms")
+            f["avg_ms"] = round(ms / f["runs"]) if f["runs"] else None
+        out = {"days": days, "flows": flows}
+        flow_stats_cache[(pid, days)] = (time.time(), out)
+        return JSONResponse(out)
+
     @app.get("/api/p/{pid}/runs/origins")
     def runs_origins(pid: str, since: str = "", until: str = "") -> JSONResponse:
         got = _origins(pid, since, until)
