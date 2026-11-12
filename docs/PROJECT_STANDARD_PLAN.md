@@ -1,14 +1,5 @@
 ---
 title: Every project up to the standard, by the assistant
-status: in_progress
-phases:
-  - {id: S1, title: The engine says what the standard is and where a project stands against it, status: done}
-  - {id: S2, title: The studio shows it and offers one action, status: done}
-  - {id: G1, title: Git per project — who commits, what the assistant may do, enforced, status: done}
-  - {id: S3, title: The assistant does it on clones; fix and retry until every project passes, status: done}
-  - {id: S4, title: The passing work lands in the real repos, status: in_progress}
-  - {id: S5, title: Live studio and the report, status: open}
-updated: 2026-10-23
 ---
 
 # Every project up to the standard, by the assistant

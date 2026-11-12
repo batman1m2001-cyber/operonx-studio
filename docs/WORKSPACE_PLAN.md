@@ -1,17 +1,6 @@
 ---
 title: One project, one execution model — the studio as a development workspace
-status: done
-phases:
-  - {id: T1, title: "A phase marked done is checked for how it was met: the plan's way, or the owner's call", status: done}
-  - {id: T2, title: "\"I haven't checked\" in the last reply sends the turn back once: check it, or say why it can't be", status: done}
-  - {id: T3, title: "on_base(command): any check run on the merge-base, not only failing tests", status: done}
-  - {id: W0, title: "Audit: where plans, board, checklist, questions, steps, runs and git disagree, and why", status: done}
-  - {id: W1, title: "Unified project execution model: card ↔ run ↔ steps ↔ evidence; board follows the assistant", status: done}
-  - {id: W2, title: "Terminal and Git: real sessions on the existing execution layer; git page linked to cards", status: done}
-  - {id: W3, title: "Environments: execution providers (local, SSH), secrets never reach the model", status: done}
-  - {id: W4, title: "Run, test, deploy: services, health, preview URL, staged deploy with approval for production", status: done}
 rows: []
-updated: 2026-11-01
 ---
 
 # One project, one execution model (WORKSPACE_PLAN)
