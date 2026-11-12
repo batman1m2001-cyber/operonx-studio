@@ -6069,3 +6069,19 @@ body.sidepeek #sidebar, body.floatframe:not(.ax-focus).sidepeek #sidebar {
   bottom: var(--glass-gap, 8px); border-radius: var(--glass-r, 14px); overflow: hidden; box-shadow: var(--sh-3);
 }
 body.sidepeek #dragbar { display: none !important; }
+
+/* Agent chips on a folded graph (AGENTOP_REDESIGN_PLAN A2): the agents
+   anywhere inside it, so a buried agent is seen from the top of the flow. */
+.node .agchips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
+#nodes.measuring .node .agchips { flex-wrap: nowrap; width: max-content !important; }
+.node .agchip {
+  display: inline-flex; align-items: center; gap: 4px; height: 20px; box-sizing: border-box; padding: 0 8px 0 4px;
+  border-radius: 999px; font-family: inherit; font-size: 11.5px; font-weight: 500; line-height: 1; cursor: pointer;
+  color: color-mix(in srgb, var(--k-llm) 80%, var(--text));
+  background: color-mix(in srgb, var(--k-llm) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--k-llm) 30%, transparent);
+}
+.node .agchip:hover { background: color-mix(in srgb, var(--k-llm) 22%, transparent); }
+.node .agchip.more { padding: 0 7px; cursor: default; color: var(--muted); }
+.node svg.agchip-mark { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; }
