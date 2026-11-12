@@ -115,7 +115,6 @@ const Hand = (() => {
     opts = opts || {};
     // a soft gesture gives way to one on the same element lit after it was asked for ("2/5" before "saved")
     if (opts.soft && (lastLit.get(target) || 0) > (opts.asked || 0)) return false;
-    if (typeof ProjectMode !== "undefined" && ProjectMode.reveal) ProjectMode.reveal(target);
     // a field left at its default sits in a folded list: unfold the list it is in
     if (/^field:/.test(target)) {
       for (const d of document.querySelectorAll("details:not([open])"))

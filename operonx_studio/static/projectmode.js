@@ -5,14 +5,14 @@
  * project's own icon bar, the assistant (Claude Code, working by the
  * project's conventions) takes the centre, and beside it the project's
  * state, read from the engine's one status document (`operonx-project api
- * {"op": "status"}`, D2) — what needs the owner, what is in progress, the
- * checklist, the plans, the last commits. The screen and the assistant
+ * {"op": "status"}`, D2) — what needs the owner and the cards in progress
+ * (docs/CYCLES_PLAN.md: what links to no card is not here). The screen and the assistant
  * read the same document, so they never disagree. The column refreshes
  * after every assistant turn, every 15 s while it shows, and when the tab
  * comes back.
  *
  *   Now        the conversation, and beside it where the project stands
- *   Board      docs/brd/board.md's cards (board.js), and below them every plan doc, phase by phase
+ *   Board      docs/brd/board.md's cards (board.js)
  *   Git        what changed, the branches, the history (git.js)
  *   Files      the project's files, read-only; what changed lately is marked
  *   Settings   the standard, and what the assistant may do with git
@@ -55,15 +55,6 @@ const ProjectMode = (() => {
   const tgt = (n, name) => { n.dataset.oxTarget = name; return n; };
   const ask = (text) => { if (window.oxAsk) window.oxAsk(text); if (MOBILE.matches) go("now"); };
 
-  function ago(iso) {
-    const t = Date.parse(iso || "");
-    if (!t) return "";
-    const s = Math.max(0, (Date.now() - t) / 1000);
-    if (s < 90) return "just now";
-    if (s < 3600) return `${Math.round(s / 60)} min ago`;
-    if (s < 86400 * 2) return `${Math.round(s / 3600)} h ago`;
-    return `${Math.round(s / 86400)} days ago`;
-  }
   function button(cls, text, onclick, title) {
     const b = el("button", cls, text);
     b.type = "button";
@@ -164,84 +155,14 @@ const ProjectMode = (() => {
     if (!items.length) { list.append(el("p", "pm-quiet", "Nothing is in progress.")); return list; }
     for (const w of items) {
       const row = button("pm-item pm-w", null, () => {
-        if (w.card && HAS_BOARD()) BoardView.open({card: w.card}); else go("board");
-      }, w.card ? `${w.path} · ${w.card}` : w.path);
-      row.dataset.key = `w:${w.card || w.path}`;
-      tgt(row, w.card ? `card:${w.card}` : `plan:${w.path}`);
+        if (HAS_BOARD()) BoardView.open({card: w.card}); else go("board");
+      }, `${w.path} · ${w.card}`);
+      row.dataset.key = `w:${w.card}`;
+      tgt(row, `card:${w.card}`);
       row.append(el("span", "pm-title", w.title), el("span", "pm-sentence", w.sentence));
       list.append(row);
     }
     return list;
-  }
-
-  function meter(done, total) {
-    const pct = total ? Math.round((100 * done) / total) : 0;
-    const m = el("div", "pm-meter");
-    m.setAttribute("role", "progressbar");
-    m.setAttribute("aria-valuenow", String(pct));
-    m.setAttribute("aria-valuemin", "0");
-    m.setAttribute("aria-valuemax", "100");
-    const fill = el("span");
-    fill.style.width = `${pct}%`;
-    m.append(fill);
-    return m;
-  }
-
-  function checklistBox(c) {
-    const wrap = el("div", "pm-check");
-    if (!c.total) { wrap.append(el("p", "pm-quiet", "No checklist yet (docs/brd).")); return wrap; }
-    wrap.append(el("p", "pm-line", `${c.verified} of ${c.total} verified`), meter(c.verified, c.total));
-    if (c.open.length) {
-      wrap.append(fold("open-rows", `${plural(c.open.length, "row")} still open`, () => {
-        const l = el("div", "pm-list");
-        for (const r of c.open) {
-          const row = el("div", "pm-item pm-row pm-one");
-          row.dataset.key = `r:${r.id}`;
-          tgt(row, `row:${r.id}`);
-          row.title = `${r.id} · ${r.status.replace(/_/g, " ")}\n${r.what || r.note || ""}`;
-          row.append(el("span", "pm-id", r.id), el("span", "pm-text", r.what || r.note || ""));
-          l.append(row);
-        }
-        return l;
-      }));
-    }
-    return wrap;
-  }
-
-  const PLAN_WORDS = {in_progress: "in progress", plan: "planned", parked: "parked", done: "done"};
-  function addBlocksNote(d) {
-    const note = el("div", "pm-note");
-    note.title = "A plan doc says where it stands in a block at its top (title, status, phases)";
-    note.append(el("span", null, `${plural(d.unmarked.length, "plan")} without a status`));
-    note.append(button("linkbtn", "Add them", () => ask("Add the status block (docs/PROJECT_MODE_PLAN D1: "
-      + "title, status, phases with their status, rows, updated) to every plan doc that has none: "
-      + `${d.unmarked.join(", ")}. Read each plan and the git log to set each phase's real status; `
-      + "then run operonx-project brd check and fix what it says.")));
-    return note;
-  }
-  function plansBox(d) {
-    const wrap = el("div", "pm-plans");
-    const counts = {};
-    for (const p of d.plans) counts[p.status] = (counts[p.status] || 0) + 1;
-    const parts = ["in_progress", "plan", "parked", "done"].filter((s) => counts[s]).map((s) => `${counts[s]} ${PLAN_WORDS[s]}`);
-    wrap.append(el("p", "pm-line", parts.length ? parts.join(" · ") : "No plan says where it stands yet."));
-    for (const e of d.plan_errors) wrap.append(el("p", "pm-bad", e));
-    if (d.unmarked.length) wrap.append(addBlocksNote(d));
-    return wrap;
-  }
-
-  function changesBox(list) {
-    const l = el("div", "pm-list");
-    if (!list.length) { l.append(el("p", "pm-quiet", "No commits yet.")); return l; }
-    for (const ch of list.slice(0, 3)) {
-      const row = el("div", "pm-item pm-commit pm-one");
-      row.dataset.key = `c:${ch.sha}`;
-      tgt(row, `commit:${ch.sha}`);
-      row.title = `${ch.sha} · ${ch.author} · ${ch.at}`;
-      row.append(el("span", "pm-text", ch.subject), el("span", "pm-where", ago(ch.at)));
-      l.append(row);
-    }
-    return l;
   }
 
   function missing() {
@@ -258,9 +179,9 @@ const ProjectMode = (() => {
     const d = doc;
     const head = el("div", "pm-summary");
     const needs = d.needs_you.length;
+    const work = d.working_on.filter((w) => w.card);
     head.append(el("span", needs ? "hot" : null, needs ? `${plural(needs, "thing")} need${needs === 1 ? "s" : ""} you` : "Nothing needs you"),
-      el("span", null, `${d.working_on.length} in progress`),
-      el("span", null, d.checklist.total ? `${d.checklist.verified}/${d.checklist.total} verified` : "no checklist"));
+      el("span", null, `${work.length} in progress`));
     // on a phone the column folds above the conversation: the summary is its handle
     const wrap = el("details", "pm-wrap");
     wrap.open = !MOBILE.matches || !!v.open.phone;
@@ -269,20 +190,7 @@ const ProjectMode = (() => {
     sum.append(head);
     wrap.append(sum,
       section("needs", "Needs you", needs, needsYou(d.needs_you), {hot: needs > 0}),
-      section("working", "Working on", d.working_on.length || null, workingOn(d.working_on), {page: "board"}),
-      section("checklist", "Checklist", null, checklistBox(d.checklist)),
-      section("plans", "Plans", d.plans.length || null, plansBox(d), {page: "board"}),
-      section("changes", "Recent changes", null, changesBox(d.changes), {page: "changes"}));
-    // the standard, only while something is missing: one line, the rest on Settings
-    const std = d.standard || [];
-    const missing = std.filter((x) => !x.ok);
-    if (missing.length) {
-      const body = el("div", "pm-note");
-      body.title = missing.map((x) => `${x.name}: ${x.line}`).join("\n");
-      body.append(el("span", null, `Missing: ${missing.map((x) => x.name).join(", ")}`),
-        button("linkbtn needs-edit", "Bring it up", () => ask(STANDARD_ASK)));
-      wrap.append(section("standard", "Standard", `${std.length - missing.length}/${std.length}`, body, {page: "settings"}));
-    }
+      section("working", "Working on", work.length || null, workingOn(work), {page: "board"}));
     side.append(wrap);
   }
 
@@ -294,83 +202,13 @@ const ProjectMode = (() => {
     return h;
   }
 
-  function phaseStrip(p) {
-    const strip = el("span", "pm-phases");
-    strip.setAttribute("aria-label", `${p.done} of ${p.total} done`);
-    for (const ph of p.phases) {
-      const seg = el("span", `pm-ph ph-${ph.status}`);
-      seg.title = `${ph.id}${ph.title ? " " + ph.title : ""} — ${ph.status.replace(/_/g, " ")}`;
-      strip.append(seg);
-    }
-    return strip;
-  }
-
-  /* the Board page: the cards on top (board.js), the plan docs below them */
+  /* the Board page: the cards (board.js), nothing else */
   function drawBoard() {
     page.textContent = "";
     const slot = el("div", "pm-board");
     page.append(slot);
     if (HAS_BOARD()) BoardView.mount(slot);
-    page.append(el("div", "pm-planlist"));
-    drawPlans();
-  }
-
-  function drawPlans() {
-    const box = page.querySelector(".pm-planlist");
-    if (!box) return;
-    box.textContent = "";
-    const d = doc;
-    box.append(pageHead("Plans", d ? plural(d.plans.length, "plan") : ""));
-    if (!d) { box.append(failed ? missing() : el("p", "pm-quiet", "Reading…")); return; }
-    if (!d.plans.length && !d.unmarked.length) {
-      box.append(el("p", "pm-quiet", "No plan doc. Work with more than one step gets a docs/*_PLAN.md that says where it stands."));
-    }
-    const sentence = Object.fromEntries(d.working_on.filter((w) => !w.card).map((w) => [w.path, w.sentence]));
-    for (const p of d.plans) {
-      const key = p.path;
-      const card = el("div", `pm-plan st-${p.status}`);
-      card.dataset.key = key;
-      tgt(card, `plan:${p.path}`);
-      const top = button("pm-plantop", null, () => { v.open[key] = !v.open[key]; save(); drawPlans(); }, "Show its phases");
-      const words = el("span", "pm-planwords");
-      const cur = p.status === "in_progress" && p.phases.find((ph) => ph.id === p.current);
-      words.title = p.path;
-      words.append(el("span", "pm-title", p.title), el("span", "pm-where", cur ? `now ${cur.id} · ${cur.title || ""}` : p.path));
-      top.append(el("span", `pm-pill st-${p.status}`, PLAN_WORDS[p.status] || p.status), words, phaseStrip(p),
-        el("span", "pm-frac", p.total ? `${p.done}/${p.total}` : ""));
-      card.append(top);
-      const said = sentence[p.path];
-      if (said) top.title = said;
-      if (v.open[key]) {
-        const list = el("ol", "pm-phaselist");
-        for (const ph of p.phases) {
-          const li = tgt(el("li", `ph-${ph.status}`), `phase:${p.path}#${ph.id}`);
-          li.append(el("span", "pm-id", ph.id), el("span", null, ph.title || ""), el("span", "pm-where", ph.status.replace(/_/g, " ")));
-          list.append(li);
-        }
-        card.append(list);
-        if (p.rows.length) list.title = `Serves ${p.rows.join(", ")}`;
-        const acts = el("div", "pm-acts");
-        if (p.status !== "done") {
-          acts.append(button("primary needs-edit", p.status === "in_progress" ? "Continue it" : "Start it", () => ask(
-            `Work on the plan ${p.path}${p.current ? `: phase ${p.current} is next` : ""}. Follow its phases, keep its `
-            + "status block true (change a phase's status in the commit that finishes it), and stop at the end of the phase.")));
-        }
-        acts.append(button(null, "Ask about it", () => ask(`What does the plan ${p.path} say, where does it stand, and what is left?`)));
-        card.append(acts);
-      }
-      box.append(card);
-    }
-    if (d.unmarked.length) {
-      const sec = el("section", "pm-unmarked");
-      sec.append(addBlocksNote(d));
-      sec.append(fold("unmarked", "Which ones", () => {
-        const ul = el("ul", "pm-paths");
-        for (const path of d.unmarked) ul.append(tgt(el("li", "mono", path), `plan:${path}`));
-        return ul;
-      }));
-      box.append(sec);
-    }
+    else slot.append(el("p", "pm-quiet", "No board yet (docs/brd/board.md)."));
   }
 
   /* ── Files: the tree on the left, the file on the right ─────────── */
@@ -619,7 +457,6 @@ const ProjectMode = (() => {
       // the pages drawn from the document follow it; a page being typed into is left alone
       const typing = page.contains(document.activeElement) && /TEXTAREA|INPUT|SELECT/.test(document.activeElement.tagName);
       if (!typing && v.page === "settings") drawPage();
-      else if (v.page === "board") drawPlans();
       else if (v.page === "files" && ftree) {
         api(`/api/p/${PID}/project/files`).then((got) => {
           const list = page.querySelector(".pm-ftree");
@@ -735,15 +572,6 @@ const ProjectMode = (() => {
   document.addEventListener("visibilitychange", () => { if (on && !document.hidden) refresh(); });
   MOBILE.addEventListener("change", () => { if (on) drawSide(); });
 
-  /* open what holds a target the hand is about to point at: a plan's phases are drawn once it is unfolded */
-  function reveal(target) {
-    const m = /^phase:(.+)#[^#]+$/.exec(target || "");
-    if (!m || v.page !== "board" || v.open[m[1]]) return;
-    v.open[m[1]] = true;
-    save();
-    drawPlans();
-  }
-
   registerPane("project", {el: box, show});
-  return {page: () => v.page, status: () => doc, refresh, go, reveal};
+  return {page: () => v.page, status: () => doc, refresh, go};
 })();
