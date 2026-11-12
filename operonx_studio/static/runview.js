@@ -302,16 +302,14 @@ const RunView = (() => {
   }
 
   /* One switch for every way to read a run: the conversation (when it was
-   * one), the tree of steps, their timeline, and the flow painted with it,
-   * as Workflow or Data Flow. The tree page's three and the canvas's two
-   * were switches of their own, nested; "Tree" and "Workflow" each said
-   * twice. */
+   * one), the tree of steps, their timeline, and the flow painted with it.
+   * The tree page's three and the canvas's two were switches of their own,
+   * nested; "Tree" and "Workflow" each said twice. */
   const VIEWS = [
     ["conversation", "Conversation", "Chat", "What was said, in order: a line opens the step that produced it"],
     ["tree", "Tree", "Tree", "What ran for what, in order"],
     ["timeline", "Timeline", "Timeline", "Every step by when it started"],
-    ["workflow", "Workflow", "Workflow", "The flow with this run painted on it  ( D )"],
-    ["data", "Data Flow", "Data", "What each op read and fed in this run  ( D )"],
+    ["workflow", "Workflow", "Workflow", "The flow with this run painted on it"],
   ];
   const TREE_VIEWS = new Set(["conversation", "tree", "timeline"]);
   let switchEl = null;
@@ -331,7 +329,7 @@ const RunView = (() => {
 
   /* the view on screen: the canvas's when the run is painted on it, else the tree page's */
   function currentView(mode) {
-    if (mode === "workflow") return canvasView === "data" ? "data" : "workflow";
+    if (mode === "workflow") return "workflow";
     const t = RunTree.current();
     return (t && t.mode) || "tree";
   }
@@ -343,8 +341,7 @@ const RunView = (() => {
       showRunTree(run);
       return;
     }
-    if (mode === "workflow") { setCanvasView(view); return; }
-    if (canvasView !== view) { canvasView = view; store(`canvasView:${PID}`, view); showViewSeg(); }
+    if (mode === "workflow") return;
     showRunWorkflow(run);
   }
 

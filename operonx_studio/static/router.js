@@ -21,7 +21,9 @@ const Router = (() => {
   // the first picture is drawn before the address is read: until then the
   // address is what was asked for, not what is on screen
   let started = false;
-  const VIEWS = new Set(["conversation", "tree", "timeline", "workflow", "data"]);
+  // "data" was the Data Flow view, gone into the workflow; its old links land there
+  const VIEWS = new Set(["conversation", "tree", "timeline", "workflow"]);
+  const OLD = {data: "workflow"};
 
   function base() {
     const parts = location.pathname.split("/");
@@ -53,7 +55,7 @@ const Router = (() => {
     return {
       tab: screen ? (TAB_OF_SCREEN[screen] || screen) : null,
       run: parts[1] || q.get("run") || null,
-      mode: VIEWS.has(q.get("view")) ? q.get("view") : "tree",
+      mode: VIEWS.has(OLD[q.get("view")] || q.get("view")) ? (OLD[q.get("view")] || q.get("view")) : "tree",
       step: q.get("step") || null,
       op: q.get("op") || null,
       file: q.get("file") || null,
