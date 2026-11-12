@@ -5,11 +5,11 @@ tests "pre-existing" without running them anywhere else, and ended with its own 
 line in a long turn, and the owner found them only by reading everything. Before the turn ends, this reads its
 transcript and, once, sends the model back when the turn:
 
-    S1  marked a plan phase (or a plan) done        name the evidence per phase, and that it was met the plan's way
+    S1  moved a card to done                         name the evidence per card, and that it was met the plan's way
     S2  ended on failing tests, never checked them   run failing_on_base: fails on base too, or new
     S3  left steps of its own pending or active      finish them, skip them with a reason, or say what is left
     T2  ends saying it has not checked something     check it now, or say why it cannot be checked
-    R7  edited a plan doc the board cannot read      fix its status block (WORKSPACE_PLAN W1.1)
+    R7  left a board.md the board cannot read        fix it (CYCLES_PLAN: cards and cycles are the board)
 
     python -I stophook.py      stdin: the hook's JSON; stdout: {"decision": "block", "reason": …}, or nothing
 
@@ -25,10 +25,10 @@ import sys
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 EDITS = ("Edit", "MultiEdit", "Write")
-_PLAN_FILE = re.compile(r"PLAN[\w.-]*\.md$", re.I)
-_PHASE_DONE = re.compile(r"\{\s*id:\s*([\w.-]+)[^}\n]*\bstatus:\s*[\"']?done\b")
-_PLAN_DONE = re.compile(r"^status:\s*[\"']?done\b", re.M)
-_SHELL_DONE = re.compile(r"[\w./-]*PLAN[\w.-]*\.md", re.I), re.compile(r"status:\s*[\"']?done\b")
+_BOARD_FILE = re.compile(r"(?:^|/)docs/brd/board\.md$")
+_CARD_DONE = re.compile(r"^### (C\d+) · .+ · done\s*$", re.M)
+_SHELL_DONE = re.compile(r"\bboard\s+(C\d+)\s+done\b")
+MOVE = "mcp__studio__board_move"
 # pytest's last line: "2 failed, 1378 passed, 3 skipped in 412.31s (0:06:52)"
 _SUMMARY = re.compile(r"((?:\d+ (?:failed|passed|skipped|errors?|deselected|xfailed|xpassed|warnings?|rerun)"
                       r"(?:, )?)+) in [\d.]+s\b")
@@ -97,41 +97,30 @@ def events(entries: List[Dict[str, Any]]) -> Iterator[Tuple[str, Dict[str, Any],
                 yield "note", {"text": _text(content)}, {}
 
 
-def _done(text: str) -> Tuple[set, bool]:
-    return set(_PHASE_DONE.findall(text or "")), bool(_PLAN_DONE.search(text or ""))
-
-
-def plans_done(evs: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]) -> Dict[str, List[str]]:
-    """S1: {plan file: [phases this turn set to done, "the plan" when its own status]}."""
+def cards_done(evs: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]) -> List[str]:
+    """S1: the cards this turn moved to done: ``board_move``, ``operonx-project board C4 done``, or an edit of
+    ``docs/brd/board.md`` that set a card's heading to done."""
     calls = {b.get("id"): b for kind, b, _ in evs if kind == "call"}
-    found: Dict[str, List[str]] = {}
-
-    def add(path: str, ids: set, plan: bool) -> None:
-        got = found.setdefault(path, [])
-        got += [i for i in sorted(ids) if i not in got]
-        if plan and "the plan" not in got:
-            got.append("the plan")
-
+    found: List[str] = []
     for kind, b, extra in evs:
         if kind != "result" or b.get("is_error"):
             continue
         call = calls.get(b.get("tool_use_id")) or {}
         name, inp = call.get("name"), call.get("input") or {}
         path = str(inp.get("file_path") or "")
-        if name in EDITS and _PLAN_FILE.search(path):
+        ids: set = set()
+        if name == MOVE and inp.get("to") == "done" and not _text(b.get("content")).startswith("refused"):
+            ids = {str(inp.get("card") or "")}
+        elif name in EDITS and _BOARD_FILE.search(path):
             pairs = [(inp.get("old_string"), inp.get("new_string"))] if name == "Edit" else \
                 [(x.get("old_string"), x.get("new_string")) for x in inp.get("edits") or [] if isinstance(x, dict)] \
                 if name == "MultiEdit" else [(extra.get("originalFile"), inp.get("content"))]
             for old, new in pairs:
-                (was, plan_was), (now, plan_now) = _done(old), _done(new)
-                if now - was or (plan_now and not plan_was):
-                    add(path, now - was, plan_now and not plan_was)
+                ids |= set(_CARD_DONE.findall(new or "")) - set(_CARD_DONE.findall(old or ""))
         elif name == "Bash":
-            cmd = str(inp.get("command") or "")
-            m = _SHELL_DONE[0].search(cmd)
-            if m and _SHELL_DONE[1].search(cmd):
-                add(m.group(0), set(), False)
-    return {p: ids for p, ids in found.items()}
+            ids = set(_SHELL_DONE.findall(str(inp.get("command") or "")))
+        found += [i for i in sorted(ids) if i and i not in found]
+    return found
 
 
 def failing_unchecked(evs: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]) -> Optional[str]:
@@ -182,26 +171,23 @@ def unchecked(entries: List[Dict[str, Any]]) -> Optional[str]:
     return " ".join(text[starts[-1] if starts else 0:end.start() if end else len(text)].split()).strip("*- ")
 
 
-def plans_unreadable(evs: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]) -> Dict[str, str]:
-    """R7: {plan doc this turn edited: why the board cannot read it}, for the docs with a status block (the ones
-    the board mirrors). WORKSPACE_PLAN's own ``pending`` phase was dropped from the board without a word."""
+def board_unreadable(evs: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]) -> Dict[str, str]:
+    """R7: {board.md this turn edited: why the board cannot read it}."""
     try:
-        from operonx_project import plans
+        from operonx_project import board
     except ImportError:
         return {}
     paths = {str((b.get("input") or {}).get("file_path") or "") for kind, b, _ in evs
              if kind == "call" and b.get("name") in EDITS}  # fmt: skip
     out = {}
-    for path in sorted(p for p in paths if _PLAN_FILE.search(p)):
+    for path in sorted(p for p in paths if _BOARD_FILE.search(p)):
         try:
             text = open(path, encoding="utf-8").read()
         except OSError:
             continue
         try:
-            data = plans.front_matter(text)
-            if data is not None and "status" in data:
-                plans.parse(path, data, text)
-        except plans.PlanError as exc:
+            board.parse_all(text)
+        except board.BoardError as exc:
             out[path] = str(exc)
     return out
 
@@ -210,13 +196,12 @@ def reason(lines: List[str]) -> Optional[str]:
     entries = this_turn(lines)
     evs = list(events(entries))
     out = []
-    plans = plans_done(evs)
-    if plans:
-        what = "; ".join(f"{p}: {', '.join(ids) or 'a phase'}" for p, ids in plans.items())
-        out.append(f"You marked done: {what}. For each, quote the evidence that its exit criteria are met (the "
-                   "command and the numbers it printed), and say that you met them the way the plan says (its "
-                   "table, its decisions): a target reached another way, or criteria skipped, deferred or changed, "
-                   "is the owner's call, so set the phase back to in_progress, say what you did and ask.")
+    done = cards_done(evs)
+    if done:
+        out.append(f"You moved to done: {', '.join(done)}. For each, quote the evidence that its exit criteria are "
+                   "met (the command and the numbers it printed), and say that you met them the way the plan says "
+                   "(its table, its decisions): a target reached another way, or criteria skipped, deferred or "
+                   "changed, is the owner's call, so move the card back to doing, say what you did and ask.")
     failed = failing_unchecked(evs)
     if failed:
         out.append(f"The last test run ended with \"{failed}\". Call failing_on_base with those test ids before "
@@ -226,11 +211,10 @@ def reason(lines: List[str]) -> Optional[str]:
         out.append(f"Your steps card still has {len(left)} step(s) pending or active ({'; '.join(left[:4])}). "
                    "Finish them, mark them skipped with the reason, or post the card with what is left as "
                    "waiting or blocked.")
-    bad = plans_unreadable(evs)
+    bad = board_unreadable(evs)
     if bad:
-        out.append("The board cannot read " + "; ".join(f"{p} ({why})" for p, why in bad.items()) + ". Fix its "
-                   "status block (plan status: plan, in_progress, done or parked; a phase's: open, in_progress, "
-                   "done or skipped), so the board shows the plan as it stands.")
+        out.append("The board cannot read " + "; ".join(f"{p} ({why})" for p, why in bad.items()) + ". Fix it "
+                   "(board_card and board_move write it; never by hand), so the board shows the cards as they stand.")
     said = unchecked(entries)
     if said:
         out.append(f"You wrote \"{said}\". Check it now (on_base runs a command on the base branch), or say why "

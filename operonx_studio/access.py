@@ -102,6 +102,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/board"): "read",                                 # docs/brd/board.md, its cards
     ("GET", f"{P}/brd"): "read",                                   # the project checklist from the checkout
     ("GET", f"{P}/board/card/{{cid}}"): "read",
+    ("GET", f"{P}/board/cycle/{{cid}}"): "read",                  # a cycle as a report: dates, cards, commits
     ("GET", f"{P}/project/status"): "read",                        # Project mode: the engine's status document
     ("GET", f"{P}/project/files"): "read",                         # Project mode › Files: what git tracks
     ("GET", f"{P}/project/file"): "read",
@@ -207,6 +208,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/play/restart"): "edit",
     ("POST", f"{P}/kb/{{service}}/{{path:path}}"): "edit",     # a query runs the project's code and its answer model
     ("POST", f"{P}/board/card"): "edit",                         # add, change or move a card in board.md
+    ("POST", f"{P}/board/cycle"): "edit",                        # open or close a cycle in board.md
 
     # ── the assistant's hands on your own screen ──
     ("POST", f"{P}/ui/action"): "self",

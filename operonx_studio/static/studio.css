@@ -5076,6 +5076,25 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 /* ── Board: docs/brd/board.md (board.js) ─────────────────── */
 .bdqtext { margin: 6px 0 4px; font-size: var(--fs-md); color: var(--text); }
 
+/* the cycles: a tab per open one, the Backlog, the Completed menu (CYCLES_PLAN) */
+.bdhead { flex-wrap: wrap; gap: 10px; }
+.bdtabs { display: inline-flex; gap: 2px; padding: 2px; background: var(--surface-2); border-radius: var(--r-sm); flex-wrap: wrap; }
+.bdtab { border: none; background: none; min-height: 28px; padding: 0 12px; border-radius: var(--r-xs);
+  font: inherit; font-size: var(--fs-sm); color: var(--text-2); white-space: pre; cursor: pointer; }
+.bdtab:hover { background: var(--surface-3); }
+.bdtab.sel { background: var(--surface); color: var(--text); box-shadow: var(--sh-1); font-weight: 600; }
+.bdcompleted { position: relative; font-size: var(--fs-sm); }
+.bdcompleted > summary { cursor: pointer; color: var(--text-2); padding: 4px 8px; border-radius: var(--r-xs); list-style: none; }
+.bdcompleted > summary::after { content: " ▾"; }
+.bdcompleted > summary:hover { background: var(--surface-2); color: var(--text); }
+.bdmenu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 260px; max-height: 50vh; overflow: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--sh-2, var(--sh-1)); padding: 4px; }
+.bdmenuitem { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; border: none; background: none;
+  font: inherit; color: var(--text); padding: 6px 8px; border-radius: var(--r-xs); cursor: pointer; }
+.bdmenuitem:hover, .bdmenuitem.sel { background: var(--surface-2); }
+.bdmenuitem .note { margin-left: auto; white-space: nowrap; }
+.bdcycle { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--text-2); margin: 0 0 10px; }
+.bdreport { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; }
 .bdcols { display: grid; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
 .bdcol { background: var(--surface-2); border-radius: var(--r-md); padding: 8px; min-height: 120px;
   display: flex; flex-direction: column; gap: 6px; }

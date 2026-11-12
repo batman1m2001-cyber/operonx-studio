@@ -134,18 +134,17 @@ const ProjectMode = (() => {
     return list;
   }
 
+  /* the cards that wait on the owner: in "needs you", or the assistant's question on one (CYCLES_PLAN: cards only) */
   function needsYou(items) {
     if (!items.length) return el("p", "pm-quiet", "Nothing waits for you.");
     return capped("more-needs", items, 3, (q) => {
-      // the assistant's question is answered in its conversation; a BRD question is talked through
+      const id = q.source === "board" ? q.id : q.card;
       const act = q.source === "assistant" && window.oxAssistant ? () => window.oxAssistant.open(q.session, true)
-        : q.source === "board" && HAS_BOARD() ? () => BoardView.open({card: q.id})
-        : () => ask(`Open question ${q.id} (${q.text}) in docs/brd/requirements/open_questions.md: `
-          + "what does it say, what are the options, and what do you recommend?");
-      const row = button("pm-item pm-q pm-one", null, act, `${q.id} · ${q.text}`);
+        : HAS_BOARD() ? () => BoardView.open({card: id}) : () => go("board");
+      const row = button("pm-item pm-q pm-one", null, act, `${id} · ${q.text}`);
       row.dataset.key = `q:${q.source}:${q.id}`;
-      tgt(row, `q:${q.id}`);
-      row.append(el("span", "pm-id", q.source === "assistant" ? "assistant" : q.id), el("span", "pm-text", q.text || q.kind));
+      tgt(row, `card:${id}`);
+      row.append(el("span", "pm-id", id), el("span", "pm-text", q.text || q.kind));
       return row;
     });
   }
@@ -178,7 +177,8 @@ const ProjectMode = (() => {
     if (!doc) { side.append(el("p", "pm-quiet", "Reading where the project stands…")); return; }
     const d = doc;
     const head = el("div", "pm-summary");
-    const needs = d.needs_you.length;
+    const waiting = d.needs_you.filter((q) => q.source === "board" || q.card);
+    const needs = waiting.length;
     const work = d.working_on.filter((w) => w.card);
     head.append(el("span", needs ? "hot" : null, needs ? `${plural(needs, "thing")} need${needs === 1 ? "s" : ""} you` : "Nothing needs you"),
       el("span", null, `${work.length} in progress`));
@@ -189,7 +189,7 @@ const ProjectMode = (() => {
     const sum = el("summary", "pm-handle");
     sum.append(head);
     wrap.append(sum,
-      section("needs", "Needs you", needs, needsYou(d.needs_you), {hot: needs > 0}),
+      section("needs", "Needs you", needs, needsYou(waiting), {hot: needs > 0}),
       section("working", "Working on", work.length || null, workingOn(work), {page: "board"}));
     side.append(wrap);
   }
@@ -573,5 +573,13 @@ const ProjectMode = (() => {
   MOBILE.addEventListener("change", () => { if (on) drawSide(); });
 
   registerPane("project", {el: box, show});
-  return {page: () => v.page, status: () => doc, refresh, go};
+  /* a file on the Files page, its folders open (the Board's plan docs) */
+  function file(path) {
+    v.file = path;
+    const parts = path.split("/");
+    for (let i = 1; i < parts.length; i++) v.fopen[parts.slice(0, i).join("/") + "/"] = 1;
+    go("files");
+  }
+
+  return {page: () => v.page, status: () => doc, refresh, go, file};
 })();

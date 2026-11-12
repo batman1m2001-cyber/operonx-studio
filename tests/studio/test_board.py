@@ -120,7 +120,7 @@ def test_cards_are_added_and_moved_and_done_means_their_tests_pass(client, tmp_p
         return client.post(f"/api/p/{pid}/board/card", json=body)
 
     assert post(title="halve", after=["C2"], files=["src/calc/ops.py"]).json() == {
-        "ok": True, "card": "C4", "state": "todo", "note": ""}
+        "ok": True, "card": "C4", "state": "todo", "note": "", "cycle": ""}
     refused = post(card="C4", to="doing")
     assert refused.status_code == 409 and "C2" in refused.json()["message"]  # its after card is not done
     red = post(card="C2", to="done")
@@ -128,7 +128,7 @@ def test_cards_are_added_and_moved_and_done_means_their_tests_pass(client, tmp_p
     (root / "tests" / "test_calc.py").write_text(TESTS.format(4), encoding="utf-8")
     assert post(card="C2", to="done").json()["state"] == "done"
     assert post(card="C4", to="doing").json()["state"] == "doing"
-    assert post(card="C3", to="doing", note="").json() == {"ok": True, "card": "C3", "state": "doing", "note": ""}
+    assert post(card="C3", to="doing", note="").json() == {"ok": True, "card": "C3", "state": "doing", "note": "", "cycle": ""}
     assert post(card="C4", title="halve it").json()["card"] == "C4"
     text = (root / "docs" / "brd" / "board.md").read_text(encoding="utf-8")
     assert "### C2 · double · done" in text and "### C4 · halve it · doing" in text
@@ -224,23 +224,54 @@ def test_the_assistant_reads_adds_and_moves_cards_and_opens_them(client, tmp_pat
     assert _tool(s, "board_move", card="C2", to="needs you", note="Strings too?") == "C2 is needs you — Strings too?"
     assert [x["args"] for x in s.shown] == [{}, {"card": "C2"}, {"card": "C4"}, {"card": "C2"}]
     names = json.dumps(mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, s))
-    assert "board_move" in names and "board_plan" not in names
+    assert "board_move" in names and "board_cycle" in names and "board_plan" not in names
+
+
+def test_a_cycle_opens_takes_cards_and_closes_only_when_they_are_done(client, tmp_path):
+    """CYCLES_PLAN K2: the studio's routes over the engine's cycles."""
+    pid = _open(client, make_project(tmp_path / "calc"))
+    post = lambda path, body: client.post(f"/api/p/{pid}/{path}", json=body)  # noqa: E731
+    assert post("board/cycle", {"open": "EX", "title": "CSV export", "plan": "docs/EXPORT_PLAN.md"}).json()["state"] == "open"
+    assert post("board/card", {"card": "C2", "cycle": "EX"}).json()["cycle"] == "EX"
+    got = client.get(f"/api/p/{pid}/board").json()
+    assert [(y["id"], y["cards"]) for y in got["cycles"]] == [("EX", ["C2"])]
+    assert next(c for c in got["cards"] if c["id"] == "C2")["cycle"] == "EX"
+    refused = post("board/cycle", {"close": "EX"})
+    assert refused.status_code == 409 and "C2" in refused.json()["message"]
+    assert post("board/card", {"card": "C2", "cycle": "Backlog"}).json()["cycle"] == ""
+    assert post("board/cycle", {"close": "EX"}).json()["state"] == "closed"
+    assert post("board/cycle", {"title": "nothing"}).status_code == 400
+
+
+def test_a_closed_cycle_reads_as_a_report_with_the_commits_that_name_it(client, tmp_path):
+    """CYCLES_PLAN K3: the Completed menu's report — the cycle, its cards, the commits naming it or its cards."""
+    root = make_project(tmp_path / "calc")
+    pid = _open(client, root)
+    post = lambda path, body: client.post(f"/api/p/{pid}/{path}", json=body)  # noqa: E731
+    post("board/cycle", {"open": "EX", "title": "CSV export", "plan": "docs/EXPORT_PLAN.md"})
+    post("board/card", {"card": "C1", "cycle": "EX"})
+    _git(root, "commit", "-q", "--allow-empty", "-m", "EX1: the rows (C1)")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "unrelated: C10 and EXTRA are not it")
+    assert post("board/cycle", {"close": "EX"}).json()["state"] == "closed"
+    got = client.get(f"/api/p/{pid}/board/cycle/EX").json()
+    assert got["cycle"]["state"] == "closed" and got["cycle"]["plan"] == "docs/EXPORT_PLAN.md"
+    assert [(c["id"], c["state"]) for c in got["cards"]] == [("C1", "done")]
+    assert [c["subject"] for c in got["commits"]] == ["EX1: the rows (C1)"]
+    board = client.get(f"/api/p/{pid}/board").json()
+    assert "C1" not in board["columns"]["done"]  # a closed cycle leaves the columns
+    assert client.get(f"/api/p/{pid}/board/cycle/ZZ").status_code == 404
 
 
 def test_project_mode_reads_the_engines_status_and_writes_nothing(client, tmp_path):
     root = make_project(tmp_path / "calc")
-    (root / "docs" / "EXPORT_PLAN.md").write_text(
-        "---\ntitle: CSV export\nstatus: in_progress\nphases:\n  - {id: E1, title: Rows, status: in_progress}\n---\n",
-        encoding="utf-8")  # fmt: skip
-    (root / "docs" / "OLD_PLAN.md").write_text("# no block\n", encoding="utf-8")
     pid = _open(client, root)
     got = client.get(f"/api/p/{pid}/project/status")
     assert got.status_code == 200, got.text
     doc = got.json()["project"]
     assert doc["checklist"]["total"] == 2 and doc["board"]["columns"]["doing"] == ["C2"]
-    assert [w["title"] for w in doc["working_on"]] == ["C2 · double", "CSV export"]
-    assert [(n["source"], n["id"]) for n in doc["needs_you"]] == [("brd", "Q-01"), ("board", "C3")]
-    assert doc["unmarked"] == ["docs/OLD_PLAN.md"] and got.json()["text"].startswith("Checklist: 1 of 2 verified")
+    assert [w["title"] for w in doc["working_on"]] == ["C2 · double"]  # cards in doing, nothing else
+    assert [(n["source"], n["id"]) for n in doc["needs_you"]] == [("board", "C3")]  # a BRD question only via a card
+    assert "plans" not in doc and got.json()["text"].startswith("Checklist: 1 of 2 verified")
     assert subprocess.run(["git", "status", "--porcelain", "docs/brd"], cwd=root, capture_output=True,
                           text=True).stdout == ""  # fmt: skip
 
@@ -265,7 +296,7 @@ def test_the_assistant_reads_where_the_project_stands_from_the_engine(client, tm
 
     text = _tool(BoardStudio(client, _open(client, make_project(tmp_path / "calc"))), "project_status")
     assert text.startswith("Checklist: ") and "Board: 1 doing, 1 needs you, 1 done" in text
-    assert "  C2 · double — doing · core · 1 of 3 cards done" in text  # the screen's words
+    assert "  C2 · double — doing · core · Backlog" in text  # the screen's words
     assert "mcp__studio__project_status" in STUDIO_READ_TOOLS  # a viewer's assistant may read it too
     assert "mcp__studio__board_move" not in STUDIO_READ_TOOLS  # moving a card writes
 

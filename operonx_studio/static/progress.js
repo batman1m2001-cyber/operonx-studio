@@ -3,7 +3,7 @@
    calls when the assistant posted none. No DOM: assistant.js draws it, and
    tests/js/progress.test.mjs checks it. */
 const oxProgress = (() => {
-  const TARGET_KIND = {op: "op", row: "requirement", q: "question", qopt: "question", plan: "plan", phase: "phase",
+  const TARGET_KIND = {op: "op", row: "requirement", q: "question", qopt: "question",
     run: "run", commit: "commit", setting: "setting", card: "card", field: "field", job: "job", eval: "eval",
     page: "", tab: "", status: ""};
 

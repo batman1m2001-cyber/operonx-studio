@@ -7,7 +7,7 @@
  * A press is a picture of what the assistant did through its tools: the
  * hand never fires the button, so nothing happens twice.
  *
- * Elements are named, not found: `data-ox-target="plan:docs/X_PLAN.md"`.
+ * Elements are named, not found: `data-ox-target="card:C4"`.
  * A gesture waits up to 3 s for its target to be drawn, then gives up
  * quietly. Gestures run one after another, each long enough to follow;
  * a backlog keeps only the newest few.

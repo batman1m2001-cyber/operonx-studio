@@ -12,42 +12,21 @@ const NOW = {tab: "project", page: "now"};
 const PLANS = {tab: "project", page: "board"};
 const tool = (name, input, status = "running") => ({kind: "tool", name, input, status});
 
-test("a plan's path, from any absolute path that ends in docs/…_PLAN.md", () => {
-  assert.equal(C.planPath("/home/x/ow/docs/EXPORT_PLAN.md"), "docs/EXPORT_PLAN.md");
-  assert.equal(C.planPath("docs/plans/A_PLAN.md"), "docs/plans/A_PLAN.md");
-  assert.equal(C.planPath("/x/docs/README.md"), null);
-  assert.equal(C.planPath("/x/docs/brd/X_PLAN.md"), null);
-  assert.equal(C.planPath(""), null);
-});
-
-test("writing a plan goes to Plans and rings it, the page's head while it is not drawn", () => {
-  const s = C.steps(tool("Write", {file_path: "/r/docs/EXPORT_PLAN.md"}), "start", NOW);
-  assert.deepEqual(s, [{go: {tab: "project", page: "board"}}, {point: "plan:docs/EXPORT_PLAN.md", words: "writing", or: "pagehead"}]);
-  // already on Plans: no going
-  assert.deepEqual(C.steps(tool("Edit", {file_path: "/r/docs/EXPORT_PLAN.md"}), "start", PLANS).map((x) => x.words), ["editing"]);
-});
-
-test("a plan edit that ends reads the status again, then a soft 'saved'", () => {
-  const s = C.steps(tool("Edit", {file_path: "/r/docs/EXPORT_PLAN.md"}, "ok"), "end", PLANS);
-  assert.deepEqual(s[0], {refresh: true});
-  assert.equal(s[1].words, "saved");
-  assert.equal(s[1].soft, true);
-  // a failed edit changed nothing
-  assert.deepEqual(C.steps(tool("Edit", {file_path: "/r/docs/EXPORT_PLAN.md"}, "error"), "end", PLANS), []);
-});
-
-test("the matrix and the open questions are not on the Board: an edit to them only refreshes (CYCLES_PLAN K1)", () => {
-  const m = tool("Edit", {file_path: "/r/docs/brd/requirements/requirements_traceability.md"});
-  assert.deepEqual(C.steps(m, "start", NOW), []);
-  assert.deepEqual(C.steps({...m, status: "ok"}, "end", NOW), [{refresh: true}]);
-  assert.deepEqual(C.steps(tool("Edit", {file_path: "/r/docs/brd/requirements/open_questions.md"}), "start", PLANS), []);
-});
-
-test("reading moves nothing: a plan is ringed only where it already shows", () => {
-  assert.deepEqual(C.steps(tool("Read", {file_path: "/r/docs/X_PLAN.md"}), "start", {tab: "flow"}), []);
-  assert.deepEqual(C.steps(tool("Read", {file_path: "/r/docs/X_PLAN.md"}), "start", PLANS), [{point: "plan:docs/X_PLAN.md", words: "reading"}]);
-  assert.deepEqual(C.steps(tool("Read", {file_path: "/r/app/main.py"}), "start", PLANS), []);
+test("a plan doc is not on the Board: writing or reading it moves nothing (CYCLES_PLAN K3)", () => {
+  assert.deepEqual(C.steps(tool("Write", {file_path: "/r/docs/EXPORT_PLAN.md"}), "start", NOW), []);
+  assert.deepEqual(C.steps(tool("Edit", {file_path: "/r/docs/EXPORT_PLAN.md"}, "ok"), "end", PLANS), []);
+  assert.deepEqual(C.steps(tool("Read", {file_path: "/r/docs/X_PLAN.md"}), "start", PLANS), []);
   assert.deepEqual(C.steps(tool("Grep", {pattern: "x"}), "start", PLANS), []);
+});
+
+test("an edit to a file the page reads (the board, the matrix, the questions) reads the status again once it ends", () => {
+  const b = tool("Edit", {file_path: "/r/docs/brd/board.md"});
+  assert.deepEqual(C.steps(b, "start", NOW), []);
+  assert.deepEqual(C.steps({...b, status: "ok"}, "end", NOW), [{refresh: true}]);
+  assert.deepEqual(C.steps({...b, status: "error"}, "end", NOW), []);
+  const m = tool("Edit", {file_path: "/r/docs/brd/requirements/requirements_traceability.md"}, "ok");
+  assert.deepEqual(C.steps(m, "end", NOW), [{refresh: true}]);
+  assert.deepEqual(C.steps(tool("Edit", {file_path: "/r/docs/brd/requirements/open_questions.md"}), "start", PLANS), []);
 });
 
 test("a commit rings the Git page, and the new commit once it lands", () => {
@@ -80,7 +59,8 @@ test("what changed between two status documents: the cards", () => {
 
 test("where a target lives: the page to go to before pointing", () => {
   assert.deepEqual(C.where("q:Q-16"), {tab: "project", page: "now"});
-  assert.deepEqual(C.where("phase:docs/X_PLAN.md#P2"), {tab: "project", page: "board"});
+  assert.deepEqual(C.where("card:C4"), {tab: "project", page: "board"});
+  assert.equal(C.where("plan:docs/X_PLAN.md"), null);
   assert.deepEqual(C.where("commit:abc"), {tab: "project", page: "changes"});
   assert.deepEqual(C.where("status:needs"), {tab: "project", page: "now"});
   assert.deepEqual(C.where("op:stt"), {tab: "flow"});
@@ -103,26 +83,21 @@ test("on Flow, an edit to an op's file rings that op", () => {
 
 // A real Sonnet turn on a OneWealth clone (2026-10-23) wrote every file with the shell, and the page got each
 // tool's input as the server clipped it: JSON text, cut short after 4000 characters.
-test("the shell: a heredoc into a plan, sed -i on the matrix, git -c … commit; inputs as clipped JSON text", () => {
+test("the shell: a heredoc into the board, sed -i on the matrix, git -c … commit; inputs as clipped JSON text", () => {
   const bash = (command, clip) => {
     const text = JSON.stringify({command});
     return {kind: "tool", name: "Bash", status: "running", input: clip ? text.slice(0, clip) + "\n… (900 more characters)" : text};
   };
-  const heredoc = bash("cd /x/pm/ow && cat > docs/CSV_EXPORT_PLAN.md <<'EOF'\n---\ntitle: CSV export\nstatus: plan\n" + "x".repeat(200), 120);
+  const heredoc = bash("cd /x/pm/ow && cat > docs/brd/board.md <<'EOF'\n# Board\n\n## FF · Flows · open\n" + "x".repeat(200), 120);
   assert.equal(C.inputOf(heredoc).command.slice(0, 16), "cd /x/pm/ow && c");
-  assert.deepEqual(C.steps(heredoc, "start", NOW),
-    [{go: {tab: "project", page: "board"}}, {point: "plan:docs/CSV_EXPORT_PLAN.md", words: "editing", or: "pagehead"}]);
+  assert.deepEqual(C.steps(heredoc, "start", NOW), []);
+  assert.deepEqual(C.steps({...heredoc, status: "ok"}, "end", NOW), [{refresh: true}]);
   const sed = bash("sed -i 's/| 120 |/| 123 |/' docs/brd/requirements/requirements_traceability.md && uv run python scripts/check_brd_docs.py");
-  assert.deepEqual(C.steps(sed, "start", NOW), []);
-  const commit = bash("git add docs/CSV_EXPORT_PLAN.md docs/brd/requirements/requirements_traceability.md && git -c user.email=a@b -c user.name=a commit -q -m 'plan'");
+  assert.deepEqual(C.steps({...sed, status: "ok"}, "end", NOW), [{refresh: true}]);
+  const commit = bash("git add docs/brd/board.md && git -c user.email=a@b -c user.name=a commit -q -m 'board'");
   assert.deepEqual(C.steps(commit, "start", NOW), [{point: "page:changes", words: "committing"}]);
-  // reading with the shell moves nothing; a bare name after `cd docs` is still the plan
-  assert.deepEqual(C.steps(bash("cd docs && head -20 WEALTH_NAMES_PLAN.md 2>/dev/null"), "start", NOW), []);
-  assert.deepEqual(C.steps(bash("cd docs && head -20 WEALTH_NAMES_PLAN.md"), "start", PLANS), [{point: "plan:docs/WEALTH_NAMES_PLAN.md", words: "reading"}]);
-  assert.deepEqual(C.steps(bash("grep -q x docs/A_PLAN.md >/dev/null"), "start", NOW), []);
-  // an Edit's input clipped mid-string still names its file
-  const edit = {kind: "tool", name: "Edit", status: "running", input: '{"file_path": "/r/docs/X_PLAN.md", "old_string": "abc'};
-  assert.equal(C.steps(edit, "start", PLANS)[0].point, "plan:docs/X_PLAN.md");
+  // reading with the shell moves nothing
+  assert.deepEqual(C.steps({...bash("head -20 docs/brd/board.md"), status: "ok"}, "end", NOW), []);
 });
 
 test("the screen follows the plan: a newly active step's target, then what an ended step left", () => {
