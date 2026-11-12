@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-glass="glass" class="refract">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../../operonx_studio/static/studio.css">
+<style>
+  body { margin: 0; background: var(--rt-bay); font-family: var(--font); }
+  .frame { position: relative; overflow: hidden;
+    background-color: var(--rt-bay);
+    background-image: radial-gradient(circle, var(--bg-gray89) 1px, transparent 1.2px);
+    background-size: 24px 24px; }
+  [data-theme="dark"] .frame { background-image: radial-gradient(circle, rgba(255,255,255,.07) 1px, transparent 1.2px); }
+  .frame .node { position: absolute; }
+  .frame svg.wires { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 0; }
+  .frame .node { z-index: 1; }
+  .term { fill: var(--rt-bay); stroke: var(--wire); stroke-width: 2; }
+  .term-dot { fill: var(--wire); }
+  .cap { position: absolute; font: 600 12px var(--font); color: var(--text-3); letter-spacing: .02em; text-transform: uppercase; }
+
+  /* ── the new agent card ─────────────────────────────────────────── */
+  .ag2 { --kind: var(--k-llm); box-sizing: border-box; width: 300px; border-radius: 18px;
+    border: 1px solid color-mix(in srgb, var(--kind) 46%, var(--og-edge));
+    background:
+      linear-gradient(180deg, var(--og-spec) 0, transparent 60px),
+      color-mix(in srgb, var(--kind) 7%, var(--og-fill));
+    -webkit-backdrop-filter: blur(var(--og-blur)) saturate(140%); backdrop-filter: blur(var(--og-blur)) saturate(140%);
+    box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 3px color-mix(in srgb, var(--kind) 9%, transparent), var(--og-drop);
+    color: var(--text); font-family: var(--font); }
+  .ag2-head { display: flex; align-items: center; gap: 11px; padding: 12px 12px 12px 12px; }
+  .ag2-icon { flex: none; width: 38px; height: 38px; display: grid; place-items: center; color: var(--kind);
+    border-radius: 11px; background: color-mix(in srgb, var(--kind) 14%, transparent); }
+  .ag2-icon svg { width: 26px; height: 26px; }
+  .ag2-title { flex: 1; min-width: 0; }
+  .ag2-name { font-weight: 700; font-size: 15px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ag2-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ag2-st { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600;
+    padding: 3px 9px; border-radius: 999px; background: var(--surface-2); color: var(--text-2);
+    border: 1px solid var(--border); }
+  .ag2-st i { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+  .ag2-st.run i { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+  .ag2-st.done i { background: var(--ok); }
+  .ag2-fold { flex: none; width: 24px; height: 24px; display: grid; place-items: center; color: var(--text-3); }
+  .ag2-fold svg { width: 16px; height: 16px; }
+  .ag2-body { margin: 0 8px 8px; padding: 6px; border-radius: 13px;
+    background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border) 70%, transparent); display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .ag2-row { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: 10px;
+    background: var(--og-fill); border: 1px solid color-mix(in srgb, var(--rk) 26%, var(--og-edge)); }
+  .ag2-row.sel { border-color: var(--flow-accent); box-shadow: 0 0 0 3px var(--flow-accent-ring); }
+  .ag2-ri { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+    color: var(--rk); background: color-mix(in srgb, var(--rk) 13%, transparent); }
+  .ag2-ri svg { width: 16px; height: 16px; }
+  .ag2-rt { flex: 1; min-width: 0; }
+  .ag2-rt b { display: block; font-size: 12.5px; font-weight: 650; }
+  .ag2-rt span { display: block; font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ag2-rt .mono { font-family: var(--mono); font-size: 11px; }
+  .ag2-n { flex: none; font-size: 11px; font-weight: 600; color: var(--text-3); }
+  .ag2-chev { flex: none; color: var(--text-3); display: grid; }
+  .ag2-chev svg { width: 15px; height: 15px; }
+  .ag2-row.off { opacity: .62; border-style: dashed; }
+  .ag2-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 2px 0 2px 14px; margin-left: 13px; border-left: 1px solid var(--border); }
+  .ag2-tool { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px;
+    background: color-mix(in srgb, var(--og-fill) 80%, transparent); border: 1px solid color-mix(in srgb, var(--tk) 22%, var(--og-edge)); }
+  .ag2-tool .k { flex: none; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center;
+    font: 700 12px var(--font); color: var(--tk); background: color-mix(in srgb, var(--tk) 14%, transparent); }
+  .ag2-tool .k svg { width: 13px; height: 13px; }
+  .ag2-tool .t { flex: 1; min-width: 0; }
+  .ag2-tool .t b { display: block; font: 600 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ag2-tool .t span { display: block; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ag2-tool .calls { flex: none; font: 600 11px var(--mono); color: var(--text-2); }
+  .ag2-tool .go { flex: none; color: var(--text-3); display: grid; }
+  .ag2-tool .go svg { width: 13px; height: 13px; }
+  .ag2-more { font-size: 11.5px; color: var(--accent); padding: 3px 8px; }
+  .ag2.node { position: relative; width: 340px; padding: 0; min-height: 0; border-radius: 18px; cursor: default;
+    border-width: 1px; transition: none; }
+  .ag2.node:hover { transform: none; }
+  .ag2.node::before { display: none; }
+  .ag2.folded { width: 320px; }
+  .ag2-head .ag2-st { margin-left: -2px; }
+  .ag2.folded .ag2-st { padding: 2px 8px; font-size: 11px; }
+  .ag2.folded .ag2-head { padding: 11px 12px; }
+  .ag2-nest { margin: 6px 4px 2px; }
+  .ag2-nest .ag2 { width: 100%; position: relative; box-shadow: inset 0 1px 0 var(--og-rim), var(--og-drop); }
+
+  /* chips on a folded graph: the agents inside it, at any depth */
+  .agchips { display: flex; flex-direction: row; gap: 4px; flex-wrap: nowrap; padding: 2px 0 4px; grid-column: 2 / -1; }
+  .agchip { display: inline-flex; align-items: center; gap: 4px; font: 600 11px var(--font); color: var(--k-llm);
+    padding: 2px 8px 2px 5px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--k-llm) 34%, var(--og-edge));
+    background: color-mix(in srgb, var(--k-llm) 9%, var(--og-fill)); }
+  .agchip svg { width: 12px; height: 12px; }
+  .tip { position: absolute; z-index: 5; font-size: 12px; padding: 7px 10px; border-radius: 8px; color: var(--text);
+    background: var(--surface); border: 1px solid var(--border); box-shadow: var(--og-drop); }
+  .tip .mono { font-family: var(--mono); color: var(--text-2); }
+  .legend { position: absolute; font-size: 12px; color: var(--text-2); max-width: 240px; line-height: 1.45; }
+  .legend b { color: var(--text); }
+
+  /* F4: Tools catalogue */
+  #f4 { padding: 28px 32px; box-sizing: border-box; background: var(--bg); }
+  #f4 .seg { display: inline-flex; background: var(--surface-3); border-radius: 999px; padding: 3px; gap: 2px; }
+  #f4 .seg span { font-size: 13px; padding: 4px 12px; border-radius: 999px; color: var(--text-2); }
+  #f4 .seg span.on { background: var(--card); color: var(--text); font-weight: 600; box-shadow: var(--sh-1); }
+  #f4 .seg i { font-style: normal; color: var(--text-3); margin-left: 4px; }
+  #f4 .rh-search { margin-left: auto; }
+  #f4 .tk-top { display: grid; grid-template-columns: 210px 74px minmax(0, 1fr) 190px 16px; align-items: center; gap: 14px; width: 100%;
+    text-align: left; background: none; border: none; padding: 9px 16px; font-size: 14px; color: var(--text); }
+  #f4 .tk-kind { font-size: 12px; color: var(--tk); display: inline-flex; gap: 5px; align-items: center; }
+  #f4 .tk-kind b { width: 18px; height: 18px; border-radius: 5px; display: inline-grid; place-items: center; font-size: 11px;
+    background: color-mix(in srgb, var(--tk) 16%, transparent); }
+  #f4 .tk-desc { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #f4 .tk-used { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #f4 .tk-used .ag { color: var(--k-llm); font-weight: 600; }
+  #f4 .rh-row + .rh-row { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+  #f4 .rh-row.open .tk-top { background: var(--card-hover); }
+  #f4 .tk-body { padding: 6px 16px 16px 240px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; font-size: 13px; }
+  #f4 .tk-body h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); font-weight: 600; }
+  #f4 .tk-args { font-family: var(--mono); font-size: 12.5px; color: var(--text-2); line-height: 1.7; }
+  #f4 .tk-args b { color: var(--text); font-weight: 600; }
+  #f4 .tk-use { display: flex; gap: 8px; align-items: center; line-height: 1.9; }
+  #f4 .tk-use .pol { font-size: 11px; padding: 0 7px; border-radius: 999px; color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+  #f4 .tk-use .path { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+  #f4 .tk-flags { color: var(--text-3); }
+  #f4 .tk-open { display: inline-flex; gap: 6px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--accent); }
+  #f4 .tk-rest { display: flex; gap: 8px; flex-wrap: wrap; }
+  #f4 .tk-rest span { font-size: 13px; color: var(--text-2); background: var(--card); border-radius: 999px; padding: 4px 12px; }
+  #f4 .tk-rest b { color: var(--text-3); font-weight: 500; margin-left: 4px; }
+</style>
+</head>
+<body>
+
+<!-- F1: the agents in their flow (web_research, opened) -->
+<div class="frame" id="f1" style="width:1260px;height:1010px">
+  <div class="node container" style="left:24px;top:24px;width:1212px;height:962px;--kind:var(--k-graph)"><div class="chead"><span class="promoter">↱</span><span class="nname">web_research</span><span class="nkind">GraphOp · 5 ops</span><button class="collapse">▾ collapse</button></div></div>
+  <div class="node cell alt" data-n="tasks" style="left:540px;top:96px;--kind:var(--k-func);width:180px;"><span class="iconband">ƒ</span><div class="nname nline"><span class="ntext">tasks</span></div><div class="detail"><div class="dshow mono"><span class="dkey">→ news</span></div></div><div class="badges"></div><span class="port in"></span><span class="port out"></span></div>
+  <div class="node cell base" data-n="cm" style="left:503px;top:206px;--kind:var(--k-func);width:254px;"><span class="iconband">ƒ</span><div class="nname nline"><span class="ntext">company_memory</span><span class="nchips"><span class="nchip">IO</span></span></div><div class="detail"><div class="dshow mono"><span class="dkey">→ news</span></div></div><div class="badges"></div><span class="port in"></span><span class="port out"></span></div>
+  <div data-slot="website" style="position:absolute;left:150px;top:330px"></div>
+  <div data-slot="news" style="position:absolute;left:520px;top:330px"></div>
+  <div data-slot="people" style="position:absolute;left:870px;top:330px"></div>
+</div>
+
+<!-- F2: the card, folded and opened -->
+<div class="frame" id="f2" style="width:1480px;height:640px">
+  <div class="cap" style="left:40px;top:28px">Folded</div>
+  <div class="cap" style="left:370px;top:28px">Opened</div>
+  <div class="cap" style="left:720px;top:28px">Opened · tools listed</div>
+  <div class="cap" style="left:1100px;top:28px">10 tools · a tool selected</div>
+  <div data-slot="f-idle" style="position:absolute;left:40px;top:60px"></div>
+  <div data-slot="f-run" style="position:absolute;left:40px;top:160px"></div>
+  <div data-slot="f-done" style="position:absolute;left:40px;top:260px"></div>
+  <div data-slot="o-rows" style="position:absolute;left:370px;top:60px"></div>
+  <div data-slot="o-tools" style="position:absolute;left:720px;top:60px"></div>
+  <div data-slot="o-many" style="position:absolute;left:1100px;top:60px"></div>
+</div>
+
+<!-- F3: a folded graph names the agents inside it -->
+<div class="frame" id="f3" style="width:1100px;height:330px">
+  <div class="node cell alt" style="left:120px;top:40px;--kind:var(--k-graph);width:180px;"><button class="iconband gband"><span class="bglyph bbox">3</span><span class="barrow">▸</span></button><div class="nname nline"><span class="ntext">inbox</span></div><div class="detail"><div class="dshow mono"><span class="dkey">→ email</span></div></div><div class="badges"></div><span class="port in"></span><span class="port out"></span></div>
+  <div class="node cell base" id="prep" style="left:60px;top:170px;--kind:var(--k-graph);width:300px;"><button class="iconband gband"><span class="bglyph bbox">10</span><span class="barrow">▸</span></button><div class="nname nline"><span class="ntext">prepare</span></div><div class="detail"><div class="dshow mono"><span class="dkey">→ brief</span></div></div><div class="agchips"></div><div class="badges"></div><span class="port in"></span><span class="port out"></span></div>
+  <div class="tip" style="left:420px;top:236px"><b>website</b> · an agent in <span class="mono">prepare › web_research</span><br>Click: opens the path and selects it</div>
+  <div class="legend" style="left:720px;top:150px"><b>The chips are the agents inside, at any depth.</b> A graph with an agent in it is still a graph: it only names them.</div>
+</div>
+
+<!-- F4: the Tools catalogue (Resources › Tools) -->
+<div class="frame" id="f4" style="width:1240px;height:940px">
+  <div class="panehead rh-head"><h2>Resources</h2><span class="seg"><span>Resources<i>9</i></span><span class="on">Tools<i>19</i></span></span><input class="rt-search rh-search" placeholder="Search tools, agents…"></div>
+  <p class="panesub rh-sub">Every tool an agent in this project can call. Read-only here: a tool is defined in code, its policy is set per agent.</p>
+  <div class="rh-list">
+    <section class="rh-cat"><div class="rh-cathead"><h3>mail</h3><span class="rh-count">4</span></div>
+<div class="rh-row"><div class="tk-top" style="--tk:var(--k-graph)"><span class="rh-name mono">mail__list_new</span><span class="tk-kind"><b>▣</b>graph</span><span class="tk-desc">Unread emails in the sales inbox, oldest first: id, from, subject, date</span><span class="tk-used">used by <span class="ag">email</span> · <span class="ag">send</span></span><span class="rh-caret">▸</span></div></div><div class="rh-row"><div class="tk-top" style="--tk:var(--k-graph)"><span class="rh-name mono">mail__read</span><span class="tk-kind"><b>▣</b>graph</span><span class="tk-desc">One email: id, from, to, subject, text, attachments</span><span class="tk-used">used by <span class="ag">email</span> · <span class="ag">send</span></span><span class="rh-caret">▸</span></div></div><div class="rh-row open"><div class="tk-top" style="--tk:var(--k-graph)"><span class="rh-name mono">mail__send</span><span class="tk-kind"><b>▣</b>graph</span><span class="tk-desc">Send an email. `approval_id` is the approved request this send carries out.</span><span class="tk-used">used by <span class="ag">email</span> · <span class="ag">send</span></span><span class="rh-caret">▾</span></div><div class="tk-body">
+  <div><h4>Arguments</h4><div class="tk-args"><b>to</b>: str<br><b>subject</b>: str<br><b>body</b>: str<br><b>approval_id</b>: int</div>
+    <h4 style="margin-top:12px">Defined at</h4><div class="tk-args">src/tools/mail.py:46 · send<br><span class="tk-flags">called through agents/_shared/graph.py · tool_call (7 ops)</span></div>
+    <span class="tk-open">Open graph ↗</span></div>
+  <div><h4>Used by · policy per use</h4>
+    <div class="tk-use"><span class="ag" style="color:var(--k-llm);font-weight:600">email</span><span class="pol">allow</span><span class="path">on_email › prepare › email ↗</span></div>
+    <div class="tk-use"><span class="ag" style="color:var(--k-llm);font-weight:600">send</span><span class="pol">allow</span><span class="path">on_approve › send_or_save › send_brief ↗</span></div>
+    <h4 style="margin-top:12px">Flags</h4><div class="tk-flags">not readonly · not destructive · approval never</div></div>
+</div></div><div class="rh-row"><div class="tk-top" style="--tk:var(--k-graph)"><span class="rh-name mono">mail__status</span><span class="tk-kind"><b>▣</b>graph</span><span class="tk-desc">Where a sent email is: delivered, bounced or queued</span><span class="tk-used">used by <span class="ag">email</span> · <span class="ag">send</span></span><span class="rh-caret">▸</span></div></div>
+    </section>
+    <section class="rh-cat"><div class="rh-cathead"><h3>web</h3><span class="rh-count">3</span></div>
+<div class="rh-row"><div class="tk-top" style="--tk:var(--k-graph)"><span class="rh-name mono">web__search</span><span class="tk-kind"><b>▣</b>graph</span><span class="tk-desc">Web search: title, url, snippet, date (news has a date).</span><span class="tk-used">used by <span class="ag">web</span></span><span class="rh-caret">▸</span></div></div><div class="rh-row"><div class="tk-top" style="--tk:var(--k-graph)"><span class="rh-name mono">web__fetch</span><span class="tk-kind"><b>▣</b>graph</span><span class="tk-desc">Read one web page as text: url, text.</span><span class="tk-used">used by <span class="ag">web</span></span><span class="rh-caret">▸</span></div></div><div class="rh-row"><div class="tk-top" style="--tk:var(--k-graph)"><span class="rh-name mono">web__news</span><span class="tk-kind"><b>▣</b>graph</span><span class="tk-desc">News published on a company's own site, newest first</span><span class="tk-used">used by <span class="ag">web</span></span><span class="rh-caret">▸</span></div></div>
+    </section>
+    <section class="rh-cat"><div class="rh-cathead"><h3>crm</h3><span class="rh-count">3</span></div>
+<div class="rh-row"><div class="tk-top" style="--tk:var(--k-graph)"><span class="rh-name mono">crm__find_company</span><span class="tk-kind"><b>▣</b>graph</span><span class="tk-desc">A company by its email domain, name or id: its profile, or {}</span><span class="tk-used">used by <span class="ag">email</span> · <span class="ag">info</span> · <span class="ag">send</span></span><span class="rh-caret">▸</span></div></div><div class="rh-row"><div class="tk-top" style="--tk:var(--k-graph)"><span class="rh-name mono">crm__contacts</span><span class="tk-kind"><b>▣</b>graph</span><span class="tk-desc">The people we know at a company: name, title, email.</span><span class="tk-used">used by <span class="ag">info</span></span><span class="rh-caret">▸</span></div></div><div class="rh-row"><div class="tk-top" style="--tk:var(--k-graph)"><span class="rh-name mono">crm__history</span><span class="tk-kind"><b>▣</b>graph</span><span class="tk-desc">Our past interactions with a company, oldest first</span><span class="tk-used">used by <span class="ag">info</span></span><span class="rh-caret">▸</span></div></div>
+    </section>
+    <div class="tk-rest"><span>memory<b>4</b></span><span>calendar<b>2</b></span><span>report<b>2</b></span><span>kb<b>1</b></span></div>
+  </div>
+</div>
+
+<script>
+const L = {
+  bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  hex: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>',
+  brain: '<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>',
+  database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>',
+  wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  up: '<path d="m18 15-6-6-6 6"/>', down: '<path d="m6 9 6 6 6-6"/>', right: '<path d="m9 18 6-6-6-6"/>',
+  out: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
+  plug: '<path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>',
+};
+const ic = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${L[n]}</svg>`;
+const agentIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${L.hex}<g transform="translate(6.6 6.9) scale(.45)" stroke-width="3.2">${L.bot}</g></svg>`;
+const KIND = { op: ["ƒ", "var(--k-func)"], function: ["ƒ", "var(--k-func)"], graph: ["▣", "var(--k-graph)"],
+               agent: [agentIcon(), "var(--k-llm)"], mcp: [ic("plug"), "var(--k-io)"] };
+
+function tool(t) {
+  const [g, c] = KIND[t.kind];
+  return `<div class="ag2-tool" style="--tk:${c}"><span class="k">${g}</span><span class="t"><b>${t.name}</b><span>${t.desc}</span></span>${t.calls ? `<span class="calls">×${t.calls}</span>` : ""}<span class="go">${ic("out")}</span></div>`;
+}
+function status(s) { return s ? `<span class="ag2-st ${s.cls}"><i></i>${s.text}</span>` : ""; }
+function card(a) {
+  const folded = !a.open;
+  let h = `<div class="node ag2 ${folded ? "folded" : ""}">
+    <div class="ag2-head"><span class="ag2-icon">${agentIcon()}</span>
+      <span class="ag2-title"><div class="ag2-name">${a.name}</div><div class="ag2-sub">${a.sub}</div></span>
+      ${status(a.st)}<span class="ag2-fold">${ic(folded ? "down" : "up")}</span></div>`;
+  if (!folded) {
+    h += `<div class="ag2-body">
+      <div class="ag2-row" style="--rk:var(--k-llm)"><span class="ag2-ri">${ic("brain")}</span><span class="ag2-rt"><b>Model</b><span class="mono">${a.model}</span></span>${a.mcalls ? `<span class="ag2-n">${a.mcalls}</span>` : ""}</div>
+      <div class="ag2-row" style="--rk:var(--k-func)"><span class="ag2-ri">${ic("wrench")}</span><span class="ag2-rt"><b>Tools</b><span>${a.toolsLine}</span></span><span class="ag2-n">${a.tools.length}</span><span class="ag2-chev">${ic(a.toolsOpen ? "up" : "down")}</span></div>`;
+    if (a.toolsOpen) {
+      const shown = a.tools.length > 6 ? a.tools.slice(0, 5) : a.tools;
+      h += `<div class="ag2-tools">${shown.map(tool).join("")}${a.tools.length > 6 ? `<div class="ag2-more">+${a.tools.length - 5} more · all in Tools ↗</div>` : ""}</div>`;
+    }
+    h += `<div class="ag2-row ${a.memory ? "" : "off"}" style="--rk:var(--k-res)"><span class="ag2-ri">${ic("database")}</span><span class="ag2-rt"><b>Memory</b><span>${a.memory || "none · each run starts fresh"}</span></span></div>
+    </div>`;
+  }
+  return h + `<span class="port in"></span><span class="port out"></span></div>`;
+}
+
+const RS = [{name: "web_search", kind: "op", desc: "Search the web: titles, links, snippets"},
+            {name: "fetch_page", kind: "graph", desc: "Read a web page: its visible text"}];
+const sub = "researcher · 2 tools";
+const AG = {
+  website: {name: "website", sub, open: true, toolsOpen: true, model: "assistant", mcalls: "2 calls",
+            tools: [{...RS[0], calls: 3}, {...RS[1], calls: 2}], toolsLine: "web_search · fetch_page",
+            st: {cls: "run", text: "turn 2 / 4"}},
+  news: {name: "news", sub, st: {cls: "done", text: "3 turns"}},
+  people: {name: "people", sub, st: {cls: "done", text: "2 turns"}},
+  "f-idle": {name: "website", sub},
+  "f-run": {name: "website", sub, st: {cls: "run", text: "turn 2 / 4"}},
+  "f-done": {name: "news", sub, st: {cls: "done", text: "3 turns"}},
+  "o-rows": {name: "website", sub, open: true, model: "assistant", tools: RS, toolsLine: "web_search · fetch_page"},
+  "o-tools": {name: "website", sub, open: true, toolsOpen: true, model: "assistant", tools: RS, toolsLine: "web_search · fetch_page"},
+  "o-many": {name: "email", sub: "email_agent · 10 tools", open: true, toolsOpen: true, model: "agent", memory: "sessions · by thread id",
+    toolsLine: "mail · crm · web",
+    tools: [
+      {name: "mail__list_new", kind: "graph", desc: "Unread emails in the sales inbox"},
+      {name: "mail__read", kind: "graph", desc: "One email, with its attachments"},
+      {name: "mail__send", kind: "graph", desc: "Send an approved email"},
+      {name: "mail__status", kind: "graph", desc: "Where a sent email is"},
+      {name: "crm__find_company", kind: "graph", desc: "A company by domain, name or id"},
+      {name: "crm__contacts", kind: "graph", desc: ""}, {name: "crm__history", kind: "graph", desc: ""},
+      {name: "web__search", kind: "graph", desc: ""}, {name: "web__fetch", kind: "graph", desc: ""}, {name: "web__news", kind: "graph", desc: ""}]},
+};
+for (const s of document.querySelectorAll("[data-slot]")) {
+  s.innerHTML = card(AG[s.dataset.slot]);
+  const c = s.firstElementChild; 
+}
+document.querySelector('[data-slot="o-many"] .ag2-row:nth-child(2)').classList.add("sel");
+
+// chips on the folded graph
+document.querySelector("#prep .agchips").innerHTML =
+  ["website", "news", "people"].map(n => `<span class="agchip">${agentIcon()}${n}</span>`).join("");
+
+// F1's wires: the flow's own plain curves, port to port
+function wires(frameId, pairs, ends) {
+  const f = document.getElementById(frameId), fr = f.getBoundingClientRect();
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "wires"); f.prepend(svg);
+  const pt = (el, which) => { const r = el.querySelector(".port." + which).getBoundingClientRect();
+    return [r.left + r.width / 2 - fr.left, r.top + r.height / 2 - fr.top]; };
+  const path = (a, b) => { const m = (a[1] + b[1]) / 2;
+    for (const cls of ["eglow", "ecore"]) { const p = document.createElementNS(svg.namespaceURI, "path");
+      p.setAttribute("d", `M ${a[0]} ${a[1]} C ${a[0]} ${m}, ${b[0]} ${m}, ${b[0]} ${b[1]}`); p.setAttribute("class", cls); svg.append(p); } };
+  for (const [a, b] of pairs) path(pt(a, "out"), pt(b, "in"));
+  if (ends) { const [x, y] = ends.at; for (const a of ends.from) path(pt(a, "out"), [x, y]);
+    const c = document.createElementNS(svg.namespaceURI, "circle"); c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", 10); c.setAttribute("class", "term"); svg.append(c);
+    const d = document.createElementNS(svg.namespaceURI, "circle"); d.setAttribute("cx", x); d.setAttribute("cy", y); d.setAttribute("r", 3.5); d.setAttribute("class", "term-dot"); svg.append(d); }
+}
+const q = (s) => document.querySelector(s);
+const ag = (n) => q(`#f1 [data-slot="${n}"] .ag2`);
+wires("f1", [[q('[data-n="tasks"]'), q('[data-n="cm"]')], [q('[data-n="cm"]'), ag("website")],
+             [q('[data-n="cm"]'), ag("news")], [q('[data-n="cm"]'), ag("people")]],
+      {at: [630, 930], from: [ag("website"), ag("news"), ag("people")]});
+wires("f3", [[q("#f3 .node.alt"), q("#prep")]]);
+</script>
+</body>
+</html>
