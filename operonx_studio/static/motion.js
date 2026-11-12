@@ -56,7 +56,6 @@ liveCanvas = (() => {
       n.classList.remove("live-active", "live-done", "live-failed");
     for (const p of document.querySelectorAll("#edges path.flowing, #edgetop path.flowing")) p.classList.remove("flowing");
     for (const p of document.querySelectorAll("#edges path.particle")) p.remove();
-    for (const g of document.querySelectorAll("#edges .apw.on")) g.classList.remove("on");
     particles = 0;
     $("#world").classList.remove("live");
     run = null;
@@ -86,12 +85,9 @@ liveCanvas = (() => {
 
   function start(op) {
     if (!run) return;
-    for (const [key, card] of cardsOf(op)) {
+    for (const [, card] of cardsOf(op)) {
       card.classList.remove("live-done", "live-failed");
       card.classList.add("live-active");
-      // an opened agent at work: its wires move
-      const wires = state.partWires && state.partWires.get(key);
-      if (wires) wires.classList.add("on");
     }
   }
 
@@ -104,8 +100,6 @@ liveCanvas = (() => {
     for (const [key, card] of cardsOf(op)) {
       card.classList.remove("live-active");
       card.classList.add(bad ? "live-failed" : "live-done");
-      const wires = state.partWires && state.partWires.get(key);
-      if (wires) wires.classList.remove("on");
       for (const w of run.out.get(key) || []) {
         particle(w.path, bad, dur, w.glow);
         // the consumer lights as the data reaches it, until it finishes

@@ -778,8 +778,6 @@ function drawDataLayer() {
       at = {x: it.x + (hr.left + hr.width / 2 - cr.left) / k, y: it.y + (hr.top + hr.height / 2 - cr.top) / k};
     } else at = holePt(card, it, r.querySelector(".dfhole"));
     const h = {...at, row: r, key};
-    // an agent keeps its right wall for its parts: its outputs leave left too
-    if (dir === "out" && card.classList.contains("agentcell")) h.exit = "left";
     if (brow) {
       // a chip in a condition: in from the side its row's edge does not use
       let top = 0, e = brow;
@@ -1272,6 +1270,7 @@ function render() {
   svg.textContent = "";
   $("#edgetop").textContent = "";
   state.rendered.clear();
+  state.partRows.clear();
   state.cardEls.clear();
   state.edgeEls = [];
   state.dfB = g ? DataFlow.dataBindings(g, state.expanded) : [];
@@ -1312,11 +1311,10 @@ function render() {
   // wire around exactly those boxes. Nothing moves after it: an opened
   // GraphOp is laid out with its siblings, not shifted into them.
   const leaves = [];
-  // an opened agent is its card AND its parts (each the op it is)
+  // an agent is one card, opened or not: its tools are rows in it
   const visit = (n, key, depth) => {
     if (n.graph && state.expanded.has(key)) { walk(n.graph, key + "/", depth + 1); return; }
     leaves.push({key, node: n, depth, inner: null, x: 0, y: 0, w: NODE_W, h: NODE_H});
-    if (n.parts && state.expanded.has(key)) for (const p of n.parts) visit(p, key + "/" + p.id, depth + 1);
   };
   function walk(gr, prefix, depth) {
     for (const n of gr.nodes || []) visit(n, prefix + n.id, depth);
@@ -1349,21 +1347,8 @@ function render() {
   const laidOut = measured.map(m => ({shown: !!m.card.offsetHeight, widths: m.els.map(e => e.clientWidth)}));
   measured.forEach((m, i) => {
     if (!laidOut[i].shown || !m.els.length) return;
-    // an agent's cell is as wide as its own content (max-content, capped).
-    // Opened onto its data, its rows' holes sit on the left wall, which is
-    // straight only along the middle half of its height: the cell grows
-    // (still a regular hexagon) until its head and rows fit in that half
-    if (m.card.classList.contains("agentcell")) {
-      const ports = m.card.querySelector(".dfports"), head = m.card.querySelector(".ahead");
-      if (ports && head) {
-        // (+ room so the last hole clears the rivet at the wall's lower end)
-        const c = head.offsetHeight + ports.offsetHeight + 28;
-        const w = Math.ceil(Math.max(m.card.offsetWidth, 2 * c * 0.8660254));
-        m.card.style.maxWidth = "none";
-        m.card.style.width = `${w}px`;
-      }
-      return;
-    }
+    // an agent's card is as wide as its CSS says
+    if (m.card.classList.contains("ag2")) return;
     // a port row sits in one of two equal columns: the card must grow by
     // twice its deficit for that column to gain it
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
@@ -1383,8 +1368,7 @@ function render() {
     const card = cardOf.get(it.key);
     // the card's real height: the layout's 64 px is only a guess
     if (card.offsetHeight) it.h = card.offsetHeight;
-    // an agent's cell keeps its parts on one row: it is as wide as they are
-    if (card.classList.contains("agentcell") && card.offsetWidth) it.w = card.offsetWidth;
+    if (card.classList.contains("ag2") && card.offsetWidth) it.w = card.offsetWidth;
     if (it.node.routes && it.node.routes.length) {
       const down = card.classList.contains("cols");
       if (down) drawCondTrees(card);
@@ -1713,8 +1697,6 @@ function render() {
       }
     }
   }
-  // an opened agent's sockets, wired to its parts
-  drawAgentParts(svg, L.parts);
   for (const [x, y, text, cls, tip] of glyphJobs) edgeGlyph(svg, x, y, text, cls, tip);
 
   // serve transport cards (only when no declared ingress wears it)
@@ -1770,7 +1752,7 @@ function refreshSelection() {
   state.dfHover = null;
   drawDataLayer();
   paintEdges();
-  partCablesFocus();
+  for (const [k, r] of state.partRows) r.el && r.el.classList.toggle("sel", k === state.sel);
 }
 
 /* Which wires are lit: the selected op's. A picked route lights only its
@@ -2050,8 +2032,6 @@ function containerKind(n) {
   const k = n.subgraph_ops;
   if (n.agentSteps) return `agent · ${k} turn${k === 1 ? "" : "s"}`;
   if (n.step) return `${n.kind} · ${k} step${k === 1 ? "" : "s"}`;
-  // an agent's tool: the rack it hangs on already says it is one
-  if (n.part === "tool") return `${TOOL_KIND_WORDS[(n.tool || {}).kind] || "@graph"} · ${k} ops`;
   return `${n.kind} · ${k} ops`;
 }
 
@@ -2072,10 +2052,11 @@ function containerCard(it) {
   const head = el("div", "chead");
   // an agent opened (a painted run) onto the turns it took
   if (n.agentSteps) {
-    // it keeps its hive cell: the same edge, the bee
+    // it keeps its agent mark
     card.classList.add("agentframe");
-    card.append(agentFrameEdge(it.w, it.h));
-    head.append(beeMark());
+    const mark = el("span", "ag2-icon");
+    mark.append(agentMark());
+    head.append(mark);
     head.append(el("span", "nname", n.name));
     head.append(el("span", "nkind", containerKind(n)));
   } else {
@@ -2106,202 +2087,248 @@ function containerCard(it) {
   return card;
 }
 
-/* ── the agent op: a hive cell ──────────────────────────────────────
- * An agent is the op that decides for itself, so it does not look like
- * the others: a regular hexagon cell, point up — its input on the top
- * point, its output on the bottom one — with a glossy steel edge and a
- * soft glow, a faint honeycomb inside, the bee and its name on one line
- * and its tools under them. The cell is sized by that line and keeps its
- * proportions (it grows and shrinks whole), up to a cap that cuts the
- * name. Down its right side, three round sockets: ✧ the model it thinks
- * with, the database of its memory, ⚒ its tools. Opened, each socket is wired to the real op behind it, drawn as
- * the card that op is anywhere else (extract.py `_agent_parts`): the
- * model's LLM cell, its session store, each tool — an @op's cell, a
- * @graph's card that opens like any GraphOp, another agent's cell that
- * opens like this one. The wires are the agent's own, never the flow's:
- * the model's a nerve with one spike, memory's three lanes of bandwidth,
- * the tools' a rack — one trunk to a bus, a straight branch to each.
- * With a run painted its line says the turns it took; a live run sweeps
- * a light along the edge and sets the wires moving. */
-const TOOL_ICONS = {function: "ƒ", op: "◈", graph: "▣", agent: "✺", mcp: "⇄"};
+/* ── the agent op: one card ─────────────────────────────────────────
+ * An agent decides for itself when to call its tools, so they are not
+ * steps of the flow: they are rows inside its card, never ops on the
+ * canvas (docs/AGENTOP_REDESIGN_PLAN.md). Header: the agent's mark (a
+ * hexagon with a bot in it), its name, "agentname · N tools", a status
+ * pill with a painted run ("3 turns"; it pulses while the agent is live)
+ * and a chevron. Opened: Model, Tools and Memory rows. The Tools row lists
+ * each tool by kind (ƒ function or @op, ▣ @graph, an agent, an MCP plug),
+ * with ×calls in a run; ↗ opens the tool on its own (openToolView), never
+ * in place. A click on a tool picks it for the inspector. The flow's ports
+ * stay top and bottom centre. */
 const TOOL_KIND_WORDS = {function: "function", op: "@op", graph: "@graph", agent: "agent",
                          mcp: "MCP tool"};
+const TOOL_SHOWN = 6;   // more than this: the first 5, then "+N more"
 
-/* An opened agent's edge: an octagon outline the size of the frame, so
- * the wires inside stay visible (a filled layer would cover them). */
-let agentFrameSeq = 0;
-function agentFrameEdge(w, h) {
-  const NS = "http://www.w3.org/2000/svg";
-  const cut = 22, id = `agfr${++agentFrameSeq}`;
-  const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("class", "aframe");
-  svg.setAttribute("width", w); svg.setAttribute("height", h);
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  const pts = [[cut, 1], [w - cut, 1], [w - 1, cut], [w - 1, h - cut], [w - cut, h - 1],
-               [cut, h - 1], [1, h - cut], [1, cut]].map(p => p.join(",")).join(" ");
-  svg.innerHTML = `<defs>
-      <linearGradient id="${id}e" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="var(--ag-e4)"/><stop offset=".3" stop-color="var(--ag-e2)"/>
-        <stop offset=".45" stop-color="var(--ag-e1)"/><stop offset=".6" stop-color="var(--ag-e2)"/>
-        <stop offset="1" stop-color="var(--ag-e4)"/></linearGradient>
-      <pattern id="${id}c" width="28" height="48.5" patternUnits="userSpaceOnUse">
-        <path d="M14 0l14 8.08v16.17L14 32.33 0 24.25V8.08z M14 32.33v16.17" fill="none"
-          stroke="var(--ag-e2)" stroke-opacity=".14" stroke-width="1"/></pattern></defs>
-    <polygon points="${pts}" fill="var(--ag-frame)"/>
-    <polygon points="${pts}" fill="url(#${id}c)"/>
-    <polygon class="aedge" points="${pts}" fill="none" stroke="url(#${id}e)" stroke-width="2.5"/>`;
+/* The agent's mark: a hexagon with a bot inside (Lucide paths). */
+function agentMark(cls = "ag2-mark") {
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", cls);
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = LUCIDE.hex + `<g transform="translate(6.6 6.9) scale(.45)" stroke-width="3.2">${LUCIDE.bot}</g>`;
   return svg;
 }
 
-function beeMark() {
-  const b = el("span", "abee");
-  b.setAttribute("aria-hidden", "true");
-  return b;
+/* What an agent did in the painted run, from the run's steps: its turns,
+ * its model calls and each tool's calls. The agent's records are matched by
+ * name; their turns, and in each turn the model and tool calls. */
+function agentRunCounts(n) {
+  const out = {turns: 0, model: 0, tools: new Map()};
+  if (!state.run) return out;
+  const rows = (state.runRows || []).filter(r => r.kind === "record");
+  const kids = new Map();
+  for (const r of rows) {
+    if (!kids.has(r.parent)) kids.set(r.parent, []);
+    kids.get(r.parent).push(r);
+  }
+  for (const a of rows.filter(r => r.op === n.name && r.op_type === "agent")) {
+    for (const t of (kids.get(a.id) || []).filter(r => r.op_type === "turn")) {
+      out.turns += 1;
+      for (const s of kids.get(t.id) || []) {
+        if (s.op_type === "llm") out.model += 1;
+        else if (s.op_type === "tool" || s.op_type === "graph") out.tools.set(s.op, (out.tools.get(s.op) || 0) + 1);
+      }
+    }
+  }
+  // a run whose steps are not loaded: the op totals it recorded
+  const ops = state.run.ops || {};
+  if (!out.turns && ops.turn) out.turns = ops.turn.runs;
+  if (!out.tools.size) for (const t of (n.agent || {}).tools || []) if (ops[t.name]) out.tools.set(t.name, ops[t.name].runs);
+  return out;
 }
+/* How many turns this agent took in the painted run. */
+function agentTurns(n) { return agentRunCounts(n).turns; }
 
-/* The cell's second line: its tools. */
-function agentSub(n) {
-  const tools = ((n.agent || {}).tools || []).length;
-  return `${tools} tool${tools === 1 ? "" : "s"}`;
-}
+const agentOpen = new Set();     // render keys of the agent cards shown opened
+const agentToolsShut = new Set(); // … whose Tools row is folded
 
-/* Everything else, on hover: its model, its tools, its turns — the cap,
- * or what a painted run took. */
-function agentFacts(n) {
-  const a = n.agent || {};
-  const bits = [`model ${(a.model || []).join(" → ") || "?"}`, agentSub(n)];
-  const cap = (a.limits || {}).turns, took = agentTurns(n);
-  if (took) bits.push(cap ? `${took} of at most ${cap} turns` : `${took} turn${took === 1 ? "" : "s"}`);
-  else if (cap) bits.push(`at most ${cap} turns`);
-  return bits.join(" · ");
-}
-
-/* How many turns this agent took in the painted run: its `turn` steps. */
-function agentTurns(n) {
-  if (!state.run) return 0;
-  const rows = state.runRows || [];
-  const mine = rows.filter(r => r.kind === "record" && r.op === "turn"
-    && typeof r.id === "string" && r.id.startsWith(n.id + ".turn#"));
-  if (mine.length) return mine.length;
-  const t = state.run.ops && state.run.ops.turn;
-  return t ? t.runs : 0;
+function toggleAgentCard(key) {
+  if (agentOpen.has(key)) agentOpen.delete(key); else agentOpen.add(key);
+  renderKeeping(key);
 }
 
 function agentCard(card, it) {
-  const n = it.node;
-  card.classList.add("agentcell");
-  card.append(el("span", "ahull"), el("span", "abody"), hexLines());
-  const head = el("div", "ahead");
-  // the bee and the name on one line; a long name is cut, whole on hover
-  const line = el("div", "aline");
-  const name = el("div", "nname ntext", n.name);
+  const n = it.node, a = n.agent || {};
+  const tools = a.tools || [];
+  const parts = n.parts || [];
+  const open = agentOpen.has(it.key);
+  const counts = agentRunCounts(n);
+  card.classList.add("ag2");
+  card.classList.toggle("folded", !open);
+  card.style.setProperty("--kind", "var(--k-llm)");
+
+  const head = el("div", "ag2-head");
+  const mark = el("span", "ag2-icon");
+  mark.append(agentMark());
+  const title = el("span", "ag2-title");
+  const name = el("div", "ag2-name", n.name);
   name.title = n.name;
-  line.append(beeMark(), name);
-  const sub = el("div", "asubline");
-  sub.append(el("span", "asub", agentSub(n)));
-  head.append(line, sub);
-  card.append(head);
-  const open = state.expanded.has(it.key);
-  // it opens by a double-click or a click on a socket: its parts plug in
-  if (n.parts && n.parts.length) card.append(agentSockets(n, it.key));
-  card.title = `${n.name} — an agent: ${agentFacts(n)}. Double-click it, or click a socket, to `
-    + (open ? "unplug its parts." : "plug its model, memory and tools in.");
-}
-
-/* The cell's plating: a seam across each cap, a rivet at its left
- * corners, three vents in the bottom cap and a sensor in the top one (it
- * shows while the agent runs). The right wall is left clear for the
- * sockets. Drawn in the cell's own box (a regular hexagon, so the viewBox
- * is too: it scales, never stretches). */
-function hexLines() {
-  const svg = document.createElementNS(SVGNS, "svg");
-  svg.setAttribute("class", "ahex");
-  svg.setAttribute("viewBox", "0 0 86.6 100");
-  svg.setAttribute("aria-hidden", "true");
-  const k = 0.88, cx = 43.3, cy = 50;
-  const pts = [[43.3, 0], [86.6, 25], [86.6, 75], [43.3, 100], [0, 75], [0, 25]]
-    .map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]);
-  const at = (i) => pts[i].map(v => v.toFixed(2));
-  const seam = (a, b) => `<line class="ahex-seam" x1="${at(a)[0]}" y1="${at(a)[1]}" x2="${at(b)[0]}" y2="${at(b)[1]}"/>`;
-  svg.innerHTML = seam(5, 1) + seam(4, 2)
-    + [4, 5].map(i => `<circle class="ahex-rivet" cx="${at(i)[0]}" cy="${at(i)[1]}" r="1.7"/>`).join("")
-    + [81, 85, 89].map((y, i) => `<line class="ahex-vent" x1="${(35.3 + i * 1.5).toFixed(1)}" y1="${y}" x2="${(51.3 - i * 1.5).toFixed(1)}" y2="${y}"/>`).join("")
-    + `<circle class="ahex-led" cx="43.3" cy="17" r="2"/>`;
-  return svg;
-}
-
-/* The agent's three sockets, top to bottom: model, memory, tools, down the
- * cell's upright right wall, 15% of its height apart, each icon beside its
- * own. A socket exists only while the agent is opened: a recess machined
- * into the wall, open at the wall and rounded at its far end — a dark
- * cavity, the lip's shadow along its top,
- * no outline. A part's connector sits in it: a straight barrel most of the
- * way in, the cavity showing round it, chamfered out of the wall down to
- * exactly the cable's width (drawAgentParts takes the cable on from the
- * ferrule's end). Folded, the wall is whole: only the icons show. Clicking
- * a socket's place opens or folds the agent. */
-const SOCK_AT = {model: 0.35, memory: 0.5, tool: 0.65};
-const RECESS = {h: 3.2, run: 2.2};                  // half the mouth (also the far end's radius); the straight run
-const NOSE = {h: 1.9, depth: 4.5, r: 0.8};          // half the barrel's height; how far in it goes; its tip's corners
-const CHAMFER = {at: 2.5, len: 3};                  // where the barrel's chamfer starts outside the wall; its length
-const FERRULE = CHAMFER.at + CHAMFER.len;           // the connector out of the wall, to where the cable takes over
-const CABLE_R = 1.2;                                // half the cable's width: the chamfer ends at exactly this
-function sockAt(A, part) {
-  return {x: A.x + A.w + FERRULE, y: A.y + A.h * SOCK_AT[part]};   // where the cable takes over
-}
-/* One socket, drawn with the wall at x = 0 (inside is negative): its
- * recess — the cavity in the darkest tone, its floor a shade lighter and
- * set a little lower, so the lip's shadow shows along the top — and the
- * connector in it when a part is plugged in: a straight barrel, a straight
- * chamfer down to the cable's width, one hairline of the role's colour. */
-const SOCK_BOX = {x0: -(RECESS.run + RECESS.h) - 1, w: RECESS.run + RECESS.h + 1 + FERRULE, h: 2 * RECESS.h + 2};
-function socketSvg(plugged) {
-  const svg = document.createElementNS(SVGNS, "svg");
-  svg.setAttribute("class", "asockg");
-  svg.setAttribute("viewBox", `${SOCK_BOX.x0} ${-SOCK_BOX.h / 2} ${SOCK_BOX.w} ${SOCK_BOX.h}`);
-  svg.setAttribute("aria-hidden", "true");
-  const {h, run} = RECESS;
-  const pocket = (top, bot, end) => `M0 ${top} L${-run} ${top} A${end} ${(bot - top) / 2} 0 0 0 ${-run} ${bot} L0 ${bot} Z`;
-  let g = `<path class="asg-cavity" d="${pocket(-h, h, h)}"/>`
-    + `<path class="asg-floor" d="${pocket(-h + 0.9, h, h - 0.6)}"/>`;
-  if (plugged) {
-    const {h: n, depth, r} = NOSE, tip = -depth, c = CABLE_R, a = CHAMFER.at;
-    g += `<path class="asg-conn" d="M${FERRULE} ${-c} L${a} ${-n} L${tip + r} ${-n} Q${tip} ${-n} ${tip} ${-n + r}`
-      + ` L${tip} ${n - r} Q${tip} ${n} ${tip + r} ${n} L${a} ${n} L${FERRULE} ${c} Z"/>`
-      + `<line class="asg-band" x1="1.1" y1="${-n + 0.35}" x2="1.1" y2="${n - 0.35}"/>`;
+  title.append(name, el("div", "ag2-sub", `${a.name || "agent"} · ${tools.length} tool${tools.length === 1 ? "" : "s"}`));
+  head.append(mark, title);
+  if (state.run && ranInRun(n)) {
+    const cap = (a.limits || {}).turns, t = counts.turns;
+    const live = (state.run.summary || {}).status === "running";
+    const st = el("span", live ? "ag2-st run" : "ag2-st done");
+    st.append(el("i"), document.createTextNode(live ? `turn ${t}${cap ? ` / ${cap}` : ""}` : `${t} turn${t === 1 ? "" : "s"}`));
+    st.title = cap ? `${t} of at most ${cap} turns` : `${t} turn${t === 1 ? "" : "s"}`;
+    head.append(st);
   }
-  svg.innerHTML = g;
-  return svg;
-}
-function agentSockets(n, key) {
-  const a = n.agent || {};
-  const have = new Set((n.parts || []).map(p => p.part));
-  const tools = (a.tools || []).length;
-  const box = el("span", "asocks");
-  const open = state.expanded.has(key);
-  const sock = (part, icon, tip) => {
-    const s = el("span", `asock s-${part}` + (have.has(part) ? "" : " empty"));
-    s.style.top = `${SOCK_AT[part] * 100}%`;
-    Object.assign(s.style, {right: `${-FERRULE}px`, width: `${SOCK_BOX.w}px`, height: `${SOCK_BOX.h}px`});
-    const mark = el("span", "amark");
-    mark.append(icon);
-    s.append(mark);
-    if (open) s.append(socketSvg(have.has(part)));
-    s.title = `${tip} — click to ${open ? "unplug" : "plug in"} its parts`;
-    s.onclick = (ev) => { ev.stopPropagation(); toggleExpand(key); };
-    box.append(s);
+  const fold = el("button", "ag2-fold");
+  fold.append(lucideIcon(open ? "up" : "down"));
+  fold.title = open ? "Fold the agent" : "Open the agent: its model, tools and memory";
+  fold.setAttribute("aria-expanded", String(open));
+  fold.onclick = (ev) => { ev.stopPropagation(); toggleAgentCard(it.key); };
+  fold.ondblclick = (ev) => ev.stopPropagation();
+  head.append(fold);
+  card.append(head);
+  card.title = "";
+  if (!open) return;
+
+  const body = el("div", "ag2-body");
+  const row = (kind, icon, label, line, extra) => {
+    const r = el("div", "ag2-row");
+    r.style.setProperty("--rk", kind);
+    const ri = el("span", "ag2-ri");
+    ri.append(lucideIcon(icon));
+    const rt = el("span", "ag2-rt");
+    rt.append(el("b", null, label), line);
+    r.append(ri, rt);
+    if (extra) r.append(extra);
+    body.append(r);
+    return r;
   };
-  sock("model", brainIcon(), `model: ${(a.model || []).join(" → ") || "?"}`);
-  sock("memory", dbIcon(), have.has("memory")
-    ? "memory: a conversation kept per session_id"
-    : "memory: none — each run starts fresh (sessions= gives it one)");
-  sock("tool", lucideIcon("wrench"), `tools: ${tools ? (a.tools || []).map(t => t.name).join(", ") : "none — it only answers"}`);
-  return box;
+  const model = a.model || [];
+  const mline = el("span", "mono", model.join(" → ") || "?");
+  mline.title = model.length > 1 ? `falls back to ${model.slice(1).join(", ")}` : "";
+  row("var(--k-llm)", "brain", "Model", mline,
+      counts.model ? el("span", "ag2-n", `${counts.model} call${counts.model === 1 ? "" : "s"}`) : null);
+
+  const shut = agentToolsShut.has(it.key);
+  const spaces = [...new Set(tools.map(t => t.name.includes("__") ? t.name.split("__")[0] : t.name))];
+  const tline = el("span", null, tools.length
+    ? (spaces.length < tools.length ? spaces : tools.map(t => t.name)).slice(0, 4).join(" · ")
+      + (spaces.length > 4 && spaces.length < tools.length ? " …" : "")
+    : "none · it only answers");
+  const tn = el("span", "ag2-n", String(tools.length));
+  const tr = row("var(--k-func)", "wrench", "Tools", tline, tn);
+  if (tools.length) {
+    const chev = el("span", "ag2-chev");
+    chev.append(lucideIcon(shut ? "down" : "up"));
+    tr.append(chev);
+    tr.classList.add("ag2-toggle");
+    tr.onclick = (ev) => {
+      ev.stopPropagation();
+      if (shut) agentToolsShut.delete(it.key); else agentToolsShut.add(it.key);
+      renderKeeping(it.key);
+    };
+  }
+  if (tools.length && !shut) {
+    const list = el("div", "ag2-tools");
+    const byName = new Map(parts.filter(p => p.part === "tool").map(p => [p.name, p]));
+    const shown = tools.length > TOOL_SHOWN ? tools.slice(0, TOOL_SHOWN - 1) : tools;
+    for (const t of shown) list.append(toolRow(it, t, byName.get(t.name), counts.tools.get(t.name)));
+    if (tools.length > TOOL_SHOWN) {
+      const more = el("div", "ag2-more", `+${tools.length - shown.length} more · all in Tools ↗`);
+      more.title = tools.slice(shown.length).map(t => t.name).join(", ");
+      list.append(more);
+    }
+    body.append(list);
+  }
+
+  const mem = parts.find(p => p.part === "memory");
+  const mr = row("var(--k-res)", "database", "Memory",
+                 el("span", null, mem ? `${mem.name} · kept per session` : "none · each run starts fresh"));
+  if (!mem) mr.classList.add("off");
+  if (mem) mr.title = mem.description || "";
+  card.append(body);
 }
 
-/* The agent's parts' icons, from Lucide (lucide.dev, ISC licence): the
- * model a brain, memory a database, the tools a wrench — by each socket,
- * and the model's and memory's on their cards. */
+/* One tool in an agent's card: its kind's glyph, name and description,
+ * ×calls in a run, ↗ to open it on its own. A click picks it. */
+const TOOL_GLYPH = {function: ["ƒ", "--k-func"], op: ["ƒ", "--k-func"], graph: ["▣", "--k-graph"],
+                    agent: [null, "--k-llm"], mcp: [null, "--k-io"]};
+function toolRow(it, t, p, calls) {
+  const kind = t.kind || (p && p.tool && p.tool.kind) || "function";
+  const [glyph, color] = TOOL_GLYPH[kind] || TOOL_GLYPH.function;
+  const key = p ? `${it.key}/${p.id}` : null;
+  const r = el("div", "ag2-tool");
+  r.style.setProperty("--tk", `var(${color})`);
+  const policy = t.policy || "allow";
+  if (policy !== "allow") r.classList.add("p-" + policy);
+  const k = el("span", "k");
+  if (glyph) k.textContent = glyph;
+  else k.append(kind === "agent" ? agentMark("") : lucideIcon("plug"));
+  k.title = TOOL_KIND_WORDS[kind] || kind;
+  const tx = el("span", "t");
+  tx.append(el("b", null, t.name), el("span", null, t.description || ""));
+  r.append(k, tx);
+  if (policy === "ask") { const m = el("span", "atpolicy p-ask", "ASK"); m.title = "Waits for a human's approval before it runs."; r.append(m); }
+  if (calls) r.append(el("span", "calls", `×${calls}`));
+  if (p && (p.graph || p.agent || p.code)) {
+    const go = el("button", "go");
+    go.append(lucideIcon("out"));
+    go.title = p.graph || p.agent ? `Open ${t.name} on its own` : `${t.name}'s code`;
+    go.onclick = (ev) => { ev.stopPropagation(); openToolView(it, p); };
+    go.ondblclick = (ev) => ev.stopPropagation();
+    r.append(go);
+  }
+  r.title = `${t.name} — ${TOOL_KIND_WORDS[kind] || kind}${policy !== "allow" ? ` · ${policy}` : ""}`;
+  if (key) {
+    r.dataset.key = key;
+    state.partRows.set(key, {key, node: p, inner: null, el: r, agent: it.key, depth: (it.depth || 0) + 1});
+    if (state.sel === key) r.classList.add("sel");
+    r.onclick = (ev) => { ev.stopPropagation(); if (state.sel !== key) select(key); };
+    r.ondblclick = (ev) => ev.stopPropagation();
+  }
+  return r;
+}
+
+/* A tool opened on its own: the canvas shows the tool — a @graph's graph,
+ * an agent's card — in place of the flow, with a bar to come back. A
+ * function's or an @op's code is the inspector's: ↗ picks it. */
+let toolHome = null;
+function openToolView(it, p) {
+  if (!p.graph && !p.agent) { select(`${it.key}/${p.id}`); return; }
+  const {part, ...node} = p;
+  const g = p.graph
+    ? {...p.graph, name: p.name}
+    : {name: p.name, nodes: [node], edges: [], entries: [node.id], exits: [node.id]};
+  if (!toolHome) toolHome = {graph: state.graph, sel: state.sel, expanded: new Set(state.expanded), trail: []};
+  toolHome.trail.push(`${it.node.name} › ${p.name}`);
+  state.graph = g;
+  state.sel = state.dfFocus = null;
+  state.expanded.clear();
+  render(); fit(); renderFlowInfo();
+  toolBar();
+}
+function closeToolView(restore = true) {
+  const h = toolHome;
+  toolHome = null;
+  toolBar();
+  if (!h || !restore) return;
+  state.graph = h.graph;
+  state.sel = h.sel;
+  state.expanded = h.expanded;
+  render(); fit(); renderFlowInfo();
+}
+function toolBar() {
+  let bar = $("#toolview");
+  if (!toolHome) { if (bar) bar.remove(); return; }
+  if (!bar) { bar = el("div", "toolview"); bar.id = "toolview"; $("#stage").append(bar); }
+  bar.textContent = "";
+  const back = el("button", "tvback", `‹ ${toolHome.graph ? toolHome.graph.name : "back"}`);
+  back.title = "Back to the flow (Esc)";
+  back.onclick = () => closeToolView();
+  bar.append(back, el("span", "tvtrail mono", toolHome.trail.join(" › ")));
+}
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && toolHome && !state.sel && !ev.target.closest("input, textarea, select, [contenteditable]")) closeToolView();
+});
+
+/* The agent's icons, from Lucide (lucide.dev, ISC licence). */
 const LUCIDE = {
   brain: '<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>'
     + '<path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>'
@@ -2313,136 +2340,21 @@ const LUCIDE = {
     + '<path d="M3 12A9 3 0 0 0 21 12"/>',
   wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 '
     + '6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/>'
+    + '<path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  hex: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>',
+  up: '<path d="m18 15-6-6-6 6"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  out: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
+  plug: '<path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>',
 };
 function lucideIcon(name) {
   const svg = document.createElementNS(SVGNS, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("class", `dbicon lucide-ic lucide-${name}`);
+  svg.setAttribute("class", `lucide-ic lucide-${name}`);
   svg.setAttribute("aria-hidden", "true");
   svg.innerHTML = LUCIDE[name];
   return svg;
-}
-const brainIcon = () => lucideIcon("brain");
-const dbIcon = () => lucideIcon("database");
-
-/* The cables from an opened agent's connectors to its parts: one slim
- * Bézier each, a single stroke faintly of its role's colour, leaving the
- * ferrule level and meeting the part level, where it flares a little onto
- * the card's edge. The tools' cables are thinner and fan out from their
- * one connector through a short junction just outside the wall (nothing
- * drawn there): each eases off into a lane of its own, the lanes in the
- * order of the tools they lead to, so no two cross, then curves on to its
- * tool. Hovering or selecting a part brings its cable up and steps its
- * agent's others back (partCablesFocus). What moves sits in `.apw-anim`,
- * shown only while a run is live (liveCanvas). */
-const FAN = {run: 16, gap: 4.5, spread: 36, clear: 7};   // the junction's length; lane gap; most the lanes span; room kept from the memory socket
-const TOOL_R = 0.8;                                      // half a tool cable's width
-let apwSeq = 0;
-function drawAgentParts(svg, parts) {
-  state.partWires = new Map();
-  const byAgent = new Map();
-  for (const P of parts || []) {
-    if (!byAgent.has(P.agent)) byAgent.set(P.agent, []);
-    byAgent.get(P.agent).push(P);
-  }
-  const mk = (tag, attrs, parent) => {
-    const e = document.createElementNS(SVGNS, tag);
-    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-    if (parent) parent.append(e);
-    return e;
-  };
-  const f = (v) => v.toFixed(1);
-  const ride = (g, attrs, id, dur, begin, extra = {}) => {
-    const m = mk("circle", attrs, g);
-    const an = mk("animateMotion", {dur, begin, repeatCount: "indefinite", ...extra}, m);
-    mk("mpath", {href: `#${id}`}, an);
-  };
-  // a curve from (x0, y0) to (x1, y1), level at both ends
-  const curve = (x0, y0, x1, y1) => {
-    const k = Math.max(18, Math.min(90, (x1 - x0) * 0.5));
-    return ` C${f(x0 + k)} ${f(y0)} ${f(x1 - k)} ${f(y1)} ${f(x1)} ${f(y1)}`;
-  };
-  // where it meets a part: the cable flaring a little onto the card's edge
-  const TERM = 4;
-  const terminal = (g, x, y, r, cls, part) => mk("path", {class: `apw-term ${cls}`, "data-part": part,
-    transform: `translate(${f(x)} ${f(y)})`,
-    d: `M${-TERM} ${-r} L-1.5 ${-r - 0.5} L0 ${-r - 0.5} L0 ${r + 0.5} L-1.5 ${r + 0.5} L${-TERM} ${r} Z`}, g);
-  // where a cable meets its part: the left edge's middle (an opened part's
-  // title strip)
-  const anchor = (it) => ({x: it.x - 0.5, y: it.inner ? it.y + 17 : it.y + it.h / 2});
-  for (const [A, mine] of byAgent) {
-    const g = mk("g", {class: "apw", "data-agent": A.key}, svg);
-    const anim = mk("g", {class: "apw-anim"});
-    state.partWires.set(A.key, g);
-    const draw = (P, d, r) => {
-      const denied = ((P.item.node.tool || {}).policy) === "deny";
-      const cls = `apw-${P.part}` + (denied ? " p-deny" : ""), id = `apw${++apwSeq}`, to = anchor(P.item);
-      mk("path", {id, d, class: `apw-cable ${cls}`, "data-part": P.item.key}, g);
-      terminal(g, to.x, to.y, r, cls, P.item.key);
-      return id;
-    };
-    for (const P of mine.filter(q => q.part !== "tool")) {
-      const {x: x0, y: y0} = sockAt(A, P.part), to = anchor(P.item);
-      const id = draw(P, `M${f(x0)} ${f(y0)}` + curve(x0, y0, to.x - TERM, to.y), CABLE_R);
-      ride(anim, {r: 1.6, class: `apw-dot apw-${P.part}`}, id, "1.6s", "0s");
-    }
-    // the tools: a lane each out of the junction, in their order down the column
-    const tools = mine.filter(q => q.part === "tool").sort((p, q) => anchor(p.item).y - anchor(q.item).y);
-    const m = tools.length;
-    if (!m) { g.append(anim); continue; }
-    const {x: x0, y: y0} = sockAt(A, "tool"), xj = x0 + FAN.run;
-    const gap = m > 1 ? Math.min(FAN.gap, FAN.spread / (m - 1)) : 0;
-    let first = -(m - 1) / 2 * gap;
-    const up = sockAt(A, "tool").y - sockAt(A, "memory").y - FAN.clear;   // never fan up into memory's cable
-    if (-first > up) first = -up;
-    tools.forEach((P, i) => {
-      const to = anchor(P.item), yl = y0 + first + i * gap;
-      const d = `M${f(x0)} ${f(y0)} C${f(x0 + FAN.run * 0.55)} ${f(y0)} ${f(xj - FAN.run * 0.55)} ${f(yl)} ${f(xj)} ${f(yl)}`
-        + curve(xj, yl, to.x - TERM, to.y);
-      const id = draw(P, d, TOOL_R);
-      if (((P.item.node.tool || {}).policy) === "deny") return;   // never called
-      // a call: out to the tool and its answer back, each tool in turn
-      const times = [0, i / m, (i + 0.4) / m, (i + 0.5) / m, (i + 0.9) / m, 1].map(v => v.toFixed(3)).join(";");
-      ride(anim, {r: 1.4, class: "apw-dot apw-tool"}, id, `${2.6 * m}s`, "0s",
-           {keyPoints: "0;0;1;1;0;0", keyTimes: times, calcMode: "linear"});
-    });
-    g.append(anim);
-  }
-  partCablesFocus();
-}
-/* The part in focus (hovered, else selected): its cable comes up, and its
- * agent's other cables step back. Nothing else on the canvas changes. */
-function partCablesFocus() {
-  const key = state.partHover || state.sel;
-  for (const g of (state.partWires || new Map()).values()) {
-    const mine = !!key && !!g.querySelector(`.apw-cable[data-part="${CSS.escape(key)}"]`);
-    g.classList.toggle("focus", mine);
-    for (const e of g.querySelectorAll("[data-part]")) e.classList.toggle("hot", mine && e.dataset.part === key);
-  }
-}
-function partHover(key, on) {
-  if (on) state.partHover = key;
-  else if (state.partHover === key) state.partHover = null;
-  partCablesFocus();
-}
-
-/* An agent's tool: the policy shows only when it is not the usual allow.
- * Ask: a small mark after the name. Deny: the card greyed out (and its
- * cable, drawAgentParts). The inspector says all three in full. */
-const POLICY_WORDS = {allow: "Runs when the model calls it.",
-  ask: "Waits for a human's approval before it runs.",
-  deny: "Refused: the model may not call it."};
-function toolMarks(card, line, n) {
-  const policy = (n.tool || {}).policy || "allow";
-  if (policy === "ask") {
-    const m = el("span", "atpolicy p-ask", "ASK");
-    m.title = POLICY_WORDS.ask;
-    line.append(m);
-  }
-  if (policy === "deny") card.classList.add("tool-denied");
-  card.dataset.policy = policy;
-  const runs = state.run && state.run.ops && state.run.ops[n.name];
-  if (runs) line.append(el("span", "atcount", `×${runs.runs}`));
 }
 
 /* A nested graph's icon band is its open button: the graph's square with
@@ -2796,7 +2708,7 @@ function doubleClickKey(fallback, ev) {
 }
 function opensInPlace(key) {
   const it = key && state.rendered.get(key);
-  return !!(it && (it.node.graph || it.node.parts));
+  return !!(it && it.node.graph);
 }
 
 /* A click only selects; a double click opens the op's data, in place —
@@ -2898,22 +2810,9 @@ function opCard(it) {
     card.append(band);
     const line = el("div", "nname nline");
     line.append(el("span", "ntext", n.name));
-    // an agent's tool: what the policy lets it do, said only when it is
-    // not the usual allow
-    if (n.part === "tool") {
-      card.classList.add("agenttool");
-      toolMarks(card, line, n);
-    }
     const chips = state.run ? null : nameChips(n);
     if (chips) line.append(chips);
     card.append(line);
-    // an agent's tools are what it can DO: one line under its name
-    const tools = agentToolsLine(n);
-    if (tools) card.append(tools);
-    // an agent's memory wears the database it is, its model the brain it is
-    const glyph = band.querySelector(".bglyph") || band;
-    if (n.part === "memory") glyph.replaceChildren(dbIcon());
-    if (n.part === "model") glyph.replaceChildren(brainIcon());
     // the kind line was card noise at fit-zoom; it lives in the
     // tooltip and the inspector — and on the card once it is clicked
     // (the .detail block shows on the selected card only)
@@ -2973,12 +2872,9 @@ function opCard(it) {
     badges.append(b);
   }
   card.append(badges);
-  // an agent's part is wired from its socket, never into the flow: no ports
-  if (!n.part) {
-    card.append(el("span", "port in"));
-    // a router's exits are its condition rows — no anonymous base port
-    if (!(n.routes && n.routes.length)) card.append(el("span", "port out"));
-  }
+  card.append(el("span", "port in"));
+  // a router's exits are its condition rows — no anonymous base port
+  if (!(n.routes && n.routes.length)) card.append(el("span", "port out"));
   card.onclick = (ev) => {
     ev.stopPropagation();
     // the second press of a double click is the double click's, and a
@@ -2987,8 +2883,8 @@ function opCard(it) {
     firstClick = {key: it.key, at: ev.timeStamp};
     if (state.sel !== it.key) select(it.key);
   };
-  card.onmouseenter = () => { dfHoverEnter(it.key); if (n.part) partHover(it.key, true); };
-  card.onmouseleave = () => { dfHoverLeave(it.key); if (n.part) partHover(it.key, false); };
+  card.onmouseenter = () => dfHoverEnter(it.key);
+  card.onmouseleave = () => dfHoverLeave(it.key);
   card.ondblclick = (ev) => {
     ev.stopPropagation();
     openOp(doubleClickKey(it.key, ev));

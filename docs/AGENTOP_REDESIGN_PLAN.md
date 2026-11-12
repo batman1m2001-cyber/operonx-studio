@@ -1,6 +1,6 @@
 # One card per agent, one list of tools (AGENTOP_REDESIGN_PLAN)
 
-Status: planned (2026-11-12). Nothing built yet.
+Status: A1 built (2026-11-12): the card. A2–A4 open.
 
 Owner's brief:
 1. Today's AgentOp is ugly.
@@ -34,7 +34,8 @@ Problems:
 
 - **No engine change.** operonx-agents keeps its tool kinds (function, op,
   graph, agent, mcp) and has no runtime registry: each agent owns its
-  Toolset (tool.py). The studio only changes how this is drawn.
+  Toolset (tool.py). The studio only changes how this is drawn. A3 reads
+  each tool's args from operonx-agents' `ToolSpec.params_schema`.
 - **The agent is a card, not a container.** Its tools are rows inside it,
   not ops on the canvas. There are no wires between the rows, because the
   agent loop isn't a pipeline.
@@ -128,7 +129,8 @@ them. Only the canvas drawing of parts is removed.
   - ↗ opens fetch_page in its own tab;
   - `prepare` shows three chips, and a chip opens the path and selects the
     agent.
-- meeting-prep-brd: email (10 tools) shows 5 + "+5 more"; Tools lists 19
+- meeting-prep-brd: an agent over 6 tools shows 5 + "+N more" (email
+  declares 5 today, so A1 checked it on 9); Tools lists 19
   tools in 7 namespaces; `mail__send` shows two uses (email and send).
 - A run shows "turn n / m" live and ×calls per tool.
 - Light and dark screenshots match the mocks.

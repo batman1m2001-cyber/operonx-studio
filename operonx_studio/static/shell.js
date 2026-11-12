@@ -371,6 +371,7 @@ for (const b of document.querySelectorAll(".tabs button[data-tab]"))
 
 $("#graph-pick").onchange = (ev) => {
   state.flowHome = null;   // a graph picked by hand is the one to come back to
+  closeToolView(false);    // … and closes a tool opened on its own
   state.graph = state.ir.graphs.find(g => g.name === ev.target.value);
   state.sel = state.dfFocus = null;
   state.expanded.clear();
