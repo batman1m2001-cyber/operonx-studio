@@ -1,14 +1,5 @@
 ---
 title: The assistant works the screen
-status: done
-phases:
-  - {id: L1, title: The hand — go, point, press, status: done}
-  - {id: L2, title: Project mode's targets, status: done}
-  - {id: L3, title: Project mode follows the assistant's work, status: done}
-  - {id: L4, title: The assistant points on purpose, status: done}
-  - {id: L5, title: The rest of the studio, status: done}
-  - {id: L6, title: Gate, status: done}
-updated: 2026-10-23
 ---
 
 # The assistant works the screen

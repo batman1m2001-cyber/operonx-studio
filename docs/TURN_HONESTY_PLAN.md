@@ -1,13 +1,6 @@
 ---
 title: A turn ends on what it really did
-status: done
-phases:
-  - {id: S4, title: "A call the studio's guard refused is guarded, not failed", status: done}
-  - {id: S1, title: "Plan phases marked done are sent back once for their evidence (stophook.py)", status: done}
-  - {id: S2, title: "failing_on_base: failing tests run on the base branch; a red last run is sent back until it is called", status: done}
-  - {id: S3, title: "What the turn leaves: open steps (strip + hook), worktrees it made (card with Remove)", status: done}
 rows: []
-updated: 2026-11-01
 ---
 
 # A turn ends on what it really did (TURN_HONESTY_PLAN)

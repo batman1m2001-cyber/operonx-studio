@@ -1,16 +1,6 @@
 ---
 title: A long tool call shows its stages, its real progress and whether it is alive
-status: done
-phases:
-  - {id: E1, title: "Every shell call observed: the hook wraps foreground and background calls, records the shell's pid", status: done}
-  - {id: E2, title: "progress.py: one parser registry (tests, install, build, lint, fetch, docker, generic) → stages and counts", status: done}
-  - {id: E3, title: "Stages of a chained command: a conservative top-level split, markers between the parts", status: done}
-  - {id: E4, title: "The relay: liveness from /proc, coalesced progress events, background calls linked to their task, stop one call", status: done}
-  - {id: E5, title: "The page: the running row's bar, counters, liveness and stages; the status line; node tests", status: done}
-  - {id: E6, title: "Knowledge: separate stages, background past two minutes, never poll", status: done}
-  - {id: E7, title: "Live gate: a Sonnet turn on the scratch studio, shots, overhead and gap measurements", status: done}
 rows: []
-updated: 2026-11-01
 ---
 
 # A long tool call shows what it is doing (EXECUTION_PROGRESS_PLAN)
