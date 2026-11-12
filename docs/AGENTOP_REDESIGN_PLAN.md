@@ -1,6 +1,6 @@
 # One card per agent, one list of tools (AGENTOP_REDESIGN_PLAN)
 
-Status: A1 built (2026-11-12): the card. A2 built: agent chips. A3–A4 open.
+Status: A1 built (2026-11-12): the card (#168). A2 built: agent chips (#169). A3 built: the Tools catalogue; args are read from `ToolSpec.params_schema` in the studio's extract.py, with no operonx change. A4 open.
 
 Owner's brief:
 1. Today's AgentOp is ugly.

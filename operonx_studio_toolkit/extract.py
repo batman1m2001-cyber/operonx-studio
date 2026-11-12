@@ -399,6 +399,10 @@ def _agent_parts(
         tinfo = dict(by_name.get(name) or {"name": name})
         kind = getattr(t, "kind", None) or tinfo.get("kind") or "function"
         tinfo["kind"] = kind
+        # its arguments, as the model sees them (the Tools catalogue shows them)
+        schema = getattr(getattr(t, "spec", None), "params_schema", None)
+        if isinstance(schema, dict) and schema:
+            tinfo["args"] = _json_safe(schema)
         op_kind, op_type = _TOOL_NODE_KIND.get(kind, ("FuncOp", "code"))
         node: Dict[str, Any] = {
             **blank, "id": f"{base}.{name}", "name": name, "kind": op_kind, "op_type": op_type,

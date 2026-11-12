@@ -1283,6 +1283,26 @@ def test_an_agent_ships_its_parts_a_graph_tool_laid_out(client, tmp_path):
     assert all(isinstance(m.get("x"), (int, float)) for m in tool_part["graph"]["nodes"])
 
 
+def test_the_tools_catalogue_lists_each_tool_once_with_its_args_and_uses(client, tmp_path):
+    """Resources › Tools (AGENTOP_REDESIGN_PLAN A3): a tool the agents declare,
+    once, with the arguments the model sees and the agent that uses it, keyed
+    for the canvas."""
+    agents = pytest.importorskip("operonx_agents")
+    if not hasattr(agents.Agent, "describe"):
+        pytest.skip("operonx-agents < 0.2: no graph tools")
+    root = tmp_path / "toolcat"
+    root.mkdir()
+    (root / "main.py").write_text(AGENT_PARTS_MAIN, encoding="utf-8")
+    (root / "operonx.toml").write_text(MANIFEST.replace("scratch-demo", "toolcat"), encoding="utf-8")
+    pid = _open(client, root)
+    (row,) = client.get(f"/api/p/{pid}/tools").json()["tools"]
+    assert (row["name"], row["kind"], row["readonly"]) == ("read_page", "graph", True)
+    assert "url" in (row["args"] or {}).get("properties", {})
+    (use,) = row["uses"]
+    assert (use["agent"], use["graph"], use["policy"]) == ("a", "flow", "allow")
+    assert use["key"].endswith(".a") and use["path"] == []
+
+
 def test_an_edit_applies_against_the_file_it_previewed_and_can_be_undone(client, project):
     """safewrite (§5): the preview's base is named by the apply; a file
     changed in between is refused with the new diff; a write can be undone."""
