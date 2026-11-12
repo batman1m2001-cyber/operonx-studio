@@ -170,13 +170,15 @@ window.FlowRail = (() => {
   }
 
   if (btn) btn.onclick = () => show(document.body.classList.contains("flowrail-off"));
+  // [ the flows, ] the side panel: both away leaves the canvas alone
   document.addEventListener("keydown", (ev) => {
-    if (ev.key !== "[" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    if ((ev.key !== "[" && ev.key !== "]") || ev.ctrlKey || ev.metaKey || ev.altKey) return;
     const t = ev.target;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
     if (document.body.dataset.tab !== "flow") return;
     ev.preventDefault();
-    if (btn) btn.click();
+    if (ev.key === "]") window.oxSide.toggle();
+    else if (btn) btn.click();
   });
   const saved = keep.get(ON, null);
   show(saved ? saved === "on" : innerWidth > 760, false);

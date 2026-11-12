@@ -42,6 +42,7 @@ function select(key) {
   // an op was picked on the canvas: its detail is the point, bring the tab forward
   // (on a phone the panel is a sheet that only a selection opens)
   if (MOBILE.matches || (panelWanted() && recall("sideTab", "assistant") !== "inspect")) showSide("inspect");
+  else if (!panelWanted()) peekSide("inspect");
   panel.textContent = "";
   panel.scrollTop = 0;
 
