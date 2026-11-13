@@ -6118,3 +6118,35 @@ svg.tc-mark { width: 15px; height: 15px; fill: none; stroke: currentColor; strok
 .tc-pol.deny { background: color-mix(in srgb, var(--err) 16%, transparent); color: var(--err); }
 .tc-code summary { cursor: pointer; font-size: var(--fs-sm); color: var(--text-2); }
 .tc-code pre { max-height: 260px; overflow: auto; font-size: var(--fs-xs); background: var(--surface-2); padding: 10px; border-radius: 8px; }
+
+/* ── C1: the canvas backdrop (docs/CANVAS_REDESIGN_PLAN.md) ─────────
+   On the Flow screen the canvas wears the operonx backdrop: lavender
+   glass sheets at the edges, the glyph in the bottom-right corner (where
+   a graph rarely reaches), a calm centre. The dot grid is softened over
+   it. The ops on it are clear glass: a thin tint of their kind, a sharp
+   rim, little blur, so the backdrop reads through. The frame round the
+   canvas (top bar, rail, flows panel, side panel) is clear glass like the
+   canvas bar. Reduce Transparency keeps the plain bay and frosted ops. */
+:root { --glass-blur-frame: 12px; }
+:root:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > #stage {
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--bg-gray89) 45%, transparent) 1px, transparent 1.2px),
+    url("/static/canvas-bg-light.webp");
+  background-size: 24px 24px, cover; background-position: 0 0, center;
+  --og-fill: rgba(255, 255, 255, .12); --og-tint: 2%; --og-band: 5%; --og-blur: 2px;
+  --og-edge: rgba(52, 62, 102, .26); --og-spec: rgba(255, 255, 255, .6); --og-rim: rgba(255, 255, 255, 1);
+}
+/* faint text over the backdrop or the frame's clear glass: a step stronger */
+:root:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > #stage,
+body.floatframe:not(.ax-focus) .flowrail { --text-3: var(--glass-text-3); }
+:root:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > #stage .node.container {
+  background: color-mix(in srgb, var(--kind, var(--k-graph)) 2%, transparent); }
+:root:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > #stage .node.container .chead {
+  background: var(--og-fill); -webkit-backdrop-filter: blur(var(--og-blur)); backdrop-filter: blur(var(--og-blur)); }
+body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail,
+body.floatframe:not(.ax-focus) #sidebar, body.floatframe:not(.ax-focus) .flowrail {
+  --glass-tint: var(--glass-clear); --glass-blur: var(--glass-blur-frame); }
+/* the side panel's reading area: half the surface, the frame's blur under it */
+body.floatframe:not(.ax-focus) #sidebar > #inspector,
+body.floatframe:not(.ax-focus) #sidebar > #chatdock { background: color-mix(in srgb, var(--surface) 45%, transparent); }
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar > #inspector,
+:root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar > #chatdock { background: var(--surface); }

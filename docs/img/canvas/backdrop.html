@@ -1,0 +1,70 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0}svg{display:block}</style></head><body>
+<svg id="s" xmlns="http://www.w3.org/2000/svg" width="2560" height="1440" viewBox="0 0 2560 1440"></svg>
+<script>
+const T = {
+ dark: {base:["#17161d","#121117","#0e0d12"], glow:"#7a5cff", glowO:.14, glow2:"#4d6bff", glow2O:.07, sheet:"#8f78ff", sheet2:"#6f8cff", sheetO:.09,
+        edge:"#cbb9ff", edgeO:.75, logo:"#b49bff", logoFill:.16, logoEdge:"#e6dcff", orb:"#d9ccff", grain:.045, vign:.35, centre:"#0c0b10", centreO:.45},
+ light:{base:["#f2eeff","#ebe8fd","#e4e8fb"], glow:"#a991ff", glowO:.50, glow2:"#97b4ff", glow2O:.40, sheet:"#ad98ff", sheet2:"#99b4ff", sheetO:.30,
+        edge:"#ffffff", edgeO:1, logo:"#a58cf5", logoFill:.14, logoEdge:"#ffffff", orb:"#ffffff", grain:.03, vign:0, centre:"#faf8ff", centreO:.35},
+};
+// the operonx glyph as a path (box 520x290): a big loop, a crossing, two tails ending in orbs
+const GLYPH = "M 465 45 C 400 80, 362 118, 330 150 C 282 200, 222 268, 150 262 C 70 255, 35 200, 38 150 C 42 90, 100 38, 185 40 C 255 42, 300 110, 330 150 C 366 196, 410 234, 462 258";
+function draw(mode){
+ const t=T[mode], s=document.getElementById("s");
+ let d=`<defs>
+  <linearGradient id="base" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${t.base[0]}"/><stop offset=".5" stop-color="${t.base[1]}"/><stop offset="1" stop-color="${t.base[2]}"/></linearGradient>
+  <radialGradient id="gA" cx=".88" cy=".05" r=".55"><stop offset="0" stop-color="${t.glow}" stop-opacity="${t.glowO}"/><stop offset="1" stop-color="${t.glow}" stop-opacity="0"/></radialGradient>
+  <radialGradient id="gB" cx=".85" cy=".95" r=".5"><stop offset="0" stop-color="${t.glow}" stop-opacity="${t.glowO*.9}"/><stop offset="1" stop-color="${t.glow}" stop-opacity="0"/></radialGradient>
+  <radialGradient id="gC" cx=".05" cy=".95" r=".45"><stop offset="0" stop-color="${t.glow2}" stop-opacity="${t.glow2O}"/><stop offset="1" stop-color="${t.glow2}" stop-opacity="0"/></radialGradient>
+  <radialGradient id="calm" cx=".45" cy=".42" r=".38"><stop offset="0" stop-color="${t.centre}" stop-opacity="${t.centreO}"/><stop offset="1" stop-color="${t.centre}" stop-opacity="0"/></radialGradient>
+  <radialGradient id="vig" cx=".5" cy=".5" r=".78"><stop offset=".6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="${t.vign}"/></radialGradient>
+  <linearGradient id="sh" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${t.sheet}" stop-opacity="0"/><stop offset=".35" stop-color="${t.sheet}" stop-opacity="1"/><stop offset=".8" stop-color="${t.sheet2}" stop-opacity="1"/><stop offset="1" stop-color="${t.sheet2}" stop-opacity=".4"/></linearGradient>
+  <linearGradient id="ed" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${t.edge}" stop-opacity="0"/><stop offset=".4" stop-color="${t.edge}" stop-opacity="1"/><stop offset="1" stop-color="${t.edge}" stop-opacity=".6"/></linearGradient>
+  <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${t.logo}"/><stop offset="1" stop-color="${t.sheet2}"/></linearGradient>
+  <radialGradient id="orb" cx=".38" cy=".35" r=".7"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".35" stop-color="${t.orb}" stop-opacity=".7"/><stop offset="1" stop-color="${t.logo}" stop-opacity=".35"/></radialGradient>
+  <radialGradient id="spark"><stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset=".25" stop-color="${t.orb}" stop-opacity=".8"/><stop offset="1" stop-color="${t.logo}" stop-opacity="0"/></radialGradient>
+  <filter id="b40" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="40"/></filter>
+  <filter id="b8" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="8"/></filter>
+  <filter id="b2"><feGaussianBlur stdDeviation="1.2"/></filter>
+  <filter id="grain" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 ${t.grain} 0"/></filter>
+  <mask id="tube" maskUnits="userSpaceOnUse"><rect x="-200" y="-200" width="900" height="700" fill="#000"/><path d="${GLYPH}" fill="none" stroke="#fff" stroke-width="48" stroke-linecap="round"/><path d="${GLYPH}" fill="none" stroke="#000" stroke-width="44.5" stroke-linecap="round"/></mask>
+ </defs>`;
+ d+=`<rect width="2560" height="1440" fill="url(#base)"/><rect width="2560" height="1440" fill="url(#gA)"/><rect width="2560" height="1440" fill="url(#gB)"/><rect width="2560" height="1440" fill="url(#gC)"/>`;
+ // glass sheets: top-right sweep, bottom sweep (a translucent band + one bright edge)
+ const sheets = [
+  ["M 1500 -40 C 1900 150, 2250 170, 2620 -20 L 2620 -200 L 1500 -200 Z", "M 1500 -40 C 1900 150, 2250 170, 2620 -20"],
+  ["M 2050 -60 C 2250 120, 2450 260, 2640 330 L 2640 -100 Z", "M 2050 -60 C 2250 120, 2450 260, 2640 330"],
+  ["M -60 1250 C 500 1120, 1100 1260, 1700 1150 C 2050 1090, 2350 1000, 2640 900 L 2640 1500 L -60 1500 Z", "M -60 1250 C 500 1120, 1100 1260, 1700 1150 C 2050 1090, 2350 1000, 2640 900"],
+  ["M -60 1360 C 400 1290, 900 1380, 1400 1330 C 1900 1280, 2300 1180, 2640 1120 L 2640 1500 L -60 1500 Z", "M -60 1360 C 400 1290, 900 1380, 1400 1330 C 1900 1280, 2300 1180, 2640 1120"],
+  ["M -60 120 C 300 220, 650 160, 900 -40 L -60 -40 Z", "M -60 120 C 300 220, 650 160, 900 -40"],
+ ];
+ sheets.forEach((p,i)=>{ d+=`<path d="${p[0]}" fill="url(#sh)" opacity="${t.sheetO*(i==4?.6:1)}" filter="url(#b8)"/>`;
+   d+=`<path d="${p[1]}" fill="none" stroke="url(#ed)" stroke-width="10" opacity="${t.edgeO*.18}" filter="url(#b8)"/><path d="${p[1]}" fill="none" stroke="url(#ed)" stroke-width="1.6" opacity="${t.edgeO*(i==4?.35:.55)}" filter="url(#b2)"/>`; });
+ // thin orbit lines with a few orbs
+ d+=`<ellipse cx="2120" cy="1120" rx="560" ry="250" transform="rotate(-14 2120 1120)" fill="none" stroke="${t.edge}" stroke-width="1.2" opacity="${t.edgeO*.35}"/>`;
+ d+=`<path d="M 1380 140 C 1800 300, 2300 380, 2640 360" fill="none" stroke="${t.edge}" stroke-width="1.1" opacity="${t.edgeO*.3}"/>`;
+ [[1980,268,7],[2520,358,6],[1600,1236,6]].forEach(o=>{ d+=`<circle cx="${o[0]}" cy="${o[1]}" r="${o[2]*5}" fill="url(#spark)" opacity=".55"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="url(#orb)"/>`; });
+ // the operonx glyph, glass, bottom-right: the corner the graph rarely reaches
+ const L = `translate(1840 930) rotate(-6) scale(1.25)`;
+ const INK = new URLSearchParams(location.search).get("g")==="ink";
+ if (INK) { const ink = mode==='dark' ? "#07081a" : "#2c2940", hi = mode==='dark' ? "#9d8cff" : "#b7a6ff";
+ d+=`<g transform="${L}">
+   <path d="${GLYPH}" fill="none" stroke="${ink}" stroke-width="54" stroke-linecap="round" opacity="${mode==='dark'?.55:.18}" filter="url(#b40)" transform="translate(0 10)"/>
+   <path d="${GLYPH}" fill="none" stroke="${ink}" stroke-width="40" stroke-linecap="round" opacity="${mode==='dark'?.85:.82}"/>
+   <path d="${GLYPH}" fill="none" stroke="${hi}" stroke-width="1.6" stroke-linecap="round" opacity="${mode==='dark'?.55:.6}" transform="translate(-2 -3)"/>
+   ${[[465,45],[462,258]].map(o=>`<circle cx="${o[0]}" cy="${o[1]}" r="38" fill="url(#spark)" opacity=".45"/><circle cx="${o[0]}" cy="${o[1]}" r="13" fill="${hi}" opacity=".9"/>`).join("")}
+ </g>`; } else {
+ d+=`<g transform="${L}">
+   <path d="${GLYPH}" fill="none" stroke="${t.logo}" stroke-width="60" stroke-linecap="round" opacity="${t.logoFill*.8}" filter="url(#b40)"/>
+   <path d="${GLYPH}" fill="none" stroke="url(#lg)" stroke-width="46" stroke-linecap="round" opacity="${t.logoFill}"/>
+   <g mask="url(#tube)"><path d="${GLYPH}" fill="none" stroke="${t.logoEdge}" stroke-width="48" stroke-linecap="round" opacity="${mode==='dark'?.65:.95}"/></g>
+   <path d="${GLYPH}" fill="none" stroke="${t.logoEdge}" stroke-width="1" stroke-linecap="round" opacity=".35" transform="translate(-3 -4)"/>
+   ${[[465,45,15],[462,258,15]].map(o=>`<circle cx="${o[0]}" cy="${o[1]}" r="${o[2]*3}" fill="url(#spark)" opacity=".5"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="url(#orb)"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="none" stroke="${t.logoEdge}" stroke-width="1" opacity=".7"/>`).join("")}
+   ${[[185,40],[38,150],[330,150],[150,262],[90,230]].map(o=>`<circle cx="${o[0]}" cy="${o[1]}" r="14" fill="url(#spark)" opacity=".75"/>`).join("")}
+ </g>`;
+ }
+ d+=`<rect width="2560" height="1440" fill="url(#calm)"/><rect width="2560" height="1440" fill="url(#vig)"/><rect width="2560" height="1440" filter="url(#grain)"/>`;
+ s.innerHTML=d;
+}
+draw(new URLSearchParams(location.search).get("m")||"dark");
+</script></body></html>
