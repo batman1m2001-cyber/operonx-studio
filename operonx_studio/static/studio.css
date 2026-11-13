@@ -6126,8 +6126,8 @@ svg.tc-mark { width: 15px; height: 15px; fill: none; stroke: currentColor; strok
 
 /* ── C1: the canvas backdrop (docs/CANVAS_REDESIGN_PLAN.md) ─────────
    On the Flow screen the canvas wears the operonx backdrop: lavender
-   glass sheets at the edges, the glyph in the bottom-right corner (where
-   a graph rarely reaches), a calm centre. The dot grid is softened over
+   glass sheets at the edges, a faint glyph in the bottom-right corner
+   (only its light spots bright: a graph often runs over it), a calm centre. The dot grid is softened over
    it. The ops on it are clear glass: a thin tint of their kind, a sharp
    rim, little blur, so the backdrop reads through. The frame round the
    canvas (top bar, rail, flows panel, side panel) is clear glass like the

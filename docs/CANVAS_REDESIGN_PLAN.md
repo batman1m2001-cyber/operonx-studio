@@ -25,7 +25,12 @@ Owner's feedback on the mocks:
 | ![second project](img/canvas/c1-second-project-dark.png) | ![phone](img/canvas/c1-phone-light.png) | ![solid](img/canvas/c1-solid-dark.png) |
 
 What changed (all in CSS, in the C1 sections at the end of studio.css and studio-dark.css):
-- **Backdrop.** `static/canvas-bg-{light,dark}.webp` (31 KB and 37 KB, 2560×1440) sit under a softened dot grid on the Flow screen's `#stage`. They are generated from [img/canvas/backdrop.html](img/canvas/backdrop.html): an SVG with `?m=dark|light`, shot at 2560×1440 and saved as WebP at quality 0.86. There is no external asset.
+- **Backdrop.** `static/canvas-bg-{light,dark}.webp` (31 KB and 37 KB, 2560×1440) sit under a softened dot grid on the Flow screen's `#stage`. They are generated from [img/canvas/backdrop.html](img/canvas/backdrop.html): an SVG with `?m=dark|light`, shot at 2560×1440 and saved as WebP at quality 0.86. There is no external asset. The images are shot with `?g=faint`: the glyph is drawn at 22% so a flow can run over it, and its light spots stay bright. At full strength it fought the cards on wide screens (owner, after C4).
+
+  | before | faint, dark | faint, light |
+  |---|---|---|
+  | ![before](img/canvas/glyph-before-dark.png) | ![faint dark](img/canvas/glyph-faint-dark.png) | ![faint light](img/canvas/glyph-faint-light.png) |
+
 - **Op glass on the backdrop.** The `--og-*` tokens are overridden on `#stage` only, not on `:root`. Other screens, and Reduce Transparency, keep the frosted ops. Light uses a 12% white fill and a 2% kind tint. Dark uses a 1.5% fill and a 9% kind tint, so on graphite the kind colour is what makes an op stand out. Blur is 2px. An opened GraphOp is a 2% tint, with a glass header.
 - **Frame.** The top bar, rail, flows panel and side panel take the canvas bar's clear tint, with a 12px blur (`--glass-blur-frame`). Before, they used frost at 24px. The side panel's reading area is 45% of the surface, down from solid.
 - **Faint text on glass.** `--text-3` becomes `--glass-text-3` on the canvas and in the flows panel.

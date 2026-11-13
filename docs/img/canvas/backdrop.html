@@ -46,7 +46,9 @@ function draw(mode){
  [[1980,268,7],[2520,358,6],[1600,1236,6]].forEach(o=>{ d+=`<circle cx="${o[0]}" cy="${o[1]}" r="${o[2]*5}" fill="url(#spark)" opacity=".55"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="url(#orb)"/>`; });
  // the operonx glyph, glass, bottom-right: the corner the graph rarely reaches
  const L = `translate(1840 930) rotate(-6) scale(1.25)`;
- const INK = new URLSearchParams(location.search).get("g")==="ink";
+ const G = new URLSearchParams(location.search).get("g"), INK = G==="ink";
+ // ?g=faint: the glyph sinks into the backdrop (a graph often runs over it); its light spots stay bright
+ const F = G==="faint" ? .22 : 1;
  if (INK) { const ink = mode==='dark' ? "#07081a" : "#2c2940", hi = mode==='dark' ? "#9d8cff" : "#b7a6ff";
  d+=`<g transform="${L}">
    <path d="${GLYPH}" fill="none" stroke="${ink}" stroke-width="54" stroke-linecap="round" opacity="${mode==='dark'?.55:.18}" filter="url(#b40)" transform="translate(0 10)"/>
@@ -55,10 +57,10 @@ function draw(mode){
    ${[[465,45],[462,258]].map(o=>`<circle cx="${o[0]}" cy="${o[1]}" r="38" fill="url(#spark)" opacity=".45"/><circle cx="${o[0]}" cy="${o[1]}" r="13" fill="${hi}" opacity=".9"/>`).join("")}
  </g>`; } else {
  d+=`<g transform="${L}">
-   <path d="${GLYPH}" fill="none" stroke="${t.logo}" stroke-width="60" stroke-linecap="round" opacity="${t.logoFill*.8}" filter="url(#b40)"/>
-   <path d="${GLYPH}" fill="none" stroke="url(#lg)" stroke-width="46" stroke-linecap="round" opacity="${t.logoFill}"/>
-   <g mask="url(#tube)"><path d="${GLYPH}" fill="none" stroke="${t.logoEdge}" stroke-width="48" stroke-linecap="round" opacity="${mode==='dark'?.65:.95}"/></g>
-   <path d="${GLYPH}" fill="none" stroke="${t.logoEdge}" stroke-width="1" stroke-linecap="round" opacity=".35" transform="translate(-3 -4)"/>
+   <path d="${GLYPH}" fill="none" stroke="${t.logo}" stroke-width="60" stroke-linecap="round" opacity="${t.logoFill*.8*F}" filter="url(#b40)"/>
+   <path d="${GLYPH}" fill="none" stroke="url(#lg)" stroke-width="46" stroke-linecap="round" opacity="${t.logoFill*F}"/>
+   <g mask="url(#tube)"><path d="${GLYPH}" fill="none" stroke="${t.logoEdge}" stroke-width="48" stroke-linecap="round" opacity="${(mode==='dark'?.65:.95)*F}"/></g>
+   <path d="${GLYPH}" fill="none" stroke="${t.logoEdge}" stroke-width="1" stroke-linecap="round" opacity="${.35*F}" transform="translate(-3 -4)"/>
    ${[[465,45,15],[462,258,15]].map(o=>`<circle cx="${o[0]}" cy="${o[1]}" r="${o[2]*3}" fill="url(#spark)" opacity=".5"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="url(#orb)"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="none" stroke="${t.logoEdge}" stroke-width="1" opacity=".7"/>`).join("")}
    ${[[185,40],[38,150],[330,150],[150,262],[90,230]].map(o=>`<circle cx="${o[0]}" cy="${o[1]}" r="14" fill="url(#spark)" opacity=".75"/>`).join("")}
  </g>`;
