@@ -9,8 +9,14 @@ const T = {
 };
 // the operonx glyph as a path (box 520x290): a big loop, a crossing, two tails ending in orbs
 const GLYPH = "M 465 45 C 400 80, 362 118, 330 150 C 282 200, 222 268, 150 262 C 70 255, 35 200, 38 150 C 42 90, 100 38, 185 40 C 255 42, 300 110, 330 150 C 366 196, 410 234, 462 258";
+// ?g=faint: the glyph sinks into the backdrop (a graph often runs over it); its light spots stay bright
+// ?g=quiet: nothing competes with the graph: no orbs or sparks, the glyph a third of faint,
+//   the glows and the bright edges about halved; the glass curves at the edges stay
+const G = new URLSearchParams(location.search).get("g"), INK = G==="ink", QUIET = G==="quiet";
+const F = G==="faint" ? .22 : QUIET ? .075 : 1, GL = QUIET ? .6 : 1, HI = QUIET ? .5 : 1;
 function draw(mode){
- const t=T[mode], s=document.getElementById("s");
+ const t={...T[mode]}, s=document.getElementById("s");
+ t.glowO*=GL; t.glow2O*=GL; t.edgeO*=HI;
  let d=`<defs>
   <linearGradient id="base" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${t.base[0]}"/><stop offset=".5" stop-color="${t.base[1]}"/><stop offset="1" stop-color="${t.base[2]}"/></linearGradient>
   <radialGradient id="gA" cx=".88" cy=".05" r=".55"><stop offset="0" stop-color="${t.glow}" stop-opacity="${t.glowO}"/><stop offset="1" stop-color="${t.glow}" stop-opacity="0"/></radialGradient>
@@ -43,12 +49,9 @@ function draw(mode){
  // thin orbit lines with a few orbs
  d+=`<ellipse cx="2120" cy="1120" rx="560" ry="250" transform="rotate(-14 2120 1120)" fill="none" stroke="${t.edge}" stroke-width="1.2" opacity="${t.edgeO*.35}"/>`;
  d+=`<path d="M 1380 140 C 1800 300, 2300 380, 2640 360" fill="none" stroke="${t.edge}" stroke-width="1.1" opacity="${t.edgeO*.3}"/>`;
- [[1980,268,7],[2520,358,6],[1600,1236,6]].forEach(o=>{ d+=`<circle cx="${o[0]}" cy="${o[1]}" r="${o[2]*5}" fill="url(#spark)" opacity=".55"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="url(#orb)"/>`; });
+ if (!QUIET) [[1980,268,7],[2520,358,6],[1600,1236,6]].forEach(o=>{ d+=`<circle cx="${o[0]}" cy="${o[1]}" r="${o[2]*5}" fill="url(#spark)" opacity=".55"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="url(#orb)"/>`; });
  // the operonx glyph, glass, bottom-right: the corner the graph rarely reaches
  const L = `translate(1840 930) rotate(-6) scale(1.25)`;
- const G = new URLSearchParams(location.search).get("g"), INK = G==="ink";
- // ?g=faint: the glyph sinks into the backdrop (a graph often runs over it); its light spots stay bright
- const F = G==="faint" ? .22 : 1;
  if (INK) { const ink = mode==='dark' ? "#07081a" : "#2c2940", hi = mode==='dark' ? "#9d8cff" : "#b7a6ff";
  d+=`<g transform="${L}">
    <path d="${GLYPH}" fill="none" stroke="${ink}" stroke-width="54" stroke-linecap="round" opacity="${mode==='dark'?.55:.18}" filter="url(#b40)" transform="translate(0 10)"/>
@@ -61,8 +64,8 @@ function draw(mode){
    <path d="${GLYPH}" fill="none" stroke="url(#lg)" stroke-width="46" stroke-linecap="round" opacity="${t.logoFill*F}"/>
    <g mask="url(#tube)"><path d="${GLYPH}" fill="none" stroke="${t.logoEdge}" stroke-width="48" stroke-linecap="round" opacity="${(mode==='dark'?.65:.95)*F}"/></g>
    <path d="${GLYPH}" fill="none" stroke="${t.logoEdge}" stroke-width="1" stroke-linecap="round" opacity="${.35*F}" transform="translate(-3 -4)"/>
-   ${[[465,45,15],[462,258,15]].map(o=>`<circle cx="${o[0]}" cy="${o[1]}" r="${o[2]*3}" fill="url(#spark)" opacity=".5"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="url(#orb)"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="none" stroke="${t.logoEdge}" stroke-width="1" opacity=".7"/>`).join("")}
-   ${[[185,40],[38,150],[330,150],[150,262],[90,230]].map(o=>`<circle cx="${o[0]}" cy="${o[1]}" r="14" fill="url(#spark)" opacity=".75"/>`).join("")}
+   ${QUIET ? "" : [[465,45,15],[462,258,15]].map(o=>`<circle cx="${o[0]}" cy="${o[1]}" r="${o[2]*3}" fill="url(#spark)" opacity=".5"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="url(#orb)"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="none" stroke="${t.logoEdge}" stroke-width="1" opacity=".7"/>`).join("")}
+   ${QUIET ? "" : [[185,40],[38,150],[330,150],[150,262],[90,230]].map(o=>`<circle cx="${o[0]}" cy="${o[1]}" r="14" fill="url(#spark)" opacity=".75"/>`).join("")}
  </g>`;
  }
  d+=`<rect width="2560" height="1440" fill="url(#calm)"/><rect width="2560" height="1440" fill="url(#vig)"/><rect width="2560" height="1440" filter="url(#grain)"/>`;

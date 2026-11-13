@@ -137,4 +137,4 @@ def served_css(monkeypatch, tmp_path):
 
 def test_the_stylesheet_carries_both_themes_hand_tuned_last(served_css):
     twin = served_css.index(DARK + ".crumbbtn::after")
-    assert served_css.index(".crumbbtn::after {") < twin < served_css.index("--k-func: #318aff;")
+    assert served_css.index(".crumbbtn::after {") < twin < served_css.index("--k-func: #c2cddd;")

@@ -109,7 +109,7 @@ const RunTree = (() => {
   function iconOf(r) {
     const node = r.op && !r.child ? irNodeByName(r.op) : null;
     const sv = r.child ? AgentSteps.visual(r.op_type) : null;
-    const ico = el("span", "rt-ico", node ? kindIcon(node) : sv ? sv.icon
+    const ico = node ? kindIconEl("rt-ico", node) : el("span", "rt-ico", sv ? sv.icon
       : r.kind === "run" ? "◉" : r.kind === "container" ? "▣" : "≋");
     if (node || sv) ico.style.setProperty("--kind", node ? kindColor(node) : sv.color);
     if (sv) ico.title = sv.label;

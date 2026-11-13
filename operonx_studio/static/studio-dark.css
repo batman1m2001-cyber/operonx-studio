@@ -67,9 +67,10 @@
      ≥ 4.5:1 as text (the kind chip). The default is the neutral "other":
      a light grey that stays apart from every hue, colour-blind or not
      (CVD ΔE ≥ 9.5). Serve is the flow's glowing lavender (--flow-accent), not a kind */
-  --k-func: #318aff;
+  --k-func: #c2cddd; --k-func-fill: #30394b; --k-func-line: #8795ac;
   --k-llm: #a665d2;
-  --k-graph: #00964a;
+  --k-graph: #7894ea; --k-graph-fill: #1f2a4d; --k-graph-line: #5873d0;
+  --k-agraph: #c5a6ff; --k-agraph-fill: #2b2245; --k-agraph-line: #8a6fd1;
   --k-branch: #d45f06;
   /* the router's patch panel, in graphite with cyan wires */
   --rt-body1: #232b36; --rt-body2: #1a212a; --rt-edge: #3d4a5c; --rt-ear: #2b3440;

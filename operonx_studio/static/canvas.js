@@ -1348,14 +1348,18 @@ function render() {
     // gates: plain name line, plus the transport line below it
     if (!els.length) els = [".nname", ".nkind"].map(sel => card.querySelector(sel)).filter(Boolean);
     // a folded graph's count line sits on one line when the cap allows
-    const chips = card.querySelector(".agcount");
+    const chips = card.querySelector(".agcount, .opcount");
     if (chips) els.push(chips);
-    measured.push({it, card, els});
+    // the room each line has: its own width, except the count line, which
+    // is only as wide as its text — its room is the name line's column
+    const line = card.querySelector(".nname");
+    const rooms = els.map(e => e === chips && line ? line : e);
+    measured.push({it, card, els, rooms});
   }
   nodesBox.classList.add("measuring");
   const natural = measured.map(m => m.els.map(e => e.offsetWidth));
   nodesBox.classList.remove("measuring");
-  const laidOut = measured.map(m => ({shown: !!m.card.offsetHeight, widths: m.els.map(e => e.clientWidth)}));
+  const laidOut = measured.map(m => ({shown: !!m.card.offsetHeight, widths: m.rooms.map(e => e.clientWidth)}));
   measured.forEach((m, i) => {
     if (!laidOut[i].shown || !m.els.length) return;
     // an agent's card is as wide as its CSS says
@@ -2042,6 +2046,26 @@ function exitPoint(path, z) {
  * agents at any depth and its ops. */
 const containerKind = AgentSteps.containerKind;
 
+/* A GraphOp that holds an agent, at any depth (the structure — op_type
+ * "agent" with its agent card — never a name), is an agent graph: it wears
+ * the operonx glyph and the lavender family. Any other graph stays green;
+ * the ops inside keep their own colours (each is its own card). An agent
+ * opened onto its turns, and a turn, are not graphs of this kind. */
+function holdsAgents(n) {
+  return !!n.graph && !n.agentSteps && !n.step && AgentSteps.agentsInside(n.graph).length > 0;
+}
+/* the operonx glyph (docs/img/canvas/backdrop.html GLYPH): a big loop, a
+ * crossing, two tails; with `count`, the number sits in the loop */
+// a GraphOp's icon: a small graph, one op feeding two that join again
+function graphIcon() { return Icons.svg("graphop"); }
+// the operonx brand glyph itself (the logo's image), the count in its loop
+function oxGlyph(cls, count) {
+  const g = el("span", `oxpic ${cls}`.trim());
+  g.setAttribute("aria-hidden", "true");
+  if (count != null) { const b = el("b"); b.textContent = String(count); g.append(b); }
+  return g;
+}
+
 function containerCard(it) {
   const n = it.node;
   const card = el("div", "node container");
@@ -2052,6 +2076,8 @@ function containerCard(it) {
   card.style.width = `${it.w}px`;
   card.style.height = `${it.h}px`;
   card.style.setProperty("--kind", kindColor(n));
+  const agentGraph = holdsAgents(n);
+  if (agentGraph) { card.classList.add("agentgraph"); card.style.setProperty("--kind", "var(--k-agraph)"); }
   if (it.key === state.sel) card.classList.add("selected");
 
   if (state.run && !ranInRun(n)) card.classList.add("dormant");
@@ -2064,6 +2090,10 @@ function containerCard(it) {
     const mark = el("span", "ag2-icon");
     mark.append(agentMark());
     head.append(mark);
+    head.append(el("span", "nname", n.name));
+    head.append(el("span", "nkind", containerKind(n)));
+  } else if (agentGraph) {
+    head.append(oxGlyph("oxmark"));
     head.append(el("span", "nname", n.name));
     head.append(el("span", "nkind", containerKind(n)));
   } else {
@@ -2103,7 +2133,7 @@ function containerCard(it) {
  * hexagon with a bot in it), its name, "agentname · N tools", a status
  * pill with a painted run ("3 turns"; it pulses while the agent is live)
  * and a chevron. Opened: Model, Tools and Memory rows. The Tools row lists
- * each tool by kind (ƒ function or @op, ▣ @graph, an agent, an MCP plug),
+ * each tool by kind (</> function or @op, a graph for @graph, an agent, an MCP plug),
  * with ×calls in a run; ↗ opens the tool on its own (openToolView), never
  * in place. A click on a tool picks it for the inspector. The flow's ports
  * stay top and bottom centre. */
@@ -2276,8 +2306,13 @@ function agentCard(card, it) {
 
 /* One tool in an agent's card: its kind's glyph, name and description,
  * ×calls in a run, ↗ to open it on its own. A click picks it. */
-const TOOL_GLYPH = {function: ["ƒ", "--k-func"], op: ["ƒ", "--k-func"], graph: ["▣", "--k-graph"],
+const TOOL_GLYPH = {function: [null, "--k-func"], op: [null, "--k-func"], graph: [null, "--k-graph"],
                     agent: [null, "--k-llm"], mcp: [null, "--k-io"]};
+/* a tool kind's mark: an agent's, an MCP plug, a @graph's graph, or a function's </> */
+function toolMark(kind, cls) {
+  return kind === "agent" ? agentMark(cls) : kind === "mcp" ? lucideIcon("plug")
+    : Icons.svg(kind === "graph" ? "graphop" : "code2", "kglyph");
+}
 function toolRow(it, t, p, calls) {
   const kind = t.kind || (p && p.tool && p.tool.kind) || "function";
   const [glyph, color] = TOOL_GLYPH[kind] || TOOL_GLYPH.function;
@@ -2288,7 +2323,7 @@ function toolRow(it, t, p, calls) {
   if (policy !== "allow") r.classList.add("p-" + policy);
   const k = el("span", "k");
   if (glyph) k.textContent = glyph;
-  else k.append(kind === "agent" ? agentMark("") : lucideIcon("plug"));
+  else k.append(toolMark(kind, ""));
   k.title = TOOL_KIND_WORDS[kind] || kind;
   const tx = el("span", "t");
   tx.append(el("b", null, t.name), el("span", null, t.description || ""));
@@ -2452,7 +2487,10 @@ function graphBand(it) {
   const n = it.node;
   const b = el("button", "iconband gband");
   const icon = kindIcon(n);
-  if (icon === "▣") b.append(el("span", "bglyph bbox", String(n.subgraph_ops)));
+  // a GraphOp's band is its icon alone (the count is the line under the name):
+  // the operonx glyph when it holds an agent, a small graph otherwise
+  if (holdsAgents(n)) { const g = el("span", "bglyph oxg"); g.append(oxGlyph("")); b.append(g); }
+  else if (icon === "▣") { const g = el("span", "bglyph gicon"); g.append(graphIcon()); b.append(g); }
   else b.append(el("span", "bglyph", icon), el("span", "bcount", String(n.subgraph_ops)));
   b.append(el("span", "barrow", "▸"));
   const what = n.stack ? "agents" : n.agentSteps ? "turns" : n.step ? "steps" : "ops";
@@ -2819,6 +2857,10 @@ function opCard(it) {
   card.style.left = `${it.x}px`;
   card.style.top = `${it.y}px`;
   card.style.setProperty("--kind", kindColor(n));
+  if (n.graph && !n.agentSteps && !n.step && !n.stack) card.classList.add("graphop");
+  // a FuncOp (not a serve gate, which keeps its own look)
+  else if (!n.graph && !n.serve_role && !stepVisual(n) && visualOf(n.kind) === OP_VISUALS.FuncOp) card.classList.add("funcop");
+  if (holdsAgents(n)) { card.classList.add("agentgraph"); card.style.setProperty("--kind", "var(--k-agraph)"); }
   if (it.key === state.sel) card.classList.add("selected");
   // The serve boundary is a door, not an op: ingress is where the
   // client's data enters the run, egress where answers leave. Drawn in
@@ -2847,7 +2889,7 @@ function opCard(it) {
     // says the condition flat; clicking one picks it in the decision table.
     card.classList.add("branch", "cols");
     const line = el("div", "nname nline");
-    line.append(el("span", "nicon", kindIcon(n)));
+    line.append(kindIconEl("nicon", n));
     line.append(el("span", "ntext", n.name));
     const chips = state.run ? null : nameChips(n);
     if (chips) line.append(chips);
@@ -2893,7 +2935,7 @@ function opCard(it) {
     card.classList.add("cell", n.name.length % 2 ? "alt" : "base");
     // the kind's icon fills the cell's left quarter — a pastel
     // half-oval slice cut along the membrane, not a badge on the line
-    const band = n.graph ? graphBand(it) : el("span", "iconband", kindIcon(n));
+    const band = n.graph ? graphBand(it) : kindIconEl("iconband", n);
     card.append(band);
     const line = el("div", "nname nline");
     line.append(el("span", "ntext", n.name));
@@ -2901,7 +2943,11 @@ function opCard(it) {
     if (chips) line.append(chips);
     card.append(line);
     // a folded graph counts the agents inside it, at any depth, and lists them
-    if (n.graph && !state.expanded.has(it.key)) { const ag = agentCount(it); if (ag) card.append(ag); }
+    if (n.graph && !state.expanded.has(it.key)) {
+      const ag = agentCount(it);
+      if (ag) card.append(ag);
+      else if (card.classList.contains("graphop")) card.append(el("span", "opcount", containerKind(n).split(" · ").slice(1).join(" · ")));
+    }
     // the kind line was card noise at fit-zoom; it lives in the
     // tooltip and the inspector — and on the card once it is clicked
     // (the .detail block shows on the selected card only)

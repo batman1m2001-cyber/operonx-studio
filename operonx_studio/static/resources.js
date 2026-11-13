@@ -502,7 +502,7 @@ function toolCatRow(t) {
   top.setAttribute("aria-expanded", "false");
   const [glyph, color] = TOOL_GLYPH[t.kind] || TOOL_GLYPH.function;
   const k = el("span", "tc-kind", glyph || "");
-  if (!glyph) k.append(t.kind === "agent" ? agentMark("tc-mark") : lucideIcon("plug"));
+  if (!glyph) k.append(toolMark(t.kind, "tc-mark"));
   k.style.setProperty("--tk", `var(${color})`);
   k.title = TOOL_KIND_WORDS[t.kind] || t.kind;
   const name = el("span", "rh-name mono", t.name);

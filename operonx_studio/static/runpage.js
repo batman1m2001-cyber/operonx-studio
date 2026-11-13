@@ -278,7 +278,7 @@ async function renderExecPanel(run, e, execs, target) {
       back.onclick = () => RunTree.backToSteps();
       title.append(back);
     }
-    const ico = el("span", "rt-ico", node ? kindIcon(node) : "≋");
+    const ico = node ? kindIconEl("rt-ico", node) : el("span", "rt-ico", "≋");
     if (node) ico.style.setProperty("--kind", kindColor(node));
     title.append(ico);
   }

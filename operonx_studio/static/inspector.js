@@ -645,7 +645,9 @@ function membersSection(it) {
   sec.append(el("div", "stitle", `Inside · ${n.subgraph_ops} ops`));
   for (const m of (n.graph.nodes || [])) {
     const row = el("button", "memberrow");
-    row.append(el("span", "memicon", kindIcon(m)));
+    const mi = kindIconEl("memicon", m);
+    mi.style.setProperty("--kind", kindColor(m));
+    row.append(mi);
     row.append(el("span", "mono", m.name));
     row.append(el("span", "memkind", m.kind));
     const runinfo = state.run && state.run.ops[m.name];
