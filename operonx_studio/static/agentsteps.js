@@ -151,7 +151,31 @@
     return {graph: copy(graph, ""), opened};
   }
 
-  const api = {VISUALS, visual, rootOps, agentGraph, withSteps, wire};
+  /* The agents inside a graph, at any depth, each with its canvas key (the
+   * ids on the path, "/"-joined under `key`). An agent's own turns are not
+   * walked: an agent inside an agent is not drawn. */
+  function agentsInside(g, key = "", out = []) {
+    for (const n of (g && g.nodes) || []) {
+      const k = `${key}/${n.id}`;
+      if (n.op_type === "agent" && n.agent) out.push({name: n.name, key: k});
+      else if (n.graph) agentsInside(n.graph, k, out);
+    }
+    return out;
+  }
+
+  const plural = (k, one) => `${k} ${one}${k === 1 ? "" : "s"}`;
+  /* What a container holds, in its own words: an agent's turns, a turn's
+   * steps, a nested graph's agents (at any depth, from the walk above) and
+   * its ops (the ones directly inside, as the band counts them). */
+  function containerKind(n) {
+    const k = n.subgraph_ops || 0;
+    if (n.agentSteps) return `agent · ${plural(k, "turn")}`;
+    if (n.step) return `${n.kind} · ${plural(k, "step")}`;
+    const a = agentsInside(n.graph).length;
+    return [n.kind, a ? plural(a, "agent") : null, plural(k, "op")].filter(Boolean).join(" · ");
+  }
+
+  const api = {VISUALS, visual, rootOps, agentGraph, withSteps, wire, agentsInside, containerKind};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.AgentSteps = api;
 })(typeof window !== "undefined" ? window : globalThis);
