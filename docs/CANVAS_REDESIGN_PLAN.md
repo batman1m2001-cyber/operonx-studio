@@ -1,6 +1,6 @@
 # A canvas you can read at any size (CANVAS_REDESIGN_PLAN)
 
-Status: C1 built (2026-11-13): the backdrop, clear glass for ops and for the frame. C2 built (2026-11-13): the agent card in the ops' glass, with its run state. C3–C4 not started.
+Status: C1 built (2026-11-13): the backdrop, clear glass for ops and for the frame. C2 built (2026-11-13): the agent card in the ops' glass, with its run state. C3 built (2026-11-13): agent and op counts on GraphOps, the agents one click away. C4 not started.
 
 Owner's brief:
 1. **Liquid glass background.** Dark mode is deep charcoal with a hint of lavender; light mode is pearl with lavender-blue reflections. The graph stays readable.
@@ -71,7 +71,25 @@ Today, an agent inside an opened GraphOp is the `.ag2` card. It has a purple bor
 
 Gate: the agent and its neighbours read as one family in both themes. States are shown on a real run of meeting-prep-brd. Text is at 4.5:1 or better.
 
-## C3 · Counts on GraphOp headers
+## C3 · Counts on GraphOp headers (built)
+
+| | Dark | Light |
+|---|---|---|
+| Folded, the list open | ![](img/canvas/c3-folded-list-dark.png) | ![](img/canvas/c3-folded-list-light.png) |
+| Opened | ![](img/canvas/c3-opened-dark.png) | ![](img/canvas/c3-opened-light.png) |
+| Second project, folded | ![](img/canvas/c3-second-project-folded-dark.png) | ![](img/canvas/c3-second-project-folded-light.png) |
+| Second project, opened | ![](img/canvas/c3-second-project-opened-dark.png) | ![](img/canvas/c3-second-project-opened-light.png) |
+
+What changed:
+- `containerKind` and the agent walk (`agentsInside`) moved to `agentsteps.js`, where node can test them; canvas.js uses them from there. An opened GraphOp's header reads "GraphOp · 1 agent · 4 ops": agents at any depth, ops directly inside (the number the band shows). A graph with no agent reads "GraphOp · 7 ops"; one op is "1 op".
+- A folded GraphOp holding agents shows "6 agents · 11 ops ▾" under its name, in `--text-2`, where the A2 chips were. A click opens the agents in the one menu (`menuList`, as the flows menu): name, and the path under it ("prepare › web_research"). A pick runs `revealAgent(key)`. Esc or a click away closes it.
+- The header's "▾ collapse" is now a bare ▾ (its title and aria-label say Collapse), so the count line fits: on both projects every header with an agent reads in full. Two long-named graphs with no agent (extract_company_name, extract_company) still cut their "GraphOp · N ops", as before C3.
+- The header's kind line and ▾ moved from `--muted` to `--text-2`: they read 3.8–4.3:1 on the clear glass.
+
+Gate:
+- Counts match the IR on both projects, both themes: each header and each folded count line was checked against a separate walk of the served graph (meeting-prep-brd: prepare 6 agents · 11 ops, each of its 6 agent graphs 1 agent · 4 ops; meeting-prep: prepare 3 agents · 10 ops, web_research 3 agents · 5 ops). Picking the last agent in the list opened its path and selected it on both.
+- `tests/js/containerkind.test.mjs` covers `containerKind` and the walk.
+- Contrast: the count line 6.6–8.5:1, the headers ≥5.0:1, both themes. The ↱ promoter glyph is decorative and unchanged.
 
 - An opened GraphOp header reads "email · GraphOp · 1 agent · 4 ops". `containerKind` counts agents at any depth, from the same walk the chips use.
 - A folded GraphOp shows that count line in place of the purple chips from A2. Clicking the count opens a small list of the agents. Each entry runs `revealAgent(key)`, so the path to an agent is kept.

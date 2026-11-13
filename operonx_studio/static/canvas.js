@@ -1339,8 +1339,8 @@ function render() {
     let els = [...card.querySelectorAll(card.classList.contains("cols") ? ".ntext, .brlist, .dfports" : ".ntext, .brcond, .dfports")];
     // gates: plain name line, plus the transport line below it
     if (!els.length) els = [".nname", ".nkind"].map(sel => card.querySelector(sel)).filter(Boolean);
-    // a folded graph's agent chips sit on one line when the cap allows
-    const chips = card.querySelector(".agchips");
+    // a folded graph's count line sits on one line when the cap allows
+    const chips = card.querySelector(".agcount");
     if (chips) els.push(chips);
     measured.push({it, card, els});
   }
@@ -1357,7 +1357,7 @@ function render() {
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
     const want = Math.ceil(m.it.w + need + 8);
     // a router is as wide as its zones: they never fold or cut
-    const cap = m.card.classList.contains("cols") ? 2000 : m.card.querySelector(".dfports") ? 420 : m.card.querySelector(".agchips") ? 400 : 310;
+    const cap = m.card.classList.contains("cols") ? 2000 : m.card.querySelector(".dfports") ? 420 : m.card.querySelector(".agcount") ? 400 : 310;
     const w = Math.max(180, Math.min(cap, want));
     if (want > cap) {
       // a name cut short says itself in full on hover
@@ -2029,14 +2029,10 @@ function exitPoint(path, z) {
   return null;
 }
 
-/* What an opened container holds, in its own words: a nested graph's ops,
- * an agent's turns, a turn's steps. */
-function containerKind(n) {
-  const k = n.subgraph_ops;
-  if (n.agentSteps) return `agent · ${k} turn${k === 1 ? "" : "s"}`;
-  if (n.step) return `${n.kind} · ${k} step${k === 1 ? "" : "s"}`;
-  return `${n.kind} · ${k} ops`;
-}
+/* What an opened container holds, in its own words (agentsteps.js, where
+ * the test reads it): an agent's turns, a turn's steps, a nested graph's
+ * agents at any depth and its ops. */
+const containerKind = AgentSteps.containerKind;
 
 function containerCard(it) {
   const n = it.node;
@@ -2079,8 +2075,10 @@ function containerCard(it) {
     t.title = loopSentence(info) + "\n" + loopDetail(info);
     head.append(t);
   }
-  const close = el("button", "collapse", "▾ collapse");
+  // a bare ▾: the header's room goes to what the box holds
+  const close = el("button", "collapse", "▾");
   close.title = "Collapse this graph back into a single node";
+  close.setAttribute("aria-label", `Collapse ${n.name}`);
   close.onclick = (ev) => { ev.stopPropagation(); toggleExpand(it.key); };
   head.append(close);
   head.onclick = (ev) => { ev.stopPropagation(); select(it.key); };
@@ -2383,18 +2381,10 @@ function lucideIcon(name) {
  * the count of what is inside written in it, and ▸ beside it (a kind with
  * its own glyph keeps it, the count beside). A click on the rest of the
  * card still selects it; a double-click opens it too. */
-/* The agents inside a folded graph, at any depth: one chip each on its
- * card, so an agent buried in prepare › web_research is seen from the top
- * of the flow. A click opens the path to it and picks it. */
-const AGENT_CHIPS = 4;   // more than this: the first 3, then "+N"
-function agentsInside(g, key, out = []) {
-  for (const n of (g && g.nodes) || []) {
-    const k = `${key}/${n.id}`;
-    if (n.op_type === "agent" && n.agent) out.push({name: n.name, key: k});
-    else if (n.graph) agentsInside(n.graph, k, out);
-  }
-  return out;
-}
+/* A folded graph says what is inside it: its agents at any depth and its
+ * ops, one quiet line under its name. A click on it lists the agents; a
+ * pick opens the path to that agent and selects it, so an agent buried in
+ * prepare › web_research is one click from the top of the flow. */
 function revealAgent(key) {
   const parts = key.split("/");
   for (let i = 1; i < parts.length; i++) state.expanded.add(parts.slice(0, i).join("/"));
@@ -2403,26 +2393,45 @@ function revealAgent(key) {
   const it = state.rendered.get(key);
   if (it) centerOn(it);
 }
-function agentChips(it) {
-  const found = agentsInside(it.node.graph, it.key);
+function agentCount(it) {
+  const found = AgentSteps.agentsInside(it.node.graph, it.key);
   if (!found.length) return null;
-  const box = el("div", "agchips");
-  const shown = found.length > AGENT_CHIPS ? found.slice(0, AGENT_CHIPS - 1) : found;
-  for (const a of shown) {
-    const c = el("button", "agchip");
-    c.append(agentMark("agchip-mark"), el("span", null, a.name));
-    const path = a.key.split("/").slice(1, -1).map(k => k.split(".").pop());
-    c.title = `Agent ${a.name}${path.length ? ` in ${[it.node.name, ...path].join(" › ")}` : ""} — open it`;
-    c.onclick = (ev) => { ev.stopPropagation(); revealAgent(a.key); };
-    c.ondblclick = (ev) => ev.stopPropagation();
-    box.append(c);
-  }
-  if (found.length > shown.length) {
-    const more = el("span", "agchip more", `+${found.length - shown.length}`);
-    more.title = found.slice(shown.length).map(a => a.name).join(", ");
-    box.append(more);
-  }
-  return box;
+  const b = el("button", "agcount", containerKind(it.node).split(" · ").slice(1).join(" · "));
+  b.type = "button";
+  b.title = `${found.map(a => a.name).join(", ")} — pick one to open it`;
+  b.setAttribute("aria-haspopup", "menu");
+  b.onclick = (ev) => { ev.stopPropagation(); agentMenu(b, it, found); };
+  b.ondblclick = (ev) => ev.stopPropagation();
+  return b;
+}
+/* The agents of a folded graph, in the one menu (studio.js menuList),
+ * under the count that opened it. */
+function agentMenu(anchor, it, found) {
+  let box = document.getElementById("agmenu");
+  if (box && box._anchor === anchor) { box.remove(); return; }
+  if (box) box.remove();
+  box = el("div", "popover");
+  box.id = "agmenu";
+  box._anchor = anchor;
+  const close = () => { box.remove(); anchor.setAttribute("aria-expanded", "false"); };
+  const rows = found.map(a => {
+    const path = a.key.slice(it.key.length + 1).split("/").slice(0, -1).map(k => k.split(".").pop());
+    return {name: a.name, sub: [it.node.name, ...path].join(" › "), find: a.key,
+            pick: () => { close(); revealAgent(a.key); }};
+  });
+  menuList(box, {placeholder: "Find an agent", sections: [{title: `Agents in ${it.node.name}`, rows}]});
+  document.body.append(box);
+  const r = anchor.getBoundingClientRect();
+  box.style.position = "fixed";
+  box.style.left = `${Math.max(8, Math.min(r.left, innerWidth - box.offsetWidth - 8))}px`;
+  box.style.top = `${r.bottom + 6 + box.offsetHeight > innerHeight ? Math.max(8, r.top - 6 - box.offsetHeight) : r.bottom + 6}px`;
+  anchor.setAttribute("aria-expanded", "true");
+  const away = (ev) => {
+    if (!box.isConnected) return document.removeEventListener("pointerdown", away, true);
+    if (!box.contains(ev.target) && ev.target !== anchor) { close(); document.removeEventListener("pointerdown", away, true); }
+  };
+  document.addEventListener("pointerdown", away, true);
+  box.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); close(); anchor.focus(); } });
 }
 
 function graphBand(it) {
@@ -2877,8 +2886,8 @@ function opCard(it) {
     const chips = state.run ? null : nameChips(n);
     if (chips) line.append(chips);
     card.append(line);
-    // a folded graph names the agents inside it, at any depth
-    if (n.graph && !state.expanded.has(it.key)) { const ag = agentChips(it); if (ag) card.append(ag); }
+    // a folded graph counts the agents inside it, at any depth, and lists them
+    if (n.graph && !state.expanded.has(it.key)) { const ag = agentCount(it); if (ag) card.append(ag); }
     // the kind line was card noise at fit-zoom; it lives in the
     // tooltip and the inspector — and on the card once it is clicked
     // (the .detail block shows on the selected card only)

@@ -1175,13 +1175,13 @@ body:not([data-stage]) .canvasbar { display: none; }
 .node.container .chead .nname { font-weight: 650; font-size: 13px; }
 /* the operon nod: one promoter, the genes inside transcribed together */
 .node.container .chead .promoter { color: var(--flow-accent); font-weight: 800; font-size: 13px; }
-.node.container .chead .nkind { color: var(--muted); font-size: 11px; }
+.node.container .chead .nkind { color: var(--text-2); font-size: 11px; }
 /* a narrow box keeps its name whole: the kind line gives way first */
 .node.container .chead .nname { flex: none; }
 .node.container .chead .nkind { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .node.container .collapse {
-  margin-left: auto; border: none; background: none; color: var(--muted);
-  font-size: 11px; padding: 0 2px; box-shadow: none;
+  margin-left: auto; border: none; background: none; color: var(--text-2);
+  font-size: 13px; padding: 0 4px; box-shadow: none; flex: none;
 }
 .node.container .collapse:hover { color: var(--text); box-shadow: none; }
 /* a nested graph's icon band is its open button: the graph's square with
@@ -6079,21 +6079,16 @@ body.sidepeek #sidebar, body.floatframe:not(.ax-focus).sidepeek #sidebar {
 }
 body.sidepeek #dragbar { display: none !important; }
 
-/* Agent chips on a folded graph (AGENTOP_REDESIGN_PLAN A2): the agents
-   anywhere inside it, so a buried agent is seen from the top of the flow. */
-.node .agchips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
-#nodes.measuring .node .agchips { flex-wrap: nowrap; width: max-content !important; }
-.node .agchip {
-  display: inline-flex; align-items: center; gap: 4px; height: 20px; box-sizing: border-box; padding: 0 8px 0 4px;
-  border-radius: 999px; font-family: inherit; font-size: 11.5px; font-weight: 500; line-height: 1; cursor: pointer;
-  color: color-mix(in srgb, var(--k-llm) 80%, var(--text));
-  background: color-mix(in srgb, var(--k-llm) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--k-llm) 30%, transparent);
-}
-.node .agchip:hover { background: color-mix(in srgb, var(--k-llm) 22%, transparent); }
-.node .agchip.more { padding: 0 7px; cursor: default; color: var(--muted); }
-.node svg.agchip-mark { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8;
-  stroke-linecap: round; stroke-linejoin: round; }
+/* A folded graph's count line (CANVAS_REDESIGN_PLAN C3): its agents at any
+   depth and its ops, quiet text under the name; a click lists the agents. */
+.node .agcount { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; min-height: 0;
+  margin-top: 4px; padding: 1px 6px; border: 1px solid transparent; border-radius: 6px; background: none;
+  font-family: inherit; font-size: 12px; font-weight: 500; line-height: 1.3; color: var(--text-2);
+  cursor: pointer; white-space: nowrap; }
+.node .agcount::after { content: "▾"; font-size: 10px; opacity: .7; }
+.node .agcount:hover, .node .agcount[aria-expanded="true"] { color: var(--text); border-color: var(--border); }
+#nodes.measuring .node .agcount { width: max-content !important; }
+#agmenu { z-index: 120; }
 
 /* Resources › Tools (AGENTOP_REDESIGN_PLAN A3) */
 .rh-switch { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--surface-3); }
