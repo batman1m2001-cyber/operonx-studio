@@ -1,6 +1,6 @@
 # A canvas you can read at any size (CANVAS_REDESIGN_PLAN)
 
-Status: C1 built (2026-11-13): the backdrop, clear glass for ops and for the frame. C2 built (2026-11-13): the agent card in the ops' glass, with its run state. C3 built (2026-11-13): agent and op counts on GraphOps, the agents one click away. C4 not started.
+Status: C1 built (2026-11-13): the backdrop, clear glass for ops and for the frame. C2 built (2026-11-13): the agent card in the ops' glass, with its run state. C3 built (2026-11-13): agent and op counts on GraphOps, the agents one click away. C4 built (2026-11-13): 6 or more agents side by side fold into one stack. The plan is done.
 
 Owner's brief:
 1. **Liquid glass background.** Dark mode is deep charcoal with a hint of lavender; light mode is pearl with lavender-blue reflections. The graph stays readable.
@@ -96,11 +96,27 @@ Gate:
 
 Gate: counts match the IR on both projects, and a test covers `containerKind`.
 
-## C4 · Collapsing large groups
+## C4 · Collapsing large groups (built)
 
-When one layer of an opened graph holds 6 or more agents side by side (a fan-out), they draw as one stacked node, for example "10 agents ▸", using the generator stack's look (`#stacks .genghost`). Opening it lays them out as today. The threshold is a constant, and the open state is kept in `state.expanded` like any container.
+The fan-out below is a test fixture: meeting-prep's web_research holds three agents (website, news, people) with the same feeder and the same exit; the gate script cloned website 7 times in the page, so 10 sit side by side. Neither real project has a level with 6 such agents, so on both nothing changes.
 
-Gate: a test graph with 10 parallel agents folds and opens. Layout stays stable when it opens and closes. A JS test covers the grouping.
+| | Dark | Light |
+|---|---|---|
+| Fixture, folded | ![](img/canvas/c4-fanout-folded-dark.png) | ![](img/canvas/c4-fanout-folded-light.png) |
+| Fixture, opened (50%) | ![](img/canvas/c4-fanout-opened-dark.png) | ![](img/canvas/c4-fanout-opened-light.png) |
+| meeting-prep-brd, unchanged | ![](img/canvas/c4-brd-unchanged-dark.png) | ![](img/canvas/c4-brd-unchanged-light.png) |
+| meeting-prep, unchanged | ![](img/canvas/c4-mp-unchanged-dark.png) | ![](img/canvas/c4-mp-unchanged-light.png) |
+
+What changed:
+- `FlowLayout.stackFanouts(g)` (flowlayout.js, pure): at each level, AgentOps with the same feeders, the same targets and the same START/END, entry, exit and final ties are one fan-out. `STACK_MIN` (6) or more become one container node, "10 agents", holding them as its inner level; their wires become one wire in and one out. Agents on a branch route, a back edge or in a loop are left alone. The input graph is never changed.
+- The canvas draws `shownGraph()`, the stacked graph, memoised per `state.graph`. The stack is a container like any GraphOp: its band reads "◈ 10 ▸", it opens and closes through `state.expanded`, and folded it gets the generator's two ghost cards. Its count line names the first agents ("website, website_1 +8 ▾") and opens the agent menu. Opened, its header reads "fan-out · side by side".
+- `FlowLayout.stackedKey` maps an agent's key to its key inside a stack, so `revealAgent` reaches a stacked agent from an old key.
+- The inspector reads a stacked agent's ports from the level the stack stands for (`stack.home`), so it shows "input ← tasks.website" and "output → PARENT.website", as without the stack.
+
+Gate:
+- The 10-agent fixture folds into one card ("10 agents", 2 ghosts) and opens into 10 agent cards, both themes. After open → close every other card has the same x, y, w and h (0 moved). The menu lists the 10, and a pick selects the agent inside the opened stack. No page errors, including the inspector and the data view on the stack and on a member.
+- `tests/js/fanout.test.mjs` (6 tests): 10 fold and are rewired; 5 stay; the input is not mutated; a branch route or a different feeder keeps an agent out; a fan-out inside a GraphOp stacks and entries/exits name the stack; `stackedKey`; open and close give back the same coordinates. JS 194/194.
+- Both real projects: 0 stacks folded, 0 with every graph opened, both themes.
 
 ## Order
 

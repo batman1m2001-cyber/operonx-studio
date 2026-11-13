@@ -737,6 +737,8 @@ function graphOf(it) {
   const parts = it.key.split("/");
   if (parts.length > 1) {
     const parent = state.rendered.get(parts.slice(0, -1).join("/"));
+    // a fan-out stack's member lives in the level the stack stands for
+    if (parent && parent.node.stack) return parent.node.home;
     if (parent && parent.node.graph) return parent.node.graph;
   }
   return state.graph;

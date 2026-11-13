@@ -169,6 +169,7 @@
    * its ops (the ones directly inside, as the band counts them). */
   function containerKind(n) {
     const k = n.subgraph_ops || 0;
+    if (n.stack) return "fan-out · side by side";
     if (n.agentSteps) return `agent · ${plural(k, "turn")}`;
     if (n.step) return `${n.kind} · ${plural(k, "step")}`;
     const a = agentsInside(n.graph).length;

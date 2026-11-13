@@ -1258,8 +1258,16 @@ function flushCanvas() {
   }
 }
 
+/* The graph the canvas draws: state.graph with each fan-out of agents
+ * stacked into one node (FlowLayout.stackFanouts), memoised per graph. */
+let shownMemo = {from: null, g: null};
+function shownGraph() {
+  if (shownMemo.from !== state.graph) shownMemo = {from: state.graph, g: FlowLayout.stackFanouts(state.graph)};
+  return shownMemo.g;
+}
+
 function render() {
-  const g = state.graph;
+  const g = shownGraph();
   const gname = $("#graph-name");
   if (gname) gname.textContent = g ? g.name : "no graph";
   if (!canvasShown()) { state.renderPending = true; return; }
@@ -1440,7 +1448,7 @@ function render() {
     // its plugs drops it. Plain decorations, not cards: they copy
     // the drawn card's outline and hue, and nothing that looks for cards
     // (find, the audits, dimming) ever sees them.
-    if (stacksBox && !it.inner && it.kind !== "knob" && it.node && it.node.is_gen && !card.classList.contains("dfcard")) {
+    if (stacksBox && !it.inner && it.kind !== "knob" && it.node && (it.node.is_gen || (it.node.stack && it.kind === "card")) && !card.classList.contains("dfcard")) {
       const ghosts = [];
       for (const k of [2, 1]) {
         const ghost = el("div", `genghost g${k}`);
@@ -2007,7 +2015,7 @@ function loopNote(n, zone) {
 
 function authoredLoop(it) {
   const parent = it.key.split("/").slice(0, -1).join("/");
-  const g = parent ? state.rendered.get(parent)?.node.graph : state.graph;
+  const g = parent ? state.rendered.get(parent)?.node.graph : shownGraph();
   const lp = g && g.loops ? g.loops[it.node.id] : null;
   return lp && !lp.synthetic ? lp : null;
 }
@@ -2386,6 +2394,7 @@ function lucideIcon(name) {
  * pick opens the path to that agent and selects it, so an agent buried in
  * prepare › web_research is one click from the top of the flow. */
 function revealAgent(key) {
+  if (!state.rendered.has(key)) key = FlowLayout.stackedKey(shownGraph(), key);
   const parts = key.split("/");
   for (let i = 1; i < parts.length; i++) state.expanded.add(parts.slice(0, i).join("/"));
   render();
@@ -2396,7 +2405,12 @@ function revealAgent(key) {
 function agentCount(it) {
   const found = AgentSteps.agentsInside(it.node.graph, it.key);
   if (!found.length) return null;
-  const b = el("button", "agcount", containerKind(it.node).split(" · ").slice(1).join(" · "));
+  // a fan-out's count line names its first agents; any other graph's
+  // says how many agents and ops it holds
+  const label = it.node.stack
+    ? found.slice(0, 2).map(a => a.name).join(", ") + (found.length > 2 ? ` +${found.length - 2}` : "")
+    : containerKind(it.node).split(" · ").slice(1).join(" · ");
+  const b = el("button", "agcount", label);
   b.type = "button";
   b.title = `${found.map(a => a.name).join(", ")} — pick one to open it`;
   b.setAttribute("aria-haspopup", "menu");
@@ -2441,7 +2455,7 @@ function graphBand(it) {
   if (icon === "▣") b.append(el("span", "bglyph bbox", String(n.subgraph_ops)));
   else b.append(el("span", "bglyph", icon), el("span", "bcount", String(n.subgraph_ops)));
   b.append(el("span", "barrow", "▸"));
-  const what = n.agentSteps ? "turns" : n.step ? "steps" : "ops";
+  const what = n.stack ? "agents" : n.agentSteps ? "turns" : n.step ? "steps" : "ops";
   b.title = `Open: ${n.subgraph_ops} ${what} inside`;
   b.setAttribute("aria-expanded", "false");
   b.setAttribute("aria-label", `Open ${n.name}: ${n.subgraph_ops} ${what}`);
@@ -2891,7 +2905,7 @@ function opCard(it) {
     // the kind line was card noise at fit-zoom; it lives in the
     // tooltip and the inspector — and on the card once it is clicked
     // (the .detail block shows on the selected card only)
-    card.title = n.kind + (n.bound ? ` · ${n.bound}` : "") + (n.is_gen ? " · generator" : "");
+    card.title = n.stack ? `${n.subgraph_ops} ${n.kind}s side by side (a fan-out)` : n.kind + (n.bound ? ` · ${n.bound}` : "") + (n.is_gen ? " · generator" : "");
     // Clicked, the card says what the op PRODUCES, not its port
     // list: inputs are the wires, and most outputs are plumbing every
     // op passes along. show_keys (declared on the op, its kind's
