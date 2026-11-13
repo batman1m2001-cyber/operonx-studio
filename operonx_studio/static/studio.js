@@ -468,16 +468,18 @@ function overCard(A, made) {
     mk.setAttribute("id", cid);
     mk.setAttribute("maskUnits", "userSpaceOnUse");
     mk.setAttribute("x", A.x - 4); mk.setAttribute("y", A.y - 4);
-    mk.setAttribute("width", A.w + 8); mk.setAttribute("height", A.h + 8);
+    // it ends at the card's bottom edge: a wire leaving downwards is the
+    // canvas's own from there, so it changes look at the edge, not below it
+    mk.setAttribute("width", A.w + 8); mk.setAttribute("height", A.h + 4);
     const r = document.createElementNS(SVGNS, "rect");
     r.setAttribute("x", A.x - 4); r.setAttribute("y", A.y - 4);
-    r.setAttribute("width", A.w + 8); r.setAttribute("height", A.h + 8);
+    r.setAttribute("width", A.w + 8); r.setAttribute("height", A.h + 4);
     r.setAttribute("fill", "#fff");
     mk.append(r);
     for (const d of (A.condDots || [])) {
       const hole = document.createElementNS(SVGNS, "circle");
       hole.setAttribute("cx", A.x + d.x); hole.setAttribute("cy", A.y + d.y);
-      hole.setAttribute("r", 7.5);
+      hole.setAttribute("r", d.r || 7.5);
       hole.setAttribute("fill", "#000");
       mk.append(hole);
     }

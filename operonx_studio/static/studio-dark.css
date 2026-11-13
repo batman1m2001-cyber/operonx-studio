@@ -69,14 +69,14 @@
      (CVD ΔE ≥ 9.5). Serve is the flow's glowing lavender (--flow-accent), not a kind */
   --k-func: #c2cddd; --k-func-fill: #30394b; --k-func-line: #8795ac;
   --k-llm: #a665d2;
-  --k-graph: #7894ea; --k-graph-fill: #1f2a4d; --k-graph-line: #5873d0;
+  --k-graph: #8589ee; --k-graph-fill: #232850; --k-graph-line: #6468d4;
   --k-agraph: #c5a6ff; --k-agraph-fill: #2b2245; --k-agraph-line: #8a6fd1;
   --k-branch: #d45f06;
   /* the router's patch panel, in graphite with cyan wires */
   --rt-body1: #232b36; --rt-body2: #1a212a; --rt-edge: #3d4a5c; --rt-ear: #2b3440;
   --rt-ink: #e6ebf2; --rt-sub: #93a0b1; --rt-bay: #141a21; --rt-bay-edge: #344052;
   --rt-cond: #8fb4ff; --rt-led: #3ee08a; --rt-led-off: #2f3a48; --rt-socket: #0b0f14;
-  --rt-wire: #5cc8ff; --rt-wire-else: #4c6a80; --rt-zone-edge: #3a4758;
+  --rt-wire: #a78bfa; --rt-wire-lit: #c3b0ff; --rt-wire-else: var(--rt-wire-lit); --rt-zone-edge: #3a4758;
   --rt-guide: #262d37;
   /* the agent's hive cell, steel blue on night glass */
   --ag-e1: #a9c6ee; --ag-e2: #5b82bd; --ag-e3: #dbe8fa; --ag-e4: #2c4770;

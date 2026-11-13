@@ -13,8 +13,8 @@
  *    return gets a lane chain pinned just right of its two cards, rows are
  *    ordered by barycentre sweeps (starting from the server's order, so a
  *    graph keeps its look), and x is assigned by order-preserving
- *    alignment. A decision card's routes leave by exits along its bottom
- *    edge, in route order: each target is ordered and placed under its
+ *    alignment. A junction's routes leave by ports along its bar
+ *    in route order: each target is ordered and placed under its
  *    own exit, so the wires drop straight down and never cross. (A card
  *    whose rows leave by its sides reserves room beside it for their lanes.)
  * 3. A row is as tall as its tallest card and cards are top-aligned, so the
@@ -715,7 +715,7 @@
       const A = portOut(w.a), Bt = w.back ? portIn(w.b) : portIn(w.b);
       let p;
       const fromRow = w.row && !(item.get(w.a).bOut);
-      const dot = !fromRow ? null : w.row.down ? {x: A.x + w.row.cx, y: A.y + A.h} : {
+      const dot = !fromRow ? null : w.row.down ? {x: A.x + w.row.cx, y: A.y + (w.row.cy != null ? w.row.cy : A.h)} : {
         x: A.x + (sideOf.get(w.row) < 0 ? w.row.left - 1 : w.row.left + w.row.w + 1),
         y: A.y + w.row.top + w.row.h / 2,
       };
@@ -743,7 +743,7 @@
         const lanes = w.lanes;
         p = new Path(x1, y1);
         // out of a bottom exit: drop clear of the card before turning
-        if (dot && w.row.down) p.v(y1 + 10);
+        if (dot && w.row.down) p.v(A.y + A.h + 10);
         if (la === lb) {
           const [ds, dd] = lanes;
           p.turnInto(X(ds), -1, Math.max(1, Math.min(12, y1 - T(la))));
