@@ -2119,7 +2119,7 @@ function agentMark(cls = "ag2-mark") {
  * its model calls and each tool's calls. The agent's records are matched by
  * name; their turns, and in each turn the model and tool calls. */
 function agentRunCounts(n) {
-  const out = {turns: 0, model: 0, tools: new Map()};
+  const out = {turns: 0, model: 0, tools: new Map(), errors: 0};
   if (!state.run) return out;
   const rows = (state.runRows || []).filter(r => r.kind === "record");
   const kids = new Map();
@@ -2127,7 +2127,12 @@ function agentRunCounts(n) {
     if (!kids.has(r.parent)) kids.set(r.parent, []);
     kids.get(r.parent).push(r);
   }
+  // errors in the agent's own record or any step under it (an op's name is
+  // not enough: the GraphOp round an agent often shares its name)
+  const bad = (r) => r.status === "error" || (r.error != null && r.error !== "");
+  const failedUnder = (r) => bad(r) || (kids.get(r.id) || []).some(failedUnder);
   for (const a of rows.filter(r => r.op === n.name && r.op_type === "agent")) {
+    if (failedUnder(a)) out.errors += 1;
     for (const t of (kids.get(a.id) || []).filter(r => r.op_type === "turn")) {
       out.turns += 1;
       for (const s of kids.get(t.id) || []) {
@@ -2171,13 +2176,25 @@ function agentCard(card, it) {
   name.title = n.name;
   title.append(name, el("div", "ag2-sub", `${a.name || "agent"} · ${tools.length} tool${tools.length === 1 ? "" : "s"}`));
   head.append(mark, title);
-  if (state.run && ranInRun(n)) {
+  // its run state, in the cells' words: at work, done, failed, or skipped
+  // (a finished run never reached it); a live run not yet at it says nothing
+  if (state.run) {
     const cap = (a.limits || {}).turns, t = counts.turns;
     const live = (state.run.summary || {}).status === "running";
-    const st = el("span", live ? "ag2-st run" : "ag2-st done");
-    st.append(el("i"), document.createTextNode(live ? `turn ${t}${cap ? ` / ${cap}` : ""}` : `${t} turn${t === 1 ? "" : "s"}`));
-    st.title = cap ? `${t} of at most ${cap} turns` : `${t} turn${t === 1 ? "" : "s"}`;
-    head.append(st);
+    const turns = `${t} turn${t === 1 ? "" : "s"}`;
+    let cls = "", text = "", tip = cap ? `${t} of at most ${cap} turns` : turns;
+    if (ranInRun(n)) {
+      const errs = counts.errors;
+      if (errs) { cls = "failed"; text = `failed · ${turns}`; tip = `failed in ${errs} run${errs === 1 ? "" : "s"} · ${tip}`; }
+      else if (live) { cls = "run"; text = `turn ${t}${cap ? ` / ${cap}` : ""}`; }
+      else { cls = "done"; text = turns; }
+    } else if (!live) { cls = "skipped"; text = "skipped"; tip = "The run did not reach this agent"; }
+    if (cls) {
+      const st = el("span", `ag2-st ${cls}`);
+      st.append(el("i"), document.createTextNode(text));
+      st.title = tip;
+      head.append(st);
+    }
   }
   const fold = el("button", "ag2-fold");
   fold.append(lucideIcon(open ? "up" : "down"));
