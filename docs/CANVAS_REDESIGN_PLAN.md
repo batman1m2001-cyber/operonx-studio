@@ -16,6 +16,8 @@ Owner's feedback on the mocks:
 
 ## C1 · Backdrop and clear glass (built)
 
+Later, 2026-11-13: the backdrop went quiet (`?g=quiet`) and the op kinds got their own colours and icons. See docs/GRAPH_HIERARCHY_PLAN.md.
+
 | Dark | Light |
 |---|---|
 | ![dark](img/canvas/c1-flow-dark.png) | ![light](img/canvas/c1-flow-light.png) |
