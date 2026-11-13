@@ -793,6 +793,110 @@
     return item;
   }
 
+  /* ── fan-outs: many agents side by side, drawn as one stack ─────────
+   * At each level, AgentOps that hang off the same feeders and feed the
+   * same targets (and share START/END/entry/exit/final ties) are one
+   * fan-out. STACK_MIN or more of them become one container node, the
+   * stack, holding them as its inner level — folded it reads "N agents",
+   * opened it lays them out as before. Agents on a branch route, a back
+   * edge or in a loop stay as they are. Pure: returns a new graph (the
+   * input when there is nothing to stack), never mutates it. */
+  const STACK_MIN = 6;
+  function stackFanouts(g) {
+    if (!g || !g.nodes) return g;
+    let changed = false;
+    const nodes = g.nodes.map(n => {
+      if (!n.graph || (n.op_type === "agent" && n.agent)) return n;
+      const sub = stackFanouts(n.graph);
+      if (sub === n.graph) return n;
+      changed = true;
+      return {...n, graph: sub};
+    });
+    const edges = g.edges || [];
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    const plain = (e) => e.type !== "condition" && e.route == null && e.origin !== "back_edge" && !e.back;
+    const ins = new Map(), outs = new Map(), odd = new Set();
+    for (const e of edges) {
+      if (!byId.has(e.src) || !byId.has(e.dst)) continue;
+      if (!plain(e)) { odd.add(e.src); odd.add(e.dst); continue; }
+      (ins.get(e.dst) || ins.set(e.dst, new Set()).get(e.dst)).add(e.src);
+      (outs.get(e.src) || outs.set(e.src, new Set()).get(e.src)).add(e.dst);
+    }
+    const tag = (list, nm) => (list || []).includes(nm) ? 1 : 0;
+    const groups = new Map();
+    for (const n of nodes) {
+      if (n.op_type !== "agent" || !n.agent || n.loop || n.routes || odd.has(n.id)) continue;
+      const sig = JSON.stringify([[...(ins.get(n.id) || [])].sort(), [...(outs.get(n.id) || [])].sort(),
+        !!n.start, !!n.end, tag(g.entries, n.name), tag(g.exits, n.name), tag(g.finals, n.name)]);
+      if (!groups.has(sig)) groups.set(sig, []);
+      groups.get(sig).push(n);
+    }
+    const stacks = [...groups.values()].filter(m => m.length >= STACK_MIN);
+    if (!stacks.length) return changed ? {...g, nodes} : g;
+
+    const into = new Map();             // member id → its stack
+    const out = [];
+    for (const members of stacks) {
+      const f = members[0];
+      const k = members.length;
+      const st = {id: `${f.id}~stack`, name: `${k} agents`, kind: f.kind, op_type: "agent_stack",
+        stack: true, x: f.x, subgraph_ops: k, members: members.map(m => m.name),
+        home: g,                          // the level as authored: its members' wiring and exports
+        ...(f.start ? {start: true} : {}), ...(f.end ? {end: true} : {}),
+        graph: {nodes: members.map(m => ({...m, start: true, end: true})), edges: []}};
+      for (const m of members) into.set(m.id, st);
+    }
+    const placed = new Set();
+    for (const n of nodes) {
+      const st = into.get(n.id);
+      if (!st) { out.push(n); continue; }
+      if (!placed.has(st.id)) { placed.add(st.id); out.push(st); }
+    }
+    const seen = new Set(), E = [];
+    for (const e of edges) {
+      const a = into.get(e.src), b = into.get(e.dst);
+      if (!a && !b) { E.push(e); continue; }
+      const src = a ? a.id : e.src, dst = b ? b.id : e.dst;
+      const id = `${src}->${dst}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      E.push({...e, id, src, dst});
+    }
+    const names = (list) => {
+      if (!list) return list;
+      const r = [];
+      for (const nm of list) {
+        const n = nodes.find(x => x.name === nm);
+        const st = n && into.get(n.id);
+        const v = st ? st.name : nm;
+        if (!r.includes(v)) r.push(v);
+      }
+      return r;
+    };
+    return {...g, nodes: out, edges: E, entries: names(g.entries), exits: names(g.exits), finals: names(g.finals)};
+  }
+
+  /* An op's key in the stacked graph: the same path with the stack's id
+   * put in front of any member (or the key itself when nothing stacks it). */
+  function stackedKey(g, key) {
+    const parts = key.split("/").filter(Boolean);
+    const out = [];
+    let level = g;
+    for (const id of parts) {
+      const nodes = (level && level.nodes) || [];
+      let n = nodes.find(x => x.id === id);
+      if (!n) {
+        const st = nodes.find(x => x.stack && x.graph.nodes.some(m => m.id === id));
+        if (!st) return key;
+        out.push(st.id);
+        n = st.graph.nodes.find(m => m.id === id);
+      }
+      out.push(id);
+      level = n.graph;
+    }
+    return (key.startsWith("/") ? "/" : "") + out.join("/");
+  }
+
   /* graph: an IR graph; opts.expanded: Set of opened container keys;
    * opts.sizeOf(key, node) → {w, h, rows: [{target, route, left, top, w, h}]};
    * a row with `down` (and `cx`, its exit's x on the card) leaves by the
@@ -814,7 +918,7 @@
     } finally { Object.assign(C, keep); }
   }
 
-  const api = {layout, loopsOf, loopHeader, exitText, C};
+  const api = {layout, loopsOf, loopHeader, exitText, stackFanouts, stackedKey, STACK_MIN, C};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.FlowLayout = api;
 })(typeof window !== "undefined" ? window : globalThis);
