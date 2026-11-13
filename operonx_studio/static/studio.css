@@ -106,9 +106,14 @@
 
   /* node kind colours — one hue per family, dark enough to read on white.
      The kind→visual mapping itself lives in studio.js (OP_VISUALS). */
-  --k-func: #2f6fd0;
+  /* FuncOp is Titanium Slate: accent (icon, text), fill (glass wash), line (border) */
+  --k-func: #4f5d75; --k-func-fill: #e9edf3; --k-func-line: #8795ac;
   --k-llm: #7c4dcc;
-  --k-graph: #148a62;
+  /* GraphOps are periwinkle blue, a GraphOp that holds an agent is Lavender:
+     accent (text, icon, header mark), fill (glass wash), line (border).
+     Green belongs to execution status only */
+  --k-graph: #3557b8; --k-graph-fill: #eaedfc; --k-graph-line: #6a82d8;
+  --k-agraph: #7a56d8; --k-agraph-fill: #f1ebff; --k-agraph-line: #a68be8;
   --k-branch: #b0620f;
   /* the router: a patch panel — its body, ears, port bays, sockets, the
      light on the port a run took, and the route wires out of it */
@@ -1008,6 +1013,27 @@ body:not([data-stage]) .canvasbar { display: none; }
   backdrop-filter: blur(var(--og-blur)) saturate(140%);
   box-shadow: inset 0 1px 0 var(--og-rim), var(--og-drop);
 }
+/* a folded GraphOp: its fill under the icon band and a breath of it in the
+   body, its own border; the icon wears the accent itself */
+.node.cell.graphop, .node.cell.funcop {
+  border-color: color-mix(in srgb, var(--kind-line) 60%, var(--og-edge));
+  background:
+    linear-gradient(180deg, var(--og-spec) 0, transparent 42%),
+    linear-gradient(90deg, color-mix(in srgb, var(--kind-fill) 70%, transparent) 0 56px, transparent 56px),
+    color-mix(in srgb, var(--kind-fill) 22%, var(--og-fill));
+}
+.node.cell.graphop:hover, .node.cell.funcop:hover {
+  border-color: var(--kind-line);
+  background:
+    linear-gradient(180deg, var(--og-spec) 0, transparent 42%),
+    linear-gradient(90deg, color-mix(in srgb, var(--kind-fill) 85%, transparent) 0 56px, transparent 56px),
+    color-mix(in srgb, var(--kind-fill) 32%, var(--og-fill));
+}
+.node.funcop .iconband { color: var(--kind); border-right-color: color-mix(in srgb, var(--kind-line) 35%, transparent); }
+/* a drawn kind icon (FuncOp's </>) sized by the font of whatever holds it */
+svg.icon.kglyph { width: 1em; height: 1em; vertical-align: -.125em; stroke-width: 2; }
+.node .iconband svg.kglyph { width: 18px; height: 18px; }
+.node.graphop button.iconband.gband { color: var(--kind); border-right-color: color-mix(in srgb, var(--kind-line) 35%, transparent); }
 /* the blur is the costly part: off while the canvas is dragged and on a
    big flow (143 blurred ops panned at ~1.3x the frame time of clear ones) */
 #stage.panning .node.cell, #world.big .node.cell { -webkit-backdrop-filter: none; backdrop-filter: none; }
@@ -1029,6 +1055,24 @@ body:not([data-stage]) .canvasbar { display: none; }
 .node.selected:not(.cell) {
   background: linear-gradient(180deg, var(--surface), var(--flow-accent-soft));
 }
+/* a GraphOp selected: its own accent (periwinkle blue, or Lavender when it holds
+   an agent), a ring, no glow */
+.node.graphop.selected, .node.graphop.selected:hover, .node.container.selected,
+.node.funcop.selected, .node.funcop.selected:hover {
+  border-color: var(--kind-line);
+  box-shadow: inset 0 1px 0 var(--og-rim),
+              0 0 0 1px var(--kind-line),
+              0 0 0 4px color-mix(in srgb, var(--kind) 18%, transparent),
+              var(--og-drop);
+}
+.node.container.selected { border-style: solid; box-shadow: 0 0 0 3px color-mix(in srgb, var(--kind) 16%, transparent); }
+/* a FuncOp selected keeps its slate, with a soft glow of it */
+.node.funcop.selected, .node.funcop.selected:hover {
+  box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 1px var(--kind-line),
+              0 0 0 4px color-mix(in srgb, var(--kind) 16%, transparent),
+              0 0 14px color-mix(in srgb, var(--kind-line) 22%, transparent), var(--og-drop);
+}
+.node.graphop.selected:not(.cell), .node.funcop.selected:not(.cell) { background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--kind-fill) 70%, transparent)); }
 .node.cell .badges { margin-top: 3px; }
 .node.cell .nname { margin-left: 0; }
 .node.dimmed { opacity: .18; }
@@ -1073,8 +1117,8 @@ body:not([data-stage]) .canvasbar { display: none; }
   background: var(--bg-pink61-a6); }
 .badge.loop { color: var(--loop); border-color: color-mix(in srgb, var(--loop) 35%, transparent);
   background: color-mix(in srgb, var(--loop) 7%, var(--rt-bay)); }
-.badge.sub { color: var(--k-graph); border-color: var(--line-green58-a35);
-  background: var(--bg-green58-a6); }
+.badge.sub { color: var(--k-graph); border-color: color-mix(in srgb, var(--k-graph-line) 45%, transparent);
+  background: color-mix(in srgb, var(--k-graph-fill) 50%, transparent); }
 .badge.run { color: var(--text); background: var(--panel);
   box-shadow: 0 1px 2px var(--sh-amber49-a12); }
 .node .port { position: absolute; width: 12px; height: 12px; border-radius: 50%;
@@ -1154,9 +1198,12 @@ body:not([data-stage]) .canvasbar { display: none; }
 
 /* an opened GraphOp — a container whose members are real nodes on the
    canvas; the box itself is just the boundary and a title strip */
+.node.graphop, .node.container { --kind-fill: var(--k-graph-fill); --kind-line: var(--k-graph-line); }
+.node.funcop { --kind-fill: var(--k-func-fill); --kind-line: var(--k-func-line); }
+.node.agentgraph { --kind-fill: var(--k-agraph-fill); --kind-line: var(--k-agraph-line); }
 .node.container {
-  background: var(--bg-green58-a4);
-  border: 1.5px dashed color-mix(in srgb, var(--kind, var(--k-graph)) 55%, var(--line));
+  background: color-mix(in srgb, var(--kind-fill) 22%, transparent);
+  border: 1.5px dashed color-mix(in srgb, var(--kind-line) 70%, transparent);
   padding: 0; cursor: default; box-shadow: none;
 }
 .node.container:hover { transform: none; box-shadow: none; }
@@ -1168,9 +1215,10 @@ body:not([data-stage]) .canvasbar { display: none; }
 .node.container .chead {
   display: flex; align-items: baseline; gap: 10px;
   height: 34px; padding: 7px 12px 0 16px; cursor: pointer;
-  border-bottom: 1px dashed var(--line);
+  border-bottom: 1px dashed color-mix(in srgb, var(--kind-line) 40%, var(--line));
   overflow: hidden; white-space: nowrap;
-  background: var(--bg-gray99-a55); border-radius: 14px 14px 0 0;
+  background: linear-gradient(color-mix(in srgb, var(--kind-fill) 45%, transparent), color-mix(in srgb, var(--kind-fill) 45%, transparent)),
+    var(--bg-gray99-a55); border-radius: 14px 14px 0 0;
 }
 .node.container .chead .nname { font-weight: 650; font-size: 13px; }
 /* the operon nod: one promoter, the genes inside transcribed together */
@@ -1206,6 +1254,22 @@ body:not([data-stage]) .canvasbar { display: none; }
 .node button.iconband.gband:hover .bbox, .node button.iconband.gband:focus-visible .bbox {
   background: var(--kind, var(--k-default)); border-color: var(--kind, var(--k-default)); color: var(--on-fill); }
 .node button.iconband.gband:hover .barrow { opacity: 1; }
+/* an agent graph's band: the operonx glyph, the op count in its loop */
+.oxpic { position: relative; display: inline-block; flex: none;
+  background: url("/static/operonx-glyph-light.png") center / contain no-repeat; }
+:root[data-theme="dark"] .oxpic { background-image: url("/static/operonx-glyph-dark.png"); }
+.node .gband .gicon svg { width: 17px; height: 17px; overflow: visible; transition: transform var(--tr); }
+.node .gband .gicon path { fill: none; stroke: currentColor; stroke-width: 1.6; opacity: .7; }
+.node .gband .gicon circle { fill: color-mix(in srgb, var(--kind-fill) 60%, transparent); stroke: currentColor; stroke-width: 1.6; }
+.node button.iconband.gband:hover .gicon svg, .node button.iconband.gband:focus-visible .gicon svg { transform: scale(1.12); }
+.node .opcount { display: inline-block; align-self: flex-start; margin-top: 4px; padding: 1px 6px; font-size: 12px; font-weight: 500; line-height: 1.3;
+  color: color-mix(in srgb, var(--kind) 60%, var(--text-2)); white-space: nowrap; }
+.node .gband .oxg .oxpic { width: 30px; height: 17px; transition: transform var(--tr); }
+.node button.iconband.gband:hover .oxg .oxpic, .node button.iconband.gband:focus-visible .oxg .oxpic { transform: scale(1.1); }
+/* an opened agent graph: the glyph leads its header, a lavender wash under the title */
+.node.container.agentgraph .chead { align-items: center; padding-top: 0; }
+.node.container.agentgraph .chead .oxmark { width: 28px; height: 16px; }
+.node.agentgraph .agcount { color: color-mix(in srgb, var(--kind) 65%, var(--text-2)); }
 .node button.iconband.gband:focus-visible { outline: none; }
 
 /* wrap seam — where a long chain breaks to the next band, like a
@@ -1697,7 +1761,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   color: var(--text); border-radius: var(--r-xs); padding: 0 10px; margin-bottom: 3px;
   font: 400 12px var(--font); }
 .memberrow:hover { background: var(--surface-3); border-color: transparent; }
-.memberrow .memicon { color: var(--k-graph); }
+.memberrow .memicon { color: var(--kind, var(--k-graph)); display: inline-grid; place-items: center; width: 16px; }
 .memberrow .memkind { color: var(--text-3); font-size: 11px; margin-left: auto; }
 
 /* the op's backing resource */
@@ -6148,9 +6212,11 @@ svg.tc-mark { width: 15px; height: 15px; fill: none; stroke: currentColor; strok
 :root:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > #stage,
 body.floatframe:not(.ax-focus) .flowrail { --text-3: var(--glass-text-3); }
 :root:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > #stage .node.container {
-  background: color-mix(in srgb, var(--kind, var(--k-graph)) 2%, transparent); }
+  background: color-mix(in srgb, var(--kind-fill) 14%, transparent); }
 :root:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > #stage .node.container .chead {
   background: var(--og-fill); -webkit-backdrop-filter: blur(var(--og-blur)); backdrop-filter: blur(var(--og-blur)); }
+:root:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > #stage .node.container .chead {
+  background: linear-gradient(color-mix(in srgb, var(--kind-fill) 40%, transparent), color-mix(in srgb, var(--kind-fill) 40%, transparent)), var(--og-fill); }
 body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail,
 body.floatframe:not(.ax-focus) #sidebar, body.floatframe:not(.ax-focus) .flowrail {
   --glass-tint: var(--glass-clear); --glass-blur: var(--glass-blur-frame); }

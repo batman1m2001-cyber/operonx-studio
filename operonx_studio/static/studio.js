@@ -323,8 +323,8 @@ async function api(path, body) {
  * coherently instead of guessing per-property. Extend by adding a row.
  */
 const OP_VISUALS = {
-  "FuncOp":            {icon: "ƒ", color: "var(--k-func)"},
-  "GraphOp":           {icon: "▣", color: "var(--k-graph)"},
+  "FuncOp":            {icon: "ƒ", svg: "code2", color: "var(--k-func)"},
+  "GraphOp":           {icon: "▣", svg: "graphop", color: "var(--k-graph)"},
   "BranchOp":          {icon: "⑃", color: "var(--k-branch)"},
   "LLMOp":             {icon: "✧", color: "var(--k-llm)"},
   "EmbeddingOp":       {icon: "⛁", color: "var(--k-res)"},
@@ -400,6 +400,17 @@ function kindIcon(node) {
     if (p) return LLM_PROVIDERS[p].icon;
   }
   return v.icon;
+}
+
+/* The kind's icon as a span of class `cls`: a drawn icon when the kind has
+ * one (FuncOp's </>), else its glyph. Every place an op's kind shows
+ * (canvas, inspector, run tree) goes through here. */
+function kindIconEl(cls, node) {
+  const v = !stepVisual(node) && visualOf(node.kind);
+  if (!v || !v.svg) return el("span", cls, kindIcon(node));
+  const s = el("span", cls);
+  s.append(Icons.svg(v.svg, "kglyph"));
+  return s;
 }
 
 /* With a run painted, an op either executed or it didn't — and the
