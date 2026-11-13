@@ -1,6 +1,6 @@
 # A canvas you can read at any size (CANVAS_REDESIGN_PLAN)
 
-Status: C1 built (2026-11-13): the backdrop, clear glass for ops and for the frame. C2–C4 not started.
+Status: C1 built (2026-11-13): the backdrop, clear glass for ops and for the frame. C2 built (2026-11-13): the agent card in the ops' glass, with its run state. C3–C4 not started.
 
 Owner's brief:
 1. **Liquid glass background.** Dark mode is deep charcoal with a hint of lavender; light mode is pearl with lavender-blue reflections. The graph stays readable.
@@ -35,7 +35,32 @@ Gate, measured on the pixels behind each text with the text hidden:
 - The canvas was checked on meeting-prep-brd and meeting-prep, at desktop and phone widths, and in Reduce Transparency.
 - `node --test tests/js/` and pytest pass.
 
-## C2 · One compact agent node
+## C2 · One compact agent node (built)
+
+| Dark | Light |
+|---|---|
+| ![dark](img/canvas/c2-flow-dark.png) | ![light](img/canvas/c2-flow-light.png) |
+| ![second project dark](img/canvas/c2-second-project-dark.png) | ![second project light](img/canvas/c2-second-project-light.png) |
+
+States on real meeting-prep-brd runs (done: 03ffb4fa; failed and skipped: 650e3842, where the email agent's model call failed and the run stopped there):
+
+| Done | Failed | Skipped |
+|---|---|---|
+| ![done](img/canvas/c2-run-done-light.png) | ![failed](img/canvas/c2-run-failed-dark.png) | ![skipped](img/canvas/c2-run-skipped-light.png) |
+| ![done](img/canvas/c2-run-done-dark.png) | ![failed](img/canvas/c2-run-failed-light.png) | ![skipped](img/canvas/c2-run-skipped-dark.png) |
+
+What changed:
+- **The card is an op.** `.ag2` takes the `--og-*` glass of `.node.cell` (edge, fill, spec, rim, drop, blur); the kind colour is only in the 62px icon band. `.agentframe` lost its purple border and fill: an opened agent is a container like any other, its mark the icon in its title.
+- **Run state in the header pill.** `ag2-st` now says at work (`turn 2 / 8`), done (`3 turns`), failed (`failed · 1 turn`, red) or skipped (dashed, when a finished run never reached the agent). Failed is read from the run's records: the agent's own record or any step under it (`turn → model`) — not from `runNumbers`, which is keyed by op name and would blame an agent for its same-named GraphOp. The card's edge follows the cells' `live-active` / `live-done` / `live-failed`.
+- **The error badge sits inside the card**, under the title, not across its bottom border.
+- **Shared fix:** `.badge.err` ink is 80% `--err` into `--text`. On the C1 clear glass the pure red read 4.0:1, on every op.
+- The subtitle is `--text-2` (it read 4.1:1 on the card's band).
+
+Gate, measured as in C1 (text hidden, the 1st/99th percentile of the pixels behind each text):
+- Flow, meeting-prep-brd: 5.09 light, 5.56 dark. Flow, meeting-prep: 5.73 light, ≥6.1 dark (one card measured 4.07 where the flows panel covers half of it; the crop shows the panel's text, not the card's).
+- Run, failed: 4.78 light, 4.53 dark. Run, done: 6.02 light, 5.81 dark.
+- Not met, by design: a skipped card is faded to .35 like every op a run did not reach, so its text reads 3.8–4.2:1.
+- Not shot: the live `turn n / cap` pulse. It needs a live run, which costs model credit; the card takes the cells' `live-active` class, set by the same motion code.
 
 Today, an agent inside an opened GraphOp is the `.ag2` card. It has a purple border at 46% and a purple fill, so it is the one card that does not look like the ops around it. An opened agent is `.agentframe`, which also has a purple border.
 
