@@ -5364,10 +5364,10 @@ button.pm-w { cursor: pointer; }
   --glass-tint: var(--glass-clear); --glass-blur: var(--glass-blur-clear);
 }
 /* the frosted pieces: what holds text to read */
-.glass.frost, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip, body.pmode .ax-input, body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail, body.floatframe:not(.ax-focus) #sidebar {
+.glass.frost, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip, body.pmode .ax-input, body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail, body.floatframe:not(.ax-focus) .prail, body.floatframe:not(.ax-focus) #sidebar {
   --glass-tint: var(--glass-frost); --glass-blur: var(--glass-blur-frost);
 }
-.glass, .canvasbar, .livebar, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip, body.pmode .ax-input, body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail, body.floatframe:not(.ax-focus) #sidebar {
+.glass, .canvasbar, .livebar, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip, body.pmode .ax-input, body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail, body.floatframe:not(.ax-focus) .prail, body.floatframe:not(.ax-focus) #sidebar {
   background: var(--glass-sheen), var(--glass-tint);
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
@@ -5378,7 +5378,7 @@ button.pm-w { cursor: pointer; }
 .popover, .ax-pop, .ax-slash { --glass-tint: var(--glass-menu); --glass-blur: var(--glass-blur-menu); }
 /* reduce transparency: each piece is its solid surface again, with the
    edge and shadow every floating surface has */
-:root[data-glass="solid"] .glass, :root[data-glass="solid"] .canvasbar, :root[data-glass="solid"] .livebar, :root[data-glass="solid"] .popover, :root[data-glass="solid"] .ax-askbar, :root[data-glass="solid"] .ax-pop, :root[data-glass="solid"] .ax-slash, :root[data-glass="solid"] .viztip, :root[data-glass="solid"] body.pmode .ax-input, :root[data-glass="solid"] body.floatframe:not(.ax-focus) header.bar, :root[data-glass="solid"] body.floatframe:not(.ax-focus) .rail, :root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar {
+:root[data-glass="solid"] .glass, :root[data-glass="solid"] .canvasbar, :root[data-glass="solid"] .livebar, :root[data-glass="solid"] .popover, :root[data-glass="solid"] .ax-askbar, :root[data-glass="solid"] .ax-pop, :root[data-glass="solid"] .ax-slash, :root[data-glass="solid"] .viztip, :root[data-glass="solid"] body.pmode .ax-input, :root[data-glass="solid"] body.floatframe:not(.ax-focus) header.bar, :root[data-glass="solid"] body.floatframe:not(.ax-focus) .rail, :root[data-glass="solid"] body.floatframe:not(.ax-focus) .prail, :root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar {
   background: var(--surface);
   -webkit-backdrop-filter: none; backdrop-filter: none;
   box-shadow: inset 0 0 0 1px var(--float-edge), var(--sh-2);
@@ -5387,8 +5387,9 @@ button.pm-w { cursor: pointer; }
 /* ── G1: the Flow screen — the canvas runs under its chrome ──────────
    The top bar, the rail and the side panel float over the canvas, inset
    by --glass-gap, and the flow pans under them (canvas.js stageInset
-   lays the flow out in the open part). Only on the Flow screen: on the
-   other screens nothing moves under the chrome, and it stays solid. */
+   lays the flow out in the open part). Since GLASS_EVERYWHERE every
+   screen floats it (a run's canvas excepted); off Flow the page is a
+   glass card over the backdrop. */
 body.floatframe:not(.ax-focus) .shell { position: relative; }
 body.floatframe:not(.ax-focus) header.bar {
   position: absolute; top: var(--glass-gap); left: var(--glass-gap); right: var(--glass-gap);
@@ -5402,6 +5403,7 @@ body.floatframe:not(.ax-focus) .main > #stage { position: absolute; inset: 0; sc
 :root[data-glass="solid"] body.floatframe:not(.ax-focus) .main > #stage { background-color: var(--rt-bay); }
 body.floatframe:not(.ax-focus) .main > #stage::-webkit-scrollbar { display: none; }
 body.floatframe:not(.ax-focus) .rail { border-right: none; border-radius: var(--glass-r); margin-right: auto; }
+body.floatframe:not(.ax-focus) .prail { border-right: none; border-radius: var(--glass-r); }
 body.floatframe:not(.ax-focus) #sidebar {
   position: relative; z-index: 20; border-left: none; border-radius: var(--glass-r); overflow: hidden;
 }
@@ -5425,6 +5427,8 @@ body.floatframe:not(.ax-focus) .findbox, body.floatframe:not(.ax-focus) #legend 
 /* a phone: the bar floats; the rail is still the drawer, the panel the sheet */
 @media (max-width: 760px) {
   body.floatframe:not(.ax-focus) .main { padding: 0; }
+  /* off Flow the page is a card: it starts under the floating bar */
+  body.floatframe:not(.ax-focus):not([data-tab="flow"]) .main { padding: calc(var(--bar-h) + 2 * var(--glass-gap)) 0 var(--glass-gap); }
   body.floatframe:not(.ax-focus) .rail { margin-right: 0; border-radius: 0 var(--glass-r) var(--glass-r) 0; }
   body.floatframe:not(.ax-focus) #sidebar { position: fixed; z-index: 70; border-radius: 16px 16px 0 0; }
   body.floatframe:not(.ax-focus) .livebar { left: 12px; }
@@ -6155,3 +6159,30 @@ body.floatframe:not(.ax-focus) #sidebar > #inspector,
 body.floatframe:not(.ax-focus) #sidebar > #chatdock { background: color-mix(in srgb, var(--surface) 45%, transparent); }
 :root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar > #inspector,
 :root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar > #chatdock { background: var(--surface); }
+
+/* ── Glass everywhere (docs/GLASS_EVERYWHERE_PLAN.md) ──────────────
+   Every screen floats its frame over the backdrop, as Flow does; off
+   Flow the page itself is a glass card in the open area, and what is in
+   it (cards, tables, tiles, wells) is glass on glass. The derived
+   tokens (--card, --well, --panel…) resolve at :root, so they are set
+   again here; accent fills and selection stay solid. Reduce
+   Transparency keeps the solid screens. */
+:root { --glass-page: rgba(255, 255, 255, .42); }
+:root:not([data-glass="solid"]) body.floatframe:not(.ax-focus),
+:root:not([data-glass="solid"]) body.page {
+  background: url("/static/canvas-bg-light.webp") center / cover no-repeat fixed, var(--glass-under); }
+:root:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > :is(.pane, #traces, #jobs, #resources):not([hidden]) {
+  flex: 1 1 auto; min-width: 0; margin: 0 var(--glass-gap); border-radius: var(--glass-r);
+  background: var(--glass-page); border: 1px solid var(--glass-edge); box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(var(--glass-blur-frame)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur-frame)) saturate(var(--glass-sat)); }
+:root:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > :is(.pane, #traces, #jobs, #resources),
+:root:not([data-glass="solid"]) body.page {
+  --bg: transparent; --surface: rgba(255, 255, 255, .55); --surface-2: rgba(255, 255, 255, .42);
+  --surface-3: rgba(255, 255, 255, .7);
+  --card: var(--surface-2); --card-hover: var(--surface-3); --well: var(--surface-2);
+  --panel: var(--surface); --panel-2: var(--surface-2); --text-3: var(--glass-text-3); }
+/* the home page's big pieces are lenses of their own */
+:root:not([data-glass="solid"]) body.page :is(.projlist, .logincard) {
+  -webkit-backdrop-filter: blur(var(--glass-blur-frame)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur-frame)) saturate(var(--glass-sat)); }
