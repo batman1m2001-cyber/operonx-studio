@@ -112,7 +112,7 @@
   /* GraphOps are periwinkle blue, a GraphOp that holds an agent is Lavender:
      accent (text, icon, header mark), fill (glass wash), line (border).
      Green belongs to execution status only */
-  --k-graph: #3557b8; --k-graph-fill: #eaedfc; --k-graph-line: #6a82d8;
+  --k-graph: #4651c0; --k-graph-fill: #ecedfc; --k-graph-line: #7a80dc;
   --k-agraph: #7a56d8; --k-agraph-fill: #f1ebff; --k-agraph-line: #a68be8;
   --k-branch: #b0620f;
   /* the router: a patch panel — its body, ears, port bays, sockets, the
@@ -120,7 +120,7 @@
   --rt-body1: #eef1f5; --rt-body2: #dde3ea; --rt-edge: #8d9aab; --rt-ear: #d3dae3;
   --rt-ink: #243142; --rt-sub: #5b6878; --rt-bay: #f9fbfc; --rt-bay-edge: #c3ccd7;
   --rt-cond: #3a4a8c; --rt-led: #22a35a; --rt-led-off: #c9d1db; --rt-socket: #2b3442;
-  --rt-wire: #4f5bd5; --rt-wire-else: #9aa4c4; --rt-zone-edge: #a9b5c3;
+  --rt-wire: #8b6cf0; --rt-wire-lit: #7b57f2; --rt-wire-else: var(--rt-wire-lit); --rt-zone-edge: #a9b5c3;
   --rt-guide: #e3e7ec;
   --k-session: #2f6fd0;          /* a session store (an agent's memory) as an op */
   --k-io: #c8457f;
@@ -1167,15 +1167,20 @@ svg.icon.kglyph { width: 1em; height: 1em; vertical-align: -.125em; stroke-width
 .wires circle.eflow.cond { stroke: var(--rt-wire); filter: drop-shadow(0 0 2px color-mix(in srgb, var(--rt-wire) 50%, transparent)); }
 .wires circle.eflow.back { fill: var(--loop); stroke: var(--rt-bay); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--loop) 60%, transparent)); }
 @media (prefers-reduced-motion: reduce) { .wires circle.eflow { display: none; } }
-/* if/else routes: the beam in the router's wire colour; the ELSE
-   fallback dashed, quieter, laserless — a path that exists but is not flowing */
-.wires path.eglow.cond { stroke: color-mix(in srgb, var(--rt-wire) 13%, transparent); }
-.wires path.ecore.cond { stroke: var(--rt-wire); }
-.wires path.ecore.cond.relse { stroke: var(--rt-wire-else); }
-.wires path.eray.cond { stroke-width: .5; opacity: .85; }
-.wires path.ecore.cond.relse { stroke-dasharray: 9 7; opacity: .75; }
-.wires path.eglow.cond.relse { opacity: .5; }
-.wires path.eray.cond.relse { display: none; }
+/* routing wires (BranchOp): lavender for a route and for the wire into the
+   router; the ELSE fallback the same colour, dashed. A lit hairline core over
+   a faint halo stroke, no filament or sparks. Hover or selection: brighter
+   and wider; a run's path: the halo grows */
+.wires path.eglow.cond { stroke: color-mix(in srgb, var(--rt-wire) 45%, transparent);
+  stroke-width: 3; filter: blur(1.2px); }
+.wires path.eglow.cond.relse { stroke-dasharray: 5 4; }
+.wires path.ecore.cond { stroke: var(--rt-wire-lit); stroke-width: 1; }
+.wires path.ecore.cond.relse { stroke: var(--rt-wire-else); stroke-dasharray: 5 4; }
+.wires path.eray.cond { display: none; }
+.wires path.ecore.cond.hot { stroke-width: 1.4; filter: brightness(1.12); }
+.wires path.eglow.cond.hot { stroke: color-mix(in srgb, var(--rt-wire) 50%, transparent); stroke-width: 3.6; filter: blur(1.5px); }
+.wires path.ecore.cond.ran { stroke-width: 1.3; }
+.wires path.eglow.cond.ran { stroke: color-mix(in srgb, var(--rt-wire) 55%, transparent); stroke-width: 4; }
 .wires circle.espark.cond { stroke: var(--rt-wire); }
 /* soft merge edges: the same family, a quieter voice — never gray */
 .wires path.soft { stroke: var(--stroke-blue78); opacity: .8; }
@@ -1342,102 +1347,88 @@ svg.icon.kglyph { width: 1em; height: 1em; vertical-align: -.125em; stroke-width
 /* and so are badges, but a run's chip, an error, and a nested graph's
    open button (▣ n ▸) */
 .node .badges .badge:not(.run):not(.err):not(.sub) { display: none; }
-/* ── the router as a decision card: one row per condition ─────────── */
-.node.branch {
-  border-radius: 14px; padding: 9px 12px 8px 12px;
-  border: 2px solid color-mix(in srgb, var(--k-branch) 45%, var(--border));
-  background: linear-gradient(180deg, var(--rt-bay), var(--rt-bay));
-}
-/* the kind-accent bar reads as a stray thick line on a tall decision
-   card — the amber border already says "branch" */
-.node.branch::before { display: none; }
-.node.branch .brlist { margin-top: 6px; display: flex;
-  flex-direction: column; gap: 3px; }
-.brrow { position: relative; display: flex; align-items: center;
-  border: 1px solid var(--line-amber91); background: var(--rt-bay); border-radius: 7px;
-  padding: 2px 16px 2px 8px; min-height: 18px; }
-.brcond { font-size: 10.5px; color: var(--ink-orange55); overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; }
-.brrow.relse .brcond { color: var(--muted); font-style: italic; }
-.brrow.relse { border-style: dashed; }
-.brport { position: absolute; right: -6px; top: 50%; margin-top: -5px;
-  width: 10px; height: 10px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, var(--bg-amber89), var(--bg-amber67) 75%);
-  border: 1.5px solid var(--line-amber57); box-shadow: 0 0 5px var(--sh-orange59-a40); }
-.brrow.relse .brport { background: var(--bg-amber93); border-color: var(--line-amber78-2);
-  box-shadow: none; }
-/* a row whose target lies left carries its port on the left */
-.brrow.left { padding: 2px 8px 2px 16px; }
-.brrow.left .brport { left: -6px; right: auto; }
-/* the flow runs down, so a router's routes stand side by side, in route
-   order, each in its own outlined zone with its socket on the card's
-   bottom edge. In a zone each clause is a book (text top to bottom, every
-   book of the router one size) and each and / or a bracket under the books
-   it joins (studio.js drawCondTrees); the root's stem runs to the socket.
-   Drawn as a patch panel: screw ears, a label strip with its power light. */
-.node.branch.cols { padding: 9px 22px 14px; border-radius: 6px; border: 2px solid var(--rt-edge);
-  background: linear-gradient(180deg, var(--rt-body1), var(--rt-body2)); }
-.node.branch.cols::before, .node.branch.cols::after { content: ""; display: block; position: absolute;
-  top: 0; bottom: 0; width: 12px; pointer-events: none; background-color: var(--rt-ear);
-  background-image:
-    radial-gradient(circle at 50% 14px, var(--rt-body2) 0 2.5px, var(--rt-edge) 2.7px 3.6px, transparent 4px),
-    radial-gradient(circle at 50% calc(100% - 14px), var(--rt-body2) 0 2.5px, var(--rt-edge) 2.7px 3.6px, transparent 4px); }
-.node.branch.cols::before { left: 0; border-right: 1px solid var(--rt-edge); border-radius: 4px 0 0 4px; }
-.node.branch.cols::after { right: 0; left: auto; border-left: 1px solid var(--rt-edge); border-radius: 0 4px 4px 0; }
-.node.branch.cols > .nline { position: relative; padding: 3px 22px 3px 8px; border-radius: 3px;
-  background: var(--rt-bay); border: 1px solid var(--rt-bay-edge); }
-.node.branch.cols > .nline::after { content: ""; position: absolute; right: 8px; top: 50%; width: 7px; height: 7px;
-  margin-top: -3.5px; border-radius: 50%; background: var(--rt-led);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--rt-led) 70%, transparent); }
-.node.branch.cols > .nline .nicon { display: none; }
-.node.branch.cols > .nline .ntext { color: var(--rt-ink); font-family: var(--mono, ui-monospace, monospace); }
-.node.branch.cols .brlist { flex-direction: row; justify-content: center;
-  align-items: stretch; gap: 10px; margin-top: 12px; }
-/* a route's zone: its own outline, a clear gap to the next */
-.node.branch.cols .brrow { position: relative; flex: 0 0 auto; min-height: 0; display: flex;
-  flex-direction: column; align-items: stretch; padding: 8px 8px 0; border-radius: 5px;
-  border: 1.5px solid var(--rt-zone-edge); background: var(--rt-bay); box-shadow: none;
-  cursor: pointer; transition: border-color .12s, background-color .12s; }
-.node.branch.cols .brbooks { flex: 1; display: flex; flex-direction: row; align-items: stretch; gap: 5px; }
-.node.branch.cols .brroom { flex: none; }
-/* a clause: one book, every book of the router one size */
-.node.branch.cols .book { position: relative; z-index: 1; display: block; width: 28px; box-sizing: border-box;
-  padding: 8px 0; max-height: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  writing-mode: vertical-lr; line-height: 26px; font-size: 11px; color: var(--rt-cond);
-  border-radius: 3px 3px 2px 2px; border: 1px solid var(--rt-bay-edge);
-  background: color-mix(in srgb, var(--rt-bay) 55%, var(--rt-body1));
-  box-shadow: inset 0 3px 0 -1px color-mix(in srgb, var(--rt-wire) 22%, transparent),
-              inset 0 -3px 0 -1px color-mix(in srgb, var(--rt-wire) 22%, transparent); }
-.node.branch.cols .book.elsebook { color: var(--rt-sub); font-style: italic; border-style: dashed; }
-.node.branch.cols .book .brchip { vertical-align: middle; line-height: 1.25; }
-/* the brackets: hairlines in the wire's colour, `or` dashed; the operator
-   in a small square, turned with the text */
-.node.branch.cols svg.ctree { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.node.branch.cols svg.ctree path { fill: none; stroke: var(--rt-wire); stroke-width: 1; }
-.node.branch.cols svg.ctree path.cor { stroke-dasharray: 3 2; }
-.node.branch.cols svg.ctree .cmark { pointer-events: auto; cursor: help; }
-.node.branch.cols svg.ctree .cmark rect { fill: var(--rt-bay); stroke: var(--rt-wire); stroke-width: .8; }
-.node.branch.cols svg.ctree .cmark text { fill: var(--rt-wire); font: 600 8.5px var(--mono, ui-monospace, monospace);
-  text-anchor: middle; dominant-baseline: central; }
-.node.branch.cols svg.ctree .cled { fill: var(--rt-led); filter: drop-shadow(0 0 3px var(--rt-led)); }
-.node.branch.cols .brrow:hover, .node.branch.cols .brrow.picked { border-color: var(--rt-wire); }
-.node.branch.cols .brrow.picked { box-shadow: 0 0 0 2px color-mix(in srgb, var(--rt-wire) 35%, transparent); }
-/* the socket, on the bottom edge under the stem (studio.js sets its top and left) */
-.node.branch.cols .brport, .node.branch.cols .brrow.relse .brport { right: auto; left: 50%; margin-top: 0;
-  top: calc(100% + 13px); transform: translate(-50%, -50%); z-index: 2;
-  width: 16px; height: 11px; border-radius: 2px; background: var(--rt-socket);
-  border: 1.2px solid var(--rt-edge); box-shadow: none; }
-#nodes.measuring .node.branch.cols .brlist { width: max-content !important; }
+/* ── the router as an inline routing rail (docs/BRANCH_JUNCTION_PLAN.md) ──
+   A thin, quiet bar, no name or icon: one flat anchor per route in route
+   order, set in the bar's lower half, its wire leaving from the anchor.
+   Its name is a sign on the top edge. The same liquid glass as the ops
+   (clear body, one thin edge, a specular line, a soft drop), with only a
+   breath of the routing colour; the wires carry the colour. */
+.node.branch.junction, .node.branch.junction.selected {
+  width: max-content; min-height: 0; padding: 0 3px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--rt-wire) 22%, var(--og-edge));
+  background: linear-gradient(180deg, var(--og-spec) 0, transparent 60%),
+    color-mix(in srgb, var(--rt-wire) var(--og-tint), var(--og-fill));
+  -webkit-backdrop-filter: blur(var(--og-blur)) saturate(140%);
+  backdrop-filter: blur(var(--og-blur)) saturate(140%); }
+.node.branch.junction { box-shadow: inset 0 1px 0 var(--og-rim), var(--og-drop); }
+.node.branch.junction::before { display: none; }
+.node.branch.junction:hover { transform: none;
+  border-color: color-mix(in srgb, var(--rt-wire) 45%, var(--og-edge)); }
+.node.branch.junction.selected { border-color: color-mix(in srgb, var(--rt-wire) 75%, var(--og-edge));
+  box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 3px color-mix(in srgb, var(--rt-wire) 14%, transparent), var(--og-drop); }
+/* the input lands on the router's name, a sign across the rail's top edge;
+   the port stays as a target only */
+.node.branch.junction .port.in { opacity: 0; }
+.jnname { display: block; width: max-content; max-width: 220px; margin: -9px auto 0;
+  padding: 0 8px; height: 16px; line-height: 15px; box-sizing: border-box;
+  border-radius: 6px; font-size: 10.5px; font-weight: 600; letter-spacing: .01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-2); background: linear-gradient(180deg, var(--og-spec) 0, transparent 70%), var(--rt-bay);
+  box-shadow: inset 0 1px 0 var(--og-rim);
+  border: 1px solid color-mix(in srgb, var(--rt-wire) 45%, var(--og-edge)); }
+.node.branch.junction:hover .jnname, .node.branch.junction.selected .jnname {
+  color: var(--text); border-color: var(--rt-wire); }
+/* opened on its data (double click): the plugs between the sign and the anchors */
+.node.branch.junction.dfopen .jnname { margin-bottom: 4px; }
+.jnbar { display: flex; justify-content: center; align-items: flex-end; height: 12px; margin: 2px 0 0; }
+.jnport { all: unset; box-sizing: border-box; position: relative; flex: none;
+  width: 16px; height: 10px; cursor: pointer; }
+/* the global button:hover (0,1,1) outranks the reset above and painted a slot */
+.jnport:hover { background: none; }
+/* the anchors are svg dots on the wires' own end points (canvas.js
+   anchorDot): solid, one size, never pixel-snapped. The slot is only the
+   pointer target. Brighter and larger when the wire is lit (hover, pick,
+   selection); a run's route glows more; the else anchor is hollow. Each
+   is a socket: a lit core, a pale rim and a soft halo. */
+#edgetop circle.jnanchor { r: 3.2; fill: var(--rt-wire-lit); pointer-events: none;
+  stroke: color-mix(in srgb, #fff 50%, var(--rt-wire)); stroke-width: .8;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--rt-wire) 85%, transparent));
+  transition: r .12s; }
+#edgetop circle.jnanchor.relse { fill: var(--rt-bay); stroke: var(--rt-wire-else); stroke-width: 1.4; r: 2.8; }
+/* no brightness() here: chained before the shadow it cuts the glow square */
+#edgetop circle.jnanchor.hot { r: 4; stroke: color-mix(in srgb, #fff 80%, var(--rt-wire)); stroke-width: 1;
+  filter: drop-shadow(0 0 4px var(--rt-wire)); }
+#edgetop circle.jnanchor.relse.hot { fill: color-mix(in srgb, var(--rt-wire-else) 35%, var(--rt-bay)); }
+#edgetop circle.jnanchor.took { r: 3.8; filter: drop-shadow(0 0 4px var(--rt-wire)); }
+#edgetop circle.jnanchor.dorm { opacity: .15; }
+/* a wire's stretch drawn over its router is paint only: the anchor under it takes the pointer */
+#edgetop path { pointer-events: none; }
+/* the halo stops at the rail: blurred under or over the glass it smears into bands */
+#edgetop path.eglow { display: none; }
+/* a route wire's pointer target: clear, wider than the wire */
+.wires path.rhit { fill: none; stroke: transparent; stroke-width: 10px; pointer-events: stroke; cursor: pointer; }
 /* the condition, flat, at the pointer */
-.routetip { position: fixed; z-index: 70; pointer-events: none; display: flex; gap: 7px;
-  align-items: baseline; padding: 4px 9px; border-radius: 7px; font-size: 12px;
-  background: var(--surface); color: var(--text); white-space: nowrap;
-  border: 1px solid color-mix(in srgb, var(--rt-wire) 45%, var(--border));
-  box-shadow: 0 6px 18px var(--sh-gray0-a18); }
-.routetip .rtcond { color: var(--rt-cond); }
+/* the route tip: frosted glass with a lavender rim; the route's own socket,
+   its condition, then where it goes */
+.routetip { position: fixed; z-index: 70; pointer-events: none; display: flex; gap: 8px;
+  align-items: center; padding: 6px 11px 6px 9px; border-radius: 10px; font-size: 12px;
+  color: var(--text); white-space: nowrap;
+  background: var(--glass-sheen), color-mix(in srgb, var(--rt-wire) 8%, var(--glass-menu));
+  -webkit-backdrop-filter: blur(var(--glass-blur-menu)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur-menu)) saturate(var(--glass-sat));
+  border: 1px solid color-mix(in srgb, var(--rt-wire) 40%, var(--glass-outline));
+  box-shadow: inset 0 1px 0 var(--glass-rim), 0 0 14px -4px color-mix(in srgb, var(--rt-wire) 55%, transparent), var(--glass-shadow); }
+.routetip .rtdot { flex: none; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box;
+  background: var(--rt-wire-lit); border: 1px solid color-mix(in srgb, #fff 55%, var(--rt-wire));
+  box-shadow: 0 0 5px var(--rt-wire); }
+.routetip.relse .rtdot { background: transparent; border: 1.4px solid var(--rt-wire-else); }
+.routetip .rtcond { color: var(--rt-cond); font-size: 11.5px; }
 .routetip.relse .rtcond { color: var(--text-3); font-style: italic; }
-.routetip .rtarr { color: var(--text-3); }
-.routetip .rttgt { font-weight: 600; }
+.routetip .rtarr { color: var(--rt-wire); font-size: 13px; line-height: 1; }
+.routetip .rttgt { font-weight: 600; padding: 1px 7px; border-radius: 6px;
+  background: color-mix(in srgb, var(--rt-wire) 14%, transparent); }
+:root[data-glass="solid"] .routetip { background: var(--surface);
+  -webkit-backdrop-filter: none; backdrop-filter: none; }
 
 .wires text.condglyph { fill: var(--rt-wire); font-size: 11px; font-weight: 700;
   paint-order: stroke; stroke: var(--stroke-gray99); stroke-width: 3px; cursor: help; }
@@ -1504,7 +1495,7 @@ svg.icon.kglyph { width: 1em; height: 1em; vertical-align: -.125em; stroke-width
 /* render()'s measuring pass: every name line at its natural width, for
    one layout, then back (studio.js) */
 #nodes.measuring .dfport, #nodes.measuring .dfname,
-#nodes.measuring .ntext, #nodes.measuring .brcond, #nodes.measuring .nname,
+#nodes.measuring .ntext, #nodes.measuring .nname,
 #nodes.measuring .nkind { flex: none !important; width: max-content !important; }
 
 /* a run painted on a graph other than the one on screen: which, and why */
@@ -4475,46 +4466,6 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 #stacks .genghost.dimmed { opacity: .18 !important; }
 #world.dfsel #stacks .genghost:not(.dfpeer) { opacity: .4 !important; }
 #world.dfpin #stacks .genghost:not(.dfpeer):not(.selected) { opacity: .28 !important; }
-
-/* a branch's input, plugged into the condition that reads it */
-.brcond .dfport.brchip, .brcond .brchip.ghost {
-  display: inline-flex; align-items: center; gap: 4px; width: auto !important; max-width: none !important;
-  height: 18px; min-height: 0 !important; margin: 0 2px; padding: 0 7px 0 3px; vertical-align: middle;
-  border-radius: 9px; border: 1px solid var(--df); background: var(--df-soft); color: var(--df-ink);
-  font: inherit; line-height: 1; box-shadow: none; }
-.brcond .dfport.brchip .dfname { overflow: visible; text-overflow: clip; }
-.brcond .dfport.brchip.holeR { padding: 0 3px 0 7px; }
-.brcond .dfport.brchip.holeR .dfhole { order: 2; }
-.brcond .brchip.ghost { padding: 0 7px; border-style: dashed; opacity: .85; }
-.brcond .dfport.brchip .dfhole { position: static; margin: 0; flex: none; }
-/* … in a column the chip turns with its text: sized by its logical
-   sides, so its length runs along the column, its 18px across it */
-.node.branch.cols .brcond .dfport.brchip, .node.branch.cols .brcond .brchip.ghost {
-  width: 18px !important; height: auto; justify-content: flex-start;
-  margin: 0; margin-inline: 0 3px; padding: 0; padding-inline: 3px 7px; }
-/* a plug and its copies: one size, the name in the condition's own type */
-.brcond .brchip .dfname { font-size: inherit; line-height: 1; }
-.node.branch.cols .brcond .brchip.ghost { padding-inline: 3px 7px; }
-.brcond .brchip.ghost { gap: 4px; }
-.brcond .brchip.ghost .ghosthole { flex: none; width: 11px; height: 11px; border-radius: 50%;
-  box-sizing: border-box; border: 1.5px dashed var(--vc, var(--df)); opacity: .8; }
-/* one colour per variable on a router: its plug and every mention of it
-   (studio.js numbers them, data-vi); pointing at or following any one
-   lights them all */
-.brcond .brchip[data-vi="0"] { --vc: var(--df); }
-.brcond .brchip[data-vi="1"] { --vc: var(--c-teal58); }
-.brcond .brchip[data-vi="2"] { --vc: var(--c-violet57); }
-.brcond .brchip[data-vi="3"] { --vc: var(--c-pink58); }
-.brcond .brchip[data-vi="4"] { --vc: var(--c-lime60); }
-.node.branch .brcond .brchip[data-vi] { border-color: var(--vc);
-  background: color-mix(in srgb, var(--vc) 13%, var(--surface));
-  color: color-mix(in srgb, var(--vc) 80%, var(--text)); cursor: pointer;
-  transition: background-color .12s, box-shadow .12s; }
-.node.branch .brcond .brchip[data-vi] .dfhole { border-color: var(--vc); }
-.node.branch .brcond .brchip[data-vi]:is(.hot, .vhot, .lit, .lit2, .picked) {
-  background: color-mix(in srgb, var(--vc) 30%, var(--surface)); opacity: 1;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vc) 40%, transparent),
-              0 0 12px color-mix(in srgb, var(--vc) 60%, transparent); }
 
 /* SILK: the data wire is a hairline; hovered or lit it comes up whole.
    Last in the sheet: these win over the older weights above. */
