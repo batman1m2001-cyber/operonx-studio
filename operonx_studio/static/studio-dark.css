@@ -407,3 +407,14 @@
   --og-fill: rgba(255, 255, 255, .015); --og-tint: 9%; --og-band: 14%; --og-blur: 2px;
   --og-edge: rgba(255, 255, 255, .16); --og-spec: rgba(255, 255, 255, .10); --og-rim: rgba(255, 255, 255, .24);
 }
+
+/* glass everywhere at night: the graphite backdrop, a page tint just off
+   it (clear, not smoke), and surfaces that are a breath of white */
+:root[data-theme="dark"] { --glass-page: rgba(24, 24, 32, .42); }
+:root[data-theme="dark"]:not([data-glass="solid"]) body.floatframe:not(.ax-focus),
+:root[data-theme="dark"]:not([data-glass="solid"]) body.page {
+  background: url("/static/canvas-bg-dark.webp") center / cover no-repeat fixed, var(--glass-under); }
+:root[data-theme="dark"]:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > :is(.pane, #traces, #jobs, #resources),
+:root[data-theme="dark"]:not([data-glass="solid"]) body.page {
+  --surface: rgba(255, 255, 255, .035); --surface-2: rgba(255, 255, 255, .05);
+  --surface-3: rgba(255, 255, 255, .09); }

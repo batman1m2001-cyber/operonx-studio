@@ -115,9 +115,9 @@ function syncChrome() {
   const stageOn = state.tab === "flow" || !!state.workflowOn;
   if (stageOn) document.body.dataset.stage = "";
   else delete document.body.dataset.stage;
-  // the Flow screen's chrome floats over the canvas as glass (a run's
-  // canvas sits in its pane, under a solid head)
-  document.body.classList.toggle("floatframe", state.tab === "flow" && !state.workflowOn);
+  // every screen's chrome floats as glass over the backdrop; a run's
+  // canvas sits in its pane, under a solid head (docs/GLASS_EVERYWHERE_PLAN.md)
+  document.body.classList.toggle("floatframe", !state.workflowOn);
   if (!stageOn) { $("#find").hidden = true; $("#legend").hidden = true; }
 }
 
