@@ -398,3 +398,12 @@
   --glass-under: #0c0d11;   /* the flow canvas: near-black charcoal under the glass ops */
   --glass-still: rgba(22, 26, 32, .95);
 }
+
+/* C1 at night: a graphite backdrop with a hint of lavender, so the ops'
+   kind tint is what carries colour (docs/CANVAS_REDESIGN_PLAN.md) */
+:root[data-theme="dark"]:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > #stage {
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--bg-gray89) 45%, transparent) 1px, transparent 1.2px),
+    url("/static/canvas-bg-dark.webp");
+  --og-fill: rgba(255, 255, 255, .015); --og-tint: 9%; --og-band: 14%; --og-blur: 2px;
+  --og-edge: rgba(255, 255, 255, .16); --og-spec: rgba(255, 255, 255, .10); --og-rim: rgba(255, 255, 255, .24);
+}
