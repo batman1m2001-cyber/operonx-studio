@@ -208,3 +208,46 @@ def test_a_clean_turn_or_a_broken_transcript_ends_untouched(tmp_path):
     assert _hook(tmp_path, turn(prompt("go"), ("Bash", {"command": "ls"}))) == ""
     assert subprocess.run([sys.executable, "-I", stophook.__file__], input="{not json", capture_output=True,
                           text=True).stdout == ""
+
+
+class TestLint:
+    """L1 (ENGINEERING_ENV_PLAN E8): `operonx lint` after a turn that edited a project's code."""
+
+    def project(self, tmp_path, baseline=""):
+        root = tmp_path / "p"
+        (root / "src" / "a").mkdir(parents=True)
+        (root / "operonx.toml").write_text('[app]\nname = "p"\n' + (f"\n[lint]\nbaseline = {baseline}\n" if baseline else ""))
+        (root / "src" / "a" / "ops.py").write_text('def f():\n    print("hi")\n')
+        (root / "src" / "a" / "old.py").write_text('def g():\n    print("old")\n')
+        return root
+
+    def wrote(self, path):
+        return ("Write", {"file_path": str(path), "content": path.read_text()})
+
+    def test_an_error_in_an_edited_file_is_sent_back(self, tmp_path):
+        root = self.project(tmp_path)
+        why = stophook.reason(turn(prompt("go"), self.wrote(root / "src" / "a" / "ops.py")))
+        assert "operonx lint flags 1 error(s)" in why and "src/a/ops.py:2: [C8]" in why
+        assert "old.py" not in why  # an error in a file the turn did not touch is not this turn's
+
+    def test_a_root_folder_the_turn_made_is_sent_back(self, tmp_path):
+        root = self.project(tmp_path)
+        (root / "view").mkdir()
+        (root / "view" / "x.md").write_text("x\n")
+        why = stophook.reason(turn(prompt("go"), self.wrote(root / "view" / "x.md")))
+        assert "view:1: [C16]" in why
+
+    def test_held_by_the_baseline_or_clean_ends(self, tmp_path):
+        root = self.project(tmp_path, baseline="{C8 = 2}")
+        assert stophook.reason(turn(prompt("go"), self.wrote(root / "src" / "a" / "ops.py"))) is None
+        (root / "src" / "a" / "ok.py").write_text("X = 1\n")
+        assert stophook.reason(turn(prompt("go"), self.wrote(root / "src" / "a" / "ok.py"))) is None
+
+    def test_no_edit_or_no_project_runs_no_lint(self, tmp_path, monkeypatch):
+        def boom(*a, **k):
+            raise AssertionError("lint ran")
+
+        monkeypatch.setattr(stophook.subprocess, "run", boom)
+        assert stophook.reason(turn(prompt("go"), ("Bash", {"command": "ls"}))) is None
+        (tmp_path / "loose.py").write_text('print("x")\n')
+        assert stophook.reason(turn(prompt("go"), self.wrote(tmp_path / "loose.py"))) is None
