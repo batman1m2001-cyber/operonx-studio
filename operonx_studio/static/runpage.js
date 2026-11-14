@@ -248,6 +248,20 @@ function forkSection(run, e, recorded) {
   return sec;
 }
 
+/* the run line on screen (the Workflow view), or null */
+const lineView = () => (typeof RunLineView !== "undefined" && RunLineView.current()) || null;
+
+/* go to another execution in whichever run view is showing */
+function pickExec(x) {
+  if (lineView()) return RunLineView.selectId(x.id);
+  if (x.el) {
+    x.el.scrollIntoView({block: "center", behavior: "smooth"});
+    x.el.click();
+    return true;
+  }
+  return RunTree.selectId(x.id);
+}
+
 async function renderExecPanel(run, e, execs, target) {
   state.execSel = `${e.op} @ ${e.ctx || "main"} (+${fmtMs(e.start_ms)})`;
   state.execId = e.id || null;
@@ -272,12 +286,9 @@ async function renderExecPanel(run, e, execs, target) {
   const title = el("div", "pheadrow");
   if (target) {
     // on a phone the step covers the steps: the way back
-    // (the Workflow's sheet closes from its own bar)
-    if (!target.closest("#wfstep")) {
-      const back = Icons.button("back", "Steps", "small ghost rt-back", "Back to the steps");
-      back.onclick = () => RunTree.backToSteps();
-      title.append(back);
-    }
+    const back = Icons.button("back", "Steps", "small ghost rt-back", "Back to the steps");
+    back.onclick = () => (lineView() ? RunLineView.backToSteps() : RunTree.backToSteps());
+    title.append(back);
     const ico = node ? kindIconEl("rt-ico", node) : el("span", "rt-ico", "≋");
     if (node) ico.style.setProperty("--kind", kindColor(node));
     title.append(ico);
@@ -360,10 +371,7 @@ async function renderExecPanel(run, e, execs, target) {
   if (mine.length > 1) {
     const sec = el("section");
     sec.append(el("div", "stitle", `This op's ${mine.length} runs`));
-    sec.append(RunView.dots(e, mine, (x) => {
-      x.el?.scrollIntoView({block: "center", behavior: "smooth"});
-      x.el?.click();
-    }));
+    sec.append(RunView.dots(e, mine, (x) => pickExec(x)));
     panel.append(sec);
   }
 
@@ -378,10 +386,7 @@ async function renderExecPanel(run, e, execs, target) {
       row.append(el("span", "reskey mono", u.to_key || ""));
       const chip = el("button", "pchip pref",
         `${src ? src.op : u.from}.${u.from_key || ""}`);
-      if (src) chip.onclick = () => {
-        src.el?.scrollIntoView({block: "center", behavior: "smooth"});
-        src.el?.click();
-      };
+      if (src) chip.onclick = () => pickExec(src);
       row.append(chip);
       sec.append(row);
     }
@@ -389,7 +394,8 @@ async function renderExecPanel(run, e, execs, target) {
   }
 
   // ── what it fed ── (the run page knows every step's downstream)
-  const fed = target && RunTree.current() ? (RunTree.current().feeds.get(e.id) || []) : [];
+  const view = target && (lineView() || RunTree.current());
+  const fed = view ? (view.feeds.get(e.id) || []) : [];
   if (fed.length) {
     const sec = el("section");
     sec.append(el("div", "stitle", "Fed"));
@@ -397,7 +403,7 @@ async function renderExecPanel(run, e, execs, target) {
       const row = el("div", "resrow");
       row.append(el("span", "reskey mono", f.from_key || ""));
       const chip = el("button", "pchip pref", `${f.to.name}.${f.to_key || ""}`);
-      chip.onclick = () => RunTree.selectId(f.to.id);
+      chip.onclick = () => (lineView() ? RunLineView.selectId(f.to.id) : RunTree.selectId(f.to.id));
       row.append(chip);
       sec.append(row);
     }
@@ -542,376 +548,16 @@ function graphForRun(data) {
   return best && best.score >= 0.5 ? best.g : null;
 }
 
+/* the run page's Workflow view: the flow as a line beside the step (runlineview.js) */
 async function showRunWorkflow(run) {
-  if (state.tab !== "traces") switchTab("traces", {quiet: true});
   leaveWorkflow();
-  const box = $("#traces");
-  box.textContent = "";
-  const mine = (state.tracesView = {});
-  let data, tree;
-  try {
-    [data, tree] = await Promise.all([
-      api(`/api/p/${PID}/trace/${encodeURIComponent(run)}`), loadRunTree(run)]);
-  } catch (e) { box.append(el("div", "note", e.message)); return; }
-  if (state.tracesView !== mine) return;
-  followRun(run, mine, tree, () => showRunWorkflow(run));
-  state.run = data;
-  state.errIdx = 0;
-  // every execution with its values, by op and by turn — the cards
-  // read one turn's values when a turn is picked, the last otherwise
-  state.runTurn = null;
-  state.runTurns = tree.turns || [];
-  state.runByOpTurn = new Map();
-  for (const e of execsOf(tree.rows)) {
-    const key = (e.ctx || "").split(".").slice(0, 2).join(".");
-    if (!state.runByOpTurn.has(e.op)) state.runByOpTurn.set(e.op, new Map());
-    state.runByOpTurn.get(e.op).set(key, e);   // rows are in time order: last wins
-  }
-  // heat scale: the run's slowest average paints the hottest border
-  state.heatMax = Math.max(0, ...Object.values(data.ops || {})
-    .map(o => o.runs ? o.total_ms / o.runs : 0));
-
-  state.runRollups = new Map((tree.rollups || []).map(r => [r.op, r]));
-
-  // the canvas shows the graph this run ran: another of the project's
-  // graphs is switched to (and said so); one the studio does not draw
-  // gets a note and the tree, never a canvas of unrelated faded cards
-  const ranGraph = graphForRun(data);
-  const workflowName = ((data.summary || tree.summary || {}).workflow) || "?";
-  if (!ranGraph) {
-    box.append(runHeader(run, tree, "workflow", []));
-    const note = el("div", "wfnote wfmissing");
-    const said = el("span");
-    said.append("This run's graph (", el("code", null, workflowName), ") isn't drawn here.");
-    const ops = Object.keys(data.ops || {});
-    if (ops.length) said.append(el("span", "wfops", ` It ran ${ops.slice(0, 6).join(", ")}${ops.length > 6 ? "…" : ""}.`));
-    note.append(said);
-    const tb = el("button", "small", "Open as tree");
-    tb.type = "button";
-    tb.onclick = () => showRunTree(run);
-    note.append(tb);
-    box.append(note);
-    state.run = null;
-    pushView();
-    return;
-  }
-  let switched = null;
-  if (ranGraph !== state.graph) {
-    switched = state.graph ? state.graph.name : null;
-    // the run BORROWS the canvas for its graph: the Flow tab's own graph,
-    // its open GraphOps and its view are kept and come back on leaving
-    if (!state.flowHome) state.flowHome = {graph: state.graph, sel: state.sel, expanded: new Set(state.expanded)};
-    state.graph = ranGraph;
-    $("#graph-pick").value = ranGraph.name;
-    state.sel = state.dfFocus = null;
-    state.expanded.clear();
-  }
-  // an agent op opens onto the steps this run recorded under it
-  state.runRows = tree.rows;
-  state.stepsBase = state.graph;
-  paintSteps(true);
-  state.runSteps = (tree.rows || []).filter(r => (r.kind === "record" || r.step) && !(r.outputs || {})._transient_stream)
-    .sort((a, b) => a.start_ms - b.start_ms);
-  if (state.runFocusRun !== run) { state.runFocus = null; state.runPinned = false; state.runFocusRun = run; }
-  // a live run redraws every few seconds: the step in focus is kept by its id
-  else if (state.runFocus) state.runFocus = state.runSteps.find(r => r.id === state.runFocus.id) || null;
-  const live = ((tree.summary || {}).status === "running");
-  const extras = [RunView.lensBar(), runStepper(), replayControl(run)];
-  box.append(runHeader(run, tree, "workflow", extras));
-  if (switched) {
-    const note = el("div", "wfnote");
-    const said = el("span");
-    said.append("Showing ", el("code", null, ranGraph.name), ", the graph this run ran",
-      el("span", "wfops", switched ? ` (the canvas had ${switched})` : ""));
-    note.append(said);
-    box.append(note);
-  }
-  box.append(RunView.timeline(state.runTurns, tree.total_ms, (key) => {
-    state.runTurn = key; paintSteps(true); render(); renderFlowInfo();
-    // the panel reads the picked turn: the selected op's execution in it
-    renderRunStep(selectedNode());
-  }));
-  box.classList.add("workflow");
-  const stage = $("#stage");
-  if (!state._stageHome) state._stageHome = {parent: stage.parentNode, next: stage.nextSibling};
-  stage.style.display = "";
-  // the canvas and, beside it, the step it is on: what an op did is never
-  // in a panel the user has to have opened (it was, at 0 px, on Runs)
-  const split = el("div", "wfsplit");
-  const side = el("aside", "wfstep");
-  side.id = "wfstep";
-  side.setAttribute("aria-label", "The selected step");
-  split.append(stage, side);
-  box.append(split);
-  state.workflowOn = true;
-  syncChrome();
-  render();
-  // moving the canvas into the run's pane reset its scroll to the top-left
-  // corner (a phone showed 3 of 27 cards, at the edge): the run opens
-  // fitted to its own, smaller box — the Flow tab's saved view untouched
-  initView(true);
-  landOnAgent();
-  pushView();
-  renderFlowInfo();
-  // live, and nothing picked by hand: follow the newest step as it lands
-  if (live && !state.runPinned && state.runSteps.length) focusStep(state.runSteps[state.runSteps.length - 1], true);
-  else renderRunStep(selectedNode());
+  return RunLineView.show(run);
 }
 
-/* ── the Workflow's step panel ──────────────────────────────────────── */
-
-function selectedNode() {
-  const it = state.sel && state.rendered.get(state.sel);
-  return it ? it.node : null;
-}
-
-/* An op's executions in this run — in the picked turn when one is. A
- * subgraph's own record (operonx 1.22.3) is one of them. */
-function runStepRows(name) {
-  const turn = state.runTurn;
-  return (state.runSteps || []).filter(r => r.op === name
-    && (!turn || (r.ctx || "") === turn || (r.ctx || "").startsWith(turn + ".")));
-}
-
-const turnOf = (r) => (r.ctx || "").split(".").slice(0, 2).join(".");
-
-/* The steps of the ops inside a subgraph node, in this run (and turn):
- * by name, and by the subgraph in the step's id where it has one. */
-function innerRunRows(n) {
-  const names = new Set();
-  const walk = (g) => { for (const m of (g && g.nodes) || []) { names.add(m.name); if (m.graph) walk(m.graph); } };
-  walk(n.graph);
-  const turn = state.runTurn;
-  return (state.runSteps || []).filter(r => names.has(r.op)
-    && (!r.id || String(r.id).startsWith("graph:") || String(r.id).includes(`.${n.name}.`))
-    && (!turn || (r.ctx || "") === turn || (r.ctx || "").startsWith(turn + ".")));
-}
-
-/* The panel beside the canvas: the selected op's execution, as the Tree
- * reads a step — its output, its input, what fed it. Several executions
- * (a turn each, a stream's items) are chips above it; the stepper's or
- * the last one is open. */
-function renderRunStep(n, focus) {
-  const side = $("#wfstep");
-  if (!side || !state.run) return;
-  side.textContent = "";
-  side.classList.toggle("open", !!n);
-  if (!n) {
-    side.append(el("p", "note wfhint",
-      "Pick an op to read what it did in this run — its output, its input, what fed it. "
-      + "◀ ▶ (or ← →) walk the run step by step; a turn above narrows it to that turn."));
-    return;
-  }
-  // a phone's sheet closes from its own bar, clear of the step's buttons
-  const close = el("div", "wfbar");
-  const x = Icons.button("x", undefined, "small ghost wfclose", "Close");
-  x.onclick = () => { if (state.sel) select(state.sel); else renderRunStep(null); };
-  close.append(el("span", "wfgrip"), x);
-  if (n.step) {   // a step an agent recorded: that one execution
-    const body = el("div", "wfbody");
-    side.append(close, body);
-    renderExecPanel(state.run.run, n.step, execsOf(state.runRows || []), body);
-    return;
-  }
-  const rows = runStepRows(n.name);
-  if (!rows.length) {
-    // a subgraph with no record of its own whose ops ran: a run from
-    // before operonx 1.22.3, which records a subgraph's values — it ran,
-    // and its ops' steps are the way in
-    const inner = n.graph ? innerRunRows(n) : [];
-    if (inner.length) {
-      const list = el("div", "wfexecs wfinner");
-      inner.slice(0, 60).forEach((r) => {
-        const c = el("button", "pill" + (r.status === "error" ? " err" : ""), `${r.op} +${fmtMs(r.start_ms)}`);
-        c.type = "button";
-        c.title = `${r.ctx} · ${fmtMs(r.dur_ms)}`;
-        c.onclick = () => { state.runPinned = true; focusStep(r); };
-        list.append(c);
-      });
-      side.append(close, el("h3", "rt-step-title", n.name),
-        el("p", "note", `Ran — ${inner.length} step${inner.length === 1 ? "" : "s"} of its ops`
-          + `${state.runTurn ? " in this turn" : ""}. This run was recorded before operonx 1.22.3, so the `
-          + "subgraph's own inputs and outputs were not kept: a run made since has them. Open one of its steps:"),
-        list);
-      return;
-    }
-    side.append(close, el("h3", "rt-step-title", n.name),
-      el("p", "note", state.runTurn
-        ? "Did not run in this turn. Pick “Whole run”, or another turn, to see where it did."
-        : "Did not run in this run — the path went another way, or nothing reached it."));
-    return;
-  }
-  const pick = (focus && rows.includes(focus)) ? focus
-    : (state.runFocus && rows.includes(state.runFocus)) ? state.runFocus : rows[rows.length - 1];
-  side.append(close);
-  if (rows.length > 1) {
-    const chips = el("div", "wfexecs");
-    chips.append(el("span", "note", `${rows.length} executions`));
-    rows.slice(-40).forEach((r) => {
-      const i = rows.indexOf(r);
-      const c = el("button", "pill" + (r === pick ? " on" : "") + (r.status === "error" ? " err" : ""),
-        `#${i + 1} +${fmtMs(r.start_ms)}`);
-      c.type = "button";
-      c.title = `${r.ctx} · ${fmtMs(r.dur_ms)}`;
-      c.onclick = () => { state.runFocus = r; state.runPinned = true; renderRunStep(n, r); syncStepper(); };
-      chips.append(c);
-    });
-    side.append(chips);
-  }
-  const body = el("div", "wfbody");
-  side.append(body);
-  renderExecPanel(state.run.run, pick, execsOf(state.runRows || []), body);
-}
-
-/* ◀ step i of n ▶ — the run one execution at a time, in the order they
- * started: the canvas selects the op, the panel opens that execution. */
-function runStepper() {
-  const box = el("span", "wfstepper");
-  const arrow = (label, title) => {
-    const b = el("button", "small ghost wfarrow", label);
-    b.type = "button";
-    b.title = title;
-    b.setAttribute("aria-label", title);
-    return b;
-  };
-  const prev = arrow("◀", "Previous step (←)");
-  const next = arrow("▶", "Next step (→)");
-  const at = el("span", "wfstepat");
-  prev.onclick = () => stepBy(-1);
-  next.onclick = () => stepBy(1);
-  box.append(prev, at, next);
-  state.stepperEl = at;
-  syncStepper();
-  return box;
-}
-
-function syncStepper() {
-  const steps = state.runSteps || [];
-  const i = state.runFocus ? steps.indexOf(state.runFocus) : -1;
-  if (state.stepperEl) state.stepperEl.textContent = steps.length ? `step ${i + 1 || "–"} of ${steps.length}` : "no steps";
-}
-
-function stepBy(d) {
-  const steps = state.runSteps || [];
-  if (!steps.length) return;
-  state.runPinned = true;   // stepping by hand: a live run stops pulling the focus
-  const i = state.runFocus ? steps.indexOf(state.runFocus) : -1;
-  focusStep(steps[Math.max(0, Math.min(steps.length - 1, i < 0 ? 0 : i + d))]);
-}
-
-function focusStep(row, auto) {
-  state.runFocus = row;
-  state._autoStep = !!auto;
-  // a step outside the picked turn: the turn follows it
-  if (state.runTurn && turnOf(row) !== state.runTurn) { state.runTurn = null; paintSteps(true); render(); }
-  let found = [...state.rendered.values()].find(x => x.node.name === row.op);
-  if (!found) { expandAll(true); found = [...state.rendered.values()].find(x => x.node.name === row.op); }
-  if (found) {
-    if (state.sel !== found.key) select(found.key); else renderRunStep(found.node, row);
-    centerOn(found);
-  } else renderRunStep({name: row.op}, row);
-  state._autoStep = false;
-  syncStepper();
-}
-
-document.addEventListener("keydown", (ev) => {
-  if (!state.workflowOn || !state.run || ev.metaKey || ev.ctrlKey || ev.altKey) return;
-  const t = ev.target;
-  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-  if (ev.key !== "ArrowRight" && ev.key !== "ArrowLeft") return;
-  // first, and only: the canvas's own arrow keys walk to a neighbour card
-  ev.preventDefault();
-  ev.stopImmediatePropagation();
-  stepBy(ev.key === "ArrowRight" ? 1 : -1);
-}, true);
-
-// a replay finishing an op: the panel follows it
-document.addEventListener("oxreplayop", (ev) => {
-  if (!state.workflowOn || !state.run) return;
-  const op = (ev.detail || {}).op;
-  const rows = (state.runSteps || []).filter(r => r.op === op);
-  if (rows.length) { state.runFocus = rows[rows.length - 1]; renderRunStep({name: op}, state.runFocus); syncStepper(); }
-});
-
-/* A run whose agent op opened onto its steps lands on that agent: its
- * turns are what the run did, and they are below the fold of a tall flow. */
-function landOnAgent() {
-  const agent = [...state.rendered.values()].find(x => x.inner && x.node.agentSteps);
-  if (!agent) return;
-  const stage = $("#stage"), r = stage.getBoundingClientRect();
-  const s = state.view.scale, ex = state.extent;
-  stage.scrollTop = Math.max(0, (agent.y - ex.minY) * s + VIEW_PAD - 16);
-  stage.scrollLeft = Math.max(0, (agent.x + agent.w / 2 - ex.minX) * s + VIEW_PAD - r.width / 2);
-}
-
-/* The painted graph: the run's graph with each agent op given the graph
- * its recorded steps make (agentsteps.js) — for the picked turn, or the
- * whole run. `open` opens the agents and their turns, so the run shows its
- * structure at once. The Flow tab's graph (`stepsBase`) is never changed. */
-function paintSteps(open) {
-  if (!state.stepsBase) return;
-  const {graph, opened} = AgentSteps.withSteps(state.stepsBase, state.runRows || [], state.runTurn);
-  state.graph = state.stepsGraph = graph;
-  if (open) for (const key of opened) state.expanded.add(key);
-}
-
-/* "error →": center + select the errored ops one by one, opening
- * containers if the culprit is folded away inside one. */
-function walkErrors() {
-  if (!state.run) return;
-  const names = Object.entries(state.run.ops || {})
-    .filter(([, o]) => o.errors).map(([name]) => name);
-  if (!names.length) return;
-  const name = names[state.errIdx % names.length];
-  state.errIdx += 1;
-  let found = [...state.rendered.values()].find(x => x.node.name === name);
-  if (!found) {          // hidden inside a collapsed GraphOp — open everything
-    expandAll(true);
-    found = [...state.rendered.values()].find(x => x.node.name === name);
-  }
-  if (found) { select(found.key); centerOn(found); }
-  else toast(`'${name}' errored but is not on this canvas`, true);
-}
-
-// the canvas goes home and the paint comes off — the Flow tab never
-// shows a run
+/* leaving a run page: a replay on the canvas stops (not quietly — a quiet
+ * stop left the "Replaying … done" pill riding back to the Flow tab) */
 function leaveWorkflow() {
-  // not quiet: a quiet stop left the "Replaying … done" pill riding back
-  // to the Flow tab with the canvas
   if (liveCanvas) liveCanvas.stop();
-  if (!state.workflowOn) return;
-  state.workflowOn = false;
-  syncChrome();
-  const stage = $("#stage");
-  $("#traces").classList.remove("workflow");
-  const home = state._stageHome;
-  home.parent.insertBefore(stage, home.next && home.next.parentNode === home.parent ? home.next : null);
-  stage.style.display = state.tab === "flow" ? "" : "none";
-  state.run = null;
-  state.runTurn = null;
-  state.runByOpTurn = null;
-  state.runRollups = null;
-  state.heatMax = 0;
-  // the Flow tab gets its own graph back, not the run's opened copy
-  if (state.stepsBase && state.graph === state.stepsGraph) state.graph = state.stepsBase;
-  state.stepsBase = state.stepsGraph = state.runRows = null;
-  // ... nor the run's graph: the one it showed before the run borrowed it
-  if (state.flowHome) {
-    const h = state.flowHome;
-    state.flowHome = null;
-    if (h.graph && state.ir && state.ir.graphs.includes(h.graph)) {
-      state.graph = h.graph;
-      state.sel = h.sel;
-      state.expanded = h.expanded;
-      const pick = $("#graph-pick");
-      if (pick) pick.value = h.graph.name;
-    }
-  }
-  render();
-  // ... and coming home it lost the Flow tab's view: it comes back once
-  // the canvas shows at its full size (flushCanvas)
-  state.viewPending = true;
-  renderFlowInfo();
 }
 
 /* every nested graph at once — opening five GraphOps one by one to see

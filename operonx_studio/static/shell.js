@@ -743,7 +743,8 @@ async function pulse() {
         state.uiSeq = a.seq;
         try { await assistantUi(a.kind, a.args || {}); } catch { /* a stale action is not an error */ }
       }
-      if (state.follow && got.newest && (!state.run || state.run.run !== got.newest)) {
+      const showing = (state.run && state.run.run) || (RunLineView.current() || {}).run;
+      if (state.follow && got.newest && showing !== got.newest) {
         await showRunWorkflow(got.newest);
       } else if (!state.follow && state.tab === "flow" && got.newest) {
         flowLive.landed(got.newest, got.newest_info);
