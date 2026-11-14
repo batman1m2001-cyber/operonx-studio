@@ -8,21 +8,12 @@
  * clicking or dragging across them repaints the canvas for that moment.
  * Two runs can be compared op by op.
  *
- * Everything here renders from what /tree and /compare return; the
- * canvas itself stays in studio.js and reads `state.lens`.
+ * Everything here renders from what /tree and /compare return.
  */
 
 "use strict";
 
 const RunView = (() => {
-  // the path, and one heat on it; a failed op is marked whatever is
-  // picked, and an op's values are in the step panel beside the canvas
-  const LENSES = [
-    ["path", "Path", "Which ops ran — the rest fade"],
-    ["time", "Time", "Each op's time in this run, the three slowest ranked"],
-    ["cost", "Cost", "Only ops that cost money"],
-  ];
-
   function money(cost, unpriced) {
     if (cost == null) return unpriced ? "unpriced" : null;
     const txt = cost === 0 ? "$0" : cost < 0.01 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(2)}`;
@@ -756,7 +747,5 @@ const RunView = (() => {
     return sec;
   }
 
-  state.lens = recall("lens", "path");
-  if (!LENSES.some(([k]) => k === state.lens)) state.lens = "path";   // a retired lens (errors, values)
-  return {header, conversation, syncViews, pill, copyId, timeline, anomalies, rank, dots, compare, money, focusOp, focusExec, background, LENSES};
+  return {header, conversation, syncViews, pill, copyId, timeline, anomalies, rank, dots, compare, money, focusOp, focusExec, background};
 })();

@@ -126,11 +126,11 @@ def test_open_run_reads_the_summary_and_shows_it():
         "rollups": [{"op": "a", "count": 3, "total_ms": 12.0, "max_ms": 5.0, "errors": 1,
                      "cost_usd": None, "unpriced": 1}],
         "rows": [{"op": "a", "ctx": "main", "status": "error", "error": "Boom"}]}})
-    text = _rpc(s, "tools/call", {"name": "open_run", "arguments": {"run": "r1", "lens": "errors"}})
+    text = _rpc(s, "tools/call", {"name": "open_run", "arguments": {"run": "r1"}})
     text = text["result"]["content"][0]["text"]
     assert "run r1: error in 1.50s" in text and "unpriced" in text and "$0" not in text
     assert "first error: a: Boom" in text and "failed a @ main: Boom" in text
-    assert s.shown == [{"kind": "open_run", "args": {"run": "r1", "mode": "tree", "lens": "errors"}}]
+    assert s.shown == [{"kind": "open_run", "args": {"run": "r1", "mode": "tree"}}]
 
 
 def test_select_op_only_points():

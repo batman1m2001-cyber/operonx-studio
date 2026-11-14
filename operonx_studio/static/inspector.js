@@ -81,24 +81,6 @@ function select(key) {
   panel.append(head);
   if (n.loop) panel.append(loopNote(n, it.zone));
 
-  if (state.run && !ranInRun(n)) {
-    panel.append(el("div", "rolenote dormnote",
-      `— did not execute in ${state.run.run}. The values below are its wiring, not a recording.`));
-  }
-  // with a run painted, the op's verdict in that run comes first
-  const inRun = state.run && state.run.ops[n.name];
-  if (inRun) {
-    const roll = state.runRollups ? state.runRollups.get(n.name) : null;
-    const total = Math.max(1, (state.run.wall_s || 0) * 1000);
-    const v = el("div", "execverdict");
-    v.append(el("span", "status " + (inRun.errors ? "s-bad" : "s-ok"), inRun.errors ? `${inRun.errors} failed` : "ok"));
-    v.append(el("span", "vsep", "·"), el("span", "strong", fmtMs(inRun.total_ms)));
-    v.append(el("span", "vsep", "·"), el("span", null, `${inRun.runs} run${inRun.runs > 1 ? "s" : ""}`));
-    if (state.run.wall_s) v.append(el("span", "vsep", "·"), el("span", null, `${Math.round(100 * inRun.total_ms / total)}% of the run`));
-    const cost = roll ? RunView.money(roll.cost_usd, roll.unpriced) : null;
-    if (cost) v.append(el("span", "vsep", "·"), el("span", null, cost));
-    panel.append(v);
-  }
   if (n.serve_role) {
     panel.append(el("div", "rolenote",
       n.serve_role === "ingress"
@@ -113,40 +95,24 @@ function select(key) {
     }
   }
 
-  // One fetch per selection; every section that cares about the painted
-  // run shares it.
-  const execP = state.run
-    ? api(`/api/p/${PID}/trace/${encodeURIComponent(state.run.run)}/op/${encodeURIComponent(n.name)}`)
-    : null;
-
-  // A painted run leads with THE RUNS: click an execution, see its
-  // inputs and outputs — that is what a trace is for. Everything else
-  // (wiring, resource, code) queues behind. Containers keep the
-  // member-scan latest-values view before their grouped passes.
-  if (execP && !n.graph) panel.append(executionsSection(n, execP));
-  if (execP && n.graph) panel.append(valuesSection(n, execP));
-  // With a run painted the panel is a TRACE reader: ports would only
-  // repeat what every execution already shows, and code lives in the
-  // flow view — both stand down until the run is cleared.
   if (n.description) panel.append(el("div", "rolenote", n.description));
   // what can be set on it, as what it is (configure.js), then its wiring.
   // n8n's order: what it got last, its settings, what it gave last
-  const lastP = !state.run && !n.graph ? lastExecution(n) : null;
+  const lastP = !n.graph ? lastExecution(n) : null;
   const io = lastP ? lastSections(n, lastP) : null;
   if (io) panel.append(io.in);
-  if (!state.run && !n.graph) panel.append(Configure.section(it));
-  if (!state.run && n.agent) panel.append(instructionsSection(n));
+  if (!n.graph) panel.append(Configure.section(it));
+  if (n.agent) panel.append(instructionsSection(n));
   if (io) panel.append(io.out);
-  if (!state.run) panel.append(portsSection(it));
+  panel.append(portsSection(it));
   const res = resourceSection(n);
   if (res) panel.append(res);
   const tools = toolsSection(n);
   if (tools) panel.append(tools);
-  const llm = llmSection(n, execP);
+  const llm = llmSection(n);
   if (llm) panel.append(llm);
-  if (n.routes) panel.append(routeSection(it, execP));
-  if (execP && n.graph) panel.append(executionsSection(n, execP));
-  if (n.code && !state.run) panel.append(codeSection(n));
+  if (n.routes) panel.append(routeSection(it));
+  if (n.code) panel.append(codeSection(n));
   if (n.graph) panel.append(membersSection(it));
 }
 
@@ -337,73 +303,8 @@ function lastSections(n, lastP) {
   return {in: IN.sec, out: OUT.sec};
 }
 
-function valuesSection(n, execP) {
-  const sec = el("section");
-  sec.append(el("div", "stitle", `Latest values · ${state.run.run}`));
-  const box = el("div", null, "…");
-  sec.append(box);
-
-  const addRow = (dir, key, val) => {
-    const row = el("div", `valrow ${dir === "in" ? "vin" : ""}`);
-    row.append(el("div", "vname mono", dir === "out" ? `${key} →` : `→ ${key}`));
-    row.append(Values.render(val, {open: dir === "out"}));
-    box.append(row);
-  };
-
-  execP.then(data => {
-    box.textContent = "";
-    if (!data.executions.length) {
-      box.append(el("div", "note", "no records for this op in this run"));
-      return;
-    }
-
-    if (n.graph) {
-      // A GraphOp never executes under its own name — its ports' values
-      // live in its MEMBERS' records. The last member record that
-      // carried each declared port name is the value that crossed the
-      // container's boundary.
-      const boundary = (names, dir) => {
-        const found = {};
-        for (const ex of data.executions) {
-          const src = dir === "out" ? ex.outputs : ex.inputs;
-          if (!src || typeof src !== "object") continue;
-          for (const k of names) if (k in src) found[k] = src[k];
-        }
-        return found;
-      };
-      const outs = boundary(n.outputs || [], "out");
-      const ins = boundary((n.inputs || []).map(i => i.name), "in");
-      for (const k of n.outputs || []) {
-        if (k in outs) addRow("out", k, outs[k]);
-        else addRow("out", k, "(not recorded in this run)");
-      }
-      for (const inp of n.inputs || []) {
-        if (inp.name in ins) addRow("in", inp.name, ins[inp.name]);
-      }
-      if (!box.childNodes.length) box.append(el("div", "note", "no declared ports"));
-      return;
-    }
-
-    // a plain op: the latest record's values, outputs first — "what did
-    // this op produce" is why the node was clicked
-    const last = data.executions[data.executions.length - 1];
-    const groups = [["out", last.outputs, n.outputs || []],
-                    ["in", last.inputs, null]];
-    for (const [dir, values, priority] of groups) {
-      const entries = Object.entries(values || {});
-      if (priority) entries.sort((a, b) =>
-        (priority.indexOf(a[0]) + 1 || 99) - (priority.indexOf(b[0]) + 1 || 99));
-      for (const [key, val] of entries) addRow(dir, key, val);
-    }
-    if (!box.childNodes.length) box.append(el("div", "note", "record carried no values"));
-  }).catch(e => { box.textContent = e.message; });
-  return sec;
-}
-
-/* The decision table: every condition, its target, and — with a run
- * painted — how often each fired and which fired last. Rows that never
- * fired dim; the latest choice is marked. */
-function routeSection(it, execP) {
+/* The decision table: every condition and its target. */
+function routeSection(it) {
   const n = it.node;
   const sec = el("section");
   sec.append(el("div", "stitle", "Decision table"));
@@ -424,27 +325,6 @@ function routeSection(it, execP) {
     byTarget.get(r.target).push({row, meta});
     sec.append(row);
   });
-  if (execP) execP.then(data => {
-    if (!data.executions.length) return;
-    const fired = {};
-    for (const ex of data.executions) {
-      const t = (ex.outputs || {}).target;
-      if (t) fired[t] = (fired[t] || 0) + 1;
-    }
-    const last = data.executions[data.executions.length - 1];
-    const latest = (last.outputs || {}).target;
-    for (const [target, entries] of byTarget) {
-      const count = fired[target] || 0;
-      for (const {row, meta} of entries) {
-        if (count) meta.append(el("span", "chip cfired", `${count}×`));
-        else row.classList.add("dnever");
-        if (target === latest) {
-          row.classList.add("dlatest");
-          meta.append(el("span", "chip clatest", "latest"));
-        }
-      }
-    }
-  }).catch(() => {});
   return sec;
 }
 
@@ -557,7 +437,7 @@ function toolsSection(n) {
   return sec;
 }
 
-function llmSection(n, execP) {
+function llmSection(n) {
   // an agent's model is no LLMOp of the graph: the agent writes its conversation
   if (!(n.kind || "").includes("LLM") || n.part === "model") return null;
   const byName = {};
@@ -601,18 +481,7 @@ function llmSection(n, execP) {
     }
   };
 
-  if (execP) {
-    execP.then(data => {
-      const last = data.executions[data.executions.length - 1];
-      const msgs = last && last.inputs && last.inputs.messages;
-      const content = last && last.outputs && last.outputs.content;
-      if (Array.isArray(msgs) && msgs.length) bubbles(msgs, content);
-      else if (content !== undefined && content !== null) { templates(); bubbles([], content); }
-      else templates();
-    }).catch(templates);
-  } else {
-    templates();
-  }
+  templates();
 
   const params = el("div", "chips");
   for (const [name, b] of Object.entries(byName)) {
@@ -639,13 +508,6 @@ function membersSection(it) {
     row.append(mi);
     row.append(el("span", "mono", m.name));
     row.append(el("span", "memkind", m.kind));
-    const runinfo = state.run && state.run.ops[m.name];
-    if (runinfo) {
-      const avg = runinfo.runs ? runinfo.total_ms / runinfo.runs : 0;
-      const chip = el("span", "chip", `${runinfo.runs}× ${avg < 10 ? avg.toFixed(1) : Math.round(avg)}ms`);
-      if (runinfo.errors) chip.classList.add("cbad");
-      row.append(chip);
-    }
     row.onclick = () => {
       if (!state.expanded.has(it.key)) { state.expanded.add(it.key); render(); }
       select(it.key + "/" + m.id);

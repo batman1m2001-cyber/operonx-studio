@@ -26,11 +26,6 @@ test("a graph with no agent says only its ops; one op is singular", () => {
   assert.equal(containerKind(graph("g", [op("g.a")])), "GraphOp · 1 op");
 });
 
-test("an agent's turns and a turn's steps keep their words", () => {
-  assert.equal(containerKind({agentSteps: true, subgraph_ops: 3}), "agent · 3 turns");
-  assert.equal(containerKind({step: {}, kind: "turn", subgraph_ops: 1}), "turn · 1 step");
-});
-
 test("the walk keys each agent by its path and does not open an agent", () => {
   const opened = {...agent("prepare.web.web"), graph: {nodes: [agent("turn0")]}};
   const g = {nodes: [email, {...web, graph: {nodes: [opened]}}]};

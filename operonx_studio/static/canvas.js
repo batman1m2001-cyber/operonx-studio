@@ -1217,10 +1217,8 @@ const canvasShown = () => $("#stage").getClientRects().length > 0;
 function flushCanvas() {
   if (!canvasShown()) return;
   if (state.renderPending) render();
-  // the Flow tab's view, never inside a run's pane (which fits its own):
-  // exactly as it was left when a run's pane borrowed the canvas, else
-  // the saved or landing view
-  if (state.viewPending && !state.workflowOn) {
+  // the Flow tab's view: the saved or landing view
+  if (state.viewPending) {
     state.viewPending = false;
     const v = state.flowView;
     if (!v) { initView(); return; }
@@ -1614,15 +1612,12 @@ function render() {
     }
     let drawn = p;
     const made = [];
-    const faded = state.run && (!ranInRun(a.node) || !ranInRun(b.node));
     if (sheath !== null) {
       drawn = energyEdge(svg, p.getAttribute("d"), sheath.trim(), made);
-      // routing wires carry no sparks or dots (colour is their identity);
-      // none either into an op that never ran
+      // routing wires carry no sparks or dots (colour is their identity)
       const routing = sheath.includes("cond");
-      if (!routing && !faded) energySparks(svg, drawn, sheath.trim());
-      if (!routing && !faded) flowDot(svg, drawn, sheath.trim());
-      if (routing && state.run && !faded) for (const m of made) m.classList.add("ran");
+      if (!routing) energySparks(svg, drawn, sheath.trim());
+      if (!routing) flowDot(svg, drawn, sheath.trim());
     } else {
       p.setAttribute("class", cls.trim());
       svg.append(p);
@@ -1646,14 +1641,11 @@ function render() {
         // the anchor: an svg dot on the wire's first point, over the rail.
         // A css dot is snapped to the pixel grid, each a little
         // differently, and sat off its wire; this one cannot.
-        const port = state.cardEls.get(a.key)?.querySelector(`.jnport[data-route="${ri}"]`);
-        const at = anchorDot(W.d, "jnanchor" + (r.condition === "else" ? " relse" : "")
-          + (port && port.classList.contains("took") ? " took" : ""));
+        const at = anchorDot(W.d, "jnanchor" + (r.condition === "else" ? " relse" : ""));
         if (at) made.push(at);
       }
     }
 
-    if (faded) for (const el2 of made) el2.classList.add("dorm");
     // selection highlights and ←/→ walking work off this ledger, so a
     // click never needs to redraw the whole canvas
     state.edgeEls.push({a: a.key, b: b.key, id: e.id, route: e.route, els: made});
@@ -1883,18 +1875,18 @@ function renderFlowInfo() {
   if (state.sel) return;
   // an execution is open in the run's tree: a code reload (the assistant
   // editing, say) must not wipe the panel the user is working in
-  if (state.tab === "traces" && !state.workflowOn && state.execPanelRun && state.execPanelRun === state._tlrun) return;
+  if (state.tab === "traces" && state.execPanelRun && state.execPanelRun === state._tlrun) return;
   const panel = $("#inspector");
   panel.textContent = "";
   panel.scrollTop = 0;
   // the Traces list (or a run's tree) has no flow on screen: say what
   // the panel will show instead of describing a canvas nobody sees
-  if (state.tab === "traces" && !state.workflowOn) {
+  if (state.tab === "traces") {
     const hint = el("div", "sidehint");
     hint.append(el("div", "sidehint-title", "Nothing selected"));
     hint.append(el("p", null, state._tlrun
       ? "Pick an execution in the tree to see what went in, what came out, and what fed it."
-      : "Open a run to read it as a tree, or as the flow with its values painted on every card."));
+      : "Open a run to read it as a tree, a timeline, or the flow's line."));
     panel.append(hint);
     return;
   }
@@ -1937,31 +1929,6 @@ function renderFlowInfo() {
   if (dIn.childNodes.length) doors.append(el("div", "plabel", "entries"), dIn);
   if (dOut.childNodes.length) doors.append(el("div", "plabel", "exits"), dOut);
   panel.append(doors);
-
-  const sec = el("section");
-  if (state.run) {
-    sec.append(el("div", "stitle", `Painted run · ${state.run.run}`));
-    // the graph's ops that ran, and apart from them the steps an agent op
-    // recorded under itself (its turns, model and tool calls)
-    const steps = (state.runRows || []).filter(r => r.kind === "record" && r.child).length;
-    const bits = [`${AgentSteps.rootOps(state.run).length} ops ran`];
-    if (steps) bits.push(`${steps} agent steps`);
-    bits.push(`${state.run.records ?? "?"} records`);
-    if (state.run.wall_s != null) bits.push(`${state.run.wall_s.toFixed(1)}s`);
-    // the run's failure records (a list, one per failing op), or a count
-    const failed = Array.isArray(state.run.errors)
-      ? state.run.errors.reduce((sum, e) => sum + (e.count || 1), 0) : state.run.errors;
-    if (failed) bits.push(`${failed} errors`);
-    sec.append(el("div", "srcline", bits.join(" · ")));
-    sec.append(el("div", "note",
-      "Click any lit op for its recorded inputs and outputs; faded ops did not run."));
-  } else {
-    sec.append(el("div", "stitle", "Traces"));
-    sec.append(el("div", "note",
-      "Paint a run from the Traces tab to light this flow up with real "
-      + "timings, values and errors."));
-  }
-  panel.append(sec);
 }
 
 function toggleExpand(key, draw = true) {
@@ -2066,10 +2033,9 @@ const containerKind = AgentSteps.containerKind;
 /* A GraphOp that holds an agent, at any depth (the structure — op_type
  * "agent" with its agent card — never a name), is an agent graph: it wears
  * the operonx glyph and the lavender family. Any other graph stays green;
- * the ops inside keep their own colours (each is its own card). An agent
- * opened onto its turns, and a turn, are not graphs of this kind. */
+ * the ops inside keep their own colours (each is its own card). */
 function holdsAgents(n) {
-  return !!n.graph && !n.agentSteps && !n.step && AgentSteps.agentsInside(n.graph).length > 0;
+  return !!n.graph && AgentSteps.agentsInside(n.graph).length > 0;
 }
 /* the operonx glyph (docs/img/canvas/backdrop.html GLYPH): a big loop, a
  * crossing, two tails; with `count`, the number sits in the loop */
@@ -2097,19 +2063,8 @@ function containerCard(it) {
   if (agentGraph) { card.classList.add("agentgraph"); card.style.setProperty("--kind", "var(--k-agraph)"); }
   if (it.key === state.sel) card.classList.add("selected");
 
-  if (state.run && !ranInRun(n)) card.classList.add("dormant");
-
   const head = el("div", "chead");
-  // an agent opened (a painted run) onto the turns it took
-  if (n.agentSteps) {
-    // it keeps its agent mark
-    card.classList.add("agentframe");
-    const mark = el("span", "ag2-icon");
-    mark.append(agentMark());
-    head.append(mark);
-    head.append(el("span", "nname", n.name));
-    head.append(el("span", "nkind", containerKind(n)));
-  } else if (agentGraph) {
+  if (agentGraph) {
     head.append(oxGlyph("oxmark"));
     head.append(el("span", "nname", n.name));
     head.append(el("span", "nkind", containerKind(n)));
@@ -2168,41 +2123,6 @@ function agentMark(cls = "ag2-mark") {
   return svg;
 }
 
-/* What an agent did in the painted run, from the run's steps: its turns,
- * its model calls and each tool's calls. The agent's records are matched by
- * name; their turns, and in each turn the model and tool calls. */
-function agentRunCounts(n) {
-  const out = {turns: 0, model: 0, tools: new Map(), errors: 0};
-  if (!state.run) return out;
-  const rows = (state.runRows || []).filter(r => r.kind === "record");
-  const kids = new Map();
-  for (const r of rows) {
-    if (!kids.has(r.parent)) kids.set(r.parent, []);
-    kids.get(r.parent).push(r);
-  }
-  // errors in the agent's own record or any step under it (an op's name is
-  // not enough: the GraphOp round an agent often shares its name)
-  const bad = (r) => r.status === "error" || (r.error != null && r.error !== "");
-  const failedUnder = (r) => bad(r) || (kids.get(r.id) || []).some(failedUnder);
-  for (const a of rows.filter(r => r.op === n.name && r.op_type === "agent")) {
-    if (failedUnder(a)) out.errors += 1;
-    for (const t of (kids.get(a.id) || []).filter(r => r.op_type === "turn")) {
-      out.turns += 1;
-      for (const s of kids.get(t.id) || []) {
-        if (s.op_type === "llm") out.model += 1;
-        else if (s.op_type === "tool" || s.op_type === "graph") out.tools.set(s.op, (out.tools.get(s.op) || 0) + 1);
-      }
-    }
-  }
-  // a run whose steps are not loaded: the op totals it recorded
-  const ops = state.run.ops || {};
-  if (!out.turns && ops.turn) out.turns = ops.turn.runs;
-  if (!out.tools.size) for (const t of (n.agent || {}).tools || []) if (ops[t.name]) out.tools.set(t.name, ops[t.name].runs);
-  return out;
-}
-/* How many turns this agent took in the painted run. */
-function agentTurns(n) { return agentRunCounts(n).turns; }
-
 const agentOpen = new Set();     // render keys of the agent cards shown opened
 const agentToolsShut = new Set(); // … whose Tools row is folded
 
@@ -2216,7 +2136,6 @@ function agentCard(card, it) {
   const tools = a.tools || [];
   const parts = n.parts || [];
   const open = agentOpen.has(it.key);
-  const counts = agentRunCounts(n);
   card.classList.add("ag2");
   card.classList.toggle("folded", !open);
   card.style.setProperty("--kind", "var(--k-llm)");
@@ -2229,26 +2148,6 @@ function agentCard(card, it) {
   name.title = n.name;
   title.append(name, el("div", "ag2-sub", `${a.name || "agent"} · ${tools.length} tool${tools.length === 1 ? "" : "s"}`));
   head.append(mark, title);
-  // its run state, in the cells' words: at work, done, failed, or skipped
-  // (a finished run never reached it); a live run not yet at it says nothing
-  if (state.run) {
-    const cap = (a.limits || {}).turns, t = counts.turns;
-    const live = (state.run.summary || {}).status === "running";
-    const turns = `${t} turn${t === 1 ? "" : "s"}`;
-    let cls = "", text = "", tip = cap ? `${t} of at most ${cap} turns` : turns;
-    if (ranInRun(n)) {
-      const errs = counts.errors;
-      if (errs) { cls = "failed"; text = `failed · ${turns}`; tip = `failed in ${errs} run${errs === 1 ? "" : "s"} · ${tip}`; }
-      else if (live) { cls = "run"; text = `turn ${t}${cap ? ` / ${cap}` : ""}`; }
-      else { cls = "done"; text = turns; }
-    } else if (!live) { cls = "skipped"; text = "skipped"; tip = "The run did not reach this agent"; }
-    if (cls) {
-      const st = el("span", `ag2-st ${cls}`);
-      st.append(el("i"), document.createTextNode(text));
-      st.title = tip;
-      head.append(st);
-    }
-  }
   const fold = el("button", "ag2-fold");
   fold.append(lucideIcon(open ? "up" : "down"));
   fold.title = open ? "Fold the agent" : "Open the agent: its model, tools and memory";
@@ -2276,8 +2175,7 @@ function agentCard(card, it) {
   const model = a.model || [];
   const mline = el("span", "mono", model.join(" → ") || "?");
   mline.title = model.length > 1 ? `falls back to ${model.slice(1).join(", ")}` : "";
-  row("var(--k-llm)", "brain", "Model", mline,
-      counts.model ? el("span", "ag2-n", `${counts.model} call${counts.model === 1 ? "" : "s"}`) : null);
+  row("var(--k-llm)", "brain", "Model", mline);
 
   const shut = agentToolsShut.has(it.key);
   const spaces = [...new Set(tools.map(t => t.name.includes("__") ? t.name.split("__")[0] : t.name))];
@@ -2302,7 +2200,7 @@ function agentCard(card, it) {
     const list = el("div", "ag2-tools");
     const byName = new Map(parts.filter(p => p.part === "tool").map(p => [p.name, p]));
     const shown = tools.length > TOOL_SHOWN ? tools.slice(0, TOOL_SHOWN - 1) : tools;
-    for (const t of shown) list.append(toolRow(it, t, byName.get(t.name), counts.tools.get(t.name)));
+    for (const t of shown) list.append(toolRow(it, t, byName.get(t.name)));
     if (tools.length > TOOL_SHOWN) {
       const more = el("div", "ag2-more", `+${tools.length - shown.length} more · all in Tools ↗`);
       more.title = tools.slice(shown.length).map(t => t.name).join(", ");
@@ -2330,7 +2228,7 @@ function toolMark(kind, cls) {
   return kind === "agent" ? agentMark(cls) : kind === "mcp" ? lucideIcon("plug")
     : Icons.svg(kind === "graph" ? "graphop" : "code2", "kglyph");
 }
-function toolRow(it, t, p, calls) {
+function toolRow(it, t, p) {
   const kind = t.kind || (p && p.tool && p.tool.kind) || "function";
   const [glyph, color] = TOOL_GLYPH[kind] || TOOL_GLYPH.function;
   const key = p ? `${it.key}/${p.id}` : null;
@@ -2346,7 +2244,6 @@ function toolRow(it, t, p, calls) {
   tx.append(el("b", null, t.name), el("span", null, t.description || ""));
   r.append(k, tx);
   if (policy === "ask") { const m = el("span", "atpolicy p-ask", "ASK"); m.title = "Waits for a human's approval before it runs."; r.append(m); }
-  if (calls) r.append(el("span", "calls", `×${calls}`));
   if (p && (p.graph || p.agent || p.code)) {
     const go = el("button", "go");
     go.append(lucideIcon("out"));
@@ -2510,7 +2407,7 @@ function graphBand(it) {
   else if (icon === "▣") { const g = el("span", "bglyph gicon"); g.append(graphIcon()); b.append(g); }
   else b.append(el("span", "bglyph", icon), el("span", "bcount", String(n.subgraph_ops)));
   b.append(el("span", "barrow", "▸"));
-  const what = n.stack ? "agents" : n.agentSteps ? "turns" : n.step ? "steps" : "ops";
+  const what = n.stack ? "agents" : "ops";
   b.title = `Open: ${n.subgraph_ops} ${what} inside`;
   b.setAttribute("aria-expanded", "false");
   b.setAttribute("aria-label", `Open ${n.name}: ${n.subgraph_ops} ${what}`);
@@ -2593,125 +2490,6 @@ function nameChips(n) {
   return box.childNodes.length ? box : null;
 }
 
-/* With a run painted, a card says ONE thing — the lens decides which.
- * path: nothing but lit / faded. time: the op's total time in the run,
- * the three slowest ranked, the border warmer with its share. errors:
- * only failures, with their error. cost: only ops that cost money.
- * values: executions and average, and the show-key values. */
-/* An op's numbers in the painted run — a nested graph's are its members'
- * summed (a container never executes under its own name). */
-/* A step's own numbers: the one execution the run recorded. */
-function stepNumbers(n) {
-  const s = n.step;
-  const bad = s.status && s.status !== "ok";
-  return {runs: 1, total_ms: s.dur_ms || 0, max_ms: s.dur_ms || 0, errors: bad ? 1 : 0,
-          last_error: bad ? (s.error || s.status) : null};
-}
-
-function runNumbers(n) {
-  const rolls = state.runRollups || new Map();
-  if (n.step) return {info: stepNumbers(n), roll: null};
-  if (n.agentSteps) {
-    // an agent op opened onto its steps: its own record's numbers, not its
-    // members' summed (they are inside its time)
-    const info = state.run && state.run.ops[n.name];
-    return info ? {info, roll: rolls.get(n.name) || null} : null;
-  }
-  if (!n.graph) {
-    const info = state.run && state.run.ops[n.name];
-    return info ? {info, roll: rolls.get(n.name) || null} : null;
-  }
-  const acc = {runs: 0, total_ms: 0, max_ms: 0, errors: 0, last_error: null};
-  const roll = {count: 0, total_ms: 0, cost_usd: null, unpriced: 0, tokens_in: 0, tokens_out: 0};
-  let any = false;
-  (function walk(g) {
-    for (const m of (g && g.nodes) || []) {
-      if (m.step && !m.graph) {
-        const i = stepNumbers(m);
-        any = true;
-        acc.runs += 1; acc.total_ms += i.total_ms; acc.max_ms = Math.max(acc.max_ms, i.max_ms);
-        acc.errors += i.errors; acc.last_error = i.last_error || acc.last_error;
-        continue;
-      }
-      if (m.graph) { walk(m.graph); continue; }
-      const i = state.run.ops[m.name];
-      if (!i) continue;
-      any = true;
-      acc.runs += i.runs; acc.total_ms += i.total_ms; acc.max_ms = Math.max(acc.max_ms, i.max_ms);
-      acc.errors += i.errors; acc.last_error = i.last_error || acc.last_error;
-      const r = rolls.get(m.name);
-      if (r) {
-        roll.count += r.count; roll.total_ms += r.total_ms; roll.unpriced += r.unpriced;
-        roll.tokens_in += r.tokens_in; roll.tokens_out += r.tokens_out;
-        if (r.cost_usd != null) roll.cost_usd = (roll.cost_usd || 0) + r.cost_usd;
-      }
-    }
-  })(n.graph);
-  return any ? {info: acc, roll} : null;
-}
-
-function lensBadge(card, badges, n) {
-  const lens = state.lens || "path";
-  const got = runNumbers(n);
-  const runinfo = got && got.info;
-  const roll = got && got.roll;
-  if (!runinfo) {
-    if (lens !== "path" && lens !== "values") card.classList.add("quiet");
-    return;
-  }
-  // a failure is shown whatever the lens: it is what a run page is opened for
-  if (runinfo.errors && lens !== "errors") {
-    const last = String(runinfo.last_error || "failed").trim().split("\n").pop();
-    const chip = el("span", "badge err errline", `${runinfo.errors}✗ ${last}`);
-    chip.title = String(runinfo.last_error || "");
-    badges.append(chip);
-    card.classList.add("errorlit");
-  }
-  if (lens === "time") {
-    const runMs = (state.run.wall_s || 0) * 1000;
-    if (roll && RunView.background(roll, runMs)) {
-      const chip = el("span", "badge run", "whole run");
-      chip.title = `Spans the session (${fmtMs(runinfo.total_ms)}) — its time is the call's length, not work`;
-      badges.append(chip);
-      return;
-    }
-    const ranked = [...(state.runRollups || new Map()).values()]
-      .filter(r => !RunView.background(r, runMs)).slice(0, 3).map(r => r.op);
-    const place = ranked.indexOf(n.name);
-    const chip = el("span", "badge run", fmtMs(runinfo.total_ms));
-    chip.title = `${runinfo.runs} execution${runinfo.runs > 1 ? "s" : ""} · max ${fmtMs(runinfo.max_ms)}`;
-    if (place >= 0) {
-      const r = el("span", "badge rank", `#${place + 1}`);
-      r.title = `${["Slowest", "Second slowest", "Third slowest"][place]} op in this run`;
-      badges.append(r);
-    }
-    badges.append(chip);
-    const top = Math.max(1, ...[...(state.runRollups || new Map()).values()]
-      .filter(r => !RunView.background(r, runMs)).map(r => r.total_ms));
-    card.style.setProperty("--heat", Math.min(1, runinfo.total_ms / top).toFixed(2));
-    card.classList.add("heated");
-  } else if (lens === "errors") {
-    if (!runinfo.errors) { card.classList.add("quiet"); return; }
-    const last = String(runinfo.last_error || "failed").trim().split("\n").pop();
-    const chip = el("span", "badge err errline", `${runinfo.errors}✗ ${last}`);
-    chip.title = String(runinfo.last_error || "");
-    badges.append(chip);
-    card.classList.add("errorlit");
-  } else if (lens === "cost") {
-    if (!roll || (roll.cost_usd == null && !roll.unpriced)) { card.classList.add("quiet"); return; }
-    const chip = el("span", "badge run cost", RunView.money(roll.cost_usd, roll.unpriced));
-    chip.title = `${roll.tokens_in} in / ${roll.tokens_out} out tokens`;
-    badges.append(chip);
-  } else if (lens === "values") {
-    const avg = runinfo.runs ? (runinfo.total_ms / runinfo.runs) : 0;
-    const chip = el("span", "badge run",
-      `${runinfo.runs}× ${avg < 10 ? avg.toFixed(1) : Math.round(avg)}ms`
-      + (runinfo.errors ? ` · ${runinfo.errors}✗` : ""));
-    if (runinfo.errors) chip.classList.add("err");
-    badges.append(chip);
-  }
-}
-
 /* A double-click opens the card its FIRST click landed on. That click
  * selects the card, which opens its plugs in place and lays the canvas out
  * again; when the flow fits the window there is no scroll to hold the card
@@ -2749,7 +2527,7 @@ function opCard(it) {
   card.style.left = `${it.x}px`;
   card.style.top = `${it.y}px`;
   card.style.setProperty("--kind", kindColor(n));
-  if (n.graph && !n.agentSteps && !n.step && !n.stack) card.classList.add("graphop");
+  if (n.graph && !n.stack) card.classList.add("graphop");
   // a FuncOp (not a serve gate, which keeps its own look)
   else if (!n.graph && !n.serve_role && !stepVisual(n) && visualOf(n.kind) === OP_VISUALS.FuncOp) card.classList.add("funcop");
   if (holdsAgents(n)) { card.classList.add("agentgraph"); card.style.setProperty("--kind", "var(--k-agraph)"); }
@@ -2778,13 +2556,10 @@ function opCard(it) {
     // (docs/BRANCH_JUNCTION_PLAN.md)
     card.classList.add("branch", "junction");
     card.setAttribute("aria-label", `${n.name}: ${n.routes.length} routes`);
-    // which route the painted run took last: its port's light is on
-    const lastOut = state.run && state.run.ops && state.run.ops[n.name] && state.run.ops[n.name].last;
-    const took = lastOut && lastOut.target != null ? n.routes.findIndex(r => r.target === lastOut.target) : -1;
     const bar = el("div", "jnbar");
     n.routes.forEach((r, ri) => {
       const picked = state.route && state.route.key === it.key && state.route.ri === ri;
-      const p = el("button", "jnport" + (r.condition === "else" ? " relse" : "") + (picked ? " picked" : "") + (ri === took ? " took" : ""));
+      const p = el("button", "jnport" + (r.condition === "else" ? " relse" : "") + (picked ? " picked" : ""));
       p.type = "button";
       p.dataset.target = r.target;
       p.dataset.route = String(ri);
@@ -2806,7 +2581,7 @@ function opCard(it) {
     card.append(band);
     const line = el("div", "nname nline");
     line.append(el("span", "ntext", n.name));
-    const chips = state.run ? null : nameChips(n);
+    const chips = nameChips(n);
     if (chips) line.append(chips);
     card.append(line);
     // a folded graph counts the agents inside it, at any depth, and lists them
@@ -2823,25 +2598,12 @@ function opCard(it) {
     // list: inputs are the wires, and most outputs are plumbing every
     // op passes along. show_keys (declared on the op, its kind's
     // default, or the extractor's pick from the dataflow) name the one
-    // or two outputs that stand for it. With a run painted the same
-    // line carries the last execution's value, cut to a card's width.
+    // or two outputs that stand for it.
     const det = el("div", "detail");
-    const keys = (state.run && (state.lens || "path") !== "values") ? [] : (n.show_keys || []).slice(0, 2);
-    const turnExec = state.run && state.runTurn && state.runByOpTurn
-      && state.runByOpTurn.get(n.name) && state.runByOpTurn.get(n.name).get(state.runTurn);
-    const vals = n.step ? n.step.outputs : turnExec ? turnExec.outputs
-      : (state.run && !state.runTurn && state.run.ops[n.name] && state.run.ops[n.name].last);
-    const where = n.step ? `at ${n.step.ctx}` : turnExec ? `in ${state.runTurn}`
-      : `last value of ${state.run ? state.run.run : ""}`;
-    for (const k of keys) {
+    for (const k of (n.show_keys || []).slice(0, 2)) {
       const row = el("div", "dshow mono");
       row.append(el("span", "dkey", "→ " + k));
-      if (vals && k in vals) {
-        row.append(el("span", "dval", " = " + Values.brief(vals[k], 40)));
-        row.title = `${k}: ${where}`;
-      } else {
-        row.title = "show key: the output that stands for this op";
-      }
+      row.title = "show key: the output that stands for this op";
       det.append(row);
     }
     if (det.childNodes.length) card.append(det);
@@ -2854,21 +2616,18 @@ function opCard(it) {
       const bar = card.querySelector(".jnbar");
       if (bar) card.insertBefore(ports, bar); else card.append(ports);
       card.classList.add("dfcard", "dfopen");
-      // its plugs name its outputs now: the "→ key" lines would say it
-      // twice (a run's painted values stay — they say something new)
+      // its plugs name its outputs now: the "→ key" lines would say it twice
       const det = card.querySelector(".detail");
-      if (det && !det.querySelector(".dval")) det.remove();
+      if (det) det.remove();
     }
   }
-  // At most TWO badges: one semantic marker, plus the run chip. Density
+  // At most TWO badges. Density
   // is respect — everything else is one click away in the inspector.
   const badges = el("div", "badges");
   // a nested graph opens from its icon band (graphBand), an agent from
   // its sockets: no badge for either
   // a loop's member wears no badge: the violet zone it sits in says it
 
-  if (state.run && !ranInRun(n)) card.classList.add("dormant");
-  if (state.run) lensBadge(card, badges, n);
   if (state.changedOps && state.changedOps.has(n.name)) {
     card.classList.add("changed");
     const b = el("span", "badge changedbadge", "changed");
@@ -3022,11 +2781,10 @@ function initView(fresh) {
 // the user's own view, remembered once they stop moving it
 let _viewSave = 0;
 $("#stage").addEventListener("scroll", () => {
-  if (state.tab !== "flow" || !state.extent || state.workflowOn) return;
+  if (state.tab !== "flow" || !state.extent) return;
   clearTimeout(_viewSave);
   _viewSave = setTimeout(() => {
-    // a run opened in the meantime: its pane's scroll is not the Flow view
-    if (state.tab !== "flow" || state.workflowOn) return;
+    if (state.tab !== "flow") return;
     const st = $("#stage");
     store(viewKey(), {scale: state.view.scale, x: Math.round(st.scrollLeft), y: Math.round(st.scrollTop)});
   }, 500);
@@ -3039,7 +2797,7 @@ new ResizeObserver(() => flushCanvas()).observe($("#stage"));
 {
   let last = "";
   const reinset = () => {
-    if (!state.extent || state.tab !== "flow" || state.workflowOn) return;
+    if (!state.extent || state.tab !== "flow") return;
     const i = stageInset(), key = `${i.l}|${i.t}|${i.r}|${i.b}`;
     if (key !== last) { last = key; applyView(); }
   };
