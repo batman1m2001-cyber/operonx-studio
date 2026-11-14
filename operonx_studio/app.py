@@ -3425,11 +3425,10 @@ def build_studio_app(recents: Optional[Recents] = None):
                 lines.append(f"Extracted IR dump (JSON, may lag edits): {dump}")
             except OSError:
                 pass
-            for g in result.ir.get("graphs") or []:
-                ops = ", ".join(
-                    f"{n.get('name')}({n.get('kind')})"
-                    for n in (g.get("nodes") or [])[:40])
-                lines.append(f"Graph `{g.get('name')}`: {ops}")
+            # names, not their ops (E6): an op is a select_op, a catalog line or a project_search away
+            graphs = [f"`{g.get('name')}` ({len(g.get('nodes') or [])} ops)" for g in result.ir.get("graphs") or []]
+            if graphs:
+                lines.append("Graphs: " + ", ".join(graphs) + ". Their ops: .operonx/catalog.md, or select_op.")
         elif result.error:
             lines.append(f"NOTE: extraction currently fails: {result.error}")
         return watcher.root, "\n".join(lines)
@@ -5579,19 +5578,26 @@ def build_studio_app(recents: Optional[Recents] = None):
                                attachments=refs, extra_mcp={} if _viewer(request) else _project_mcp(sess["scope"]),
                                owner=request.state.user["id"], on_end=[_revoker(mcp)],
                                claude=_claude_of(request.state.user["id"]), wrap_env=_git_env(sess["scope"]),
-                               **_limits(request))
+                               seed=_project_seed(sess["scope"]), **_limits(request))
         except RuntimeError as exc:
             _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse({"turn": turn.id, "cursor": 0})
 
-    @app.post("/api/assistant/sessions/{sid}/compact")
-    async def assistant_compact(sid: str, request: Request) -> JSONResponse:
+    def _project_seed(scope: str) -> str:
+        """Where the project is, for a session that starts fresh (ENGINEERING_ENV_PLAN E6)."""
+        owner = _watcher(scope) if scope != "home" else None
+        return _projectboard.seed(Path(owner.root)) if owner is not None else ""
+
+    @app.post("/api/assistant/sessions/{sid}/save")
+    async def assistant_save(sid: str, request: Request) -> JSONResponse:
+        """Save the conversation to the project and start the next turn fresh (ENGINEERING_ENV_PLAN E6):
+        open work to the board, decisions to the BRD and knowledge.md, a handoff the next session starts from."""
         sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
         if not sess.get("claude_session"):
-            return JSONResponse({"error": "nothing to compact yet"}, status_code=400)
+            return JSONResponse({"error": "nothing to save yet"}, status_code=400)
         env = _turn_env(sess["scope"], None, request)
         if isinstance(env, JSONResponse):
             return env
@@ -5601,7 +5607,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             _revoker(mcp)()
             return busy
         try:
-            turn = relay.start(sid, "/compact", cwd=cwd, context=context, mcp=mcp, kind="compact",
+            turn = relay.start(sid, "Save to the project", cwd=cwd, context=context, mcp=mcp, kind="save",
                                owner=request.state.user["id"], on_end=[_revoker(mcp)],
                                claude=_claude_of(request.state.user["id"]), wrap_env=_git_env(sess["scope"]),
                                **_limits(request))

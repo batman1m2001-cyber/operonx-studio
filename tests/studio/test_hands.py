@@ -94,6 +94,7 @@ def test_initialize_and_list_tools():
     assert set(tools) == {"list_runs", "open_run", "op_values", "monitor", "compare_runs",
                           "select_op", "point", "steps", "run_job", "rerun_op", "play", "run_eval", "set_llm_price",
                           "project_status", "board_status", "board_card", "board_move", "board_cycle", "failing_on_base", "on_base",
+                          "project_search", "project_read",
                           "terminal_open", "terminal_send", "terminal_read", "terminal_list", "terminal_close",
                           "env_list", "env_check", "env_run", "env_services", "deploy"}
     # tools that run the project's code are not read tools

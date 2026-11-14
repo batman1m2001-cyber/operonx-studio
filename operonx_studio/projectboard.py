@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse
 
 from operonx_project import board as _board
 
-__all__ = ["available", "board", "brd_questions", "card", "cycle_report", "overview", "project_checklist"]
+__all__ = ["available", "board", "brd_questions", "card", "cycle_report", "overview", "project_checklist", "seed"]
 
 BRD_DIR = "docs/brd"
 MATRIX = "requirements/requirements_traceability.md"
@@ -109,6 +109,27 @@ def overview(root: Path) -> Dict[str, Any]:
                for c in cards if c.state == "needs you"]  # fmt: skip
     return {"counts": {s: sum(1 for c in cards if c.state == s) for s in _board.STATES},
             "waiting": waiting + brd_questions(root)}  # fmt: skip
+
+
+def seed(root: Path) -> str:
+    """Where the project is, for a conversation that starts fresh (ENGINEERING_ENV_PLAN E6): the board's line,
+    its open cycles, and the cards in doing and needs you. The rest is a tool call away, never in the prompt."""
+    try:
+        got = _board.read_all(Path(root))
+    except (OSError, _board.BoardError):
+        return ""
+    if got is None:
+        return ""
+    cycles, cards = got
+    v = _board.view(cards, cycles)
+    lines = ["Board: " + (", ".join(f"{len(ids)} {s}" for s, ids in v["columns"].items() if ids) or "empty")]
+    lines += [f"cycle {y['id']} · {y['title']} · {y['done']}/{len(y['cards'])} done" + (f" ({y['plan']})" if y["plan"] else "")
+              for y in v["cycles"] if y["state"] == "open"]  # fmt: skip
+    live = set(sum((ids for ids in v["columns"].values()), []))
+    for c in cards:
+        if c.id in live and c.state in ("doing", "needs you"):
+            lines.append(f"{c.id} · {c.title} [{c.state}]" + (f" — {c.note}" if c.state == "needs you" and c.note else ""))
+    return "\n".join(lines)
 
 
 def brd_questions(root: Path) -> List[Dict[str, Any]]:
@@ -285,6 +306,31 @@ def register(app: Any, *, watcher_of: Any, turns_of: Any = None, asks_of: Any = 
     def board_project(pid: str) -> JSONResponse:
         """The project's checklist from its checkout's ``docs/brd``."""
         return _read(pid, project_checklist)
+
+    @app.get("/api/p/{pid}/project/search")
+    def project_search(pid: str, q: str = "", limit: int = 8) -> JSONResponse:
+        """The sections of the project's board, BRD, plans, knowledge and guide that match *q* best
+        (``operonx_project.search``, ENGINEERING_ENV_PLAN E6): heading, three lines, ``path:line``."""
+        from operonx_project import search as _search
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        hits = _search.search(root, q, max(1, min(limit, 30)))
+        return JSONResponse({"hits": [vars(h) for h in hits], "text": _search.text(hits)})
+
+    @app.get("/api/p/{pid}/project/read")
+    def project_read(pid: str, path: str, heading: str = "") -> JSONResponse:
+        """One section of a project document (its sub-sections with it), or the whole file without *heading*."""
+        from operonx_project import search as _search
+
+        root, bad = _root(pid)
+        if bad is not None:
+            return bad
+        try:
+            return JSONResponse({"text": _search.read(root, path, heading or None)})
+        except KeyError as exc:
+            return JSONResponse({"error": exc.args[0]}, status_code=404)
 
     @app.get("/api/p/{pid}/project/status")
     async def project_status(pid: str, changes: int = 15) -> JSONResponse:

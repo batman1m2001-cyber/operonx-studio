@@ -138,8 +138,8 @@ def test_the_agent_runs_in_the_project_with_its_briefing(client, project, fake_c
     # the packaged knowledge doc, then the live briefing
     assert "operonx studio assistant" in prompt
     assert "chatty-demo" in prompt and str(project.resolve()) in prompt
-    # graphs summarised as node(kind) — node names match what traces record
-    assert "Graph `flow`: a(FuncOp)" in prompt
+    # graphs by name and size, not their ops (E6: pointers, not content)
+    assert "Graphs: `flow` (" in prompt and "a(FuncOp)" not in prompt
 
 
 def test_mode_read_denies_everything_but_looking(client, project, fake_claude, monkeypatch):
@@ -208,3 +208,16 @@ def test_the_view_rides_along_with_the_message(client, project, fake_claude):
     prompt = argv[argv.index("--append-system-prompt") + 1]
     assert "looking at right now" in prompt
     assert "`shout` (FuncOp)" in prompt and "`call-42`" in prompt
+
+
+def test_the_knowledge_doc_is_pointers_under_4_kb():
+    """ENGINEERING_ENV_PLAN E6: the doc every turn carries stays under 4 KB; the rest is guide pages it names
+    by absolute path, each of which exists."""
+    import re
+
+    from operonx_studio.chat import GUIDE, knowledge
+
+    doc = knowledge()
+    assert len(doc.encode()) <= 4096 and "{guide}" not in doc
+    named = re.findall(re.escape(str(GUIDE)) + r"/([\w-]+\.md)", doc)
+    assert sorted(named) == sorted(p.name for p in GUIDE.glob("*.md")) and all((GUIDE / n).is_file() for n in named)
