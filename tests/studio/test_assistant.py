@@ -106,6 +106,14 @@ if "--output-format" in argv and argv[argv.index("--output-format") + 1] == "jso
     sys.exit(0)
 
 def emit(o):
+    if o.get("type") == "result" and "total_cost_usd" in o and log:
+        # like the real CLI: the Claude session's running total, carried into a resumed (forked) session
+        tot_file = log + ".totals"
+        tot = json.load(open(tot_file)) if os.path.exists(tot_file) else {}
+        prev = tot.get(argv[argv.index("--resume") + 1], 0) if "--resume" in argv else 0
+        o = {**o, "total_cost_usd": round(prev + o["total_cost_usd"], 6)}
+        tot[o["session_id"]] = o["total_cost_usd"]
+        json.dump(tot, open(tot_file, "w"))
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 
 sid = ("fork-" if "--fork-session" in argv else "new-") + uuid.uuid4().hex[:8]
@@ -1624,3 +1632,16 @@ def test_stopping_the_turn_ends_its_running_call(client, project, fake, tmp_path
     import time
     time.sleep(5)
     assert not mark.exists() and _tool(client, sid)["status"] == "stopped"
+
+
+def test_each_turn_costs_its_own_call_not_the_claude_sessions_running_total(client, project, fake):
+    # the CLI's total_cost_usd is the Claude session's running total, and a
+    # resumed session carries it on: three 0.0125 turns are 0.0375, not 0.075
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    for m in ("one", "two", "three"):
+        _say(client, sid, m)
+    got = client.get(f"/api/assistant/sessions/{sid}").json()
+    ends = [i for i in got["items"] if i["kind"] == "turn_end"]
+    assert [e["cost"] for e in ends] == [0.0125, 0.0125, 0.0125]
+    assert got["session"]["usage"]["cost_usd"] == pytest.approx(0.0375)
