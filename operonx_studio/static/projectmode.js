@@ -15,10 +15,13 @@
  *   Board      docs/brd/board.md's cards (board.js)
  *   Git        what changed, the branches, the history (git.js)
  *   Files      the project's files, read-only; what changed lately is marked
- *   Settings   the standard, and what the assistant may do with git
  *
  * On a page other than Now the page takes the centre and the conversation
- * moves to the right, so it is always one glance away.
+ * moves to the right, so it is always one glance away. It is the menu's
+ * Project hub (docs/ENGINEERING_ENV_PLAN.md E2): its pages are the top
+ * strip's (#hubtabs, data-ppage), the rail stays. The project's settings
+ * (the standard, git) and Environments are the Settings hub's panes
+ * `projectsettings` and `environments`, drawn here too.
  *
  *   /p/<pid>/project[/<page>]
  */
@@ -27,13 +30,14 @@
 
 const ProjectMode = (() => {
   const box = $("#project");
-  const bar = $("#prail");
+  const bar = $("#hubtabs");
+  const sbox = $("#projectsettings");
+  const ebox = $("#environments");
   const K = `pmode:${PID}`;
   const v = Object.assign({page: "now", open: {}, fopen: {}, file: "", fonly: false}, recall(K, {}));
   delete v.mid;
   if (v.page === "plans") v.page = "board";
-  const PAGES = {now: "Now", board: "Board", changes: "Git", files: "Files", terminal: "Terminal",
-                 environments: "Environments", settings: "Settings"};
+  const PAGES = {now: "Now", board: "Board", changes: "Git", files: "Files", terminal: "Terminal"};
   let doc = null;      // the last status document
   let failed = null;   // why there is none: {message, unavailable}
   let token = 0;
@@ -319,15 +323,17 @@ const ProjectMode = (() => {
     }
   }
 
+  let setToken = 0;
+  const settingsOn = () => state.tab === "projectsettings";
   async function drawSettings() {
-    const mine = ++pageToken;
-    page.textContent = "";
-    page.append(pageHead("Settings", ""));
+    const mine = ++setToken;
+    const page = sbox;
+    if (!page.firstChild) page.append(pageHead("Project", ""));
     let git = null;
     try { git = await api(`/api/p/${PID}/git`); } catch (err) { git = {error: err.message}; }
-    if (mine !== pageToken || v.page !== "settings") return;
+    if (mine !== setToken || !settingsOn()) return;
     page.textContent = "";
-    page.append(pageHead("Settings", ""));
+    page.append(pageHead("Project", "the standard, and what the assistant may do with git"));
     // one row per setting: its name, its value, its action; the why is on hover
     let rows = null;
     const group = (title) => {
@@ -421,18 +427,15 @@ const ProjectMode = (() => {
 
   function drawPage() {
     main.classList.toggle("paged", v.page !== "now");
-    page.classList.toggle("pm-page-files", v.page === "files" || v.page === "terminal" || v.page === "changes" || v.page === "environments");
+    page.classList.toggle("pm-page-files", v.page === "files" || v.page === "terminal" || v.page === "changes");
     if (v.page !== "board" && HAS_BOARD()) BoardView.unmount();
     if (v.page !== "terminal" && HAS_TERM()) TerminalPage.unmount();
     if (v.page !== "changes" && HAS_GIT()) GitPage.unmount();
-    if (v.page !== "environments" && HAS_ENV()) EnvPage.unmount();
     if (v.page === "now") { page.textContent = ""; return; }
     if (v.page === "board") drawBoard();
     else if (v.page === "changes") { if (HAS_GIT()) GitPage.mount(page); }
     else if (v.page === "files") drawFiles();
     else if (v.page === "terminal") { if (HAS_TERM()) TerminalPage.mount(page); }
-    else if (v.page === "environments") { if (HAS_ENV()) EnvPage.mount(page); }
-    else if (v.page === "settings") drawSettings();
   }
 
   /* ── reading the status ─────────────────────────────────────────── */
@@ -451,13 +454,13 @@ const ProjectMode = (() => {
       const d = err.data || {};
       failed = {message: d.message || err.message, unavailable: d.status === "unavailable"};
     }
+    const typing = (box) => box.contains(document.activeElement) && /TEXTAREA|INPUT|SELECT/.test(document.activeElement.tagName);
+    if (settingsOn() && !typing(sbox)) drawSettings();
     if (on) {
       drawSide();
       paintBar();
-      // the pages drawn from the document follow it; a page being typed into is left alone
-      const typing = page.contains(document.activeElement) && /TEXTAREA|INPUT|SELECT/.test(document.activeElement.tagName);
-      if (!typing && v.page === "settings") drawPage();
-      else if (v.page === "files" && ftree) {
+      // the Files tree follows the document
+      if (v.page === "files" && ftree) {
         api(`/api/p/${PID}/project/files`).then((got) => {
           const list = page.querySelector(".pm-ftree");
           if (!list || v.page !== "files") return;
@@ -493,15 +496,14 @@ const ProjectMode = (() => {
   /* ── the bar ───────────────────────────────────────────────────── */
   function paintBar() {
     for (const b of bar.querySelectorAll("button[data-ppage]")) {
-      const here = b.dataset.ppage === v.page;
+      const here = on && b.dataset.ppage === v.page;
       b.classList.toggle("active", here);
       b.setAttribute("aria-selected", String(here));
     }
   }
-  for (const b of bar.querySelectorAll("button[data-ppage]")) b.addEventListener("click", () => go(b.dataset.ppage));
-  bar.querySelector("[data-pback]").onclick = () => switchTab(recall(`pmodeFrom:${PID}`, "flow"));
-
   function go(name) {
+    if (name === "environments" || name === "settings") { switchTab(name === "settings" ? "projectsettings" : name); return; }
+    if (!on) { switchTab("project", {page: name}); return; }
     v.page = PAGES[name] ? name : "now";
     save();
     paintBar();
@@ -514,7 +516,6 @@ const ProjectMode = (() => {
     if (!on) {
       on = true;
       document.body.classList.add("pmode");
-      bar.hidden = false;
     }
     if (window.oxAssistant && window.oxAssistant.center) window.oxAssistant.center(chat);
   }
@@ -523,16 +524,15 @@ const ProjectMode = (() => {
     on = false;
     clearTimeout(timer);
     document.body.classList.remove("pmode");
-    bar.hidden = true;
     if (HAS_BOARD()) BoardView.unmount();
     if (HAS_TERM()) TerminalPage.unmount();
     if (HAS_GIT()) GitPage.unmount();
-    if (HAS_ENV()) EnvPage.unmount();
     if (window.oxAssistant && window.oxAssistant.uncenter) window.oxAssistant.uncenter();
   }
 
   function show(opts) {
-    if (opts && opts.page) v.page = PAGES[opts.page] ? opts.page : "now";
+    if (opts && opts.page) v.page = opts.page;
+    if (!PAGES[v.page]) v.page = "now";
     // studio:file/<path>#L<n>: that file, at that line (not remembered: a reload opens the file at its top)
     if (opts && opts.file) {
       v.file = opts.file;
@@ -549,11 +549,9 @@ const ProjectMode = (() => {
     refresh();
   }
 
-  // the tab before Project mode is where its back arrow returns
-  let prev = state.tab;
   document.addEventListener("oxview", () => {
-    if (state.tab !== "project") { if (prev !== state.tab) store(`pmodeFrom:${PID}`, state.tab); prev = state.tab; leave(); }
-    else prev = "project";
+    if (state.tab !== "project") leave();
+    if (state.tab !== "environments" && HAS_ENV()) EnvPage.unmount();
   });
   // a turn that ended may have changed the project: read it again
   document.addEventListener("oxassistant", (ev) => {
@@ -573,6 +571,8 @@ const ProjectMode = (() => {
   MOBILE.addEventListener("change", () => { if (on) drawSide(); });
 
   registerPane("project", {el: box, show});
+  registerPane("projectsettings", {el: sbox, show: () => { drawSettings(); refresh(); }});
+  registerPane("environments", {el: ebox, show: () => { if (HAS_ENV()) EnvPage.mount(ebox); }});
   /* a file (or "dir/") on the Files page, its folders open (the Board's plan docs) */
   function file(path) {
     v.file = path;

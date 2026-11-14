@@ -154,5 +154,5 @@ test("a step aimed at a field selects its op first; a section setting goes to it
   const a = {steps: [{title: "Raise the threshold", state: "active", target: "field:score/threshold"}]};
   assert.deepEqual(C.focus(null, a, {tab: "flow"}), [{select: "score"}, {point: "field:score/threshold", words: "Raise the threshold", or: "op:score"}]);
   assert.deepEqual(C.where("setting:retention/job"), {tab: "settings"});
-  assert.deepEqual(C.where("setting:daemon"), {tab: "project", page: "settings"});
+  assert.deepEqual(C.where("setting:daemon"), {tab: "projectsettings"});
 });

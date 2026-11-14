@@ -89,6 +89,10 @@ function switchTab(name, opts) {
   if (typeof unpeek === "function") unpeek();
   // the Board lives in Project mode: its Board page (docs/brd/board.md)
   if (name === "board") { switchTab("project", {page: "board"}); return; }
+  // Project mode's old Environments and Settings pages are the Settings hub's (ENGINEERING_ENV_PLAN E2)
+  if (name === "project" && opts && (opts.page === "environments" || opts.page === "settings")) {
+    switchTab(opts.page === "settings" ? "projectsettings" : "environments"); return;
+  }
   // the playground runs a service's code: not a viewer's (D11); every way in stops here
   if (name === "playground" && window.Account && Account.viewOnly) { Account.toast(Account.VIEW_ONLY, true); return; }
   // where the Flow tab was
@@ -343,7 +347,8 @@ document.addEventListener("click", (ev) => {
   }
 });
 for (const b of document.querySelectorAll(".tabs button[data-tab]"))
-  b.onclick = () => switchTab(b.dataset.hub ? hubLast(b.dataset.hub) : b.dataset.tab);
+  b.onclick = () => b.dataset.ppage ? switchTab("project", {page: b.dataset.ppage})
+    : switchTab(b.dataset.hub ? hubLast(b.dataset.hub) : b.dataset.tab);
 syncHub();
 
 /* The rail: the screens grouped by what they are for. Slim (icons, the
@@ -376,11 +381,11 @@ syncHub();
   tip.id = "railtip";
   tip.hidden = true;
   document.body.append(tip);
-  const slimNow = (b) => !MOBILE.matches && (b.closest("#prail") || document.body.classList.contains("railslim"));
-  for (const b of document.querySelectorAll("#rail .tabs button, #rail .railtoggle, #prail .tabs button")) {
+  const slimNow = () => !MOBILE.matches && document.body.classList.contains("railslim");
+  for (const b of document.querySelectorAll("#rail .tabs button, #rail .railtoggle")) {
     b.addEventListener("mouseenter", () => {
       const name = b.querySelector("span");
-      if (!slimNow(b) || !name) return;
+      if (!slimNow() || !name) return;
       const box = b.getBoundingClientRect();
       tip.textContent = name.textContent;
       tip.style.left = `${box.right + 8}px`;
@@ -391,7 +396,7 @@ syncHub();
     b.addEventListener("click", () => { tip.hidden = true; });
   }
   window.oxRailLabel = (name) => {
-    const b = document.querySelector(`#hubtabs [data-tab="${name}"]`) || r.querySelector(`.tabs button[data-tab="${name}"] span`);
+    const b = name === "project" ? null : document.querySelector(`#hubtabs [data-tab="${name}"]`) || r.querySelector(`.tabs button[data-tab="${name}"] span`);
     $("#screen-label").textContent = b ? b.textContent : name ? name[0].toUpperCase() + name.slice(1) : "";
   };
 })();

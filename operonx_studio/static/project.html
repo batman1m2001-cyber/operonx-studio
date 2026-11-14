@@ -29,19 +29,26 @@
     </nav>
     <!-- the open rail item's screens (shell.js HUBS) -->
     <nav class="tabs hubtabs" id="hubtabs" role="tablist" aria-label="Screens of this section" hidden>
+      <button data-tab="project" data-ppage="now" data-in="project" role="tab">Now</button>
+      <button data-tab="project" data-ppage="board" data-in="project" role="tab">Board</button>
+      <button data-tab="project" data-ppage="changes" data-in="project" role="tab">Git</button>
+      <button data-tab="project" data-ppage="files" data-in="project" role="tab">Files</button>
+      <button data-tab="project" data-ppage="terminal" data-in="project" role="tab">Terminal</button>
       <button data-tab="flow" data-in="flow" class="active" role="tab" aria-selected="true">Flow</button>
       <button data-tab="playground" data-in="flow" class="needs-edit" role="tab">Playground</button>
+      <button data-tab="prompts" data-in="flow" role="tab">Prompts</button>
+      <button data-tab="services" data-in="flow" role="tab">Services</button>
+      <button data-tab="jobs" data-in="flow" role="tab">Jobs</button>
       <button data-tab="knowledge" data-in="flow" role="tab" hidden>Knowledge</button>
       <button data-tab="traces" data-in="runs" role="tab">Runs</button>
       <button data-tab="review" data-in="runs" role="tab">Review</button>
+      <button data-tab="evals" data-in="runs" role="tab">Evals</button>
       <button data-tab="monitor" data-in="monitor" role="tab">Monitor</button>
       <button data-tab="alerts" data-in="monitor" role="tab">Alerts</button>
-      <button data-tab="evals" data-in="improve" role="tab">Evals</button>
-      <button data-tab="prompts" data-in="improve" role="tab">Prompts</button>
-      <button data-tab="services" data-in="operate" role="tab">Services</button>
-      <button data-tab="jobs" data-in="operate" role="tab">Jobs</button>
       <button data-tab="resources" data-in="settings" role="tab">Resources</button>
+      <button data-tab="environments" data-in="settings" role="tab">Environments</button>
       <button data-tab="settings" data-in="settings" role="tab">Storage</button>
+      <button data-tab="projectsettings" data-in="settings" role="tab">Project</button>
     </nav>
     <button id="btn-screen" class="crumbbtn screenbtn" aria-haspopup="true" aria-controls="rail" title="Screens"><i data-icon="menu"></i><span id="screen-label">Flow</span></button>
     <div class="spacer"></div>
@@ -54,30 +61,15 @@
     <!-- the screens, by what they are for: slim on a tablet, a drawer on a phone -->
     <aside class="rail" id="rail" aria-label="Screens">
       <nav class="tabs" role="tablist" aria-label="Views">
-        <button data-tab="project" role="tab" title="Project — build it by talking to the assistant"><i data-icon="target"></i><span>Project</span></button>
-        <button data-tab="flow" data-hub="flow" class="active" role="tab" title="Flow — the flows, the playground, knowledge"><i data-icon="graph"></i><span>Flow</span></button>
-        <button data-tab="traces" data-hub="runs" role="tab" title="Runs — every run, and reviewing them"><i data-icon="list"></i><span>Runs</span></button>
+        <button data-tab="project" data-hub="project" role="tab" title="Project — the conversation, the board, git, files, terminal"><i data-icon="target"></i><span>Project</span></button>
+        <button data-tab="flow" data-hub="flow" class="active" role="tab" title="Flow — the flows, the playground, prompts, services, jobs"><i data-icon="graph"></i><span>Flow</span></button>
+        <button data-tab="traces" data-hub="runs" role="tab" title="Runs — every run, reviewing them, evals"><i data-icon="list"></i><span>Runs</span></button>
         <button data-tab="monitor" data-hub="monitor" role="tab" title="Monitor — health over time, and alerts"><i data-icon="chart"></i><span>Monitor</span></button>
-        <button data-tab="evals" data-hub="improve" role="tab" title="Improve — evals and prompts"><i data-icon="evals"></i><span>Improve</span></button>
-        <button data-tab="services" data-hub="operate" role="tab" title="Operate — services and jobs"><i data-icon="server"></i><span>Operate</span></button>
-        <button data-tab="resources" data-hub="settings" role="tab" title="Settings — resources and run storage"><i data-icon="settings"></i><span>Settings</span></button>
+        <button data-tab="resources" data-hub="settings" role="tab" title="Settings — resources, environments, run storage, the project"><i data-icon="settings"></i><span>Settings</span></button>
       </nav>
       <button id="rail-slim" class="railtoggle" type="button" title="Collapse the menu" aria-label="Collapse the menu"><i data-icon="collapse"></i><span>Collapse</span></button>
     </aside>
     <div id="railshade" hidden></div>
-    <!-- Project mode's own bar: it stands in for the rail (docs/PROJECT_MODE_PLAN.md D3) -->
-    <aside class="prail" id="prail" aria-label="Project" hidden>
-      <nav class="tabs" role="tablist" aria-label="Project pages">
-        <button data-ppage="now" role="tab" title="Now — the conversation, and where the project stands"><i data-icon="target"></i><span>Now</span></button>
-        <button data-ppage="board" role="tab" title="Board — the cards in docs/brd/board.md, and the plans"><i data-icon="roadmap"></i><span>Board</span></button>
-        <button data-ppage="changes" role="tab" title="Git — what changed and is not committed, the branches, the history; commit, pull, push"><i data-icon="branch"></i><span>Git</span></button>
-        <button data-ppage="files" role="tab" title="Files — the project's files; what changed lately is marked"><i data-icon="folder"></i><span>Files</span></button>
-        <button data-ppage="terminal" role="tab" title="Terminal — shells in the project and its worktrees, yours and the assistant's"><i data-icon="terminal"></i><span>Terminal</span></button>
-        <button data-ppage="environments" role="tab" title="Environments — this machine and the hosts commands run on over SSH"><i data-icon="server"></i><span>Environments</span></button>
-        <button data-ppage="settings" role="tab" title="Settings — the standard, and what the assistant may do with git"><i data-icon="settings"></i><span>Settings</span></button>
-        <button data-pback type="button" class="pback" title="Back to the studio"><i data-icon="back"></i><span>Studio</span></button>
-      </nav>
-    </aside>
     <!-- the Flow screen's flows, always in view; [ hides it (flowrail.js) -->
     <aside id="flowrail" class="flowrail" aria-label="Flows"></aside>
     <div id="stage">
@@ -109,6 +101,8 @@
     <div id="alerts" class="pane" hidden></div>
     <div id="board" class="pane" hidden></div>
     <div id="project" class="pane" hidden></div>
+    <div id="environments" class="pane" hidden></div>
+    <div id="projectsettings" class="pane" hidden></div>
     <div id="monitor" class="pane" hidden></div>
     <div id="settings" class="pane" hidden></div>
 

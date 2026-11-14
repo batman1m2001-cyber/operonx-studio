@@ -61,7 +61,7 @@ const Hand = (() => {
     // a screen is its tab in the top bar's strip, or its hub's rail item when the strip is not showing
     if (kind === "tab") all = [...document.querySelectorAll(`#hubtabs [data-tab="${name}"], #rail [data-tab="${name}"]`),
       ...document.querySelectorAll(`#rail [data-hub="${CSS.escape(typeof hubOf === "function" ? hubOf(rest.join(":")) || "" : "")}"]`)];
-    else if (kind === "page") all = [...document.querySelectorAll(`#prail [data-ppage="${name}"]`)];
+    else if (kind === "page") all = [...document.querySelectorAll(`#hubtabs [data-ppage="${name}"]`)];
     else if (target === "commit:new") all = [...document.querySelectorAll('[data-ox-target^="commit:"]')];
     else all = [...document.querySelectorAll(`[data-ox-target="${CSS.escape(target)}"]`)];
     all = all.filter(visible);
@@ -194,7 +194,7 @@ const Hand = (() => {
   }
 
   /* the user's own hand wins: a real click, wheel or key outside the conversation stops the hand for this turn */
-  const mine = (ev) => ev.target && ev.target.closest && ev.target.closest(".ax, #prail, .ox-hand-paused, .ox-follow");
+  const mine = (ev) => ev.target && ev.target.closest && ev.target.closest(".ax, #hubtabs, .ox-hand-paused, .ox-follow");
   function takeOver(ev) {
     if (!ev.isTrusted || stopped || !running && !queue.length || mine(ev)) return;
     stopped = true;

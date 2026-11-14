@@ -5092,25 +5092,10 @@ button.rl-tog:hover { color: var(--text); }
   .bdcol.empty .bdcolhead { padding: 0; }
 }
 
-/* ── Project mode (docs/PROJECT_MODE_PLAN.md D3): its own bar stands in for
-   the rail, the conversation takes the centre, the project's state beside ── */
-.prail { width: 60px; flex: none; display: flex; flex-direction: column; background: var(--surface);
-  border-right: 1px solid var(--border); padding: 10px 8px; z-index: 20; }
-.prail[hidden] { display: none; }
-.prail .tabs { display: flex; flex-direction: column; gap: 2px; margin: 0; flex: 1; }
-.prail .tabs button { position: relative; display: flex; align-items: center; justify-content: center; width: 100%;
-  min-height: 40px; padding: 0; border: none; border-radius: var(--r-sm); background: none; color: var(--text-2); }
-.prail .tabs button::after { display: none; }
-.prail .tabs button .icon { width: 19px; height: 19px; }
-.prail .tabs button span { display: none; }
-.prail .tabs button:hover { background: var(--surface-2); color: var(--text); }
-.prail .tabs button.active { background: var(--accent-soft); color: var(--text); }
-.prail .tabs button.active .icon { color: var(--accent-strong); }
-.prail .tabs .pback { margin-top: auto; color: var(--text-3); }
-body.pmode #rail, body.pmode #sidebar, body.pmode #dragbar, body.pmode #btn-right, body.pmode .ax-askbar,
+/* ── The Project hub (Operon ENGINEERING_ENV_PLAN E2; body.pmode = its pane shows): the conversation
+   takes the centre, the project's state beside ── */
+body.pmode #sidebar, body.pmode #dragbar, body.pmode #btn-right, body.pmode .ax-askbar,
 body.pmode #canvasbar { display: none !important; }
-/* project mode reads no flow: the flow crumb goes, the dot shows only a lost link */
-body.pmode #switcher + .sep, body.pmode #btn-project, body.pmode #pmenu, body.pmode #live:not(.down) { display: none !important; }
 /* the slim rail's names: on hover, beside the icon (the rail itself scrolls, so the label floats) */
 #railtip { position: fixed; z-index: 120; pointer-events: none; padding: 4px 9px; border-radius: var(--r-sm);
   background: var(--strong, #1d232b); color: #fff; font-size: var(--fs-sm); font-weight: 500; white-space: nowrap;
@@ -5169,12 +5154,6 @@ button.pm-item:hover { background: var(--surface-2); }
 /* a phone: the bar runs along the bottom; the state folds above the conversation, its summary the handle */
 @media (max-width: 760px) {
   body.pmode .main { flex-direction: column; }
-  body.pmode .screenbtn { display: none; }
-  .prail { order: 9; width: auto; height: 52px; flex-direction: row; border-right: none; border-top: 1px solid var(--border);
-    padding: 4px 8px calc(4px + env(safe-area-inset-bottom)); }
-  .prail .tabs { flex-direction: row; justify-content: space-around; }
-  .prail .tabs button { width: auto; flex: 1 1 0; min-width: 0; min-height: 44px; }
-  .prail .tabs .pback { margin-top: 0; }
   #project.pane { padding: 0; flex: 1; min-height: 0; }
   .pm-main { flex-direction: column; }
   .pm-status { order: -1; width: auto; max-height: 55vh; border-left: none; border-bottom: 1px solid var(--border);
@@ -5380,10 +5359,10 @@ button.pm-w { cursor: pointer; }
   --glass-tint: var(--glass-clear); --glass-blur: var(--glass-blur-clear);
 }
 /* the frosted pieces: what holds text to read */
-.glass.frost, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip, body.pmode .ax-input, body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail, body.floatframe:not(.ax-focus) .prail, body.floatframe:not(.ax-focus) #sidebar {
+.glass.frost, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip, body.pmode .ax-input, body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail, body.floatframe:not(.ax-focus) #sidebar {
   --glass-tint: var(--glass-frost); --glass-blur: var(--glass-blur-frost);
 }
-.glass, .canvasbar, .livebar, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip, body.pmode .ax-input, body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail, body.floatframe:not(.ax-focus) .prail, body.floatframe:not(.ax-focus) #sidebar {
+.glass, .canvasbar, .livebar, .popover, .ax-askbar, .ax-pop, .ax-slash, .viztip, #toast, #railtip, body.pmode .ax-input, body.floatframe:not(.ax-focus) header.bar, body.floatframe:not(.ax-focus) .rail, body.floatframe:not(.ax-focus) #sidebar {
   background: var(--glass-sheen), var(--glass-tint);
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
@@ -5394,7 +5373,7 @@ button.pm-w { cursor: pointer; }
 .popover, .ax-pop, .ax-slash { --glass-tint: var(--glass-menu); --glass-blur: var(--glass-blur-menu); }
 /* reduce transparency: each piece is its solid surface again, with the
    edge and shadow every floating surface has */
-:root[data-glass="solid"] .glass, :root[data-glass="solid"] .canvasbar, :root[data-glass="solid"] .livebar, :root[data-glass="solid"] .popover, :root[data-glass="solid"] .ax-askbar, :root[data-glass="solid"] .ax-pop, :root[data-glass="solid"] .ax-slash, :root[data-glass="solid"] .viztip, :root[data-glass="solid"] body.pmode .ax-input, :root[data-glass="solid"] body.floatframe:not(.ax-focus) header.bar, :root[data-glass="solid"] body.floatframe:not(.ax-focus) .rail, :root[data-glass="solid"] body.floatframe:not(.ax-focus) .prail, :root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar {
+:root[data-glass="solid"] .glass, :root[data-glass="solid"] .canvasbar, :root[data-glass="solid"] .livebar, :root[data-glass="solid"] .popover, :root[data-glass="solid"] .ax-askbar, :root[data-glass="solid"] .ax-pop, :root[data-glass="solid"] .ax-slash, :root[data-glass="solid"] .viztip, :root[data-glass="solid"] body.pmode .ax-input, :root[data-glass="solid"] body.floatframe:not(.ax-focus) header.bar, :root[data-glass="solid"] body.floatframe:not(.ax-focus) .rail, :root[data-glass="solid"] body.floatframe:not(.ax-focus) #sidebar {
   background: var(--surface);
   -webkit-backdrop-filter: none; backdrop-filter: none;
   box-shadow: inset 0 0 0 1px var(--float-edge), var(--sh-2);
@@ -5419,7 +5398,6 @@ body.floatframe:not(.ax-focus) .main > #stage { position: absolute; inset: 0; sc
 :root[data-glass="solid"] body.floatframe:not(.ax-focus) .main > #stage { background-color: var(--rt-bay); }
 body.floatframe:not(.ax-focus) .main > #stage::-webkit-scrollbar { display: none; }
 body.floatframe:not(.ax-focus) .rail { border-right: none; border-radius: var(--glass-r); margin-right: auto; }
-body.floatframe:not(.ax-focus) .prail { border-right: none; border-radius: var(--glass-r); }
 body.floatframe:not(.ax-focus) #sidebar {
   position: relative; z-index: 20; border-left: none; border-radius: var(--glass-r); overflow: hidden;
 }

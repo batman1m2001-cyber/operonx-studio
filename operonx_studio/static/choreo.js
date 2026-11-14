@@ -143,9 +143,9 @@ const Choreo = (() => {
 
   /* where a target lives: the screen to go to before pointing at it (null: anywhere, as it is) */
   const PAGE_OF = {status: "now", q: "now", row: "now",
-                   commit: "changes", setting: "settings", card: "board"};
-  const TAB_OF = {op: "flow", field: "flow", run: "traces", job: "jobs", eval: "evals"};
-  // setting:<section>/<name> on a settings screen of its own; a bare setting:<name> is Project's Settings
+                   commit: "changes", card: "board"};
+  const TAB_OF = {op: "flow", field: "flow", run: "traces", job: "jobs", eval: "evals", setting: "projectsettings"};
+  // setting:<section>/<name> on a settings screen of its own; a bare setting:<name> is the project's settings
   const SECTION_TAB = {retention: "settings"};
   function where(target) {
     const kind = String(target || "").split(":")[0];
