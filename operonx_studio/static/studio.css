@@ -4598,6 +4598,12 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
    one time axis for every bar; the duration is a column of its own, so
    it is never cut. */
 .rt { display: flex; flex-direction: column; gap: 10px; min-height: 100%; }
+/* the run page wears the GraphOp indigo, not the app's signal blue: a blue
+   beside the lavender routes and selection read as two clashing purples */
+.rt { --signal: var(--k-graph); --signal-strong: color-mix(in srgb, var(--k-graph) 78%, var(--text)); --info: var(--signal-strong);
+  --signal-ring: color-mix(in srgb, var(--k-graph) 40%, transparent); }
+.rt .iomsg.role-user { --role: var(--k-graph); }
+.rt .iomsg.role-user .iorole { color: var(--signal-strong); }
 /* the run itself, the first of the steps: its panel is its input and output */
 .rt-row.rt-run .rt-n { font-weight: 650; }
 .rt-row.rt-run { border-bottom: 1px solid var(--border-soft); }
@@ -4665,8 +4671,8 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   background: linear-gradient(to right, var(--rt-guide) 1px, transparent 1px) 0 0 / 25% 100% repeat-x;
   box-shadow: inset -1px 0 0 var(--rt-guide); }
 .rt-track b { position: absolute; top: 10px; bottom: 10px; border-radius: 3px; min-width: 2px;
-  background: color-mix(in srgb, var(--kind, var(--wire)) 78%, var(--surface)); }
-.rt-row:not(.err):not(.sel):hover .rt-track b { background: var(--kind, var(--wire)); }
+  background: color-mix(in srgb, var(--kind, var(--k-graph)) 78%, var(--surface)); }
+.rt-row:not(.err):not(.sel):hover .rt-track b { background: var(--kind, var(--k-graph)); }
 .rt-row.err .rt-track b { background: var(--err); }
 .rt-row.sel .rt-track b { background: var(--accent); }
 .rt-row.sel.err .rt-track b { background: var(--err); }
