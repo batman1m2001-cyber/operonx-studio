@@ -2354,7 +2354,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-text ul, .ax-text ol { margin: 0 0 .65em; padding-left: 1.35em; }
 .ax-text li + li { margin-top: .2em; }
 .ax-text li > ul, .ax-text li > ol { margin: .2em 0 0; }
-.ax-text code { font: .87em var(--mono); background: var(--surface-3); padding: .1em .35em; border-radius: 4px; }
+.ax-text code { font: .87em var(--mono); background: var(--border); padding: .1em .35em; border-radius: 4px; }
 /* references (D4): a file opens the Files page at its line; this turn's glyph says what was done to it */
 .ax-ref { display: inline-flex; align-items: center; gap: 3px; vertical-align: baseline; min-height: 0; height: auto;
   padding: .05em .4em .05em .3em; margin: 0 1px; border: none; border-radius: 4px; font: .87em var(--mono); line-height: 1.45;
@@ -5548,9 +5548,11 @@ body.floatframe:not(.ax-focus) header.bar::after { content: none; }
    The conversation scrolls under a glass composer (assistant.js measures
    the foot into --ax-foot-h); send is the one tinted control. Above the
    conversation, the builder island and a question's toast (projectmode.js). */
-body.pmode .ax:not(.hero) .ax-foot { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
-  background: linear-gradient(to bottom, transparent, var(--surface) 6px); }
-body.pmode .ax:not(.hero) .ax-log { padding-bottom: var(--ax-foot-h, 150px); }
+body.pmode .ax:not(.hero) .ax-foot { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; }
+/* the words fade out where the composer starts: on glass --surface is see-through, so no fill could hide them */
+body.pmode .ax:not(.hero) .ax-log { padding-bottom: var(--ax-foot-h, 150px);
+  --fade: linear-gradient(to top, transparent var(--ax-foot-h, 150px), #000 calc(var(--ax-foot-h, 150px) + 20px));
+  -webkit-mask-image: var(--fade); mask-image: var(--fade); }
 body.pmode .ax-input:focus-within {
   box-shadow: inset 0 0 0 1px var(--signal), 0 0 0 3px var(--signal-ring), var(--glass-shadow);
 }

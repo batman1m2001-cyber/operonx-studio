@@ -87,17 +87,17 @@ MAX_ATTACHMENTS = 8
 #: A full id (``claude-…``) is accepted too.
 MODELS = ("fable", "opus", "sonnet", "haiku")
 
-#: What the menu says about each. ``full`` and ``window`` are what the CLI
-#: resolved and reported (probed 2026-09-28, Claude Code 2.1.283); the
-#: studio replaces both with what later turns actually report.
+#: What the menu says about each. ``full`` and ``window`` are the API
+#: reference's (2026-11-14: Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5, all
+#: 1M); the studio replaces both with what later turns actually report.
 MODEL_INFO = (
-    {"id": "fable", "label": "Fable", "full": "claude-fable-5-1", "window": 1_000_000,
+    {"id": "fable", "label": "Fable", "full": "claude-fable-5-2", "window": 1_000_000,
      "good": "The most capable: the hardest problems, long autonomous work"},
     {"id": "opus", "label": "Opus", "full": "claude-opus-5-5", "window": 1_000_000,
      "good": "Deep work: design, refactors, tricky debugging"},
-    {"id": "sonnet", "label": "Sonnet", "full": "claude-sonnet-5", "window": 1_000_000,
+    {"id": "sonnet", "label": "Sonnet", "full": "claude-sonnet-5-5", "window": 1_000_000,
      "good": "Everyday coding: fast and capable"},
-    {"id": "haiku", "label": "Haiku", "full": "claude-haiku-4-5-20251001", "window": 200_000,
+    {"id": "haiku", "label": "Haiku", "full": "claude-haiku-5-5", "window": 1_000_000,
      "good": "Quick answers and small edits"},
 )
 
