@@ -58,7 +58,9 @@ const Hand = (() => {
     let all;
     const [kind, ...rest] = target.split(":");
     const name = CSS.escape(rest.join(":"));
-    if (kind === "tab") all = [...document.querySelectorAll(`#rail [data-tab="${name}"]`)];
+    // a screen is its tab in the top bar's strip, or its hub's rail item when the strip is not showing
+    if (kind === "tab") all = [...document.querySelectorAll(`#hubtabs [data-tab="${name}"], #rail [data-tab="${name}"]`),
+      ...document.querySelectorAll(`#rail [data-hub="${CSS.escape(typeof hubOf === "function" ? hubOf(rest.join(":")) || "" : "")}"]`)];
     else if (kind === "page") all = [...document.querySelectorAll(`#prail [data-ppage="${name}"]`)];
     else if (target === "commit:new") all = [...document.querySelectorAll('[data-ox-target^="commit:"]')];
     else all = [...document.querySelectorAll(`[data-ox-target="${CSS.escape(target)}"]`)];

@@ -1267,7 +1267,7 @@ const PlayView = (() => {
     api(`/api/p/${PID}/play/warm`, {}).catch(() => { warmedAt = 0; });
   };
   const hasDoors = () => ((state.ir || {}).services || []).some(s => s.kind !== "asgi");
-  for (const b of document.querySelectorAll('.rail button[data-tab="playground"]')) {
+  for (const b of document.querySelectorAll('#hubtabs button[data-tab="playground"]')) {
     b.addEventListener("pointerenter", warm);
     b.addEventListener("focus", warm);
   }

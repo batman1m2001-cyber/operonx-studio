@@ -56,6 +56,35 @@ function coverWhileFresh(elm) {
   requestAnimationFrame(() => requestAnimationFrame(check));
 }
 
+/* The rail's items are hubs (docs/RAIL_SLIM_PLAN.md): each holds the
+ * screens the top bar's strip (#hubtabs) lists with its name in `data-in`.
+ * A rail item opens the screen of its hub the user was on last. */
+const hubOf = (name) => {
+  const b = document.querySelector(`#hubtabs [data-tab="${CSS.escape(name)}"]`);
+  return b ? b.dataset.in : null;
+};
+const hubTabs = (hub) => [...document.querySelectorAll(`#hubtabs [data-in="${CSS.escape(hub)}"]`)]
+  .filter(b => !b.hidden && !(b.classList.contains("needs-edit") && document.body.dataset.role === "viewer"));
+function hubLast(hub) {
+  const tabs = hubTabs(hub).map(b => b.dataset.tab);
+  const last = recall(`hub:${PID}:${hub}`, null);
+  return tabs.includes(last) ? last : tabs[0];
+}
+function syncHub() {
+  const hub = hubOf(state.tab);
+  const strip = $("#hubtabs");
+  const tabs = hub ? hubTabs(hub) : [];
+  for (const b of strip.querySelectorAll("button")) b.classList.toggle("off", b.dataset.in !== hub);
+  strip.hidden = tabs.length < 2;
+  document.body.classList.toggle("hubbed", !strip.hidden);
+  for (const b of document.querySelectorAll("#rail [data-hub]")) {
+    const on = b.dataset.hub === hub;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", String(on));
+  }
+  if (hub) store(`hub:${PID}:${hub}`, state.tab);
+}
+
 function switchTab(name, opts) {
   if (typeof unpeek === "function") unpeek();
   // the Board lives in Project mode: its Board page (docs/brd/board.md)
@@ -77,6 +106,7 @@ function switchTab(name, opts) {
     b.classList.toggle("active", on);
     b.setAttribute(b.dataset.tab ? "aria-selected" : "aria-pressed", String(on));
   }
+  syncHub();
   $("#stage").style.display = name === "flow" ? "" : "none";
   $("#traces").hidden = name !== "traces";
   $("#jobs").hidden = name !== "jobs";
@@ -313,7 +343,8 @@ document.addEventListener("click", (ev) => {
   }
 });
 for (const b of document.querySelectorAll(".tabs button[data-tab]"))
-  b.onclick = () => switchTab(b.dataset.tab);
+  b.onclick = () => switchTab(b.dataset.hub ? hubLast(b.dataset.hub) : b.dataset.tab);
+syncHub();
 
 /* The rail: the screens grouped by what they are for. Slim (icons, the
  * name on hover, the groups as thin lines) unless the user widened it
@@ -360,7 +391,7 @@ for (const b of document.querySelectorAll(".tabs button[data-tab]"))
     b.addEventListener("click", () => { tip.hidden = true; });
   }
   window.oxRailLabel = (name) => {
-    const b = r.querySelector(`.tabs button[data-tab="${name}"] span`);
+    const b = document.querySelector(`#hubtabs [data-tab="${name}"]`) || r.querySelector(`.tabs button[data-tab="${name}"] span`);
     $("#screen-label").textContent = b ? b.textContent : name ? name[0].toUpperCase() + name.slice(1) : "";
   };
 })();

@@ -27,6 +27,22 @@
       <div id="pmenu" class="popover" role="menu" hidden></div>
       <select id="graph-pick" title="graph" hidden></select>
     </nav>
+    <!-- the open rail item's screens (shell.js HUBS) -->
+    <nav class="tabs hubtabs" id="hubtabs" role="tablist" aria-label="Screens of this section" hidden>
+      <button data-tab="flow" data-in="flow" class="active" role="tab" aria-selected="true">Flow</button>
+      <button data-tab="playground" data-in="flow" class="needs-edit" role="tab">Playground</button>
+      <button data-tab="knowledge" data-in="flow" role="tab" hidden>Knowledge</button>
+      <button data-tab="traces" data-in="runs" role="tab">Runs</button>
+      <button data-tab="review" data-in="runs" role="tab">Review</button>
+      <button data-tab="monitor" data-in="monitor" role="tab">Monitor</button>
+      <button data-tab="alerts" data-in="monitor" role="tab">Alerts</button>
+      <button data-tab="evals" data-in="improve" role="tab">Evals</button>
+      <button data-tab="prompts" data-in="improve" role="tab">Prompts</button>
+      <button data-tab="services" data-in="operate" role="tab">Services</button>
+      <button data-tab="jobs" data-in="operate" role="tab">Jobs</button>
+      <button data-tab="resources" data-in="settings" role="tab">Resources</button>
+      <button data-tab="settings" data-in="settings" role="tab">Storage</button>
+    </nav>
     <button id="btn-screen" class="crumbbtn screenbtn" aria-haspopup="true" aria-controls="rail" title="Screens"><i data-icon="menu"></i><span id="screen-label">Flow</span></button>
     <div class="spacer"></div>
     <span id="themeslot"></span>
@@ -39,23 +55,12 @@
     <aside class="rail" id="rail" aria-label="Screens">
       <nav class="tabs" role="tablist" aria-label="Views">
         <button data-tab="project" role="tab" title="Project — build it by talking to the assistant"><i data-icon="target"></i><span>Project</span></button>
-        <div class="railgroup">Build</div>
-        <button data-tab="flow" class="active" role="tab" title="Flow"><i data-icon="graph"></i><span>Flow</span></button>
-        <button data-tab="playground" class="needs-edit" role="tab" title="Playground"><i data-icon="play"></i><span>Playground</span></button>
-        <button data-tab="resources" role="tab" title="Resources"><i data-icon="box"></i><span>Resources</span></button>
-        <button data-tab="knowledge" role="tab" title="Knowledge" hidden><i data-icon="book"></i><span>Knowledge</span></button>
-        <div class="railgroup">Observe</div>
-        <button data-tab="traces" role="tab" title="Runs"><i data-icon="list"></i><span>Runs</span></button>
-        <button data-tab="monitor" role="tab" title="Monitor"><i data-icon="chart"></i><span>Monitor</span></button>
-        <button data-tab="review" role="tab" title="Review"><i data-icon="review"></i><span>Review</span></button>
-        <div class="railgroup">Improve</div>
-        <button data-tab="evals" role="tab" title="Evals"><i data-icon="evals"></i><span>Evals</span></button>
-        <button data-tab="prompts" role="tab" title="Prompts"><i data-icon="prompt"></i><span>Prompts</span></button>
-        <div class="railgroup">Operate</div>
-        <button data-tab="services" role="tab" title="Services"><i data-icon="server"></i><span>Services</span></button>
-        <button data-tab="jobs" role="tab" title="Jobs"><i data-icon="clock"></i><span>Jobs</span></button>
-        <button data-tab="alerts" role="tab" title="Alerts"><i data-icon="bell"></i><span>Alerts</span></button>
-        <button data-tab="settings" role="tab" title="Settings"><i data-icon="settings"></i><span>Settings</span></button>
+        <button data-tab="flow" data-hub="flow" class="active" role="tab" title="Flow — the flows, the playground, knowledge"><i data-icon="graph"></i><span>Flow</span></button>
+        <button data-tab="traces" data-hub="runs" role="tab" title="Runs — every run, and reviewing them"><i data-icon="list"></i><span>Runs</span></button>
+        <button data-tab="monitor" data-hub="monitor" role="tab" title="Monitor — health over time, and alerts"><i data-icon="chart"></i><span>Monitor</span></button>
+        <button data-tab="evals" data-hub="improve" role="tab" title="Improve — evals and prompts"><i data-icon="evals"></i><span>Improve</span></button>
+        <button data-tab="services" data-hub="operate" role="tab" title="Operate — services and jobs"><i data-icon="server"></i><span>Operate</span></button>
+        <button data-tab="resources" data-hub="settings" role="tab" title="Settings — resources and run storage"><i data-icon="settings"></i><span>Settings</span></button>
       </nav>
       <button id="rail-slim" class="railtoggle" type="button" title="Collapse the menu" aria-label="Collapse the menu"><i data-icon="collapse"></i><span>Collapse</span></button>
     </aside>

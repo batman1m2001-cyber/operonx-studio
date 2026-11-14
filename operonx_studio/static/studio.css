@@ -694,9 +694,6 @@ body.railslim { --rail-w: 60px; }
   background: var(--surface); border-right: 1px solid var(--border); padding: 10px 8px 10px;
   overflow-y: auto; overflow-x: hidden; z-index: 20; }
 .rail .tabs { display: flex; flex-direction: column; gap: 2px; margin: 0; align-self: stretch; }
-.rail .railgroup { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--text-3); padding: 14px 10px 4px; white-space: nowrap; }
-.rail .railgroup:first-child { padding-top: 4px; }
 .rail .tabs button, .railtoggle { display: flex; align-items: center; justify-content: flex-start; gap: 11px;
   width: 100%; min-height: 36px; padding: 0 10px; border: none; border-radius: var(--r-sm);
   background: none; color: var(--text-2); font-weight: 500; white-space: nowrap; }
@@ -708,9 +705,6 @@ body.railslim { --rail-w: 60px; }
 .railtoggle { margin-top: auto; color: var(--text-3); font-size: var(--fs-sm); }
 body.railslim .rail .tabs button span, body.railslim .railtoggle span { display: none; }
 body.railslim .rail .tabs button, body.railslim .railtoggle { justify-content: center; padding: 0; }
-body.railslim .rail .railgroup { font-size: 0; padding: 8px 0 4px; }
-body.railslim .rail .railgroup::before { content: ""; display: block; height: 1px; background: var(--border-soft); margin: 0 10px; }
-body.railslim .rail .railgroup:first-child::before { display: none; }
 body.railslim .railtoggle .icon { transform: rotate(180deg); }
 .screenbtn { display: none; }
 #railshade { position: fixed; inset: 0; z-index: 79; background: var(--bg-gray19-a32); }
@@ -727,6 +721,9 @@ body.railslim .railtoggle .icon { transform: rotate(180deg); }
 .tabs button:hover { background: none; color: var(--text); }
 .tabs button.active { color: var(--text); font-weight: 600; }
 .tabs button.active::after { background: var(--accent); }
+/* the open rail item's screens (docs/RAIL_SLIM_PLAN.md) */
+.hubtabs { margin-left: 6px; }
+.hubtabs[hidden], .hubtabs button.off, .hubtabs button[hidden] { display: none; }
 
 /* the project's status: a dot beside its name. Green says nothing more (the
    tooltip says what it watches); a failed extraction or a lost link adds
@@ -3845,6 +3842,9 @@ body[data-tab="resources"] #sidetabs [data-side="inspect"] { display: none; }
   body.oncall header.bar > .crumbs { display: none; }
   .callpill-name { display: none; }
   header.bar > #btn-right { order: 5; }
+  /* a section's screens: a row of their own under the header */
+  body.hubbed { --bar-h: 88px; }
+  header.bar > .hubtabs { order: 7; flex-basis: 100%; margin-left: -4px; height: 40px; overflow-x: auto; }
   /* who is signed in sits last, its menu opening leftwards; the theme is in
      Settings, so the crowded phone bar gives its button up */
   header.bar > .acct-wrap { order: 6; }
