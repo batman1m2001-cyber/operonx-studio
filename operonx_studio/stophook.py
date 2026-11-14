@@ -10,6 +10,7 @@ transcript and, once, sends the model back when the turn:
     S3  left steps of its own pending or active      finish them, skip them with a reason, or say what is left
     T2  ends saying it has not checked something     check it now, or say why it cannot be checked
     R7  left a board.md the board cannot read        fix it (CYCLES_PLAN: cards and cycles are the board)
+    L1  edited a file `operonx lint` now flags       fix it, or say why the finding is wrong (ENGINEERING_ENV_PLAN E8)
 
     python -I stophook.py      stdin: the hook's JSON; stdout: {"decision": "block", "reason": …}, or nothing
 
@@ -21,7 +22,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 EDITS = ("Edit", "MultiEdit", "Write")
@@ -192,6 +195,44 @@ def board_unreadable(evs: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]) -> D
     return out
 
 
+# "src/app/ops.py:12: [C8] print(): …"; a warning reads "[C18] (warning) …" and is left out
+_FINDING = re.compile(r"^(?P<path>[^\s:][^:]*):\d+: \[C\d+\] (?!\(warning\))")
+LINT_TIMEOUT = 20  # seconds; the callbot (168 files) lints in 3.5 s
+
+
+def _project(path: Path) -> Optional[Path]:
+    """The operonx project that holds *path*: the nearest folder above it with an operonx.toml."""
+    return next((d for d in path.parents if (d / "operonx.toml").is_file()), None)
+
+
+def lint_errors(evs: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]) -> List[str]:
+    """L1: the ``operonx lint`` errors in the files this turn edited (or under a root folder it made). Errors
+    elsewhere, warnings and rules held by the project's baseline do not count; lint runs in the project's own
+    .venv when it has one. A project lint cannot run in, or a timeout, counts as clean."""
+    paths = {str((b.get("input") or {}).get("file_path") or "") for kind, b, _ in evs
+             if kind == "call" and b.get("name") in EDITS}  # fmt: skip
+    projects: Dict[Path, set] = {}
+    for p in filter(None, paths):
+        path = Path(p).resolve()
+        root = _project(path)
+        if root is not None:
+            projects.setdefault(root, set()).add(path.relative_to(root).as_posix())
+    out = []
+    for root, edited in sorted(projects.items()):
+        venv = root / ".venv" / "bin" / "python"
+        python = str(venv) if venv.is_file() else sys.executable
+        try:
+            run = subprocess.run([python, "-I", "-m", "operonx.cli.lint", "--no-manifest", str(root)], cwd=root,
+                                 capture_output=True, text=True, timeout=LINT_TIMEOUT)  # fmt: skip
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        for line in run.stdout.splitlines():
+            m = _FINDING.match(line)
+            if m and any(e == m["path"] or e.startswith(m["path"] + "/") for e in edited):
+                out.append(line if len(projects) == 1 else f"{root.name}/{line}")
+    return out
+
+
 def reason(lines: List[str]) -> Optional[str]:
     entries = this_turn(lines)
     evs = list(events(entries))
@@ -215,6 +256,11 @@ def reason(lines: List[str]) -> Optional[str]:
     if bad:
         out.append("The board cannot read " + "; ".join(f"{p} ({why})" for p, why in bad.items()) + ". Fix it "
                    "(board_card and board_move write it; never by hand), so the board shows the cards as they stand.")
+    lint = lint_errors(evs)
+    if lint:
+        shown = "\n  ".join(lint[:10]) + (f"\n  … and {len(lint) - 10} more" if len(lint) > 10 else "")
+        out.append(f"operonx lint flags {len(lint)} error(s) in what you edited:\n  {shown}\nFix them (each message "
+                   "says how; `operonx lint --rules` lists the rules), or tell the owner why a finding is wrong.")
     said = unchecked(entries)
     if said:
         out.append(f"You wrote \"{said}\". Check it now (on_base runs a command on the base branch), or say why "

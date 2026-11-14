@@ -1059,7 +1059,7 @@ class Relay:
             hooks["PreToolUse"] = [{"matcher": "Bash|Read|Grep|Glob|Edit|Write", "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]
         if os.environ.get("OPERONX_STUDIO_TURN_CHECKS", "on").lower() not in off:
             hook = " ".join(shlex.quote(str(a)) for a in (sys.executable, "-I", Path(__file__).with_name("stophook.py")))
-            hooks["Stop"] = [{"hooks": [{"type": "command", "command": hook, "timeout": 10}]}]
+            hooks["Stop"] = [{"hooks": [{"type": "command", "command": hook, "timeout": 30}]}]  # L1 runs lint
         if not hooks:
             return None
         self.run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
