@@ -715,6 +715,8 @@ class Turn:
     save_first: bool = False              # past SAVE_AT: save to the project, then go on fresh (E6)
     seed: str = ""                        # where the project is, for a fresh session (projectboard.seed)
     save_cost: float = 0.0
+    resumed: Optional[str] = None         # the Claude session the running CLI call resumed (None: a fresh one)
+    spent: Optional[float] = None         # that call's own cost, from the CLI's running total
     cwd: Optional[str] = None
     card: str = ""                        # the board card this turn works, from its steps call (WORKSPACE_PLAN W1.3)
     kill_timer: Optional[asyncio.TimerHandle] = None
@@ -905,8 +907,17 @@ class Relay:
                              ("cache_read_tokens", "cache_read_input_tokens"),
                              ("cache_write_tokens", "cache_creation_input_tokens")):
                 u[key] = int(u.get(key) or 0) + int(ru.get(src) or 0)
+            turn.spent = None
             if result.get("total_cost_usd") is not None:
-                u["cost_usd"] = round(float(u.get("cost_usd") or 0) + float(result["total_cost_usd"]), 6)
+                # total_cost_usd is the Claude session's running total, and a
+                # resumed (forked) session carries what it was resumed from:
+                # this call's own cost is the difference
+                totals = dict(u.get("claude_totals") or {})
+                total = float(result["total_cost_usd"])
+                turn.spent = round(max(0.0, total - float(totals.get(turn.resumed or "", 0))), 6)
+                totals[str(result.get("session_id") or "")] = total
+                u["claude_totals"] = dict(list(totals.items())[-8:])
+                u["cost_usd"] = round(float(u.get("cost_usd") or 0) + turn.spent, 6)
             # the turn's own model: every call also lists the CLI's helper
             # model (haiku), and the last listed used to win
             windows = {n: int(mu["contextWindow"]) for n, mu in (result.get("modelUsage") or {}).items()
@@ -1036,6 +1047,7 @@ class Relay:
                     before = None    # saved: the message goes on in a fresh session
             if not before:
                 prompt += self._seed(turn)
+            turn.resumed = before
             # a message (and its images) goes in on stdin
             stdin = self._stdin_message(turn, message, attachments or []) if turn.kind == "message" else None
             cmd = [binary, "-p", *(["--input-format", "stream-json"] if stdin is not None else [message]),
@@ -1520,7 +1532,7 @@ class Relay:
             elif not event.get("is_error"):
                 self._learn(turn, event)
             u = self._usage(turn, context=turn.usage.get("context"), result=event)
-            turn.usage.update(cost=event.get("total_cost_usd"), ms=event.get("duration_ms"),
+            turn.usage.update(cost=turn.spent, ms=event.get("duration_ms"),
                               turns=event.get("num_turns"), window=u.get("context_window"))
             return True
         if kind == "rate_limit_event":
@@ -1595,6 +1607,7 @@ class Relay:
         self._flush(turn, force=True)
         cmd = [binary, "-p", SAVE_PROMPT, "--output-format", "stream-json", "--verbose",
                "--append-system-prompt", prompt, "--resume", before, "--fork-session"]
+        turn.resumed = before
         model = turn.model or os.environ.get("OPERONX_STUDIO_CHAT_MODEL")
         if model:
             cmd += ["--model", model]
@@ -1641,8 +1654,8 @@ class Relay:
                 said = str((result or {}).get("result") or err.strip()[-400:] or f"exit {proc.returncode}")
                 self._item(turn, "error", text="Saving to the project failed: " + said, retry=True)
             return None
-        turn.save_cost = float(result.get("total_cost_usd") or 0)
         self._usage(turn, result=result, compacted=0 if turn.kind == "save" else None)
+        turn.save_cost = turn.spent or 0.0
         handoff = _clip_bytes(str(result.get("result") or "").strip(), HANDOFF_MAX)
         self.store.update_session(turn.session, handoff=handoff)
         self._item(turn, "saved", writes=writes, handoff=handoff, cost=turn.save_cost)
