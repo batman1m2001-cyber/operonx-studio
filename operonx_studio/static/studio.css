@@ -2010,7 +2010,6 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .highlights { color: var(--text-2); font-size: var(--fs-md); display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
 .highlights .linkbtn { font-size: var(--fs-md); padding: 0 3px; min-height: 22px; }
 .highlights .vsep { margin: 0 8px; }
-.lensbar button { min-width: 0; }
 .tlstrip { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0 10px; flex: none; }
 .tllabel { font-size: var(--fs-sm); color: var(--text-3); white-space: nowrap; padding-top: 4px; }
 .tlwhole { min-height: 26px; padding: 0 10px; font-size: 12px; }
@@ -4689,6 +4688,58 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .callretry .facts { margin-top: 6px; color: var(--text-2); }
 .rt-facts summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-sm); padding: 6px 0; }
 
+/* the Workflow view: the flow as a line (a metro line), one row per op in
+   the order the run reached it, beside the step (runlineview.js) */
+.rl-axis, .rl-row { display: grid; align-items: center; padding-right: 12px; }
+.rl-axis { grid-template-columns: minmax(0, 1fr) 64px minmax(110px, 30%); padding: 10px 12px 6px 14px;
+  font-size: var(--fs-xs); color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; }
+.rl-axis > span:first-child { text-transform: none; letter-spacing: 0; font-size: var(--fs-sm); color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-axis .rt-dur { text-align: right; padding-right: 12px; }
+.rl-rows { position: relative; }
+.rl-row { position: absolute; left: 0; right: 0; height: 30px; cursor: pointer; font-size: var(--fs-md);
+  grid-template-columns: var(--lw) minmax(0, 1fr) 64px minmax(110px, 30%); }
+.rl-row:hover { background: var(--surface-2); }
+.rl-row.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.rl-row.dim { opacity: .42; }
+.rl-row.dim:hover { opacity: .8; }
+.rl-svg { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.rl-name { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; }
+.rl-tog { width: 14px; flex: 0 0 14px; border: none; background: none; padding: 0; color: var(--text-3); font-size: 11px;
+  min-height: 0; cursor: pointer; line-height: 1; }
+button.rl-tog:hover { color: var(--text); }
+.rl-n { font-weight: 550; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 2ch; }
+.rl-row.no .rl-n { font-weight: 400; color: var(--text-3); }
+.rl-row.err .rl-n { color: var(--err); }
+.rl-row.sel .rl-n { font-weight: 650; }
+.rl-kd { --kind: var(--k-graph); font-size: 9.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; line-height: 16px;
+  padding: 0 5px; border-radius: 4px; color: var(--kind); background: color-mix(in srgb, var(--kind) 13%, transparent); flex: 0 0 auto; }
+.rl-m, .rl-rt, .rl-er, .rl-wt { font-size: var(--fs-sm); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+.rl-no { font-style: italic; }
+.rl-rt { color: var(--rt-wire); font-weight: 550; }
+.rl-er { color: var(--err); }
+.rl-wt { color: var(--text-2); }
+.rl-dur { text-align: right; padding-right: 12px; font-variant-numeric: tabular-nums; color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; }
+.rl-track { height: 100%; }
+.rl-row:not(.err):not(.sel):hover .rt-track b { background: var(--kind, var(--k-graph)); }
+.rl-row .rt-track b.bad { background: var(--err); }
+.rl-row.sel .rt-track b:not(.bad) { background: var(--accent); }
+.rl-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 14px; border-top: 1px solid var(--border-soft);
+  color: var(--text-3); font-size: var(--fs-xs); }
+.rl-legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.rl-sum { margin: 10px 0 4px; }
+.rl-kv { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.rl-kv > span { background: var(--surface-2); border-radius: 7px; padding: 3px 8px; font-size: var(--fs-sm); color: var(--text-2); }
+.rl-kv b { color: var(--text); font-weight: 600; }
+.rl-box { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2);
+  font-size: var(--fs-sm); color: var(--text-2); margin-bottom: 10px; }
+.rl-route { display: flex; gap: 8px; align-items: baseline; color: var(--text-3); }
+.rl-route.on { color: var(--text); }
+.rl-route.on .rl-dot { color: var(--rt-wire); }
+.rl-handled { font-size: var(--fs-sm); color: var(--text-2); margin-bottom: 10px; }
+.rl-sum > .rl-er { display: block; margin-bottom: 10px; }
+.rl-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+
 @media (max-width: 760px) {
   .rt-split { grid-template-columns: 1fr; height: max(460px, calc(100dvh - 120px)); }
   .rt-grip { display: none; }
@@ -4697,6 +4748,9 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
   .rt.rt-has-step .rt-step { display: block; }
   .rt-back { display: inline-flex; }
   .rt-axis, .rt-row { grid-template-columns: minmax(0, 1fr) 62px 64px; }
+  .rl-row { grid-template-columns: var(--lw) minmax(0, 1fr) 56px 56px; }
+  .rl-axis { grid-template-columns: minmax(0, 1fr) 56px 56px; }
+  .rl-m, .rl-wt { display: none; }
   .rt-pv { display: none; }
   .rt-tools .rt-search { flex: 1 1 100%; max-width: none; order: 9; }
 }
@@ -4907,37 +4961,12 @@ body.nodots .wires.dflinks path.dfflow { display: none; }
 .kbchunkrow, .kbhit, .kbcite-row { background: var(--card); --well: var(--surface); }
 .ax-error { background: var(--st-err-soft); }
 
-/* ── a run's Workflow: the canvas and the step it is on ────────────────
-   The step panel is always beside the canvas (a sheet on a phone): what
-   an op did is never in a side panel the user had to have opened. */
-#traces.workflow .wfsplit { flex: 1; min-height: 0; display: grid; margin: 0 -20px;
-  grid-template-columns: minmax(0, 1fr) clamp(320px, 30vw, 460px); border-top: 1px solid var(--border); }
-#traces.workflow .wfsplit #stage { margin: 0; border-top: none; min-height: 0; height: 100%; }
-.wfstep { position: relative; min-width: 0; overflow-y: auto; padding: 14px 16px 24px;
-  border-left: 1px solid var(--border); background: var(--surface); }
-.wfstep .wfbar { display: none; }   /* always there on a desktop: only the phone's sheet closes */
-.wfarrow { min-width: 28px; padding: 0 6px; font-size: 11px; }
-.wfstep .wfhint { margin-top: 24px; }
-.wfexecs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 2px 32px 12px 0; }
+/* a station's executions on the run line (runlineview.js) */
+.wfexecs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 8px 0 0; }
 .wfexecs .pill { cursor: pointer; border: none; min-height: 24px; font: 500 var(--fs-xs) var(--mono); }
 .wfexecs .pill:hover { background: var(--surface-3); }
 .wfexecs .pill.on { background: var(--accent-soft); color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--accent); }
 .wfexecs .pill.err { color: var(--err); }
-.wfstepper { display: inline-flex; align-items: center; gap: 2px; }
-.wfstepat { min-width: 96px; text-align: center; font-size: var(--fs-sm); color: var(--text-2); font-variant-numeric: tabular-nums; }
-@media (max-width: 760px) {
-  #traces.workflow .wfsplit { grid-template-columns: minmax(0, 1fr); margin: 0 -12px; }
-  .wfstep { display: none; }
-  .wfstep.open { display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; max-height: 64vh;
-    border-left: none; border-radius: 16px 16px 0 0; box-shadow: var(--sh-3); outline: 1px solid var(--float-edge); }
-  .wfstepat { min-width: 0; }
-  .wfstep.open { padding-top: 0; }
-  .wfstep .wfbar { display: flex; align-items: center; justify-content: flex-end; position: sticky; top: 0; z-index: 3;
-    margin: 0 -16px 8px; padding: 6px 8px; background: var(--surface); }
-  .wfstep .wfgrip { position: absolute; left: 50%; top: 8px; width: 36px; height: 4px; margin-left: -18px;
-    border-radius: 2px; background: var(--surface-3); }
-}
-
 
 /* Inspect, n8n's order: the op's last Input, its settings, its last Output */
 #inspector section.lastio > .stitle { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }

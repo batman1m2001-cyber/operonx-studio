@@ -245,7 +245,7 @@ const RunView = (() => {
       line.append(pill(`${errs} error${errs > 1 ? "s" : ""}`, null, "p-bad"));
       const next = Icons.button("right", "Next error", "small danger", "Select the failed ops one by one");
       next.classList.add("verdict-next");
-      next.onclick = () => (mode === "workflow" ? walkErrors() : nextTreeError());
+      next.onclick = () => (mode === "workflow" ? RunLineView.nextError() : nextTreeError());
       line.append(next);
     }
     head.append(line);
@@ -309,7 +309,7 @@ const RunView = (() => {
     ["conversation", "Conversation", "Chat", "What was said, in order: a line opens the step that produced it"],
     ["tree", "Tree", "Tree", "What ran for what, in order"],
     ["timeline", "Timeline", "Timeline", "Every step by when it started"],
-    ["workflow", "Workflow", "Workflow", "The flow with this run painted on it"],
+    ["workflow", "Workflow", "Workflow", "The flow as this run went, beside the step"],
   ];
   const TREE_VIEWS = new Set(["conversation", "tree", "timeline"]);
   let switchEl = null;
@@ -423,6 +423,10 @@ const RunView = (() => {
 
   /* an error's execution: its tree row by trace id, else its op */
   function focusExec(e, mode) {
+    if (RunLineView.current()) {
+      if (!(e.op_id && RunLineView.selectId(e.op_id))) RunLineView.selectOp(e.name || e.op);
+      return;
+    }
     if (mode !== "workflow" && e.op_id && RunTree.selectId(e.op_id)) return;
     focusOp(e.name || e.op);
   }
@@ -437,12 +441,7 @@ const RunView = (() => {
 
   /* select an op wherever the run is showing — a tree row, or a card */
   function focusOp(op) {
-    if (state.workflowOn) {
-      let found = [...state.rendered.values()].find(x => x.node.name === op);
-      if (!found) { expandAll(true); found = [...state.rendered.values()].find(x => x.node.name === op); }
-      if (found) { select(found.key); centerOn(found); }
-      return;
-    }
+    if (RunLineView.current()) { RunLineView.selectOp(op); return; }
     RunTree.selectOp(op);
   }
 
@@ -459,39 +458,6 @@ const RunView = (() => {
     const node = irNodeByName(roll.op);
     if (node && node.is_gen && roll.total_ms >= 0.5 * totalMs) return true;
     return roll.count <= 2 && totalMs > 0 && roll.total_ms >= 0.8 * totalMs;
-  }
-
-  /* The lens control: which one thing the cards show. */
-  function lensBar() {
-    const bar = el("span", "tlmodes lensbar");
-    bar.setAttribute("role", "radiogroup");
-    bar.setAttribute("aria-label", "What the cards show");
-    const current = state.lens || "path";
-    for (const [key, label, title] of LENSES) {
-      const b = el("button", key === current ? "on" : "", label);
-      b.type = "button";
-      b.title = title;
-      b.setAttribute("role", "radio");
-      b.setAttribute("aria-checked", String(key === current));
-      b.onclick = () => {
-        state.lens = key;
-        store("lens", key);
-        for (const x of bar.children) {
-          x.classList.toggle("on", x === b);
-          x.setAttribute("aria-checked", String(x === b));
-        }
-        render();
-        // errors and cost point at a few ops: bring the first into view
-        if (key === "errors" || key === "cost") {
-          const card = document.querySelector(key === "errors" ? "#nodes .node.errorlit" : "#nodes .node .badge.cost");
-          const name = card && (card.closest(".node") || card).dataset.name;
-          const it = name && [...state.rendered.values()].find(x => x.node.name === name);
-          if (it) centerOn(it);
-        }
-      };
-      bar.append(b);
-    }
-    return bar;
   }
 
   /* The timeline strip: the run's turns as segments on one time axis.
@@ -790,11 +756,7 @@ const RunView = (() => {
     return sec;
   }
 
-  function render() {
-    if (state.workflowOn) { window.render(); }
-  }
-
   state.lens = recall("lens", "path");
   if (!LENSES.some(([k]) => k === state.lens)) state.lens = "path";   // a retired lens (errors, values)
-  return {header, conversation, syncViews, pill, copyId, lensBar, timeline, anomalies, rank, dots, compare, money, focusOp, focusExec, background, LENSES};
+  return {header, conversation, syncViews, pill, copyId, timeline, anomalies, rank, dots, compare, money, focusOp, focusExec, background, LENSES};
 })();
