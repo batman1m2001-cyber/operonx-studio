@@ -1777,10 +1777,12 @@
       node.append(el("span", null, item.pre && item.post
         ? `Context compacted · ${fmt.tokens(item.pre)} → ${fmt.tokens(item.post)} tokens` : "Context compacted"));
       A.nodes.set(item.seq, node);
-    } else if (item.kind === "note") { node = el("div", "ax-note", item.text || ""); A.nodes.set(item.seq, node); }
+    } else if (item.kind === "saved") { node = renderSaved(item); A.nodes.set(item.seq, node); }
+    else if (item.kind === "note") { node = el("div", "ax-note", item.text || ""); A.nodes.set(item.seq, node); }
     else if (item.kind === "turn_end") {
       switchDivider(item);
-      node = renderEnd(item);
+      // a save that worked ends on its "saved" line: nothing to copy or retry
+      node = item.save && item.state === "done" ? el("div") : renderEnd(item);
       for (const g of replyEl.querySelectorAll(".ax-act")) paintActivity(g);
       if (turnEl && turnEl._prog) { turnEl._prog.ended = true; paintProg(turnEl._prog); }
       actEl = null;
@@ -1962,7 +1964,7 @@
     meterRing.style.setProperty("--pct", String(Math.min(100, Math.round(pct * 100))));
     meterText.textContent = `${shown}%`;
     meter.title = (u.context_window ? `Context ${fmt.tokens(u.context_tokens || 0)} of ${fmt.tokens(u.context_window)} · ${shown}%`
-      : "Context") + (pct >= 0.8 ? " — compact it to keep going" : "") + "  ( /usage )";
+      : "Context") + (pct >= 0.8 ? " — save it to the project and start fresh" : "") + "  ( /usage )";
     if (u.rate && u.rate.status) takeRate({...u.rate, at: u.rate.at || null}, true);
     const p = pillText();
     modelPick.replaceChildren(el("span", "ax-model-dot"),
@@ -2032,7 +2034,7 @@
    * Default (what Claude Code picks, and what that resolved to last), the
    * models with what each is good for and its window, and the effort
    * levels. A conversation already bigger than a model's window is warned
-   * before switching, with Compact first. */
+   * before switching, with Save first. */
   const EFFORT_LABEL = {low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max"};
   const EFFORT_SUB = {low: "fastest, least thinking", medium: "", high: "", xhigh: "", max: "slowest, most thinking"};
 
@@ -2080,14 +2082,14 @@
       const over = f.window && used > f.window;
       if (over) {
         b.classList.add("warn");
-        b.append(el("span", "ax-opt-warn", `This conversation is ${fmt.tokens(used)}, over its ${fmt.tokens(f.window)} window — compact first`));
+        b.append(el("span", "ax-opt-warn", `This conversation is ${fmt.tokens(used)}, over its ${fmt.tokens(f.window)} window — save it first`));
       }
       b.onclick = async () => {
         pop.hidden = true;
         if (over) {
-          if (!confirm(`This conversation is ${fmt.tokens(used)} tokens, more than ${label}'s ${fmt.tokens(f.window)} window.\n\nCompact it first, then switch?`)) return;
+          if (!confirm(`This conversation is ${fmt.tokens(used)} tokens, more than ${label}'s ${fmt.tokens(f.window)} window.\n\nSave it to the project and start fresh, then switch?`)) return;
           A.afterCompact = () => setModel(value);
-          doCompact();
+          doSave();
           return;
         }
         await setModel(value);
@@ -2189,10 +2191,10 @@
       r.append(c);
     }
     const acts = el("div", "ax-pop-acts");
-    const compact = tbtn("Compact", "ax-btn", "compress");
+    const compact = tbtn("Save & start fresh", "ax-btn", "archive");
     compact.disabled = !(s && s.claude_session) || !!A.running;
-    compact.title = "Summarize the conversation so far, to free the context";
-    compact.onclick = () => { pop.hidden = true; doCompact(); };
+    compact.title = "Write open work and decisions to the project, then start a fresh session from them";
+    compact.onclick = () => { pop.hidden = true; doSave(); };
     const exp = tbtn("Export", "ax-btn ax-btn-quiet", "download");
     exp.disabled = !A.items.length;
     exp.onclick = () => { pop.hidden = true; exportMarkdown(); };
@@ -2311,10 +2313,10 @@
       box.append(c);
     }
     const acts = el("div", "ax-pop-acts");
-    const compact = tbtn("Compact", "ax-btn" + ((u.context_window && (u.context_tokens || 0) / u.context_window >= 0.95) ? " primary" : ""), "compress");
+    const compact = tbtn("Save & start fresh", "ax-btn" + ((u.context_window && (u.context_tokens || 0) / u.context_window >= 0.95) ? " primary" : ""), "archive");
     compact.disabled = !(s && s.claude_session) || !!A.running;
-    compact.title = "Summarize the conversation so far, to free the context";
-    compact.onclick = () => { pop.hidden = true; doCompact(); };
+    compact.title = "Write open work and decisions to the project, then start a fresh session from them";
+    compact.onclick = () => { pop.hidden = true; doSave(); };
     acts.append(compact);
     box.append(acts);
 
@@ -2818,7 +2820,7 @@
   function paintStatus() {
     const r = A.running;
     if (!r) return;
-    const words = {starting: "Starting", thinking: "Thinking", writing: "Writing", compacting: "Compacting the conversation",
+    const words = {starting: "Starting", thinking: "Thinking", writing: "Writing", saving: "Saving to the project", compacting: "Compacting the conversation",
       stopping: "Stopping", waiting: "Waiting for a background task"};
     statusText.textContent = r.step && /^(thinking|tool|writing)$/.test(r.state) ? r.step
       : r.state === "tool" && r.detail ? r.detail
@@ -2989,12 +2991,39 @@
     queued.append(x);
   }
 
-  async function doCompact() {
+  /* Save & start fresh (ENGINEERING_ENV_PLAN E6): the conversation writes its open work to the board and
+   * its decisions to the BRD, leaves a handoff, and the next turn starts a fresh session from them. */
+  async function doSave() {
     if (!A.session || !A.session.claude_session || A.running) return;
     try {
-      const got = await call(`/api/assistant/sessions/${A.session.id}/compact`, {});
+      const got = await call(`/api/assistant/sessions/${A.session.id}/save`, {});
       follow(got.turn, 0);
     } catch (err) { toast(err.message, true); }
+  }
+
+  /* One line for what a save wrote; the handoff folds under it. */
+  function renderSaved(item) {
+    const node = el("div", "ax-saved");
+    const writes = item.writes || [];
+    const names = writes.map((w) => w.kind === "card" ? w.card : String(w.path || "").split("/").pop());
+    const head = el("div", "ax-divider");
+    head.append(el("span", null, "Saved to the project" + (names.length ? " · " + [...new Set(names)].join(", ") : "")));
+    node.append(head);
+    if (item.handoff) {
+      const d = el("details", "ax-saved-handoff");
+      d.append(el("summary", null, "Handoff"), el("div", "ax-note", item.handoff));
+      node.append(d);
+    }
+    return node;
+  }
+
+  /* New conversation: the one being left is saved behind it when its session still holds unsaved work. */
+  function newConversation() {
+    const s = A.session;
+    if (s && s.claude_session && !A.running)
+      call(`/api/assistant/sessions/${s.id}/save`, {})
+        .then(() => toast("Saving the last conversation to the project"), () => {});
+    newSession();
   }
 
   function exportMarkdown() {
@@ -3007,6 +3036,7 @@
       else if (it.kind === "changes") out.push("```diff", it.diff || "", "```", "");
       else if (it.kind === "error") out.push(`> **Error:** ${it.text}`, "");
       else if (it.kind === "compact") out.push("---", "*Context compacted*", "---", "");
+      else if (it.kind === "saved") out.push("---", "*Saved to the project*", "---", "");
     }
     const blob = new Blob([out.join("\n")], {type: "text/markdown"});
     const a = el("a");
@@ -3021,9 +3051,9 @@
   /* ── slash commands ───────────────────────────────────────────────── */
 
   const COMMANDS = [
-    ["/new", "Start a new conversation", () => newSession()],
+    ["/new", "Start a new conversation", () => newConversation()],
     ["/sessions", "Show your conversations", () => { root.classList.add("side-open"); refreshList(); search.focus(); }],
-    ["/compact", "Summarize the conversation to free the context", () => doCompact()],
+    ["/save", "Save open work and decisions to the project, then start fresh", () => doSave()],
     ["/model", "Choose the model: /model fable | opus | sonnet | haiku | default | claude-…", async (arg) => {
       const v = (arg || "").trim().toLowerCase();
       await loadCatalog();
@@ -3696,7 +3726,7 @@
     if (A.mode === "focus" || A.mode === "sheet") placement.leave();
     else if (W.oxSide) W.oxSide.show("inspect");
   };
-  bNew.onclick = () => { newSession(); input.focus(); };
+  bNew.onclick = () => { newConversation(); input.focus(); };
   // a phone opens the full sheet; a tablet, the side panel over the content
   askbar.onclick = () => (PHONE.matches || !W.oxSide ? placement.openSheet() : W.oxSide.show("assistant"));
 

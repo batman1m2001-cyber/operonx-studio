@@ -42,7 +42,7 @@ around it:
 Client events (``i`` is the event's index, the cursor):
 
     {"t": "turn",  "turn": id, "session": sid}
-    {"t": "state", "state": "starting|thinking|writing|tool|waiting|compacting", "detail": "…"}
+    {"t": "state", "state": "starting|saving|thinking|writing|tool|waiting|compacting", "detail": "…"}
     {"t": "item",  "item": {...}}               an item created or replaced whole
     {"t": "delta", "seq": n, "text": "…"}       more text for item n
     {"t": "usage", "usage": {...}}              the session's usage, updated
@@ -149,6 +149,38 @@ _LIVE_MAX = 8 * 1024 * 1024      # a running call's output past this is read fro
 _LIVE_TAIL = 256 * 1024
 _EST_MIN_MS = 10_000             # a call shorter than this never gets an estimate (D2)
 _EST_KEEP = 400                  # past call times kept in the store's meta
+
+
+#: A turn that starts with more context than this saves to the project first and goes on in a fresh
+#: session (ENGINEERING_ENV_PLAN E6); OPERONX_STUDIO_SAVE_AT overrides it.
+SAVE_AT = 100_000
+HANDOFF_MAX = 1024
+SAVE_PROMPT = (
+    "This conversation is about to start fresh: only what you save to the project now, and a short handoff, "
+    "carry over. Do it now, without asking anyone:\n"
+    "1. Open work: every task not finished is a board card (board_card; board_move it to `needs you` with the "
+    "question when it waits on the owner). Update the cards you worked on.\n"
+    "2. What the owner decided or asked for that the code does not show: the requirement it changes in "
+    "docs/brd/requirements/, or one entry in docs/brd/knowledge.md: `### K<n> · title · decision` (or "
+    "pattern, pitfall, replaced), then `where:` the files and the why in a line or two.\n"
+    "3. Then reply with the handoff only, at most 1000 characters, no preamble: the active card, the files "
+    "touched, the open question.\n"
+    "Save nothing the code, the board or git already hold. Without a project (no docs/brd), only the handoff."
+)
+_SAVE_WRITES = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+_SAVE_CARDS = {"mcp__studio__board_card", "mcp__studio__board_move", "mcp__studio__board_cycle"}
+
+
+def save_at() -> int:
+    try:
+        return int(os.environ.get("OPERONX_STUDIO_SAVE_AT") or SAVE_AT)
+    except ValueError:
+        return SAVE_AT
+
+
+def _clip_bytes(text: str, limit: int) -> str:
+    raw = text.encode("utf-8")
+    return text if len(raw) <= limit else raw[: limit - 3].decode("utf-8", "ignore").rstrip() + "…"
 
 
 def turn_limit(name: str, default: float) -> float:
@@ -328,7 +360,7 @@ CREATE TABLE IF NOT EXISTS items (
 """
 
 _SESSION_FIELDS = ("title", "title_source", "updated", "archived", "model", "claude_session", "usage",
-                   "running_turn", "preview", "effort", "claude_home")
+                   "running_turn", "preview", "effort", "claude_home", "handoff")
 _TURN_FIELDS = ("claude_after", "state", "ended", "usage", "cost", "hidden", "card")
 
 
@@ -361,6 +393,9 @@ class ChatStore:
             # from before owners get the column, and adopt() gives them one
             if "owner" not in cols:
                 self._db.execute("ALTER TABLE sessions ADD COLUMN owner TEXT")
+            # what a save left for the next conversation (ENGINEERING_ENV_PLAN E6)
+            if "handoff" not in cols:
+                self._db.execute("ALTER TABLE sessions ADD COLUMN handoff TEXT")
             self._db.execute("CREATE INDEX IF NOT EXISTS sessions_by_owner ON sessions (owner, scope, archived, updated)")
 
     def _q(self, sql: str, args: Iterable[Any] = ()) -> List[sqlite3.Row]:
@@ -416,6 +451,12 @@ class ChatStore:
     def session(self, sid: str) -> Optional[Dict[str, Any]]:
         rows = self._q("SELECT * FROM sessions WHERE id = ?", (sid,))
         return self._session(rows[0]) if rows else None
+
+    def last_handoff(self, scope: str) -> str:
+        """The newest handoff a save left in *scope*: where the next conversation picks up."""
+        rows = self._q("SELECT handoff FROM sessions WHERE scope = ? AND handoff IS NOT NULL AND handoff != ''"
+                       " ORDER BY updated DESC LIMIT 1", (scope,))
+        return str(rows[0]["handoff"]) if rows else ""
 
     def sessions(self, scope: Optional[str] = None, *, owner: str, q: str = "", archived: Optional[bool] = False,
                  limit: int = 200) -> List[Dict[str, Any]]:
@@ -670,7 +711,10 @@ class Turn:
     effort: Optional[str] = None
     extra_mcp: Dict[str, Any] = field(default_factory=dict)   # a project's own tool servers
     account: str = "machine"              # the sign-in this turn runs under (chat.account_key)
-    reseed: bool = False                  # a fresh Claude session, seeded with a summary
+    reseed: bool = False                  # a fresh Claude session after a sign-in switch
+    save_first: bool = False              # past SAVE_AT: save to the project, then go on fresh (E6)
+    seed: str = ""                        # where the project is, for a fresh session (projectboard.seed)
+    save_cost: float = 0.0
     cwd: Optional[str] = None
     card: str = ""                        # the board card this turn works, from its steps call (WORKSPACE_PLAN W1.3)
     kill_timer: Optional[asyncio.TimerHandle] = None
@@ -687,6 +731,22 @@ class Turn:
     edited: List[str] = field(default_factory=list)       # the files its Edit / Write calls changed (absolute)
     stamps: Dict[str, Dict[str, float]] = field(default_factory=dict)  # step title → {started, ended}
     step: str = ""                        # "Step 3 of 5 · <title>", the status line's words
+
+
+def _saved_write(name: str, inputs: Dict[str, Any], cwd: Optional[Path]) -> Optional[Dict[str, str]]:
+    """What one call of a save wrote: a file (relative to the project) or a board card."""
+    if name in _SAVE_WRITES and inputs.get("file_path"):
+        path = Path(str(inputs["file_path"]))
+        if cwd is not None:
+            try:
+                path = path.resolve().relative_to(Path(cwd).resolve())
+            except ValueError:
+                pass
+        return {"kind": "file", "path": path.as_posix()}
+    if name in _SAVE_CARDS:
+        what = str(inputs.get("card") or inputs.get("cycle") or inputs.get("title") or "").strip()
+        return {"kind": "card", "card": what} if what else None
+    return None
 
 
 def _tool_label(name: str, inputs: Dict[str, Any], cwd: Optional[str] = None) -> str:
@@ -868,14 +928,19 @@ class Relay:
               extra_mcp: Optional[Dict[str, Any]] = None, owner: Optional[str] = None,
               on_end: Optional[List[Any]] = None, claude: Optional[Dict[str, Any]] = None,
               reach: Optional[str] = None, deny: Optional[List[str]] = None,
-              wrap_env: Optional[Any] = None) -> Turn:
+              wrap_env: Optional[Any] = None, seed: str = "") -> Turn:
         """Begin a turn in session *sid*; returns at once (call from a loop).
 
         ``fork_from`` is the Claude session to continue: ``""`` means the
         session's latest, ``None`` a fresh conversation. ``owner`` is who
         asked; ``on_end`` callables run once the turn has ended (the app
         revokes the turn's agent token there). ``claude`` is their sign-in
-        (``{"home": dir, "machine": bool}``); none: the single-login one."""
+        (``{"home": dir, "machine": bool}``); none: the single-login one.
+
+        ``kind="save"`` saves the conversation to the project and ends it:
+        the next turn starts fresh. A message past :func:`save_at` does the
+        same first, then goes on fresh; a fresh session is seeded with
+        ``seed`` (where the project is) and the newest handoff."""
         sess = self.store.session(sid)
         if sess is None:
             raise KeyError(sid)
@@ -894,11 +959,14 @@ class Relay:
         reseed = bool(before) and (sess.get("claude_home") or "machine") != account and kind == "message"
         if reseed:
             before = None
+        used = int((sess.get("usage") or {}).get("context_tokens") or 0)
+        save_first = kind == "message" and bool(before) and fork_from == "" and used > save_at()
         turn = Turn(id=uuid.uuid4().hex[:16], session=sid, scope=sess["scope"], kind=kind,
                     next_seq=self.store.next_seq(sid), fresh=asyncio.Event(), model=sess.get("model"),
                     requested=sess.get("model"), effort=sess.get("effort"), extra_mcp=dict(extra_mcp or {}),
                     account=account, reseed=reseed, cwd=str(cwd) if cwd else None, owner=owner,
-                    on_end=list(on_end or []), claude=claude, env=env, reach=reach, deny=list(deny or []))
+                    on_end=list(on_end or []), claude=claude, env=env, reach=reach, deny=list(deny or []),
+                    save_first=save_first, seed=seed)
         self.turns[turn.id] = turn
         refs = list(attachments or [])
         self.store.add_turn(turn.id, sid, message=message, kind=kind, claude_before=before, attachments=refs)
@@ -953,13 +1021,22 @@ class Relay:
             prompt = _chat.knowledge()
             if context:
                 prompt = f"{prompt}\n\n{context}" if prompt else context
-            if turn.reseed:
-                summary = await self._summarize(turn.session, turn.id, turn.env)
-                if summary:
-                    prompt += ("\n\n# This conversation so far\nIt began under another Claude sign-in, so its "
-                               "earlier session can't be resumed. What was said, in summary:\n" + summary)
-            # a message (and its images) goes in on stdin; /compact, a word,
-            # stays an argument
+            mode = (turn.reach or os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full")).strip().lower()
+            if mcp:
+                # the studio's own tools, and the project's own servers (its
+                # .mcp.json) beside them
+                servers = {**{k: v for k, v in turn.extra_mcp.items() if k != "studio"}, "studio": mcp}
+                config = self._mcp_file(turn, {"mcpServers": servers})
+            if before and (turn.kind == "save" or turn.save_first):
+                handoff = await self._save(turn, binary, before, cwd, prompt, config, mode)
+                if turn.kind == "save" or turn.stopping:
+                    final = "done" if handoff is not None else "failed"
+                    return
+                if handoff is not None:
+                    before = None    # saved: the message goes on in a fresh session
+            if not before:
+                prompt += self._seed(turn)
+            # a message (and its images) goes in on stdin
             stdin = self._stdin_message(turn, message, attachments or []) if turn.kind == "message" else None
             cmd = [binary, "-p", *(["--input-format", "stream-json"] if stdin is not None else [message]),
                    "--output-format", "stream-json", "--verbose",
@@ -971,11 +1048,7 @@ class Relay:
                 cmd += ["--model", model]
             if turn.effort and turn.kind == "message":
                 cmd += ["--effort", turn.effort]
-            if mcp:
-                # the studio's own tools, and the project's own servers (its
-                # .mcp.json) beside them
-                servers = {**{k: v for k, v in turn.extra_mcp.items() if k != "studio"}, "studio": mcp}
-                config = self._mcp_file(turn, {"mcpServers": servers})
+            if config is not None:
                 cmd += ["--mcp-config", str(config)]
                 # Only the studio's own tools: not the host's personal
                 # connectors (mail, drive, calendar), which the studio's agent
@@ -988,13 +1061,15 @@ class Relay:
             hooks = self._live_calls(turn)
             if hooks is not None:
                 cmd += ["--settings", str(hooks)]
-            mode = (turn.reach or os.environ.get("OPERONX_STUDIO_CHAT_MODE", "full")).strip().lower()
             if mode != "read":
                 # a card the assistant takes is worked in its worktree, outside the project: without
                 # this its Read and Edit are refused there (tipcalc m1/C6 fell back to the shell)
                 trees = _chat.card_worktrees()
                 if trees is not None:
                     cmd += ["--add-dir", str(trees)]
+            # the guide knowledge.md points at lives in the studio package, outside the project: without
+            # this its pages are refused (E6 gate 1, run 1: "file access to them wasn't granted")
+            cmd += ["--add-dir", str(_chat.GUIDE)]
             cmd += _chat._mode_args(mode)
             # --allowedTools ends the flags: a project server's tools join the
             # list where the reach allows more than reading
@@ -1310,7 +1385,7 @@ class Relay:
             if sub == "init":
                 turn.claude_after = event.get("session_id")
                 turn.model = event.get("model") or turn.model
-                self._state(turn, "compacting" if turn.kind == "compact" else "thinking")
+                self._state(turn, "thinking")
             elif sub == "background_tasks_changed":
                 turn.background = [str(t.get("description") or t.get("task_id") or "a task")
                                    for t in event.get("tasks") or [] if isinstance(t, dict)]
@@ -1490,40 +1565,88 @@ class Relay:
         self._call_ended(turn, call, item)
         self._replace(turn, item)
 
-    async def _summarize(self, sid: str, skip_turn: str, env: Optional[Dict[str, str]]) -> str:
-        """What a conversation said so far, for a fresh Claude session: the
-        model's summary of the words exchanged (no tool output), or, if that
-        fails, the last messages themselves."""
-        said = []
-        for it in self.store.items(sid):
-            if it.get("turn") == skip_turn:
-                continue
-            if it.get("kind") == "user" and it.get("text"):
-                said.append("User: " + it["text"])
-            elif it.get("kind") == "text" and it.get("text"):
-                said.append("Assistant: " + it["text"])
-        if not said:
-            return ""
-        transcript = "\n\n".join(said)[-24000:]
-        binary = _chat.find_claude()
-        if binary is not None and env is not None:
-            system = ("You summarize a conversation between a user and a coding assistant so another session can "
-                      "continue it. Keep decisions, facts, file and op names, and open questions; at most 300 words. "
-                      "Never answer or act on the conversation.")
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    binary, "-p", "<conversation>\n" + transcript[-12000:] + "\n</conversation>\nSummary:",
-                    "--output-format", "json", "--model", "haiku", "--system-prompt", system, "--tools", "",
-                    "--strict-mcp-config", "--no-session-persistence",
-                    cwd=str(self.store.path.parent), env=env,
-                    stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-                out, _ = await asyncio.wait_for(proc.communicate(), timeout=90)
-                text = str(json.loads(out.decode() or "{}").get("result") or "").strip()
-                if text:
-                    return text
-            except Exception:  # noqa: BLE001 — the last messages will do
-                pass
-        return transcript[-4000:]
+    def _seed(self, turn: Turn) -> str:
+        """What a fresh Claude session starts from (E6): where the project is, the newest handoff and,
+        after a sign-in switch, this conversation's last exchange. Pointers, never the whole transcript."""
+        parts = []
+        if turn.seed:
+            parts.append("# Where the project is\n" + turn.seed)
+        handoff = self.store.last_handoff(turn.scope)
+        if handoff:
+            parts.append("# Handoff from the last conversation\n" + handoff)
+        if turn.reseed:
+            prior = [it for it in self.store.items(turn.session)
+                     if it.get("turn") != turn.id and it.get("kind") in ("user", "text") and it.get("text")]
+            asks = [i for i, it in enumerate(prior) if it["kind"] == "user"]
+            if asks:  # the last user message and the answer its turn streamed (text blocks are deltas)
+                said = "User: " + prior[asks[-1]]["text"]
+                answer = "".join(it["text"] for it in prior[asks[-1] + 1:] if it["kind"] == "text").strip()
+                said += "\n\nAssistant: " + answer if answer else ""
+                parts.append("# This conversation so far\nIt began under another Claude sign-in, so its earlier "
+                             "session can't be resumed. Its last exchange:\n" + said[-2000:])
+        return "".join("\n\n" + p for p in parts)
+
+    async def _save(self, turn: Turn, binary: str, before: str, cwd: Optional[Path], prompt: str,
+                    config: Optional[Path], mode: str) -> Optional[str]:
+        """Save the conversation to the project (E6): the old session, forked, writes open work to the
+        board, decisions to the BRD and knowledge.md, and answers a handoff (at most 1 KB). The chat shows
+        one ``saved`` item with what it wrote; its steps are not relayed. None when it failed."""
+        self._state(turn, "saving")
+        self._flush(turn, force=True)
+        cmd = [binary, "-p", SAVE_PROMPT, "--output-format", "stream-json", "--verbose",
+               "--append-system-prompt", prompt, "--resume", before, "--fork-session"]
+        model = turn.model or os.environ.get("OPERONX_STUDIO_CHAT_MODEL")
+        if model:
+            cmd += ["--model", model]
+        if config is not None:
+            cmd += ["--mcp-config", str(config)]
+            if os.environ.get("OPERONX_STUDIO_CHAT_STRICT_MCP", "on").lower() not in ("off", "0", "false"):
+                cmd.append("--strict-mcp-config")
+        if turn.deny:
+            cmd += ["--disallowedTools", *turn.deny]
+        cmd += ["--add-dir", str(_chat.GUIDE), *_chat._mode_args(mode)]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, cwd=str(cwd) if cwd else None, env=turn.env, stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=_chat._LINE_LIMIT,
+                start_new_session=True)
+        except OSError as exc:
+            self._item(turn, "error", text=f"Could not save to the project: {exc}", retry=True)
+            return None
+        turn.proc = proc
+        writes: List[Dict[str, str]] = []
+        result: Optional[Dict[str, Any]] = None
+        assert proc.stdout is not None
+        try:
+            async for raw in proc.stdout:
+                try:
+                    event = json.loads(raw)
+                except ValueError:
+                    continue
+                if event.get("type") == "assistant":
+                    for block in (event.get("message") or {}).get("content") or []:
+                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                            got = _saved_write(str(block.get("name") or ""), block.get("input") or {}, cwd)
+                            if got and got not in writes:
+                                writes.append(got)
+                elif event.get("type") == "result":
+                    result = event
+        except ValueError:
+            pass    # a line past the limit: the result decides
+        err = (await proc.stderr.read()).decode("utf-8", "replace") if proc.stderr is not None else ""
+        await proc.wait()
+        turn.proc = None
+        if result is None or result.get("is_error"):
+            if not turn.stopping:
+                said = str((result or {}).get("result") or err.strip()[-400:] or f"exit {proc.returncode}")
+                self._item(turn, "error", text="Saving to the project failed: " + said, retry=True)
+            return None
+        turn.save_cost = float(result.get("total_cost_usd") or 0)
+        self._usage(turn, result=result, compacted=0 if turn.kind == "save" else None)
+        handoff = _clip_bytes(str(result.get("result") or "").strip(), HANDOFF_MAX)
+        self.store.update_session(turn.session, handoff=handoff)
+        self._item(turn, "saved", writes=writes, handoff=handoff, cost=turn.save_cost)
+        return handoff
 
     def _learn(self, turn: Turn, result: Dict[str, Any]) -> None:
         """What the CLI resolved the asked-for model to, and its window: the
@@ -1566,9 +1689,13 @@ class Relay:
         if turn.stopping:
             state = "stopped"
         ms = round((time.monotonic() - turn.started) * 1000)
+        if turn.save_cost and turn.kind != "save":
+            turn.usage["cost"] = round(float(turn.usage.get("cost") or 0) + turn.save_cost, 6)
+        elif turn.kind == "save":
+            turn.usage["cost"] = turn.save_cost or None
         self._item(turn, "turn_end", state=state, ms=ms, cost=turn.usage.get("cost"),
                    context=turn.usage.get("context"), model=turn.model, effort=turn.effort,
-                   tokens=turn.usage.get("tokens"))
+                   tokens=turn.usage.get("tokens"), **({"save": True} if turn.kind == "save" else {}))
         turn.state = state
         turn.done = True
         turn.ended = time.monotonic()
@@ -1579,6 +1706,8 @@ class Relay:
             # a stopped turn still happened: the next one continues from it
             update["claude_session"] = turn.claude_after
             update["claude_home"] = turn.account
+        elif turn.kind == "save" and state == "done":
+            update["claude_session"] = None     # saved: the next turn starts fresh, from the handoff
         if texts:
             update["preview"] = re.sub(r"\s+", " ", texts[-1]["text"]).strip()[:160]
         self.store.update_session(turn.session, **update)

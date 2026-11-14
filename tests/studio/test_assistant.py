@@ -121,6 +121,18 @@ if msg == "/compact":
           "usage": {}, "num_turns": 0})
     sys.exit(0)
 
+if msg.startswith("This conversation is about to start fresh"):
+    # a save (E6): a card and a knowledge entry, then the handoff
+    emit({"type": "system", "subtype": "init", "session_id": sid, "model": model})
+    emit({"type": "assistant", "message": {"model": model, "content": [
+        {"type": "tool_use", "id": "toolu_s1", "name": "mcp__studio__board_card", "input": {"card": "C3", "title": "Retry the TTS"}},
+        {"type": "tool_use", "id": "toolu_s2", "name": "Edit", "input": {"file_path": os.path.join(os.getcwd(), "docs/brd/knowledge.md")}}],
+        "usage": usage}, "session_id": sid})
+    emit({"type": "result", "subtype": "success", "session_id": sid, "total_cost_usd": 0.02, "is_error": False,
+          "result": "Active: C3 retry the TTS. Files: src/tts/ops.py. Open: none. " + "x" * 2000, "usage": usage,
+          "num_turns": 2})
+    sys.exit(0)
+
 if "AUTHFAIL" in msg:
     emit({"type": "system", "subtype": "init", "session_id": sid, "model": model})
     emit({"type": "result", "subtype": "success", "session_id": sid, "is_error": True, "usage": {}, "num_turns": 0,
@@ -524,22 +536,69 @@ def test_failures_say_so_and_offer_a_retry(client, project, fake):
     assert tool["status"] == "error"
 
 
-def test_compact_is_an_item_and_resets_the_meter(client, project, fake):
+def _prompt(call: dict) -> str:
+    return call["argv"][call["argv"].index("--append-system-prompt") + 1]
+
+
+def test_save_writes_to_the_project_then_the_next_turn_starts_fresh(client, project, fake):
+    """E6: a save runs on the old session, the chat shows one saved item, the next turn starts from the handoff."""
+    board = project / "docs" / "brd" / "board.md"
+    board.parent.mkdir(parents=True)
+    board.write_text("# Board\n\n### C3 · Retry the TTS · doing\nfiles: src/tts/ops.py\n\n"
+                     "### C4 · The tile · needs you\nwhich colour?\n\n### C5 · Later · todo\n", encoding="utf-8")
     pid = _pid(client, project)
     sid = _session(client, pid)["id"]
-    assert client.post(f"/api/assistant/sessions/{sid}/compact").status_code == 400   # nothing yet
+    assert client.post(f"/api/assistant/sessions/{sid}/save").status_code == 400   # nothing yet
     _say(client, sid, "hello")
     before = client.get(f"/api/assistant/sessions/{sid}").json()["session"]["claude_session"]
-    turn = client.post(f"/api/assistant/sessions/{sid}/compact").json()["turn"]
+    turn = client.post(f"/api/assistant/sessions/{sid}/save").json()["turn"]
     events = _drain(client, turn)
-    assert "compacting" in [e["state"] for e in events if e["t"] == "state"]
+    assert "saving" in [e["state"] for e in events if e["t"] == "state"] and events[-1]["state"] == "done"
     argv = fake()[-1]["argv"]
-    assert argv[argv.index("-p") + 1] == "/compact" and argv[argv.index("--resume") + 1] == before
+    assert argv[argv.index("-p") + 1].startswith("This conversation is about to start fresh")
+    assert argv[argv.index("--resume") + 1] == before
     got = client.get(f"/api/assistant/sessions/{sid}").json()
-    compact = next(i for i in got["items"] if i["kind"] == "compact")
-    assert (compact["pre"], compact["post"]) == (22505, 2077)
-    assert got["session"]["usage"]["context_tokens"] == 2077 and got["session"]["claude_session"] != before
-    assert [i["text"] for i in got["items"] if i["kind"] == "user"] == ["hello"]   # no "/compact" bubble
+    saved = next(i for i in got["items"] if i["kind"] == "saved")
+    assert saved["writes"] == [{"kind": "card", "card": "C3"}, {"kind": "file", "path": "docs/brd/knowledge.md"}]
+    assert saved["handoff"].startswith("Active: C3") and len(saved["handoff"].encode()) <= 1024
+    assert got["session"]["claude_session"] is None and got["session"]["usage"]["context_tokens"] == 0
+    assert [i["text"] for i in got["items"] if i["kind"] == "user"] == ["hello"]   # no bubble for the save
+
+    _say(client, sid, "where are we?")
+    call = fake()[-1]
+    assert "--resume" not in call["argv"]
+    prompt = _prompt(call)
+    assert "# Handoff from the last conversation\nActive: C3" in prompt
+    assert "Board: 1 todo, 1 doing, 1 needs you" in prompt
+    assert "C3 · Retry the TTS [doing]" in prompt and "C4 · The tile [needs you] — which colour?" in prompt
+    assert "C5" not in prompt.split("# Where the project is", 1)[1]           # only doing and needs you
+    # a new conversation in the project starts from the newest handoff too
+    other = _session(client, pid)["id"]
+    _say(client, other, "hi")
+    assert "Active: C3" in _prompt(fake()[-1])
+
+
+def test_a_long_conversation_saves_first_then_goes_on_fresh(client, project, fake, monkeypatch):
+    monkeypatch.setenv("OPERONX_STUDIO_SAVE_AT", "1000")
+    pid = _pid(client, project)
+    sid = _session(client, pid)["id"]
+    _say(client, sid, "hello")                                    # the fake's turn: 1,250 tokens of context
+    before = client.get(f"/api/assistant/sessions/{sid}").json()["session"]["claude_session"]
+    _, events = _say(client, sid, "and next?")
+    save, turn = fake()[-2:]
+    assert save["argv"][save["argv"].index("--resume") + 1] == before
+    assert "--resume" not in turn["argv"] and turn["msg"] == "and next?"
+    assert "Active: C3" in _prompt(turn)
+    got = client.get(f"/api/assistant/sessions/{sid}").json()
+    kinds = [i["kind"] for i in got["items"]]
+    assert kinds.index("user") < kinds.index("saved") < len(kinds) - 1 - kinds[::-1].index("text")  # between the two answers
+    end = [i for i in got["items"] if i["kind"] == "turn_end"][-1]
+    assert end["state"] == "done" and end["cost"] == pytest.approx(0.0325)  # the save's 0.02 and the turn's
+    assert got["session"]["claude_session"].startswith("new-")
+    _say(client, sid, "and then?")                                # 1,250 again: saves again; a retry never does
+    monkeypatch.setenv("OPERONX_STUDIO_SAVE_AT", "100000")
+    _say(client, sid, "and after?")
+    assert "--resume" in fake()[-1]["argv"]
 
 
 def test_find_archive_rename_delete(client, project, fake):
@@ -900,10 +959,13 @@ def test_the_assistant_may_edit_in_the_card_worktrees(client, project, fake, tmp
     sid = _session(client, _pid(client, project))["id"]
     _say(client, sid, "take C6")
     argv = fake()[-1]["argv"]
-    assert argv[argv.index("--add-dir") + 1] == str(trees) and argv.index("--add-dir") < argv.index("--allowedTools")
-    monkeypatch.setenv("OPERONX_WORKTREES", str(tmp_path / "none"))  # no worktrees: no flag
+    dirs = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
+    assert str(trees) in dirs and argv.index("--add-dir") < argv.index("--allowedTools")
+    monkeypatch.setenv("OPERONX_WORKTREES", str(tmp_path / "none"))  # no worktrees: no flag for them
     _say(client, sid, "hello")
-    assert "--add-dir" not in fake()[-1]["argv"]
+    argv = fake()[-1]["argv"]
+    # the guide knowledge.md points at is always reachable (E6); the worktrees only when they exist
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"] == [str(__import__("operonx_studio.chat", fromlist=["GUIDE"]).GUIDE)]
 
 
 # ── A4: usage ─────────────────────────────────────────────────────────────
@@ -963,12 +1025,12 @@ def test_signing_in_the_studio_and_out_again(client, project, fake, tmp_path):
     assert (home / ".fake-credentials").is_file()
 
     # the conversation's Claude session is the machine's: a fresh one, seeded
-    # with a summary; the transcript stays whole
+    # with its last exchange; the transcript stays whole
     _say(client, sid, "and now?")
     call = _calls(fake)[-1]
     assert call["config_dir"] == str(home) and "--resume" not in call["argv"]
     prompt = call["argv"][call["argv"].index("--append-system-prompt") + 1]
-    assert "This conversation so far" in prompt and "Fake title here" in prompt       # the fake's summary
+    assert "This conversation so far" in prompt and "User: hello" in prompt and "Assistant: Hello world" in prompt
     items = client.get(f"/api/assistant/sessions/{sid}").json()["items"]
     assert [i["text"] for i in items if i["kind"] == "user"] == ["hello", "and now?"]
     _say(client, sid, "and then?")                                     # now it resumes, under the studio's
@@ -1231,12 +1293,13 @@ def test_each_person_runs_in_their_own_directory(team, project, fake, monkeypatc
             break
         time.sleep(0.05)
     assert titles and titles[-1]["config_dir"] == str(home) and titles[-1]["anthropic"] is False
-    # a conversation carried over from elsewhere is re-seeded with a summary: under B's sign-in too
+    # a conversation carried over from elsewhere is re-seeded with its last exchange: under B's sign-in too
     got = c.post("/api/assistant/import", json={"scope": "home", "session": "old-claude-9",
                                                 "log": [{"w": "me", "text": "earlier"}, {"w": "bot", "text": "yes"}]})
     _say(c, got.json()["session"]["id"], "and now?")
-    summary = [x for x in _calls(fake) if "<conversation>" in " ".join(x["argv"]) and "Summary:" in " ".join(x["argv"])]
-    assert summary and all(x["config_dir"] == str(home) for x in summary)
+    call = _calls(fake)[-1]
+    seeded = call["argv"][call["argv"].index("--append-system-prompt") + 1]
+    assert call["config_dir"] == str(home) and "User: earlier" in seeded and "--resume" not in call["argv"]
     # the Team page knows which Claude account they use, never a token
     team.use(team.admin_token)
     row = next(u for u in c.get("/api/admin/users").json()["users"] if u["username"] == "bee")

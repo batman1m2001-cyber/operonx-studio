@@ -560,6 +560,21 @@ def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def t_project_search(s: Studio, a: Dict[str, Any]) -> str:
+    try:
+        got = s.call("/project/search", q=str(a.get("query") or ""), limit=a.get("limit"))
+    except RuntimeError as exc:
+        return f"refused: {exc}"
+    return got.get("text") or "nothing matched"
+
+
+def t_project_read(s: Studio, a: Dict[str, Any]) -> str:
+    try:
+        return s.call("/project/read", path=str(a.get("path") or ""), heading=str(a.get("heading") or ""))["text"]
+    except RuntimeError as exc:
+        return f"refused: {exc}"
+
+
 def t_board_card(s: Studio, a: Dict[str, Any]) -> str:
     cid = str(a.get("card") or "")
     fields = {k: [str(x) for x in a[k]] for k in ("req", "after", "files", "done") if isinstance(a.get(k), list)}
@@ -802,6 +817,17 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                       "commits and the setup. Answer \"where are we\", \"what's next\", "
                                       "\"what needs me\" from it, never from memory; call it again after a change.",
                        "schema": _schema({"changes": _N})},
+    "project_search": {"fn": t_project_search,
+                       "description": "Search what the project knows before reading a whole document: its board, "
+                                      "BRD and requirements, plans (docs/*.md), knowledge.md (patterns, pitfalls, "
+                                      "decisions) and the operonx guide. Answers the best sections, each as its "
+                                      "heading, three lines and path:line; project_read gives one whole.",
+                       "schema": _schema({"query": _S, "limit": _N}, ["query"])},
+    "project_read": {"fn": t_project_read,
+                     "description": "One section of a project document (path relative to the project, heading as "
+                                    "project_search shows it, or its start, like C3 or K2), its sub-sections with "
+                                    "it; the whole file without heading.",
+                     "schema": _schema({"path": _S, "heading": _S}, ["path"])},
     "board_status": {"fn": t_board_status,
                      "description": "The project's board (docs/brd/board.md): its open cycles (a plan's round of "
                                     "work, its phases as cards), the Backlog, and the cards by state (todo, doing, "

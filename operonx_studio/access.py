@@ -105,6 +105,8 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/board/cycle/{{cid}}"): "read",                  # a cycle as a report: dates, cards, commits
     ("GET", f"{P}/project/status"): "read",                        # Project mode: the engine's status document
     ("GET", f"{P}/project/files"): "read",                         # Project mode › Files: what git tracks
+    ("GET", f"{P}/project/search"): "read",                        # E6: one search over what the project knows
+    ("GET", f"{P}/project/read"): "read",                          # E6: one section of a project doc
     ("GET", f"{P}/project/file"): "read",
     ("GET", f"{P}/git"): "read",                                   # what the assistant may do with git
     ("POST", f"{P}/git"): "admin",                                 # it reaches the machine's push credentials
@@ -232,7 +234,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{A}/sessions/{{sid}}/attachments/{{aid}}"): "self",
     ("DELETE", f"{A}/sessions/{{sid}}"): "self",
     ("POST", f"{A}/sessions/{{sid}}/turns"): "self",
-    ("POST", f"{A}/sessions/{{sid}}/compact"): "self",
+    ("POST", f"{A}/sessions/{{sid}}/save"): "self",
     ("POST", f"{A}/sessions/{{sid}}/items/{{seq}}"): "self",
     ("POST", f"{A}/import"): "self",
     ("GET", f"{A}/turns/{{tid}}"): "self",

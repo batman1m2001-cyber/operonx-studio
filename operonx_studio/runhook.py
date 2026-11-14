@@ -13,7 +13,7 @@ exit status when it ends, and, for a plain chain like `ruff check . && pytest -q
 
 Bash only. Anything else, a command that starts a job of its own in the background (`server &`: it would keep the
 copy open), or any doubt, and the call runs exactly as written. Two shapes are refused, with the reason the model
-reads: a test, build or install left running by `&`/nohup, and a wait by `sleep` (knowledge.md: Running commands).
+reads: a test, build or install left running by `&`/nohup, and a wait by `sleep` (guide/page.md: Running commands).
 """
 
 from __future__ import annotations
@@ -247,7 +247,7 @@ def filtered(cmd: str) -> str:
 
 
 def refusal(cmd: str, background: bool) -> Optional[str]:
-    """Why a call is refused (knowledge.md: Running commands), or None. The model read the rule and ran an 18-minute
+    """Why a call is refused (guide/page.md: Running commands), or None. The model read the rule and ran an 18-minute
     suite as `(pytest > log &)` plus `sleep 20` loops anyway: the page saw neither, so the hook holds the line."""
     run = _ran(cmd)
     if not background and _BACKGROUND.search(run) and _RUNNER.search(run):

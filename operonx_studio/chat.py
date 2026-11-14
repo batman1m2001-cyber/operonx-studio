@@ -66,9 +66,14 @@ def find_claude() -> Optional[str]:
     return max(hits, key=version_key) if hits else None
 
 
+#: The guide pages the knowledge doc points to by path (ENGINEERING_ENV_PLAN E6: pointers, not content).
+GUIDE = Path(__file__).parent / "guide"
+
+
 def knowledge() -> str:
+    """The assistant's standing doc (under 4 KB), its ``{guide}`` the guide pages' directory."""
     try:
-        return KNOWLEDGE.read_text(encoding="utf-8")
+        return KNOWLEDGE.read_text(encoding="utf-8").replace("{guide}", str(GUIDE))
     except OSError:  # pragma: no cover — packaging fault, not runtime state
         return ""
 
@@ -77,7 +82,8 @@ def knowledge() -> str:
 STUDIO_READ_TOOLS = ["mcp__studio__list_runs", "mcp__studio__open_run", "mcp__studio__op_values",
                      "mcp__studio__monitor", "mcp__studio__compare_runs", "mcp__studio__select_op",
                      "mcp__studio__board_status", "mcp__studio__board_card", "mcp__studio__project_status",
-                     "mcp__studio__point", "mcp__studio__steps"]
+                     "mcp__studio__point", "mcp__studio__steps",
+                     "mcp__studio__project_search", "mcp__studio__project_read"]
 
 
 def viewer_deny(state: Path) -> List[str]:

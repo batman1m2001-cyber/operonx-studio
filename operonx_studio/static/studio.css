@@ -2575,6 +2575,9 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-flow .ax-card-head .icon { color: var(--signal); }
 .ax-divider { display: flex; align-items: center; gap: 12px; color: var(--text-3); font-size: var(--fs-sm); padding: 6px 0; }
 .ax-divider::before, .ax-divider::after { content: ""; flex: 1; border-top: 1px dashed var(--border-strong); }
+.ax-saved-handoff { margin: -2px auto 6px; max-width: 560px; color: var(--text-3); font-size: var(--fs-sm); }
+.ax-saved-handoff > summary { cursor: pointer; text-align: center; list-style: none; }
+.ax-saved-handoff > .ax-note { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
 .ax-note { color: var(--text-2); font-size: var(--fs-md); background: var(--surface-2); border-radius: var(--r-sm); padding: 8px 10px; }
 .ax-turnfoot { display: flex; align-items: center; gap: 4px; min-height: 26px; margin-top: -4px; color: var(--text-3);
   font-size: var(--fs-xs); opacity: 0; transition: opacity var(--tr); }
