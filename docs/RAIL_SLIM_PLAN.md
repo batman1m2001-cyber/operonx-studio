@@ -22,7 +22,7 @@ No group labels: seven icons need none.
 ## How
 
 - A rail item is a **hub**: `data-tab` = its first screen, `data-hub` = its
-  name; `HUBS` (shell.js) lists each hub's screens. A click opens the screen
+  name; the strip's buttons say their hub in `data-in` (shell.js `hubOf`). A click opens the screen
   of that hub the user was on last (remembered per project).
 - The hub's screens are a segmented strip in the top bar (`#hubtabs`, class
   `tabs`, so every `.tabs button[data-tab]` hook — click, active state,
