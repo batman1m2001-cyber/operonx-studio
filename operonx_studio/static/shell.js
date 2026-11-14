@@ -62,9 +62,8 @@ function switchTab(name, opts) {
   if (name === "board") { switchTab("project", {page: "board"}); return; }
   // the playground runs a service's code: not a viewer's (D11); every way in stops here
   if (name === "playground" && window.Account && Account.viewOnly) { Account.toast(Account.VIEW_ONLY, true); return; }
-  // where the Flow tab was: a run's pane borrows the canvas, and moving
-  // it resets its scroll (hiding it does not)
-  if (state.tab === "flow" && !state.workflowOn && canvasShown()) {
+  // where the Flow tab was
+  if (state.tab === "flow" && canvasShown()) {
     const st = $("#stage");
     state.flowView = {scale: state.view.scale, x: st.scrollLeft, y: st.scrollTop};
   }
@@ -106,18 +105,15 @@ function switchTab(name, opts) {
 }
 
 /* The chrome follows what is on screen: the body carries the tab, and
- * `data-stage` while the canvas shows (the Flow tab, or a run's workflow
- * view) — the canvas toolbar appears only then. */
+ * `data-stage` while the canvas shows (the Flow tab) — the canvas toolbar
+ * appears only then. */
 function syncChrome() {
   document.body.dataset.tab = state.tab;
-  // a run painted on the canvas
-  document.body.classList.toggle("runwf", !!state.workflowOn);
-  const stageOn = state.tab === "flow" || !!state.workflowOn;
+  const stageOn = state.tab === "flow";
   if (stageOn) document.body.dataset.stage = "";
   else delete document.body.dataset.stage;
-  // every screen's chrome floats as glass over the backdrop; a run's
-  // canvas sits in its pane, under a solid head (docs/GLASS_EVERYWHERE_PLAN.md)
-  document.body.classList.toggle("floatframe", !state.workflowOn);
+  // every screen's chrome floats as glass over the backdrop (docs/GLASS_EVERYWHERE_PLAN.md)
+  document.body.classList.add("floatframe");
   if (!stageOn) { $("#find").hidden = true; $("#legend").hidden = true; }
 }
 
@@ -370,7 +366,6 @@ for (const b of document.querySelectorAll(".tabs button[data-tab]"))
 })();
 
 $("#graph-pick").onchange = (ev) => {
-  state.flowHome = null;   // a graph picked by hand is the one to come back to
   closeToolView(false);    // … and closes a tool opened on its own
   state.graph = state.ir.graphs.find(g => g.name === ev.target.value);
   state.sel = state.dfFocus = null;
@@ -724,7 +719,7 @@ async function pulse() {
     try {
       const q = new URLSearchParams({stamp: String(state.stamp || 0), ui: String(state.uiSeq),
                                      chat: String(state.chatSeq)});
-      if (state.follow) q.set("follow", (state.run && state.run.run) || "-");
+      if (state.follow) q.set("follow", (RunLineView.current() || {}).run || state._tlrun || "-");
       else if (state.tab === "flow" && flowLive.on) q.set("follow", flowLive.newest || "-");
       const got = await api(`/api/p/${PID}/pulse?${q}`);
       pulseMiss = 0;
@@ -743,7 +738,7 @@ async function pulse() {
         state.uiSeq = a.seq;
         try { await assistantUi(a.kind, a.args || {}); } catch { /* a stale action is not an error */ }
       }
-      const showing = (state.run && state.run.run) || (RunLineView.current() || {}).run;
+      const showing = (RunLineView.current() || {}).run || state._tlrun;
       if (state.follow && got.newest && showing !== got.newest) {
         await showRunWorkflow(got.newest);
       } else if (!state.follow && state.tab === "flow" && got.newest) {
@@ -833,10 +828,8 @@ function assistantUi(kind, args) {
 async function performUi(kind, args) {
   if (kind === "open_run") {
     if (state.tab !== "traces") switchTab("traces", {quiet: true});
-    // errors and values are no longer lenses: failures are always marked, values are in the step panel
-    if (args.lens) { state.lens = ["time", "cost"].includes(args.lens) ? args.lens : "path"; store("lens", state.lens); }
     // the view: conversation, tree or timeline (the steps page), or the
-    // workflow (the canvas; an old link's "data" is the workflow now)
+    // workflow (the run line; an old link's "data" is the workflow now)
     const onCanvas = args.mode === "workflow" || args.mode === "data";
     if (["conversation", "tree", "timeline"].includes(args.mode)) store("runTreeMode", args.mode);
     await (onCanvas ? showRunWorkflow(args.run) : showRunTree(args.run));

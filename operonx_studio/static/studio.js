@@ -89,8 +89,6 @@ const state = {
   partRows: new Map(), // render key -> an agent's tool row {key, node, el, agent} (not on the canvas)
   extent: null,      // {minX, minY, maxX, maxY} of the last render
   view: {scale: 1},  // pan lives in the stage's own scrollbars
-  run: null,         // {run, ops: {name: {runs, errors, total_ms, max_ms}}}
-  heatMax: 0,        // slowest avg ms in the painted run — the heat scale
   follow: false,     // repaint whenever a newer run appears
   stamp: 0,
   tab: "flow",
@@ -114,13 +112,12 @@ function pushView() {
   window.__oxview = {
     node: it ? it.node.name : null,
     kind: it ? it.node.kind : null,
-    run: state.run ? state.run.run : (state._tlrun || null),
+    run: state._tlrun || null,
     tab: state.tab,
-    lens: state.run ? (state.lens || "path") : null,
     exec: state.execSel || null,
     exec_id: state.execSel ? (state.execId || null) : null,
-    // how the run is read: the workflow on the canvas, else the steps page's view
-    mode: state.run || (typeof RunLineView !== "undefined" && RunLineView.current()) ? "workflow"
+    // how the run is read: the run line, else the steps page's view
+    mode: (typeof RunLineView !== "undefined" && RunLineView.current()) ? "workflow"
       : ((typeof RunTree !== "undefined" && RunTree.current() && RunTree.current().mode) || "tree"),
     file: state.tab === "yaml" ? (state.yamlFile || null) : null,
     page: state.tab === "project" && typeof ProjectMode !== "undefined" ? ProjectMode.page() : null,
@@ -358,11 +355,10 @@ function visualOf(kind) {
   return OP_DEFAULT;
 }
 
-/* An agent op, and the steps a run recorded under one (turn, model call,
- * tool call), look like their TYPE (agentsteps.js) — never like an IR
- * node that happens to share the step's name. */
+/* An agent op looks like its TYPE (agentsteps.js) — never like an IR
+ * node that happens to share its name. */
 function stepVisual(node) {
-  return (node.step || node.op_type === "agent") ? AgentSteps.visual(node.op_type) : null;
+  return node.op_type === "agent" ? AgentSteps.visual(node.op_type) : null;
 }
 
 function kindColor(node) { return (stepVisual(node) || visualOf(node.kind)).color; }
@@ -413,20 +409,6 @@ function kindIconEl(cls, node) {
   return s;
 }
 
-/* With a run painted, an op either executed or it didn't — and the
- * ones that didn't fade back, so the picture becomes the path taken.
- * A GraphOp ran if any member did; structure (terminals) never fades. */
-function ranInRun(n) {
-  if (!state.run) return true;
-  if (n.kind === "__boundary__") return true;
-  if (n.step) return true;            // a step the run recorded: it ran
-  if (n.graph) return (n.graph.nodes || []).some(ranInRun);
-  if (state.runTurn && state.runByOpTurn) {
-    const byTurn = state.runByOpTurn.get(n.name);
-    return !!(byTurn && byTurn.has(state.runTurn));
-  }
-  return !!state.run.ops[n.name];
-}
 
 /* ── placement: flowlayout.js ─────────────────────────────────────── */
 

@@ -2875,7 +2875,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     @app.get("/api/p/{pid}/trace/{run}/tree")
     def trace_tree(pid: str, run: str) -> JSONResponse:
         """The run as a tree (operonx's ctx rules), with its summary and
-        per-op rollups — what the run header and the lenses read."""
+        per-op rollups — what the run header reads."""
         got = _record(pid, run)
         if isinstance(got, JSONResponse):
             return got
@@ -4935,11 +4935,9 @@ def build_studio_app(recents: Optional[Recents] = None):
             lines.append(f"- selected op: `{str(view['node'])[:120]}`"
                          + (f" ({str(view.get('kind'))[:40]})" if view.get("kind") else ""))
         if view.get("run"):
-            lines.append(f"- run painted on the canvas: `{str(view['run'])[:120]}`")
+            lines.append(f"- open run: `{str(view['run'])[:120]}`")
         if view.get("tab"):
             lines.append(f"- open tab: {str(view['tab'])[:20]}")
-        if view.get("lens") and view.get("run"):
-            lines.append(f"- the run is painted with the {str(view['lens'])[:12]} lens")
         if view.get("exec"):
             lines.append(f"- selected execution in the run: `{str(view['exec'])[:120]}`")
         if view.get("runs_filter"):

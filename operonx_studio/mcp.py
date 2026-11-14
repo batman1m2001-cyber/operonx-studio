@@ -109,7 +109,7 @@ def t_list_runs(s: Studio, a: Dict[str, Any]) -> str:
 def t_open_run(s: Studio, a: Dict[str, Any]) -> str:
     run = str(a["run"])
     tree = s.call(f"/trace/{urllib.parse.quote(run, safe='')}/tree")
-    s.show("open_run", run=run, mode=a.get("mode") or "tree", lens=a.get("lens"))
+    s.show("open_run", run=run, mode=a.get("mode") or "tree")
     sm = tree.get("summary") or {}
     out = [f"run {run}: {sm.get('status')} in {(sm.get('duration_ms') or 0) / 1000:.2f}s, "
            f"{sm.get('executions')} executions, cost {_money(sm.get('cost_usd'), sm.get('unpriced') or 0)}, "
@@ -652,8 +652,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                      "order": _S, "limit": _N})},
     "open_run": {"fn": t_open_run,
                  "description": "Open one run: its verdict, its ops by time and cost, and its failures. Also "
-                                "opens it on the user's screen (mode conversation|tree|timeline|workflow|data; lens path|time|cost — failures are always marked).",
-                 "schema": _schema({"run": _S, "mode": _S, "lens": _S}, ["run"])},
+                                "opens it on the user's screen (mode conversation|tree|timeline|workflow|data).",
+                 "schema": _schema({"run": _S, "mode": _S}, ["run"])},
     "op_values": {"fn": t_op_values,
                   "description": "The recorded inputs and outputs of one op's executions in one run.",
                   "schema": _schema({"run": _S, "op": _S, "limit": _N}, ["run", "op"])},
