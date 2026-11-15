@@ -105,9 +105,20 @@ window.FlowRail = (() => {
     let rows = sorted();
     const maxOps = Math.max(1, ...rows.map(r => r.ops));
     if (q) rows = rows.filter(r => `${r.g.name} ${r.sub} ${r.find}`.toLowerCase().includes(q));
+    const pictured = !!(window.Factory && Factory.on());
+    if (!q && window.Factory && rows.length) {      // the whole project as one picture, before its flows (factory.js)
+      const b = el("button", "frrow frpicture" + (pictured ? " current" : ""));
+      b.type = "button";
+      b.title = "The whole project as one picture: its flows, what they share, what they need";
+      const text = el("span");
+      text.append(el("span", "frname", "Project picture"), el("span", "frsub", `${rows.length} flows as one model`));
+      b.append(text);
+      b.onclick = () => Factory.show();
+      list.append(b);
+    }
     if (!rows.length) list.append(el("div", "frnone", q ? "No flow matches" : "No flows"));
     for (const r of rows) {
-      const b = el("button", "frrow" + (state.graph && state.graph.name === r.g.name ? " current" : ""));
+      const b = el("button", "frrow" + (!pictured && state.graph && state.graph.name === r.g.name ? " current" : ""));
       b.type = "button";
       if (r.title) b.title = r.title;
       const text = el("span");
@@ -150,6 +161,7 @@ window.FlowRail = (() => {
 
   function open(name) {
     if (document.body.dataset.tab !== "flow") switchTab("flow");
+    if (window.Factory) Factory.hide();
     const pick = $("#graph-pick");
     if (!state.graph || state.graph.name !== name) {
       pick.value = name;
