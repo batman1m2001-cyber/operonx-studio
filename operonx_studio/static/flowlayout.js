@@ -30,8 +30,8 @@
 
   const C = {
     NODE_W: 260, NODE_H: 64,
-    H_GAP: 56,          // between two cards in a row
-    V_GAP: 78,          // channel between two rows
+    H_GAP: 40,          // between two cards in a row
+    V_GAP: 56,          // channel between two rows
     MARGIN: 48,
     KB: 26,             // a container's START/END knob
     HEADER: 34,         // a container's title strip

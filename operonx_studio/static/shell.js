@@ -170,7 +170,9 @@ const panelKey = () => (MOBILE.matches ? "panelRightM" : "panelRight") + (DENSE.
 // open by default only where it fits beside the content (a tablet gets
 // it as an overlay, opened from the Ask bar)
 const WIDE = window.matchMedia("(min-width: 1100px)");
-const panelWanted = () => recall(panelKey(), WIDE.matches && !DENSE.has(state.tab));
+// closed until asked for (UX_OVERHAUL_PLAN U2): the Ask bar and a click on an
+// op (the Inspect peek) open it; a choice the user made is remembered
+const panelWanted = () => recall(panelKey(), false);
 const inspectable = () => state.tab === "flow" || state.tab === "traces";
 
 /* A hidden panel still answers a click: picking an op shows its Inspect

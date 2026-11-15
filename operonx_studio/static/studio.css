@@ -6202,3 +6202,35 @@ body.floatframe:not(.ax-focus) #sidebar > #chatdock { background: color-mix(in s
 @media (max-width: 760px) {
   .monhead .tlmodes button { padding: 0 9px; }
 }
+
+/* ── UX overhaul U2: compact op cards ──────────────────────────────────
+   One shape for every op: a rounded rectangle as wide as its name. The
+   kind is the colour band and the icon, never the outline. The layout
+   works from each card's measured size, so rows and wires follow. */
+#world .node.cell, #world .node.cell.alt {
+  min-height: 44px; border-radius: var(--r-md);
+  padding: 7px 14px 7px 52px; display: flex; flex-direction: column; justify-content: center;
+}
+#world .node.cell {
+  background:
+    linear-gradient(180deg, var(--og-spec) 0, transparent 42%),
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--kind, var(--k-func)) var(--og-band), transparent) 0 40px,
+      transparent 40px),
+    color-mix(in srgb, var(--kind, var(--k-func)) var(--og-tint), var(--og-fill));
+}
+#world .node.cell.graphop, #world .node.cell.funcop {
+  background:
+    linear-gradient(180deg, var(--og-spec) 0, transparent 42%),
+    linear-gradient(90deg, color-mix(in srgb, var(--kind-fill) 70%, transparent) 0 40px, transparent 40px),
+    color-mix(in srgb, var(--kind-fill) 22%, var(--og-fill));
+}
+#world .node.cell .iconband { width: 40px; top: 0; bottom: 0; font-size: var(--fs-lg); border-right-style: solid; }
+#world .node.cell .iconband svg.kglyph { width: 16px; height: 16px; }
+#world .node.cell .nname { font-size: var(--fs-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* the minimap: the whole flow in a corner, only when it does not fit */
+.minimap { position: absolute; right: 16px; bottom: 16px; z-index: 25; padding: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--sh-2); }
+.minimap canvas { display: block; cursor: pointer; border-radius: var(--r-xs); touch-action: none; }
+body:not([data-stage]) .minimap, body:not([data-tab="flow"]) .minimap { display: none; }

@@ -108,6 +108,7 @@
 
     <!-- the canvas's own controls: they float over the canvas wherever it
          is showing (the Flow tab, or a run's workflow view) -->
+    <div id="minimap" class="minimap" hidden><canvas aria-label="The whole flow: click to move the view"></canvas></div>
     <div id="canvasbar" class="canvasbar" role="toolbar" aria-label="Canvas">
       <button id="btn-flowrail" class="iconbtn" aria-label="Show the flows" aria-pressed="true" title="Flows panel  ( [ )"><i data-icon="panelleft"></i></button>
       <span class="tsep" aria-hidden="true"></span>
@@ -160,6 +161,7 @@
 <script src="/static/router.js"></script>
 <script src="/static/studio.js"></script>
 <script src="/static/canvas.js"></script>
+<script src="/static/minimap.js"></script>
 <script src="/static/inspector.js"></script>
 <script src="/static/configure.js"></script>
 <script src="/static/runvalues.js"></script>
