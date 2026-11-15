@@ -2,7 +2,7 @@
 
 **Plan ID:** `OPERONX_SPATIAL_FACTORY_PLAN` (refactored 2026-11-15)
 
-**Status:** F0–F3 done. F4 is next.
+**Status:** F0–F4 done. F5 is next.
 
 **The first version of this plan**, as the owner wrote it, is kept word for word in
 [SPATIAL_FACTORY_PLAN_V1.md](SPATIAL_FACTORY_PLAN_V1.md). This file replaces it wherever the two differ.
@@ -161,12 +161,17 @@ The project as one isometric model, drawn from the factory model and nothing els
 - Left for F4: selecting a part (upstream and downstream), opening a flow from a domain cluster,
   search. Left for F5: runs on the picture beyond the red light of a flow with errors.
 
-### F4 — Dependencies and navigation
+### F4 — Dependencies and navigation (done)
 
-- Select: upstream and downstream highlighted, the rest quiet; a side card lists them with counts.
-- Open: a flow box opens that flow in the editor; coming back returns to the same place and selection.
-- A shared block lists the flows that use it and opens any of them at the block.
-- Search-to-location.
+Write-up: [FACTORY_NAVIGATION.md](FACTORY_NAVIGATION.md).
+
+- Select (a click on a cluster, a core item or its name): what it links to stays lit, the rest goes
+  quiet; a card lists what comes in, what it uses and needs, with counts. Esc clears.
+- Open: the card's button, a double click on a flow, or a row of a domain's card opens the flow in the
+  editor; coming back returns to the same view and selection.
+- A shared block's card lists every use, and a row opens that flow with the op that uses it selected.
+- Find by name ( / ): a flow, service, job, shared block or resource; its cluster or core item is
+  selected and brought to the middle.
 
 ### F5 — Runtime
 
@@ -202,8 +207,8 @@ reach for select, open and search.
 | F0 — Data audit | Done 2026-11-15 | #204 | [FACTORY_DATA_AUDIT.md](FACTORY_DATA_AUDIT.md) |
 | F1 — Lab | Done 2026-11-15, closed: its five looks dropped | lab repo, to 2e41956 | §1, §4, §5 of this file |
 | F2 — Factory model | Done 2026-11-15 | `ui/f2-factory-model` | [FACTORY_MODEL.md](FACTORY_MODEL.md) |
-| F3 — Factory picture | Done 2026-11-15 | `ui/f3-factory-iso` | [FACTORY_PICTURE.md](FACTORY_PICTURE.md) |
-| F4 — Dependencies and navigation | Not started | | |
+| F3 — Factory picture | Done 2026-11-15 | #207 | [FACTORY_PICTURE.md](FACTORY_PICTURE.md) |
+| F4 — Dependencies and navigation | Done 2026-11-15 | `ui/f4-factory-navigation` | [FACTORY_NAVIGATION.md](FACTORY_NAVIGATION.md) |
 | F5 — Runtime | Not started | | |
 | F6 — Remaining screens | Not started | | |
 | F7 — Scale and polish | Not started | | |

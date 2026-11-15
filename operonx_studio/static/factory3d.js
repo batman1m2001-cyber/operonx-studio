@@ -7,9 +7,11 @@
  *   cable     up to three strands per kind of link from a cluster to the core, laid side by side
  * The parts are machined titanium; colour is only ever a small light (the --fx-* tokens on #factory).
  * A fixed isometric camera: drag pans, the wheel zooms, F or the button fits everything.
+ * A click selects a cluster or a core item: what it links to stays lit, the rest goes quiet, and a card
+ * lists it; a double click on a flow, or a row of the card, opens the flow in the editor. / finds by name.
  *
  * An ES module, loaded on demand by factory.js — the studio's pages do not pay for three.js until
- * the picture is opened. mount(host, ir, stats, {onOpen}) → {pause, resume, fit, dispose}. */
+ * the picture is opened. mount(host, ir, stats, {onOpen(flow, node)}) → {pause, resume, fit, select, reveal, dispose}. */
 import * as THREE from "./vendor/three/three.module.min.js";
 import { EffectComposer } from "./vendor/three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "./vendor/three/addons/postprocessing/RenderPass.js";
@@ -192,27 +194,30 @@ function machined({metal, rough, grain, clear, opacity}) {
 }
 /* a batch: every part of one material is one draw call */
 const BOX = machinedBox();
+let owner = null;                                                  // the cluster or core item being built: everything drawn meanwhile is its
 class Batch { constructor(material, sorted) { this.material = material; this.sorted = sorted; this.items = []; }
-  add(x, y, z, sx, sy, sz, color, shape) { this.items.push({x, y, z, sx, sy, sz, color, shape}); }
+  add(x, y, z, sx, sy, sz, color, shape) { this.items.push({x, y, z, sx, sy, sz, color, shape, owner}); }
   build(order) { let list = this.items; if (!list.length) return null; if (this.sorted) list = list.slice().sort((a, b) => (a.x + a.y + a.z) - (b.x + b.y + b.z));
     const g = BOX.clone(), each = (f, n) => new THREE.InstancedBufferAttribute(new Float32Array(list.flatMap(f)), n);
     g.setAttribute("dims", each(b => [b.sx, b.sy, b.sz], 3)); g.setAttribute("shape", each(b => [b.shape[0], b.shape[1], b.shape[2], b.shape[3] || 0], 4));
     const mesh = new THREE.InstancedMesh(g, this.material, list.length);
     list.forEach((b, i) => { M.makeTranslation(b.x, b.y, b.z); mesh.setMatrixAt(i, M);
       const j = this.spread ? (Math.abs(Math.sin(b.x * 12.9898 + b.z * 78.233) * 43758.5453) % 1) - 0.5 : 0;
-      mesh.setColorAt(i, col.copy(b.color).multiplyScalar(1 + j * (this.spread || 0))); });
-    mesh.frustumCulled = false; mesh.renderOrder = order || 0; scene.add(mesh); return mesh; } }
+      b.base = b.color.clone().multiplyScalar(1 + j * (this.spread || 0)); mesh.setColorAt(i, b.base); });
+    mesh.frustumCulled = false; mesh.renderOrder = order || 0; scene.add(mesh); this.mesh = mesh; this.list = list; return mesh; }
+  /* each instance at its own tone times k(owner): how a selection quiets the rest */
+  tone(k) { if (!this.mesh) return; this.list.forEach((b, i) => this.mesh.setColorAt(i, col.copy(b.base).multiplyScalar(k(b.owner)))); this.mesh.instanceColor.needsUpdate = true; } }
 const metal = new Batch(machined({metal: 1, rough: 0.42, grain: 0.16})); metal.spread = 0.14;
 const glass = new Batch(machined({metal: 0, rough: 0.04, grain: 0}));                                   // a glass panel set in a frame
 const smoked = new Batch(machined({metal: 0, rough: 0.05, grain: 0, clear: CLEAR, opacity: CLEAR ? 0.36 : 1}), true); // an enclosure you see into
 /* signal lights: the only colour in the picture. `far` ones are seen from any distance (an error);
  * the rest appear once a component is large enough to carry them */
 const lights = {far: [], mid: []};
-const light = (x, y, z, sx, sy, sz, sig, lod = "mid", gain = 1.5) => lights[lod].push({x, y, z, sx, sy, sz, sig, gain});
+const light = (x, y, z, sx, sy, sz, sig, lod = "mid", gain = 1.5) => lights[lod].push({x, y, z, sx, sy, sz, sig, gain, owner});
 const TI = {natural: tok("ti-natural"), silver: tok("ti-silver"), dark: tok("ti-dark"), graphite: tok("ti-graphite"), black: tok("ti-black"), plate: tok("plate"), plateCore: tok("plate-core"), smoke: tok("glass-smoke"), frost: tok("glass-frost")};
 const PLAIN = (c, fin = 0) => [c, c, 0, fin];
 const boxes = [], shadows = [], engraved = [], pucks = [], kinds = new Set();
-const foot = (x, y, z, sx, sy, sz, grounded = true) => { boxes.push({x, y, z, sx, sy, sz}); if (grounded) shadows.push({x, y, z, sx, sz}); };
+const foot = (x, y, z, sx, sy, sz, grounded = true) => { boxes.push({x, y, z, sx, sy, sz, owner}); if (grounded) shadows.push({x, y, z, sx, sz}); };
 
 /* a titanium body with a recessed glass panel in a thin frame: the construction most parts share */
 function framed(x, y, z, w, h, d, body, pane, f = 0.085, fin = 0) { const c = Math.min(0.03, w * 0.07), r = 0.03;
@@ -263,18 +268,19 @@ const PARTS = {
     smoked.add(x, y + 0.16, z, W - 2 * p + 0.02, h - 0.16 - 0.03, W - 2 * p + 0.02, TI.smoke, PLAIN(0.01));
     light(x, y + 0.17, z, 0.62, Math.max(0.12, h * 0.42), 0.62, "sig-resource", "far", 0.8); },
 };
-const part = (m, x, y, z, w, h, d) => { kinds.add(m); PARTS[m](x, y, z, h); foot(x, y, z, w, h, d); };
+const part = (m, x, y, z, w, h, d) => { kinds.add(m); const n0 = pucks.length; PARTS[m](x, y, z, h); for (let i = n0; i < pucks.length; i++) pucks[i].owner = owner; foot(x, y, z, w, h, d); };
 
 const labels = [];
 // the core: a two-step Space Black plate, its items standing on it, each one's name cut into the plate
 metal.add(0, -0.16, 0, coreHalf * 2 + 1.6, 0.16, coreHalf * 2 + 1.6, TI.graphite, PLAIN(0.04)); foot(0, -0.16, 0, coreHalf * 2 + 1.6, 0.16, coreHalf * 2 + 1.6, false);
 metal.add(0, 0, 0, coreHalf * 2, 0.22, coreHalf * 2, TI.plateCore, PLAIN(0.04, 0.4));
-for (const it of core) { part(it.m, it.x, 0.22, it.z, 1.7, it.h, 1.7); engraved.push({text: it.name, x: it.x, y: 0.221, z: it.z + 1.22, size: 0.24});
-  if (core.length <= 9) labels.push({x: it.x, y: 0.22 + it.h + 0.5, z: it.z, cls: "item", title: it.name}); }
+for (const it of core) { owner = it.id; part(it.m, it.x, 0.22, it.z, 1.7, it.h, 1.7); engraved.push({text: it.name, x: it.x, y: 0.221, z: it.z + 1.22, size: 0.24});
+  if (core.length <= 9) labels.push({x: it.x, y: 0.22 + it.h + 0.5, z: it.z, cls: "item", title: it.name, owner: it.id}); }
+owner = null;
 const nBlocks = core.filter(i => i.kind === "block").length;
 labels.push({x: coreHalf + 0.6, y: -1.6, z: coreHalf + 0.6, cls: "core", title: "Core", sub: `${nBlocks} shared blocks · ${core.length - nBlocks} resources`});
 // the clusters: a graphite plate each; where a bundle of fibres leaves it, and where it reaches the core, a port
-for (const c of clusters) {
+for (const c of clusters) { owner = c.id;
   const s = c.side, alongX = !Math.abs(s.out[0]), padX = alongX ? c.wu : c.wv, padZ = alongX ? c.wv : c.wu;
   metal.add(c.x, 0, c.z, padX, 0.14, padZ, c.ghost ? TI.graphite : TI.plate, PLAIN(0.035, 0.3)); foot(c.x, 0, c.z, padX, 0.14, padZ, false);
   let top = 0.6;
@@ -287,20 +293,22 @@ for (const c of clusters) {
       metal.add(x, y, z, alongX ? w : 0.3, 0.11, alongX ? 0.3 : w, TI.silver, PLAIN(0.018, 1)); light(x, y + 0.11, z, alongX ? w * 0.5 : 0.05, 0.006, alongX ? 0.05 : w * 0.5, sig); } }
   if (s.out[1] !== 1 && !c.ghost) engraved.push({text: c.name, x: c.x, y: 0.141, z: c.z + padZ / 2 - 0.2, size: 0.2, max: padX - 0.5});
   const nS = c.doors.filter(d => d.type === "service").length, nJ = c.doors.length - nS;
-  labels.push({x: c.x - padX / 2, y: 0.9, z: c.z - padZ / 2, cls: c.ghost ? "ghost" : "", open: !c.ghost && !grouped ? c.name : null, title: c.name, sub: [c.sub, nS ? `${nS} service${nS > 1 ? "s" : ""}` : "", nJ ? `${nJ} job${nJ > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ")});
+  labels.push({x: c.x - padX / 2, y: 0.9, z: c.z - padZ / 2, cls: c.ghost ? "ghost" : "", owner: c.id, title: c.name, sub: [c.sub, nS ? `${nS} service${nS > 1 ? "s" : ""}` : "", nJ ? `${nJ} job${nJ > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ")});
 }
+owner = null;
 metal.build(); glass.build(); smoked.build(3);
 /* the junctions' eight-sided bodies */
+let puckMesh = null;
 if (pucks.length) { const g = new THREE.CylinderGeometry(1, 1, 1, 8); g.rotateY(Math.PI / 8); g.translate(0, 0.5, 0);
   const mesh = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({metalness: 1, roughness: 0.38, flatShading: true}), pucks.length);
-  pucks.forEach((b, i) => { M.makeScale(b.r, b.h, b.r); M.setPosition(b.x, b.y, b.z); mesh.setMatrixAt(i, M); mesh.setColorAt(i, b.color); }); mesh.frustumCulled = false; scene.add(mesh); }
+  pucks.forEach((b, i) => { M.makeScale(b.r, b.h, b.r); M.setPosition(b.x, b.y, b.z); mesh.setMatrixAt(i, M); mesh.setColorAt(i, b.color); }); mesh.frustumCulled = false; scene.add(mesh); puckMesh = mesh; }
 /* where a part meets the plate it stands on, the plate is a little darker */
 { const cv = document.createElement("canvas"); cv.width = cv.height = 64; const x = cv.getContext("2d"), gr = x.createRadialGradient(32, 32, 14, 32, 32, 32);
   gr.addColorStop(0, "rgba(0,0,0,0.85)"); gr.addColorStop(1, "rgba(0,0,0,0)"); x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
   const g = new THREE.PlaneGeometry(1, 1); g.rotateX(-Math.PI / 2);
   const mesh = new THREE.InstancedMesh(g, new THREE.MeshBasicMaterial({map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, opacity: 0.6}), shadows.length);
   shadows.forEach((b, i) => { M.makeScale(b.sx + 0.42, 1, b.sz + 0.42); M.setPosition(b.x, b.y + 0.003, b.z); mesh.setMatrixAt(i, M); }); mesh.frustumCulled = false; mesh.renderOrder = 1; scene.add(mesh); }
-const lod = {};
+const lod = {}, lightSets = [];
 const glowTex = (() => { const cv = document.createElement("canvas"); cv.width = cv.height = 64; const x = cv.getContext("2d"), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
   gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.25, "rgba(255,255,255,0.42)"); gr.addColorStop(0.6, "rgba(255,255,255,0.1)"); gr.addColorStop(1, "rgba(255,255,255,0)");
   x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(cv); })();
@@ -313,7 +321,7 @@ for (const k of ["far", "mid"]) { const list = lights[k]; if (!list.length) cont
   list.forEach((b, i) => { const r = Math.min(1.5, Math.max(b.sx, b.sy, b.sz) * 2.2 + 0.16);
     M.compose(v3.set(b.x, b.y + b.sy / 2, b.z).addScaledVector(DIR, 1.45 * r), camera.quaternion, new THREE.Vector3(r * 2, r * 2, 1)); halo.setMatrixAt(i, M);
     halo.setColorAt(i, col.copy(sigs[b.sig]).multiplyScalar((k === "mid" ? 0.26 : 0.42) * b.gain / 1.5)); });
-  halo.frustumCulled = false; halo.renderOrder = 4; lod[k].add(halo); }
+  halo.frustumCulled = false; halo.renderOrder = 4; lod[k].add(halo); lightSets.push({list, mesh, halo, sigs, glow: k === "mid" ? 0.26 : 0.42}); }
 /* identifiers cut into the plates: flat, dark, legible only close up */
 lod.close = new THREE.Group(); scene.add(lod.close);
 for (const e of engraved) { const cv = document.createElement("canvas"), x = cv.getContext("2d"), font = "600 44px -apple-system, 'SF Pro Text', Inter, 'Segoe UI', sans-serif";
@@ -324,7 +332,7 @@ for (const e of engraved) { const cv = document.createElement("canvas"), x = cv.
 
 /* cables: a strand is a thin lit tube on the ground — out of the cluster, along its lane, into the core */
 const cableMat = {uses: new THREE.MeshBasicMaterial({color: tok("fiber-uses").multiplyScalar(1.3)}), needs: new THREE.MeshBasicMaterial({color: tok("fiber-needs").multiplyScalar(1.3)})};
-const runs = [];                                                   // sampled strands, for the lights that travel them
+const runs = [], cables = [];                                                // sampled strands, for the lights that travel them
 const Y = 0.2;
 for (const c of clusters) { const s = c.side; if (!c.strands.length) continue;
   const sgn = Math.sign(c.slot - c.u) || 1, straight = Math.abs(c.slot - c.u) < 0.05;
@@ -340,8 +348,9 @@ for (const c of clusters) { const s = c.side; if (!c.strands.length) continue;
       path.add(new THREE.LineCurve3(from, p1)); path.add(new THREE.QuadraticBezierCurve3(p1, q, p2)); from = p2; }
     path.add(new THREE.LineCurve3(from, pts[pts.length - 1]));
     const len = path.getLength();
-    scene.add(new THREE.Mesh(new THREE.TubeGeometry(path, Math.max(12, Math.round(len * 2.2)), 0.034, 6, false), cableMat[p.kind]));
-    runs.push({pts: path.getSpacedPoints(Math.max(8, Math.round(len * 2))), len, kind: p.kind, phase: (((k * 0.37 + c.u * 0.11) % 1) + 1) % 1});
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(path, Math.max(12, Math.round(len * 2.2)), 0.034, 6, false), cableMat[p.kind]); scene.add(tube);
+    cables.push({mesh: tube, owner: c.id, kind: p.kind});
+    runs.push({owner: c.id, kind: p.kind, pts: path.getSpacedPoints(Math.max(8, Math.round(len * 2))), len, kind: p.kind, phase: (((k * 0.37 + c.u * 0.11) % 1) + 1) % 1});
   }); }
 /* energy: small lights travelling every strand from its cluster to the core */
 const sparkGeo = new THREE.SphereGeometry(0.06, 8, 6), sparks = new THREE.InstancedMesh(sparkGeo, new THREE.MeshBasicMaterial({color: 0xffffff}), runs.length);
@@ -373,18 +382,30 @@ function resize() { renderer.setSize(vw(), vh(), false); composer.setSize(vw(), 
 const sized = new ResizeObserver(() => { if (host.clientWidth) resize(); }); sized.observe(host);
 canvas.addEventListener("wheel", (e) => { e.preventDefault(); view.zoom = Math.max(0.6, Math.min(12, view.zoom * Math.exp(-e.deltaY * 0.0012))); apply(); }, {passive: false});
 let drag = null;
-canvas.addEventListener("pointerdown", (e) => { drag = [e.clientX, e.clientY]; canvas.setPointerCapture(e.pointerId); });
-canvas.addEventListener("pointermove", (e) => { if (!drag) return; const k = (view.span / view.zoom) / vh(); view.cx -= (e.clientX - drag[0]) * k; view.cy += (e.clientY - drag[1]) * k; drag = [e.clientX, e.clientY]; apply(); });
-canvas.addEventListener("pointerup", () => { drag = null; });
+let moved = 0;
+canvas.addEventListener("pointerdown", (e) => { drag = [e.clientX, e.clientY]; moved = 0; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointermove", (e) => { if (!drag) return; moved += Math.abs(e.clientX - drag[0]) + Math.abs(e.clientY - drag[1]); const k = (view.span / view.zoom) / vh(); view.cx -= (e.clientX - drag[0]) * k; view.cy += (e.clientY - drag[1]) * k; drag = [e.clientX, e.clientY]; apply(); });
+canvas.addEventListener("pointerup", (e) => { const click = drag && moved < 5; drag = null; if (click) select(pick(e)); });
+canvas.addEventListener("dblclick", (e) => { const id = pick(e); if (id && /^f:/.test(id) && opts.onOpen) opts.onOpen(model.by.get(id).name); });
+/* what is under the pointer: the eye's ray against every part's box, the nearest hit */
+function pick(e) { const r = canvas.getBoundingClientRect(), nx = (e.clientX - r.left) / r.width * 2 - 1, ny = 1 - (e.clientY - r.top) / r.height * 2;
+  const o = camera.position.clone().addScaledVector(RIGHT, nx * camera.right).addScaledVector(UP, ny * camera.top), d = DIR.clone().negate();
+  let best = null, bt = Infinity;
+  for (const b of boxes) { if (!b.owner) continue; let t0 = -Infinity, t1 = Infinity;
+    for (const [oa, da, lo, hi] of [[o.x, d.x, b.x - b.sx / 2, b.x + b.sx / 2], [o.y, d.y, b.y, b.y + b.sy], [o.z, d.z, b.z - b.sz / 2, b.z + b.sz / 2]]) {
+      const a = (lo - oa) / da, c = (hi - oa) / da; t0 = Math.max(t0, Math.min(a, c)); t1 = Math.min(t1, Math.max(a, c)); }
+    if (t0 <= t1 && t0 < bt) { bt = t0; best = b.owner; } }
+  return best; }
 resetBtn.onclick = fit;
-const onKey = (e) => { if ((e.key !== "f" && e.key !== "F") || e.ctrlKey || e.metaKey || e.altKey || !host.clientWidth) return;
-  const t = e.target; if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return; fit(); };
+const onKey = (e) => { if (e.ctrlKey || e.metaKey || e.altKey || !host.clientWidth) return;
+  const t = e.target; if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (e.key === "f" || e.key === "F") fit(); else if (e.key === "Escape" && sel) select(null); else if (e.key === "/") { e.preventDefault(); find.focus(); } };
 document.addEventListener("keydown", onKey);
 
 // ── words: names float over what they name ────────────────────────
 for (const l of labels) { const d = document.createElement("div"); d.className = `lb ${l.cls}`; const b = document.createElement("b"); b.textContent = l.title; d.append(b);
   if (l.sub) { const s = document.createElement("span"); s.textContent = l.sub; d.append(s); }
-  if (l.open && opts.onOpen) { d.classList.add("open"); d.title = `Open ${l.open}`; d.onclick = () => opts.onOpen(l.open); } labelHost.append(d); l.el = d; l.p = new THREE.Vector3(l.x, l.y, l.z); }
+  if (l.owner) { d.classList.add("open"); d.onclick = () => select(l.owner); d.ondblclick = () => { if (/^f:/.test(l.owner) && opts.onOpen) opts.onOpen(l.title); }; } labelHost.append(d); l.el = d; l.p = new THREE.Vector3(l.x, l.y, l.z); }
 function place() { const put = [];
   for (const l of labels) { v3.copy(l.p).project(camera); l.sx = (v3.x + 1) / 2 * vw(); l.sy = (1 - v3.y) / 2 * vh(); l.w = l.w || l.el.offsetWidth; l.hh = l.hh || l.el.offsetHeight; }
   for (const l of labels.slice().sort((a, b) => a.sy - b.sy)) {
@@ -394,6 +415,66 @@ titleEl.textContent = model.name || NAME;
 countsEl.textContent = `${model.counts.flows.toLocaleString()} flows${grouped ? ` in ${model.counts.domains} domains` : ""} · ${model.counts.services} services · ${model.counts.jobs} jobs · ${model.counts.sharedBlocks} shared blocks · ${model.counts.resources} resources`;
 legend.innerHTML = [[grouped ? "flow" : "op", "sig-workflow"], ...(kinds.has("agent") ? [["agent", "sig-agent"]] : []), ["resource", "sig-resource"], ["job", "sig-job"], ...(kinds.has("flowAlert") ? [["error", "sig-error"]] : [])]
   .map(([t, c]) => `<span><i style="background:var(--fx-${c})"></i>${t}</span>`).join("") + `<span class="note">titanium: the parts · silver: shared · light: a signal</span>`;
+
+
+// ── selection: a part's own links stay lit, the rest goes quiet; a card says what they are (F4) ──
+const QUIET = 0.2, cableDim = {uses: cableMat.uses.clone(), needs: cableMat.needs.clone()}; for (const m of Object.values(cableDim)) m.color.multiplyScalar(0.16);
+const card = mk("aside", "fx-card"); card.hidden = true; host.append(card);
+const spot = new Map(); for (const it of core) spot.set(it.id, it); for (const c of clusters) spot.set(c.id, c);
+let sel = null;
+function select(id) { sel = id && spot.has(id) ? id : null;
+  const lit = sel ? new Set([sel]) : null; if (lit) for (const p of pairs) { if (p.src === sel) lit.add(p.dst); if (p.dst === sel) lit.add(p.src); }
+  const k = (o) => !lit || (o != null && lit.has(o)) ? 1 : o == null ? 0.5 : QUIET;
+  for (const b of [metal, glass, smoked]) b.tone(k);
+  if (puckMesh) { pucks.forEach((b, i) => puckMesh.setColorAt(i, col.copy(b.color).multiplyScalar(k(b.owner)))); puckMesh.instanceColor.needsUpdate = true; }
+  for (const L of lightSets) { L.list.forEach((b, i) => { const f = k(b.owner) < 1 ? 0.12 : 1; L.mesh.setColorAt(i, col.copy(L.sigs[b.sig]).multiplyScalar(b.gain * 1.1 * f)); L.halo.setColorAt(i, col.copy(L.sigs[b.sig]).multiplyScalar(L.glow * b.gain / 1.5 * f)); });
+    L.mesh.instanceColor.needsUpdate = true; L.halo.instanceColor.needsUpdate = true; }
+  // a cable is lit when it is the selected cluster's, or runs from a cluster to the selected item
+  const wired = (c) => !lit || c.owner === sel || pairs.some(p => p.src === c.owner && p.dst === sel && p.kind === c.kind);
+  for (const c of cables) c.mesh.material = wired(c) ? cableMat[c.kind] : cableDim[c.kind];
+  runs.forEach((r, i) => sparks.setColorAt(i, col.setHex(0xffffff).multiplyScalar(wired(r) ? 1.5 : 0.08))); if (runs.length) sparks.instanceColor.needsUpdate = true;
+  for (const l of labels) { l.el.classList.toggle("quiet", !!lit && !(l.owner && lit.has(l.owner))); l.el.classList.toggle("picked", !!sel && l.owner === sel); }
+  describe(); }
+/* the card: what the selected thing is, what leads to it and what it leads to — every row goes somewhere */
+function describe() { card.textContent = ""; card.hidden = !sel; if (!sel) return;
+  const head = (kind, name, sub) => { const x = mk("button", "fx-x", "×"); x.type = "button"; x.title = "Clear the selection  (Esc)"; x.onclick = () => select(null);
+    card.append(x, mk("p", "fx-kind", kind), mk("h3", null, name)); if (sub) card.append(mk("p", "fx-sub", sub)); };
+  const list = (title, rows, max = 60) => { if (!rows.length) return; card.append(mk("h4", null, `${title} · ${rows.length}`)); const ul = mk("div", "fx-rows");
+    for (const r of rows.slice(0, max)) { const b = mk(r.go ? "button" : "div", "fx-row"); if (r.go) { b.type = "button"; b.onclick = r.go; } b.append(mk("b", null, r.name)); if (r.note) b.append(mk("span", null, r.note)); ul.append(b); }
+    if (rows.length > max) ul.append(mk("div", "fx-row more", `and ${rows.length - max} more`)); card.append(ul); };
+  const open = (name, at) => () => opts.onOpen && opts.onOpen(name, at);
+  const flowRow = (f) => ({name: f.name, note: [`${f.ops} ops`, f.runs ? `${f.runs.toLocaleString()} runs` : "", f.errors ? `${f.errors} failed` : ""].filter(Boolean).join(" · "), go: open(f.name)});
+  const doorRow = (d) => ({name: d.name, note: d.type === "job" ? d.kind : `${d.kind} ${d.path || ""}`.trim()});
+  const toCore = (kind) => pairs.filter(p => p.src === sel && p.kind === kind).map(p => ({name: spot.get(p.dst).name, note: p.count > 1 ? `×${p.count}` : "", go: () => select(p.dst)}));
+  const c = spot.get(sel), e = model.by.get(sel);
+  if (c.ghost) { head("Not in this project", c.name, "doors ask for this graph, and the project does not list it"); list("Asked for by", c.doors.map(doorRow)); return; }
+  if (c.members) {                                                   // a cluster: one flow, or a domain of flows
+    if (grouped) { head("Domain", c.name, c.sub); list("Flows", c.members.map(i => model.by.get(i)).sort((a, b) => b.errors - a.errors || b.runs - a.runs || b.ops - a.ops).map(flowRow), 200); }
+    else { head("Flow", c.name, [c.sub, e.runs ? `${e.runs.toLocaleString()} runs in 7 days` : "", e.errors ? `${e.errors} failed` : ""].filter(Boolean).join(" · "));
+      const go = mk("button", "fx-go", "Open in the editor"); go.type = "button"; go.onclick = open(c.name); card.append(go); }
+    list("Comes in through", c.doors.map(doorRow), 12); list("Uses, shared with other flows", toCore("uses")); list("Needs", toCore("needs")); return; }
+  const users = pairs.filter(p => p.dst === sel).map(p => ({name: spot.get(p.src).name, note: p.count > 1 ? `×${p.count}` : "", go: () => select(p.src)}));
+  if (c.kind === "block") { head("Shared block", c.name, e.kind === "op" ? `one op · ${e.definedAt}` : `a nested graph of ${e.ops} ops`);
+    if (grouped) list("Used in", users); list("Used by", e.uses.map(u => ({name: model.by.get(u.flow).name, note: `as ${u.name}`, go: open(model.by.get(u.flow).name, u.at)})), 80); return; }
+  const rs = model.resources.filter(r => boxOfRes.get(r.id) === sel);
+  head(rs.length > 1 ? "Resources" : "Resource", c.name, rs.length > 1 ? "" : rs[0].key);
+  if (rs.length > 1) list("In this group", rs.map(r => ({name: r.name, note: `${r.flows.length} flows`})));
+  if (grouped) list("Needed in", users); list("Needed by", [...new Set(rs.flatMap(r => r.flows))].map(i => flowRow(model.by.get(i))), 80); }
+/* go to a thing by name: its cluster or core item is selected and brought to the middle */
+function reveal(id) { const e = model.by.get(id); let o = spot.has(id) ? id : null;
+  if (!o && e) { const f = e.type === "flow" ? e.id : e.flow || (e.job && model.by.get(e.job).flow); o = f ? clusterOf.get(f) : e.type === "resource" ? boxOfRes.get(id) : e.asks || (e.job && model.by.get(e.job).asks) ? `?:${e.asks || model.by.get(e.job).asks}` : null; }
+  if (!o || !spot.has(o)) return false; const t = spot.get(o); v3.set(t.x, 0.6, t.z);
+  view.zoom = Math.max(view.zoom, grouped ? 2.2 : 1.8); const k = view.span / view.zoom / vh(), iL = Math.max(0, hud.offsetLeft - 14);
+  view.cx = v3.dot(RIGHT) - iL / 2 * k; view.cy = v3.dot(UP); apply(); select(o); return true; }
+const find = mk("input", "fx-find"); find.type = "search"; find.placeholder = "Find a flow, service, job, block, resource…"; find.setAttribute("aria-label", "Find on the picture"); find.autocomplete = "off";
+const found = mk("div", "fx-found"); found.hidden = true; hud.append(find, found);
+const things = [...model.flows, ...model.blocks.filter(b => b.shared), ...model.resources.filter(r => r.flows.length), ...model.doors];
+find.oninput = () => { const q = find.value.trim().toLowerCase(); found.textContent = ""; found.hidden = !q; if (!q) return;
+  const hits = things.filter(t => `${t.name} ${t.path || ""}`.toLowerCase().includes(q)).slice(0, 8);
+  if (!hits.length) found.append(mk("div", "fx-row more", "Nothing by that name"));
+  for (const t of hits) { const b = mk("button", "fx-row"); b.type = "button"; b.append(mk("b", null, t.name), mk("span", null, t.type === "block" ? "shared block" : t.type));
+    b.onclick = () => { if (reveal(t.id)) { find.value = ""; found.hidden = true; } }; found.append(b); } };
+find.onkeydown = (e) => { if (e.key === "Enter") { const b = found.querySelector("button"); if (b) b.click(); } else if (e.key === "Escape") { find.value = ""; found.hidden = true; find.blur(); } e.stopPropagation(); };
 
 fit(); resize();
 const T0 = performance.now(), still = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -406,7 +487,7 @@ function frame() { raf = 0; if (!live) return; if (!host.clientWidth) { raf = re
   composer.render(); place(); host.dataset.ready = "1"; raf = requestAnimationFrame(frame); }
 frame();
 return {
-  fit,
+  fit, select, reveal,
   pause() { live = false; if (raf) cancelAnimationFrame(raf); raf = 0; },
   resume() { if (!live) { live = true; frame(); } },
   dispose() { this.pause(); sized.disconnect(); document.removeEventListener("keydown", onKey);
