@@ -105,6 +105,17 @@ body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(v
 #factory .fx-reset { position: absolute; right: 18px; top: var(--fx-top); background: var(--fx-graphite); color: var(--fx-text); border: 1px solid var(--fx-gunmetal); border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer; }
 #factory .fx-reset:hover { border-color: var(--fx-titanium); }
 #factory .fx-note { position: absolute; left: var(--fx-left); top: calc(var(--fx-top) + 4px); margin: 0; max-width: 46ch; color: var(--fx-text-2); }
+#factory .fx-gl:focus-visible { outline: 2px solid color-mix(in srgb, var(--fx-sig-agent) 70%, transparent); outline-offset: -2px; }
+#factory .lb:focus-visible, #factory .fx-row:focus-visible, #factory .fx-go:focus-visible, #factory .fx-also:focus-visible, #factory .fx-reset:focus-visible, #factory .fx-x:focus-visible {
+  outline: 2px solid var(--fx-sig-agent); outline-offset: 1px; }
+/* a phone: the card is a sheet at the bottom, the legend's note goes, the find box takes the width */
+@media (max-width: 760px) {
+  #factory .fx-legend .note { display: none; }
+  #factory .fx-find, #factory .fx-found { width: calc(100vw - 36px - var(--fx-left)); max-width: none; }
+  #factory .fx-reset { top: auto; bottom: 76px; }
+  #factory .fx-card { left: 10px; right: 10px; top: auto; bottom: 84px; width: auto; max-width: none; max-height: 44%; }
+  #factory .fx-hud p { max-width: calc(100vw - var(--fx-left) - 18px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
 /* its row in the flows rail */
 .flowrail .frrow.frpicture { grid-template-columns: minmax(0, 1fr); border-bottom: 1px solid var(--border); }
 .flowrail .frrow.frpicture .frname { font-family: var(--font); }

@@ -113,7 +113,7 @@ window.FlowRail = (() => {
       const text = el("span");
       text.append(el("span", "frname", "Project picture"), el("span", "frsub", `${rows.length} flows as one model`));
       b.append(text);
-      b.onclick = () => Factory.show();
+      b.onclick = () => { Factory.show(); if (innerWidth <= 760) show(false); };
       list.append(b);
     }
     if (!rows.length) list.append(el("div", "frnone", q ? "No flow matches" : "No flows"));
