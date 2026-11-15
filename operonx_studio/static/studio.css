@@ -6318,20 +6318,30 @@ h2 > .paneabout { margin-left: 6px; }
 .rh-v { max-width: 100%; color: var(--text); }
 .rh-v.rh-var { color: var(--accent-strong); background: var(--accent-soft); border-radius: var(--r-2xs); padding: 0 6px; }
 
-/* Light theme: an op's kind has to read at a glance, and the card has to stay clean. A grey or
-   tinted wash over light glass reads as a smudge, so the card is white, the kind is a 3px stripe
-   on its left edge and the colour of its icon, and the band keeps only a faint tint of that hue.
-   Dark keeps its fills. */
+/* Light theme: the same card as dark, in light. The whole card is glass tinted with its kind's hue,
+   strongest under the icon and fading to the right, with a highlight along the top and an edge in
+   the same hue: a function is cool slate, an LLM op lavender, a graph indigo, speech pink. */
 :root:not([data-theme="dark"]) #world .node.cell,
 :root:not([data-theme="dark"]) #world .node.cell.funcop,
 :root:not([data-theme="dark"]) #world .node.cell.graphop {
   --kc: var(--kind, var(--k-func));
+  --kc-a: 44%; --kc-b: 17%;
   background:
-    linear-gradient(90deg, var(--kc) 0 3px, color-mix(in srgb, var(--kc) 7%, transparent) 3px 40px, transparent 40px),
-    rgba(255, 255, 255, .86);
-  border-color: color-mix(in srgb, var(--kc) 26%, var(--border));
+    linear-gradient(180deg, rgba(255, 255, 255, .55) 0, rgba(255, 255, 255, 0) 46%),
+    linear-gradient(90deg, color-mix(in srgb, var(--kc) var(--kc-a), transparent) 0, color-mix(in srgb, var(--kc) var(--kc-b), transparent) 70%),
+    rgba(255, 255, 255, .72);
+  border-color: color-mix(in srgb, var(--kc) 34%, rgba(255, 255, 255, .6));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--kc) 14%, transparent), 0 6px 16px -8px color-mix(in srgb, var(--kc) 30%, transparent);
 }
-:root:not([data-theme="dark"]) #world .node.cell.funcop { --kc: var(--k-func-line); }
-:root:not([data-theme="dark"]) #world .node.cell.graphop { --kc: var(--k-graph); }
-:root:not([data-theme="dark"]) #world .node.cell .iconband { color: var(--kc); border-right-color: color-mix(in srgb, var(--kc) 18%, transparent); }
-:root:not([data-theme="dark"]) #world .node.cell.funcop .iconband { color: var(--k-func); }
+:root:not([data-theme="dark"]) #world .node.cell.funcop { --kc: #6f7fa6; --kc-a: 20%; --kc-b: 6%; }
+:root:not([data-theme="dark"]) #world .node.cell.graphop { --kc: var(--k-graph); --kc-a: 46%; --kc-b: 20%; }
+:root:not([data-theme="dark"]) #world .node.cell .iconband { color: color-mix(in srgb, var(--kc) 80%, var(--text)); border-right-color: color-mix(in srgb, var(--kc) 22%, transparent); }
+
+/* Runs: the compare tick box sits beside the status dot with a gap, both on the row's middle line
+   (the global checkbox rule zeroed its margin, so it touched the dot) */
+.runstable .stcell { width: 52px; vertical-align: middle; }
+.runstable .stcell .stdot, .runstable .stcell .runpick { vertical-align: middle; }
+.runstable .stcell .runpick { margin-left: 10px; }
+
+/* an agent graph's card: the operonx mark at the size of the other kinds' icons (it was 30px in a 40px band) */
+#world .node.cell .gband .oxg .oxpic { width: 21px; height: 12px; }
