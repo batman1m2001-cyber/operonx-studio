@@ -128,6 +128,13 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
   detail.textContent = "";
   const bar = el("div", "jbar");
   bar.append(el("h2", "jtitle", job.name));
+  if (window.Factory && Factory.placed(`j:${job.name}`)) {      // where it stands on the project picture (factory.js)
+    const pic = el("button", "linkbtn", "Picture");
+    pic.type = "button";
+    pic.title = "Where this job stands on the project picture";
+    pic.onclick = () => Factory.reveal(`j:${job.name}`);
+    bar.append(pic);
+  }
   const refresh = Icons.button("refresh", undefined, "", "Refresh");
   refresh.onclick = () => showJobs(job.name, state.jobRun);
   bar.append(refresh);

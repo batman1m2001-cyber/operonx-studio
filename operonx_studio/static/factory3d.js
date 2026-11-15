@@ -11,7 +11,7 @@
  * lists it; a double click on a flow, or a row of the card, opens the flow in the editor. / finds by name.
  *
  * An ES module, loaded on demand by factory.js — the studio's pages do not pay for three.js until
- * the picture is opened. mount(host, ir, stats, {onOpen(flow, node), onRuns(door)}) → {pause, resume, fit, select, reveal, setStats, dispose}. */
+ * the picture is opened. mount(host, ir, stats, {onOpen(flow, node), onRuns(door), onDoor(service)}) → {pause, resume, fit, select, reveal, setStats, dispose}. */
 import * as THREE from "./vendor/three/three.module.min.js";
 import { EffectComposer } from "./vendor/three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "./vendor/three/addons/postprocessing/RenderPass.js";
@@ -466,11 +466,15 @@ function describe() { card.textContent = ""; card.hidden = !sel; if (!sel) retur
   const head = (kind, name, sub) => { const x = mk("button", "fx-x", "×"); x.type = "button"; x.title = "Clear the selection  (Esc)"; x.onclick = () => select(null);
     card.append(x, mk("p", "fx-kind", kind), mk("h3", null, name)); if (sub) card.append(mk("p", "fx-sub", sub)); };
   const list = (title, rows, max = 60) => { if (!rows.length) return; card.append(mk("h4", null, `${title} · ${rows.length}`)); const ul = mk("div", "fx-rows");
-    for (const r of rows.slice(0, max)) { const b = mk(r.go ? "button" : "div", "fx-row"); if (r.go) { b.type = "button"; b.onclick = r.go; } b.append(mk("b", null, r.name)); if (r.note) b.append(mk("span", null, r.note)); ul.append(b); }
+    for (const r of rows.slice(0, max)) { const b = mk(r.go ? "button" : "div", "fx-row"); if (r.go) { b.type = "button"; b.onclick = r.go; if (r.tip) b.title = r.tip; } b.append(mk("b", null, r.name)); if (r.note) b.append(mk("span", null, r.note));
+      if (!r.also) { ul.append(b); continue; }                        // a second place the row leads to
+      const two = mk("div", "fx-pair"), a = mk("button", "fx-also", "↗"); a.type = "button"; a.title = r.also.tip; a.setAttribute("aria-label", r.also.tip); a.onclick = r.also.go; two.append(b, a); ul.append(two); }
     if (rows.length > max) ul.append(mk("div", "fx-row more", `and ${rows.length - max} more`)); card.append(ul); };
   const open = (name, at) => () => opts.onOpen && opts.onOpen(name, at);
   const flowRow = (f) => ({name: f.name, note: [`${f.ops} ops`, f.runs ? `${f.runs.toLocaleString()} runs` : "", f.errors ? `${f.errors} failed` : ""].filter(Boolean).join(" · "), go: open(f.name)});
-  const doorRow = (d) => ({name: d.name, note: d.type === "job" ? d.kind : `${d.kind} ${d.path || ""}`.trim(), go: opts.onRuns ? () => opts.onRuns(d) : null});
+  const doorRow = (d) => ({name: d.name, note: d.type === "job" ? d.kind : `${d.kind} ${d.path || ""}`.trim(), go: opts.onRuns ? () => opts.onRuns(d) : null,
+    tip: d.type === "job" ? "Open this job, with its runs" : "Open this service's runs",
+    also: d.type === "service" && opts.onDoor ? {tip: "Its row on the Services screen", go: () => opts.onDoor(d)} : null});
   const toCore = (kind) => pairs.filter(p => p.src === sel && p.kind === kind).map(p => ({name: spot.get(p.dst).name, note: p.count > 1 ? `×${p.count}` : "", go: () => select(p.dst)}));
   const c = spot.get(sel), e = model.by.get(sel);
   if (c.ghost) { head("Not in this project", c.name, "doors ask for this graph, and the project does not list it"); list("Asked for by", c.doors.map(doorRow)); return; }
@@ -478,7 +482,7 @@ function describe() { card.textContent = ""; card.hidden = !sel; if (!sel) retur
     if (grouped) { head("Domain", c.name, c.sub); list("Flows", c.members.map(i => model.by.get(i)).sort((a, b) => b.errors - a.errors || b.runs - a.runs || b.ops - a.ops).map(flowRow), 200); }
     else { head("Flow", c.name, [c.sub, e.runs ? `${e.runs.toLocaleString()} runs in 7 days` : "", e.errors ? `${e.errors} failed` : ""].filter(Boolean).join(" · "));
       const go = mk("button", "fx-go", "Open in the editor"); go.type = "button"; go.onclick = open(c.name); card.append(go); }
-    list("Comes in through — a row opens its runs", c.doors.map(doorRow), 12); list("Uses, shared with other flows", toCore("uses")); list("Needs", toCore("needs")); return; }
+    list("Comes in through", c.doors.map(doorRow), 12); list("Uses, shared with other flows", toCore("uses")); list("Needs", toCore("needs")); return; }
   const users = pairs.filter(p => p.dst === sel).map(p => ({name: spot.get(p.src).name, note: p.count > 1 ? `×${p.count}` : "", go: () => select(p.src)}));
   if (c.kind === "block") { head("Shared block", c.name, e.kind === "op" ? `one op · ${e.definedAt}` : `a nested graph of ${e.ops} ops`);
     if (grouped) list("Used in", users); list("Used by", e.uses.map(u => ({name: model.by.get(u.flow).name, note: `as ${u.name}`, go: open(model.by.get(u.flow).name, u.at)})), 80); return; }

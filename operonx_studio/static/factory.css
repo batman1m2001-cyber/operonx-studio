@@ -90,6 +90,13 @@ body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(v
 #factory .fx-row b { font: 550 12px var(--mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #factory .fx-row span { margin-left: auto; flex: none; max-width: 55%; color: var(--fx-text-2); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #factory .fx-row.more { color: var(--fx-text-2); }
+#factory .fx-pair { display: flex; align-items: center; }
+#factory .fx-pair .fx-row { min-width: 0; }
+#factory .fx-also { flex: none; border: 0; border-radius: 6px; background: none; color: var(--fx-text-2); font: inherit; font-size: 12px; padding: 4px 7px; cursor: pointer; }
+#factory .fx-also:hover { color: var(--fx-text); background: color-mix(in srgb, var(--fx-titanium) 16%, transparent); }
+/* a Services row the picture sent you to */
+#services .fx-flash { animation: fx-flash 1.6s ease-out; }
+@keyframes fx-flash { from { box-shadow: 0 0 0 2px #C0A6FA, 0 0 22px rgba(192, 166, 250, .5); } to { box-shadow: 0 0 0 2px transparent, 0 0 0 transparent; } }
 #factory .fx-hud h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
 #factory .fx-hud p { margin: 3px 0 0; color: var(--fx-text-2); font-size: 12px; }
 #factory .fx-legend { position: absolute; left: var(--fx-left); top: calc(var(--fx-top) + 46px); display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--fx-text-2); pointer-events: none; }
