@@ -3,7 +3,7 @@
  * Four columns, the way work moves through a project (docs/SPATIAL_FACTORY_PLAN.md):
  *   doors → flows → shared blocks → resources
  * Every card is an entity of the factory model (factorymodel.js) and every line one of its links;
- * links between the same two cards are one line, thicker the more there are. A project too large
+ * links between the same two cards are one line, and all the lines into one card share one trunk. A project too large
  * to list flow by flow is listed by domain, and many resources by kind; a group opens in place.
  * Pointing at a card shows what leads to it and what it leads to; a click keeps that. Cards wear
  * the flow canvas's own glass. */
@@ -154,15 +154,22 @@ window.FactoryView = (() => {
       const cards = new Map([...root.querySelectorAll(".fv-card")].map(c => [c.dataset.id, c]));
       const pairs = FactoryModel.pairs(model, boxOf).filter(p => cards.has(p.src) && cards.has(p.dst));
       const dense = pairs.length > DENSE;
-      root.style.setProperty("--fv-rest", dense ? Math.max(0.07, Math.min(0.5, 18 / pairs.length)).toFixed(2) : "0.5");
+      root.style.setProperty("--fv-rest", dense ? Math.max(0.1, Math.min(0.5, 22 / pairs.length)).toFixed(2) : "0.5");
 
-      // a dependency sits level with the rows that use it; then the column is spread so nothing overlaps
-      const top0 = stage.getBoundingClientRect().top;
-      const mid = (el) => { const r = el.getBoundingClientRect(); return r.top - top0 + r.height / 2; };
-      const into = new Map(); for (const p of pairs) { if (!into.has(p.dst)) into.set(p.dst, []); into.get(p.dst).push(mid(cards.get(p.src))); }
-      const settle = (col) => {
+      // ── buses: everything that goes to one card shares one trunk, so a block used by four flows is
+      //    one line with four taps, not four lines. Every bus has a lane of its own between the flows
+      //    and the blocks; a resource's bus then crosses the block column where no card stands. ──
+      const buses = new Map();
+      for (const p of pairs) { if (!buses.has(p.dst)) buses.set(p.dst, {dst: p.dst, kind: p.kind, taps: []}); buses.get(p.dst).taps.push(p); }
+      const far = [...buses.values()].filter(b => b.kind === "needs");
+      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+      root.style.setProperty("--fv-gap1", `${clamp(30 + buses.size * 6, 76, 150)}px`);
+      root.style.setProperty("--fv-gap2", `${clamp(34 + far.length * 5, 60, 90)}px`);
+
+      /* spread a column: each child as near the height it asks for as the others allow */
+      const settle = (col, wantY) => {
         const items = [...col.children].map(el => {
-          const ys = (el.dataset.id ? [el.dataset.id] : [...el.querySelectorAll(".fv-card")].map(c => c.dataset.id)).flatMap(i => into.get(i) || []);
+          const ys = (el.dataset.id ? [el.dataset.id] : [...el.querySelectorAll(".fv-card")].map(c => c.dataset.id)).map(wantY).filter(y => y != null);
           return {el, hgt: el.offsetHeight, want: ys.length ? sum(ys, y => y) / ys.length - el.offsetHeight / 2 : null}; });
         const linked = items.filter(i => i.want != null).sort((a, b) => a.want - b.want);
         let y = 0; for (const it of linked) { it.y = Math.max(y, it.want); y = it.y + it.hgt + 12; }
@@ -172,25 +179,76 @@ window.FactoryView = (() => {
         y = linked.length ? linked[linked.length - 1].y + linked[linked.length - 1].hgt + 14 : 0;
         for (const it of items.filter(i => i.want == null)) { it.el.style.top = `${Math.round(y)}px`; y += it.hgt + 10; }
         col.style.height = `${Math.round(y)}px`; };
-      settle(colB); settle(colR);
+      /* a path of straight runs with rounded corners, the way the flow canvas draws its wires */
+      const ortho = (raw) => {
+        const pts = raw.filter((p, i) => !i || Math.abs(p[0] - raw[i - 1][0]) > 0.5 || Math.abs(p[1] - raw[i - 1][1]) > 0.5);
+        let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+        for (let i = 1; i < pts.length - 1; i++) {
+          const [a, c, b] = [pts[i - 1], pts[i], pts[i + 1]];
+          const la = Math.hypot(c[0] - a[0], c[1] - a[1]), lb = Math.hypot(b[0] - c[0], b[1] - c[1]), r = Math.min(9, la / 2, lb / 2);
+          d += `L${(c[0] + (a[0] - c[0]) / la * r).toFixed(1)} ${(c[1] + (a[1] - c[1]) / la * r).toFixed(1)}Q${c[0].toFixed(1)} ${c[1].toFixed(1)} ${(c[0] + (b[0] - c[0]) / lb * r).toFixed(1)} ${(c[1] + (b[1] - c[1]) / lb * r).toFixed(1)}`;
+        }
+        const z = pts[pts.length - 1]; return `${d}L${z[0].toFixed(1)} ${z[1].toFixed(1)}`;
+      };
 
-      // ── lines: one per pair of cards on screen, and one from each row's doors to its card ──
-      const draw = () => {
+      const place = () => {
+        let o = stage.getBoundingClientRect();
+        const box = (el) => { const r = el.getBoundingClientRect(); return {l: r.left - o.left, r: r.right - o.left, t: r.top - o.top, b: r.bottom - o.top, h: r.height, y: r.top - o.top + r.height / 2}; };
+        // 1. a block sits level with the rows that use it
+        const tapY = (bus) => sum(bus.taps, p => box(cards.get(p.src)).y) / bus.taps.length;
+        settle(colB, id => (buses.has(id) && buses.get(id).kind === "uses" ? tapY(buses.get(id)) : null));
+        // 2. a resource's bus crosses the block column at the free height nearest its flows, and the resource sits there
+        const walls = [...colB.children].map(el => box(el)), taken = [];
+        const free = (y) => y > 6 && !walls.some(w => y > w.t - 6 && y < w.b + 6) && !taken.some(t => Math.abs(t - y) < 6);
+        for (const bus of far.slice().sort((a, b) => tapY(a) - tapY(b))) {
+          const want = tapY(bus); let y = want;
+          for (let k = 1; k < 4000 && !free(y); k++) y = want + (k % 2 ? 1 : -1) * Math.ceil(k / 2);
+          bus.cross = y; taken.push(y);
+        }
+        settle(colR, id => (buses.has(id) ? buses.get(id).cross : null));
+
+        // 3. lanes: a bus's trunk runs from its highest tap to its lowest; lanes are ordered so trunks cross least
+        o = stage.getBoundingClientRect();
         wires.textContent = "";
-        const o = stage.getBoundingClientRect();
         wires.setAttribute("width", stage.scrollWidth); wires.setAttribute("height", stage.scrollHeight);
-        const at = (el, side) => { const r = el.getBoundingClientRect(); return [side === "l" ? r.left - o.left : r.right - o.left, r.top - o.top + r.height / 2]; };
-        const line = (a, b, cls, n, src, dst) => {
-          const dx = Math.max(40, (b[0] - a[0]) * 0.5), p = document.createElementNS(SVG, "path");
-          p.setAttribute("d", `M${a[0]} ${a[1]} C${a[0] + dx} ${a[1]} ${b[0] - dx} ${b[1]} ${b[0]} ${b[1]}`);
-          p.setAttribute("class", `fv-wire ${cls}`); p.style.strokeWidth = (1.2 + (dense ? Math.min(1.4, Math.log2(n) * 0.22) : Math.min(3, Math.log2(n) * 0.7))).toFixed(1);
+        const at = new Map([...cards].map(([id, c]) => [id, box(c)]));
+        let lanes = [...buses.values()];
+        for (const bus of lanes) { bus.ys = bus.taps.map(p => at.get(p.src).y); bus.exit = bus.kind === "uses" ? at.get(bus.dst).y : bus.cross;
+          bus.lo = Math.min(bus.exit, ...bus.ys); bus.hi = Math.max(bus.exit, ...bus.ys); }
+        const cost = (order) => { let c = 0;
+          for (let i = 0; i < order.length; i++) { const b = order[i];
+            for (let j = 0; j < i; j++) { const t = order[j]; for (const y of b.ys) if (y > t.lo && y < t.hi) c++; }
+            for (let j = i + 1; j < order.length; j++) { const t = order[j]; if (b.exit > t.lo && b.exit < t.hi) c++; } }
+          return c; };
+        lanes.sort((a, b) => b.exit - a.exit);
+        for (let pass = 0, best = cost(lanes), moved = true; moved && pass < 24; pass++) { moved = false;
+          for (let i = 0; i < lanes.length - 1; i++) { [lanes[i], lanes[i + 1]] = [lanes[i + 1], lanes[i]]; const c = cost(lanes);
+            if (c < best) { best = c; moved = true; } else [lanes[i], lanes[i + 1]] = [lanes[i + 1], lanes[i]]; } }
+        const g1 = [main.getBoundingClientRect().right - o.left, colB.getBoundingClientRect().left - o.left], g2 = colB.getBoundingClientRect().right - o.left;
+        const step = Math.min(13, (g1[1] - g1[0] - 36) / Math.max(1, lanes.length - 1)), x0 = (g1[0] + g1[1]) / 2 - step * (lanes.length - 1) / 2;
+        lanes.forEach((bus, i) => { bus.x = x0 + i * step; });
+        // a card's taps leave it one under the other, ordered so its own lines never cross each other
+        const port = new Map(), leaving = new Map();
+        for (const bus of lanes) for (const p of bus.taps) { if (!leaving.has(p.src)) leaving.set(p.src, []); leaving.get(p.src).push(bus); }
+        for (const [src, list] of leaving) { const b = at.get(src), n = list.length, gap = n > 1 ? Math.min(6, (b.h - 12) / (n - 1)) : 0;
+          const up = list.filter(x => x.exit < b.y).sort((x, y) => x.x - y.x), down = list.filter(x => x.exit >= b.y).sort((x, y) => y.x - x.x);
+          [...up, ...down].forEach((bus, k) => port.set(`${src}|${bus.dst}`, b.y + (k - (n - 1) / 2) * gap)); }
+        const jog = far.filter(bus => Math.abs(bus.cross - at.get(bus.dst).y) > 1).sort((a, b) => a.cross - b.cross);
+        const wire = (d, cls, n, src, dst, label) => {
+          const p = document.createElementNS(SVG, "path"); p.setAttribute("d", d);
+          p.setAttribute("class", `fv-wire ${cls}`); p.style.strokeWidth = (1.3 + (dense ? Math.min(1.2, Math.log2(n) * 0.2) : Math.min(2.2, Math.log2(n) * 0.55))).toFixed(1);
           p.dataset.src = src; p.dataset.dst = dst; wires.append(p);
-          if (n > 1) { const t = document.createElementNS(SVG, "text"); t.setAttribute("x", (a[0] + b[0]) / 2); t.setAttribute("y", (a[1] + b[1]) / 2 + 3.5); t.setAttribute("class", `fv-count ${cls}`);
+          if (label) { const t = document.createElementNS(SVG, "text"); t.setAttribute("x", label[0]); t.setAttribute("y", label[1]); t.setAttribute("class", `fv-count ${cls}`);
             t.dataset.src = src; t.dataset.dst = dst; t.textContent = `×${count(n)}`; wires.append(t); }
         };
-        for (const p of pairs) line(at(cards.get(p.src), "r"), at(cards.get(p.dst), "l"), p.kind, p.count, p.src, p.dst);
+        for (const bus of lanes) { const d = at.get(bus.dst);
+          for (const p of bus.taps) { const s = at.get(p.src), py = port.get(`${p.src}|${bus.dst}`);
+            const pts = [[s.r, py], [bus.x, py], [bus.x, bus.exit]];
+            if (bus.kind === "needs" && jog.includes(bus)) { const x = g2 + 16 + jog.indexOf(bus) * 5; pts.push([x, bus.cross], [x, d.y]); }
+            pts.push([d.l, bus.kind === "uses" || !jog.includes(bus) ? bus.exit : d.y]);
+            wire(ortho(pts), p.kind, p.count, p.src, p.dst, p.count > 1 ? [bus.x - 5, py - 4] : null); } }
         for (const r of main.querySelectorAll(".fv-row")) { const d = r.querySelector(".fv-doors"), c = r.querySelector(".fv-card");
-          if (d && c && d.lastElementChild) line(at(d.lastElementChild, "r"), at(c, "l"), "door", 1, `row:${c.dataset.id}`, c.dataset.id); }
+          if (d && c && d.lastElementChild) { const a = box(d.lastElementChild), b = box(c); wire(`M${a.r} ${b.y}L${b.l} ${b.y}`, "door", 1, `row:${c.dataset.id}`, c.dataset.id); } }
         light();
       };
 
@@ -215,8 +273,8 @@ window.FactoryView = (() => {
         if (c.classList.contains("flow") && opts.onOpen) c.addEventListener("dblclick", () => opts.onOpen(model.by.get(cid)));
       }
       root.onclick = () => { locked = null; light(); };
-      draw();
-      view.redraw = draw;
+      place();
+      view.redraw = place;
     }
     const view = {model, root, redraw: () => {}, select: (id) => { locked = id; hot = null; render(); }, open: (id) => { open.add(id); render(); },
       destroy: () => { ro.disconnect(); root.remove(); }};

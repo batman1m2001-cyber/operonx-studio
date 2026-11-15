@@ -6362,7 +6362,7 @@ h2 > .paneabout { margin-left: 6px; }
   padding: calc(var(--bar-h) + 3 * var(--glass-gap)) 0 0 calc(var(--rail-w) + var(--flowrail-w) + 4 * var(--glass-gap)); }
 body.flowrail-off #factory { padding-left: calc(var(--rail-w) + 3 * var(--glass-gap)); }
 .fv { position: relative; box-sizing: border-box; min-width: 900px; max-width: 1400px; margin: 0 auto; padding: 20px 28px 96px; color: var(--text); font-size: var(--fs-md); }
-.fv-heads, .fv-stage { display: grid; grid-template-columns: minmax(232px, 1fr) minmax(200px, 290px) minmax(60px, 110px) minmax(190px, 250px) minmax(50px, 90px) minmax(150px, 220px); column-gap: 0; }
+.fv-heads, .fv-stage { display: grid; grid-template-columns: minmax(232px, 1fr) minmax(200px, 290px) var(--fv-gap1, 100px) minmax(190px, 250px) var(--fv-gap2, 80px) minmax(150px, 220px); column-gap: 0; }
 .fv-main { grid-column: 1 / span 2; display: grid; grid-template-columns: subgrid; row-gap: 8px; align-content: start; }
 .fv-head { padding: 0 0 16px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .fv-head:first-child { align-items: flex-end; padding-right: 28px; }
@@ -6415,11 +6415,11 @@ body.flowrail-off #factory { padding-left: calc(var(--rail-w) + 3 * var(--glass-
 .fv-note { font-size: var(--fs-sm); color: var(--text-3); padding: 4px 2px; }
 .fv-more { all: unset; cursor: pointer; font-size: var(--fs-sm); color: var(--accent-strong); padding: 4px 2px; }
 .fv-more:hover { text-decoration: underline; }
-.fv-wire { fill: none; stroke: var(--rt-wire); opacity: var(--fv-rest, .5); stroke-linecap: round; transition: opacity .16s ease; }
+.fv-wire { fill: none; stroke: var(--rt-wire); opacity: var(--fv-rest, .5); stroke-linecap: round; stroke-linejoin: round; transition: opacity .16s ease; }
 .fv-wire.needs { stroke: var(--k-res); }
 .fv-wire.door { stroke: color-mix(in srgb, var(--k-session) 60%, transparent); stroke-width: 1 !important; opacity: .45; }
 .fv-row.ghostrow .fv-chip, .fv-row.looserow .fv-chip { opacity: .8; }
-.fv-count { font-size: 10.5px; font-weight: 650; fill: var(--rt-wire-lit); opacity: .9; text-anchor: middle; paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; display: none; }
+.fv-count { font-size: 10.5px; font-weight: 650; fill: var(--rt-wire-lit); opacity: .9; text-anchor: end; paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; display: none; }
 .fv-focus .fv-count.on { display: block; } .fv-count.needs { fill: var(--k-res); }
 /* something is pointed at or kept: it, what leads to it and what it leads to stay; the rest steps back */
 .fv-focus .fv-card:not(.on), .fv-focus .fv-row:not(.on) .fv-doors, .fv-focus .fv-note, .fv-focus .fv-more { opacity: .28; }
