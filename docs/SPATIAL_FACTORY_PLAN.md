@@ -2,7 +2,7 @@
 
 **Plan ID:** `OPERONX_SPATIAL_FACTORY_PLAN` (refactored 2026-11-15)
 
-**Status:** F0–F6 done. F7 is next.
+**Status:** complete, F0–F7 (2026-11-15). What it could not do without the engine is in §9.
 
 **The first version of this plan**, as the owner wrote it, is kept word for word in
 [SPATIAL_FACTORY_PLAN_V1.md](SPATIAL_FACTORY_PLAN_V1.md). This file replaces it wherever the two differ.
@@ -197,10 +197,17 @@ Most of the first plan's F6 was done by UX_OVERHAUL_PLAN (U0–U6). What was lef
 
 On mr-finance: 89 of 90 services and 24 of 24 jobs have the link.
 
-### F7 — Scale and polish
+### F7 — Scale and polish (done)
 
-The 1,200 and 3,000-flow projects: first paint and interaction stay responsive; phone width; keyboard
-reach for select, open and search.
+Write-up: [FACTORY_SCALE.md](FACTORY_SCALE.md).
+
+- The generated 1,199- and 2,999-flow projects, mounted in the studio page: the picture is built in
+  1.2–1.5 s, about 90 draw calls a frame at either size, a selection repaints in 20–35 ms.
+- A slow machine is noticed (twenty slow frames) and the picture steps down: one pixel per pixel, then
+  no bloom.
+- Keyboard: Tab reaches every name, Enter selects it and moves into its card, where Enter opens;
+  arrows move the picture, + and - zoom, F fits, / finds, Esc clears.
+- Phone width: two fingers zoom, the card is a sheet at the bottom, nothing overflows sideways.
 
 ## 7. Acceptance criteria
 
@@ -223,8 +230,8 @@ reach for select, open and search.
 | F3 — Factory picture | Done 2026-11-15 | #207 | [FACTORY_PICTURE.md](FACTORY_PICTURE.md) |
 | F4 — Dependencies and navigation | Done 2026-11-15 | #208 | [FACTORY_NAVIGATION.md](FACTORY_NAVIGATION.md) |
 | F5 — Runtime | Done 2026-11-15 | #209 | [FACTORY_RUNTIME.md](FACTORY_RUNTIME.md) |
-| F6 — Remaining screens | Done 2026-11-15 | `ui/f6-factory-links` | §6 F6 of this file |
-| F7 — Scale and polish | Not started | | |
+| F6 — Remaining screens | Done 2026-11-15 | #210 | §6 F6 of this file |
+| F7 — Scale and polish | Done 2026-11-15 | `ui/f7-factory-scale` | [FACTORY_SCALE.md](FACTORY_SCALE.md) |
 
 ## 9. Needs backend
 

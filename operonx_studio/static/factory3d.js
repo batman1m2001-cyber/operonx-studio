@@ -398,9 +398,17 @@ const sized = new ResizeObserver(() => { if (host.clientWidth) resize(); }); siz
 canvas.addEventListener("wheel", (e) => { e.preventDefault(); view.zoom = Math.max(0.6, Math.min(12, view.zoom * Math.exp(-e.deltaY * 0.0012))); apply(); }, {passive: false});
 let drag = null;
 let moved = 0;
-canvas.addEventListener("pointerdown", (e) => { drag = [e.clientX, e.clientY]; moved = 0; canvas.setPointerCapture(e.pointerId); });
-canvas.addEventListener("pointermove", (e) => { if (!drag) return; moved += Math.abs(e.clientX - drag[0]) + Math.abs(e.clientY - drag[1]); const k = (view.span / view.zoom) / vh(); view.cx -= (e.clientX - drag[0]) * k; view.cy += (e.clientY - drag[1]) * k; drag = [e.clientX, e.clientY]; apply(); });
-canvas.addEventListener("pointerup", (e) => { const click = drag && moved < 5; drag = null; if (click) select(pick(e)); });
+/* two fingers: the distance between them is the zoom */
+const fingers = new Map(); let spread = 0;
+const apart = () => { const [a, b] = [...fingers.values()]; return Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; };
+canvas.addEventListener("pointerdown", (e) => { drag = [e.clientX, e.clientY]; moved = 0; canvas.setPointerCapture(e.pointerId); fingers.set(e.pointerId, [e.clientX, e.clientY]);
+  if (fingers.size === 2) { spread = apart(); moved = 99; } });
+canvas.addEventListener("pointermove", (e) => { if (fingers.has(e.pointerId)) fingers.set(e.pointerId, [e.clientX, e.clientY]);
+  if (fingers.size === 2) { const d = apart(); view.zoom = Math.max(0.6, Math.min(12, view.zoom * d / spread)); spread = d; apply(); return; }
+  if (!drag) return; moved += Math.abs(e.clientX - drag[0]) + Math.abs(e.clientY - drag[1]); const k = (view.span / view.zoom) / vh(); view.cx -= (e.clientX - drag[0]) * k; view.cy += (e.clientY - drag[1]) * k; drag = [e.clientX, e.clientY]; apply(); });
+const lift = (e) => { const click = e.type === "pointerup" && drag && moved < 5 && fingers.size <= 1; fingers.delete(e.pointerId); drag = null; if (click) select(pick(e)); };
+canvas.addEventListener("pointerup", lift); canvas.addEventListener("pointercancel", lift);
+canvas.tabIndex = 0;
 canvas.addEventListener("dblclick", (e) => { const id = pick(e); if (id && /^f:/.test(id) && opts.onOpen) opts.onOpen(model.by.get(id).name); });
 /* what is under the pointer: the eye's ray against every part's box, the nearest hit */
 function pick(e) { const r = canvas.getBoundingClientRect(), nx = (e.clientX - r.left) / r.width * 2 - 1, ny = 1 - (e.clientY - r.top) / r.height * 2;
@@ -414,13 +422,22 @@ function pick(e) { const r = canvas.getBoundingClientRect(), nx = (e.clientX - r
 resetBtn.onclick = fit;
 const onKey = (e) => { if (e.ctrlKey || e.metaKey || e.altKey || !host.clientWidth) return;
   const t = e.target; if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-  if (e.key === "f" || e.key === "F") fit(); else if (e.key === "Escape" && sel) select(null); else if (e.key === "/") { e.preventDefault(); find.focus(); } };
+  // with the picture in focus (or nothing): the arrows move it, + and - zoom
+  const here = host.contains(document.activeElement) || document.activeElement === document.body, step = view.span / view.zoom * 0.08;
+  const way = here && {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1]}[e.key];
+  if (e.key === "f" || e.key === "F") fit(); else if (e.key === "Escape" && sel) { select(null); canvas.focus(); } else if (e.key === "/") { e.preventDefault(); find.focus(); }
+  else if (way) { e.preventDefault(); view.cx += way[0] * step; view.cy += way[1] * step; apply(); }
+  else if (here && (e.key === "+" || e.key === "=" || e.key === "-")) { view.zoom = Math.max(0.6, Math.min(12, view.zoom * (e.key === "-" ? 1 / 1.2 : 1.2))); apply(); }
+  else return;
+  e.stopPropagation(); };                                          // the canvas under the picture has the same keys: they stop here
 document.addEventListener("keydown", onKey);
 
 // ── words: names float over what they name ────────────────────────
 for (const l of labels) { const d = document.createElement("div"); d.className = `lb ${l.cls}`; const b = document.createElement("b"); b.textContent = l.title; d.append(b);
   if (l.sub) { const s = document.createElement("span"); s.textContent = l.sub; d.append(s); l.subEl = s; }
-  if (l.owner) { d.classList.add("open"); d.onclick = () => select(l.owner); d.ondblclick = () => { if (/^f:/.test(l.owner) && opts.onOpen) opts.onOpen(l.title); }; } labelHost.append(d); l.el = d; l.p = new THREE.Vector3(l.x, l.y, l.z); }
+  if (l.owner) { d.classList.add("open"); d.tabIndex = 0; d.setAttribute("role", "button");       // Tab reaches every name; Enter selects it and moves on into its card
+    d.onkeydown = (e) => { if (e.key !== "Enter" && e.key !== " ") return; e.preventDefault(); e.stopPropagation(); select(l.owner); const b = card.querySelector(".fx-go, button.fx-row"); if (b) b.focus(); };
+    d.onclick = () => select(l.owner); d.ondblclick = () => { if (/^f:/.test(l.owner) && opts.onOpen) opts.onOpen(l.title); }; } labelHost.append(d); l.el = d; l.p = new THREE.Vector3(l.x, l.y, l.z); }
 function place() { const put = [];
   for (const l of labels) { v3.copy(l.p).project(camera); l.sx = (v3.x + 1) / 2 * vw(); l.sy = (1 - v3.y) / 2 * vh(); l.w = l.w || l.el.offsetWidth; l.hh = l.hh || l.el.offsetHeight; }
   for (const l of labels.slice().sort((a, b) => a.sy - b.sy)) {
@@ -510,7 +527,13 @@ setStats(stats);
 fit(); resize();
 const T0 = performance.now(), still = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let raf = 0, live = true;
+let lastAt = performance.now(), slow = 0, tier = 0;
+renderer.info.autoReset = false;                                   // a frame is several passes: count them all
 function frame() { raf = 0; if (!live) return; if (!host.clientWidth) { raf = requestAnimationFrame(frame); return; }   // hidden: wait, draw nothing
+  renderer.info.reset();
+  // a slow machine: after twenty slow frames draw at one pixel per pixel, and if that is not enough, without the bloom
+  { const now = performance.now(), dt = now - lastAt; lastAt = now; slow = dt > 45 && dt < 2000 ? slow + 1 : Math.max(0, slow - 1);
+    if (slow > 20 && tier < 2) { tier++; slow = 0; if (tier === 1) { renderer.setPixelRatio(1); resize(); } else bloom.enabled = false; } }
   const t = still ? 0.37 : (performance.now() - T0) / 1000;
   runs.forEach((r, i) => { const f = ((t * 4.2) / r.len + r.phase) % 1, x = f * (r.pts.length - 1), a = r.pts[Math.floor(x)], b = r.pts[Math.min(r.pts.length - 1, Math.floor(x) + 1)];
     v3.lerpVectors(a, b, x - Math.floor(x)); M.makeTranslation(v3.x, v3.y + 0.02, v3.z); sparks.setMatrixAt(i, M); });
@@ -519,6 +542,8 @@ function frame() { raf = 0; if (!live) return; if (!host.clientWidth) { raf = re
 frame();
 return {
   fit, select, reveal, setStats,
+  /* what a frame costs: for the scale checks */
+  cost: () => ({tier, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, parts: metal.items.length + glass.items.length + smoked.items.length, lights: lights.far.length + lights.mid.length, cables: cables.length, names: labels.length}),
   pause() { live = false; if (raf) cancelAnimationFrame(raf); raf = 0; },
   resume() { if (!live) { live = true; frame(); } },
   dispose() { this.pause(); sized.disconnect(); document.removeEventListener("keydown", onKey);
