@@ -6300,3 +6300,6 @@ h2 > .paneabout { margin-left: 6px; }
   /* it lies over the page's own text here, which a tinted glass lets through: an opaque sheet */
   .popover.paneabout-body { background: var(--rt-bay); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
+
+/* a long prompt file's outline scrolls: its rows keep their height (as flex items they were squeezed to fit) */
+.yv-nav > * { flex: none; }
