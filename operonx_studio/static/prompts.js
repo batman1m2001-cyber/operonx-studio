@@ -111,10 +111,15 @@ const PromptsView = (() => {
       list.append(b);
     }
     if (files.length) list.append(filesSection(files));
-    main.append(el("div", "note", "Reading this op's recorded executions…"));
+    const wait = el("div", "note", "Reading this op's recorded executions…");
+    main.append(wait);
+    // the search opens up to 2,000 recorded runs to find this op's inputs: on a project with many
+    // runs and none of this op that is most of a minute, so say it is still working
+    const slow = setTimeout(() => { wait.textContent = "Still reading: looking through the recorded runs for this op. With many runs this can take a minute."; }, 4000);
     let got;
     try { got = await api(`/api/p/${PID}/prompts/${encodeURIComponent(v.op)}/samples?limit=20`); }
-    catch (err) { main.textContent = ""; main.append(el("div", "errbox", err.message)); return; }
+    catch (err) { clearTimeout(slow); main.textContent = ""; main.append(el("div", "errbox", err.message)); return; }
+    clearTimeout(slow);
     if (mine !== token) return;
     main.textContent = "";
     if (!got.samples.length) {
