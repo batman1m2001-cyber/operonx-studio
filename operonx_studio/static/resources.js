@@ -98,7 +98,7 @@ function resourceSummary(cat, r) {
 /* A field's value as a person reads it. A "${NAME:default}" template shows the default, with the
  * variable that overrides it in the tooltip; a bare "${NAME}" shows as $NAME. The template as
  * written stays in the form the row opens. */
-function envValue(v) {
+function resourceValue(v) {
   const raw = typeof v === "string" ? v : JSON.stringify(v);
   const box = el("span", "rh-v mono");
   box.title = raw;
@@ -134,7 +134,7 @@ function resourceRow(cat, r, hub) {
   const sum = el("span", "rh-sum");
   for (const [k, v] of resourceSummary(cat, r)) {
     const it = el("span", "rh-kv");
-    it.append(el("span", "rh-k", k), envValue(v));
+    it.append(el("span", "rh-k", k), resourceValue(v));
     sum.append(it);
   }
   top.append(sum);
