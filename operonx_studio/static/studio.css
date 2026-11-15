@@ -6318,26 +6318,20 @@ h2 > .paneabout { margin-left: 6px; }
 .rh-v { max-width: 100%; color: var(--text); }
 .rh-v.rh-var { color: var(--accent-strong); background: var(--accent-soft); border-radius: var(--r-2xs); padding: 0 6px; }
 
-/* Light theme: an op's kind has to read at a glance. The pale kind fills vanish on a light glass card,
-   so the band and the edge take the kind's own colour (indigo for a graph, grey for a function,
-   each other kind its hue), and the icon is drawn in it. Dark keeps its fills. */
-:root:not([data-theme="dark"]) #world .node.cell {
-  background:
-    linear-gradient(180deg, var(--og-spec) 0, transparent 42%),
-    linear-gradient(90deg, color-mix(in srgb, var(--kind, var(--k-func)) 20%, transparent) 0 40px, transparent 40px),
-    color-mix(in srgb, var(--kind, var(--k-func)) 5%, var(--og-fill));
-}
-:root:not([data-theme="dark"]) #world .node.cell.funcop {
-  background:
-    linear-gradient(180deg, var(--og-spec) 0, transparent 42%),
-    linear-gradient(90deg, color-mix(in srgb, var(--k-func) 14%, transparent) 0 40px, transparent 40px),
-    color-mix(in srgb, var(--k-func) 3%, var(--og-fill));
-}
+/* Light theme: an op's kind has to read at a glance, and the card has to stay clean. A grey or
+   tinted wash over light glass reads as a smudge, so the card is white, the kind is a 3px stripe
+   on its left edge and the colour of its icon, and the band keeps only a faint tint of that hue.
+   Dark keeps its fills. */
+:root:not([data-theme="dark"]) #world .node.cell,
+:root:not([data-theme="dark"]) #world .node.cell.funcop,
 :root:not([data-theme="dark"]) #world .node.cell.graphop {
+  --kc: var(--kind, var(--k-func));
   background:
-    linear-gradient(180deg, var(--og-spec) 0, transparent 42%),
-    linear-gradient(90deg, color-mix(in srgb, var(--k-graph) 30%, transparent) 0 40px, transparent 40px),
-    color-mix(in srgb, var(--k-graph) 10%, var(--og-fill));
-  border-color: color-mix(in srgb, var(--k-graph) 55%, transparent);
+    linear-gradient(90deg, var(--kc) 0 3px, color-mix(in srgb, var(--kc) 7%, transparent) 3px 40px, transparent 40px),
+    rgba(255, 255, 255, .86);
+  border-color: color-mix(in srgb, var(--kc) 26%, var(--border));
 }
-:root:not([data-theme="dark"]) #world .node.cell.graphop .iconband { color: var(--k-graph); }
+:root:not([data-theme="dark"]) #world .node.cell.funcop { --kc: var(--k-func-line); }
+:root:not([data-theme="dark"]) #world .node.cell.graphop { --kc: var(--k-graph); }
+:root:not([data-theme="dark"]) #world .node.cell .iconband { color: var(--kc); border-right-color: color-mix(in srgb, var(--kc) 18%, transparent); }
+:root:not([data-theme="dark"]) #world .node.cell.funcop .iconband { color: var(--k-func); }
