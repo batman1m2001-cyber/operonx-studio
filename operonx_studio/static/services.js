@@ -27,13 +27,12 @@ const ServicesView = (() => {
     if (mine !== token) return;
     box.textContent = "";
     const head = el("div", "panehead");
-    head.append(el("h2", null, "Services"));
+    head.append(el("h2", null, "Services"), paneAbout("Each listener is one process: a port and the services bound to it. "
+      + "Start one here to try it the way it runs in production; the Playground drives it without a port."));
     const refresh = Icons.button("refresh", undefined, "", "Refresh");
     refresh.onclick = show;
     head.append(el("div", "spacer"), refresh);
     box.append(head);
-    box.append(el("p", "panesub", "Each listener is one process: a port and the services bound to it. "
-      + "Start one here to try it the way it runs in production; the Playground drives it without a port."));
 
     if (env) {
       const missing = Object.entries(env.env || {}).filter(([, x]) => x === "missing").map(([k]) => k);

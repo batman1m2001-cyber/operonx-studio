@@ -424,11 +424,13 @@ const RunsView = (() => {
     picker.setAttribute("aria-label", "Where runs came from");
     renderPicker(picker);
     const htext = el("div", "runstitle");
-    htext.append(el("h2", null, title), el("div", "runssub", sub));
+    const h2 = el("h2", null, title);
+    // where the runs are stored is a detail: one click away, beside the title
+    if (first && first.store) h2.append(paneAbout(storeLine(first.store), "Where these runs are stored"));
+    htext.append(h2, el("div", "runssub", sub));
     const tools = el("div", "runstools");
     head.append(picker, htext, tools);
     main.append(head);
-    if (first && first.store) main.append(storeLine(first.store));
     if (first && first.source_error) main.append(el("div", "errbox loaderr", first.source_error));
 
     const bar = el("div", "runsbar");

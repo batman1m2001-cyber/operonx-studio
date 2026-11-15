@@ -28,6 +28,27 @@ const el = (tag, cls, text) => {
   return n;
 };
 
+/* What a screen is, one click away (docs/UX_OVERHAUL_PLAN.md U3): an (i) beside
+ * the title that opens the explanation, in place of a paragraph under every
+ * title. `what` is text or a node. It closes on a click elsewhere or Esc. */
+function paneAbout(what, label) {
+  const d = el("details", "paneabout");
+  const sum = el("summary");
+  sum.setAttribute("aria-label", label || "About this screen");
+  sum.title = label || "About this screen";
+  sum.append(Icons.svg("info"));
+  const body = el("div", "paneabout-body popover");
+  body.append(what);
+  d.append(sum, body);
+  return d;
+}
+document.addEventListener("click", (ev) => {
+  for (const d of document.querySelectorAll("details.paneabout[open]")) if (!d.contains(ev.target)) d.open = false;
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") for (const d of document.querySelectorAll("details.paneabout[open]")) d.open = false;
+});
+
 /* One search field for every list: a magnifier, the input, a clear
  * button once there is text, and a key hint ("/") while it is empty.
  * Returns the <label>; its input is `.input`. onInput(value) runs after

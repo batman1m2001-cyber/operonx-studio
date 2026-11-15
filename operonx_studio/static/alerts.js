@@ -36,7 +36,8 @@ const AlertsView = (() => {
     if (mine !== token) return;
     box.textContent = "";
     const head = el("div", "panehead");
-    head.append(el("h2", null, "Alerts"));
+    head.append(el("h2", null, "Alerts"), paneAbout("Checked every minute while the studio runs, from the runs it already records. "
+      + "A rule posts when it crosses, reminds while it stays over, and says when it recovers."));
     const add = el("button", "primary needs-edit", "New alert");
     add.type = "button";
     add.onclick = () => { editing = {}; show(); };
@@ -50,8 +51,6 @@ const AlertsView = (() => {
     };
     head.append(el("div", "spacer"), check, add);
     box.append(head);
-    box.append(el("p", "panesub", "Checked every minute while the studio runs, from the runs it already records. "
-      + "A rule posts when it crosses, reminds while it stays over, and says when it recovers."));
 
     if (editing) box.append(editor(editing, got.metrics));
     if (!got.alerts.length && !editing) {
