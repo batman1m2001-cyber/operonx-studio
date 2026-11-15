@@ -763,6 +763,28 @@ left-to-right option is a layout feature, not polish). Paddings and z-index valu
 An SSH host's folds on Environments were read, not run. The far-out "zones" view (the factory idea)
 was not built: the minimap answered the same question without hiding a wire or a label.
 
+## Theme strategy — Dark-first, Light-optional (owner, 2026-11-15)
+
+Dark theme is the primary visual direction and the design reference for OperonX Studio. The quality
+of the primary experience takes precedence over maintaining theme parity.
+
+1. Dark theme is the default and must receive full design attention.
+2. Do not compromise Dark theme aesthetics to accommodate Light theme.
+3. Light theme is optional and may be deferred if it cannot meet the same usability and visual quality standards.
+4. If implemented, Light theme must have its own carefully designed visual language. Do not simply invert Dark theme colors.
+5. Theme selection must remain straightforward. Support system preference and manual selection if both themes are available.
+6. Reduce Transparency and accessibility requirements still apply to the supported theme(s).
+
+A single exceptionally polished theme is preferable to two mediocre themes.
+
+**Applied 2026-11-15: Light is deferred.** Three attempts at the light op cards (#199, #200–#201,
+#202) each failed the owner's review. The studio is dark only: `LIGHT = false` in `static/theme.js`,
+the header's theme button and Settings' Light/Dark/System row are gone, and each page's `<head>`
+sets dark before the first paint, whatever a browser had saved. The light stylesheet is still in
+`studio.css` and is not reachable. Bringing Light back is a design job of its own (rule 4), then
+`LIGHT = true` and the head scripts read `ox:theme` again. Transparency (glass / solid / system) is
+unchanged.
+
 # 11. Needs backend
 
 Initially empty.
