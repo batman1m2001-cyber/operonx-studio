@@ -6303,3 +6303,17 @@ h2 > .paneabout { margin-left: 6px; }
 
 /* a long prompt file's outline scrolls: its rows keep their height (as flex items they were squeezed to fit) */
 .yv-nav > * { flex: none; }
+
+/* Resources: a row reads as name · what it is · state · who uses it, each in its own column on every
+   row. A value shows its default, not the template it is written as; a bare variable is a chip. */
+@media (min-width: 761px) {
+  .rh-top { grid-template-columns: minmax(120px, 180px) minmax(0, 1fr) 150px 190px 16px; }
+  .rh-top > .rh-env { grid-column: 3; }
+  .rh-top > .rh-used { grid-column: 4; }
+  .rh-top > .rh-caret { grid-column: 5; }
+  .rh-sum { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+}
+.rh-kv { display: flex; flex-direction: column; gap: 1px; align-items: flex-start; }
+.rh-k { font-size: var(--fs-xs); }
+.rh-v { max-width: 100%; color: var(--text); }
+.rh-v.rh-var { color: var(--accent-strong); background: var(--accent-soft); border-radius: var(--r-2xs); padding: 0 6px; }
