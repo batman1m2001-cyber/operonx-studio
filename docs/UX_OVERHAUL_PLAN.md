@@ -1,7 +1,7 @@
 # OperonX Studio — UX/UI Overhaul
 **Plan ID:** `OPERONX_STUDIO_UX_OVERHAUL`
 
-**Status:** U0–U4 done (2026-11-15); U5 next
+**Status:** U0–U5 done (2026-11-15); U6 next
 
 **Objective:** Redesign and refine the entire OperonX Studio interface while preserving all existing application logic, execution semantics, APIs, and backend behavior.
 
@@ -544,7 +544,7 @@ The interface should make the underlying complexity feel simpler, not make the a
 | U2 — Flow workspace | Done 2026-11-15 | `ui/u2-flow` | [U2 write-up](#u2-write-up) |
 | U3 — Inspection & configuration | Done 2026-11-15 | `ui/u3-inspect` | [U3 write-up](#u3-write-up) |
 | U4 — Runs & monitoring | Done 2026-11-15 | `ui/u4-runs` | [U4 write-up](#u4-write-up) |
-| U5 — Navigation & remaining screens | Not started | | |
+| U5 — Navigation & remaining screens | Done 2026-11-15 | `ui/u5-screens` | [U5 write-up](#u5-write-up) |
 | U6 — Responsive & final polish | Not started | | |
 
 ## U1 write-up
@@ -693,6 +693,36 @@ the tree and workflow views, desktop and phone, both themes; "Details" opens and
 keyboard; "Next error" still walks the failed ops. Screenshots: `docs/img/ux-overhaul/u4/`.
 
 **Remaining.** None.
+
+## U5 write-up
+
+**What changed, and why.**
+
+| screen | before | after |
+|---|---|---|
+| Environments | every form open at once: 33 controls | the host, Work there, Services and Deploy stay; Connection, Host key, Variables, Commands and "Checkout, logs, a command" are closed, each with the one fact that says whether to open it ("0 variables", "not trusted"). A host whose key is not trusted or not set opens that section by itself |
+| Services, Playground | the same missing variable in two looks and two wordings; Services also said so when nothing was missing | one notice, `envNotice()`: same words, same look, a link to Resources; nothing when all is set |
+| Project › Now | a 340 px column with two empty headings | the column is there only when a card waits or is in progress |
+| Storage | the tab says "Storage", the page said "Settings" | "Storage" |
+
+![environments](img/ux-overhaul/u5/environments-before-after.webp)
+![now](img/ux-overhaul/u5/now-before-after.webp)
+![notice](img/ux-overhaul/u5/missing-key-notice.webp)
+
+**Reviewed and left alone.** The flow picker in the top bar (it is a link to the flow, on every hub by
+design of the 5-hub rail); a resource's own "KEY not set" chip (it marks which resource, a different
+job from the notice); Playground's Connection and Conditions (already closed); Git, Files, Terminal,
+Review, Evals, Prompts, Jobs, Team, Login, Home: no level-1 clutter left after U1–U3.
+
+**Files.** `static/environments.js`, `static/studio.js` (`envNotice`), `static/services.js`,
+`static/play.js`, `static/projectmode.js`, `static/settings.js`, `static/studio.css` (the U5 block).
+
+**Checks.** `node --test tests/js/`: 198 pass. No `.py` changed. Environments, Services, Playground and
+Now opened on desktop and phone, dark and light; a fold keeps its state across the redraw after an
+action; folds open by keyboard (they are `<details>`).
+
+**Remaining.** An SSH host's folds were checked by reading the code only: the test studio has no SSH
+host, and adding one would write to the project's state.
 
 # 11. Needs backend
 

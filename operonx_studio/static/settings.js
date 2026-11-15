@@ -147,7 +147,7 @@
     catch (e) { box.textContent = ""; box.append(loadError(e, () => show())); return; }
     box.textContent = "";
     const head = el("div", "panehead");
-    head.append(el("h2", null, "Settings"));
+    head.append(el("h2", null, "Storage"));
     box.append(head);
 
     const runs = el("section", "setsection");

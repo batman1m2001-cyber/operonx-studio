@@ -493,16 +493,8 @@ const PlayView = (() => {
   async function envNote(main) {
     let got;
     try { got = await api(`/api/p/${PID}/env-health`); } catch { return; }
-    const missing = Object.entries(got.env || {}).filter(([, x]) => x === "missing").map(([k]) => k);
-    if (!missing.length || !main.isConnected) return;
-    const note = el("div", "playenv");
-    note.append(el("b", null, `Not set: ${missing.join(", ")}`),
-      el("span", null, ` — a resource that reads ${missing.length > 1 ? "them" : "it"} fails when a session uses it. Add ${missing.length > 1 ? "them" : "it"} to the project's .env.`));
-    const go = el("button", "linkbtn", "Resources");
-    go.type = "button";
-    go.onclick = () => switchTab("resources");
-    note.append(" ", go);
-    main.prepend(note);
+    const note = envNotice(got.env);
+    if (note && main.isConnected) main.prepend(note);
   }
 
   /* Chat: one session held open; each message is one item on the door. */
