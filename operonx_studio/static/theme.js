@@ -14,8 +14,13 @@
 
 const Theme = (() => {
   const KEY = "ox:theme";
+  // Dark-first, Light-optional (docs/UX_OVERHAUL_PLAN.md § Theme strategy): the light theme did not
+  // meet the dark one's standard, so it is deferred. The studio is dark; its light stylesheet stays
+  // in studio.css, unreachable. To bring it back: true here, and the inline script in each page's
+  // <head> reads `ox:theme` again.
+  const LIGHT = false;
   const media = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : null;
-  const read = () => { try { return localStorage.getItem(KEY) || "dark"; } catch { return "dark"; } };
+  const read = () => { if (!LIGHT) return "dark"; try { return localStorage.getItem(KEY) || "dark"; } catch { return "dark"; } };
   const resolve = (choice) => (choice === "system" ? (media && media.matches ? "dark" : "light") : choice);
 
   function apply(choice) {
@@ -64,7 +69,7 @@ const Theme = (() => {
     on.add(paint);
     return box;
   }
-  const picker = () => radios("Theme", CHOICES, read, set, listeners);
+  const picker = () => (LIGHT ? radios("Theme", CHOICES, read, set, listeners) : null);
 
   // the header's button: one click flips light and dark. Until the first
   // click the page follows the system; after it, the choice is kept.
@@ -94,9 +99,9 @@ const Theme = (() => {
 
   // the page's header has a place for the button
   const slot = document.getElementById("themeslot");
-  if (slot) slot.replaceWith(button());
+  if (slot) { if (LIGHT) slot.replaceWith(button()); else slot.remove(); }
 
-  return {get: read, set, resolve, picker, button, token, radios};
+  return {get: read, set, resolve, picker, button, token, radios, light: LIGHT};
 })();
 
 /* Glass or solid (docs/LIQUID_GLASS_PLAN.md): the chrome that floats over
