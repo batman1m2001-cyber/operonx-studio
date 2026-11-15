@@ -241,6 +241,21 @@ const EnvPage = (() => {
     return s;
   }
 
+  // A section that is set up once and then left alone: closed until asked for, with the one fact that
+  // says whether it needs opening. It stays as the user left it across the redraw after each action.
+  const folds = {};
+  function fold(key, title, fact, hint, open) {
+    const s = el("details", "ev-sec ev-fold");
+    const sum = el("summary");
+    sum.append(el("h3", "pm-h", title));
+    if (fact) sum.append(el("span", "ev-fact", fact));
+    s.append(sum);
+    if (hint) s.append(el("p", "ev-hint", hint));
+    s.open = key in folds ? folds[key] : !!open;
+    s.ontoggle = () => { folds[key] = s.open; };
+    return s;
+  }
+
   function summary(e) {
     const s = el("div", "ev-sum");
     const where = el("code", null, e.where);
@@ -267,7 +282,8 @@ const EnvPage = (() => {
   }
 
   function form(e) {
-    const s = section(e ? "Connection" : "Add a host", e ? null : "Reached over SSH with a private key; its host key is checked before anything connects.");
+    const s = e ? fold(`${e.id}:conn`, "Connection", `${e.user}@${e.host}${e.port === 22 ? "" : `:${e.port}`}`)
+      : section("Add a host", "Reached over SSH with a private key; its host key is checked before anything connects.");
     const id = input(e ? e.id : "", "staging");
     id.disabled = !!e;
     const name = input(e ? e.name : "", "Staging");
@@ -302,7 +318,8 @@ const EnvPage = (() => {
   }
 
   function commands(e) {  // this machine: the checkout is fixed, its interpreter and commands are not
-    const s = section("Commands", "What a deploy here runs. Its folder is the checkout.");
+    const s = fold("local:cmd", "Commands", [e.build, e.test].filter(Boolean).join(" · ") || "not set",
+      "What a deploy here runs. Its folder is the checkout.");
     const py = input(e.python, ".venv/bin/python");
     const build = input(e.build, "uv sync");
     const test = input(e.test, "pytest -q");
@@ -317,7 +334,9 @@ const EnvPage = (() => {
   }
 
   function trust(e) {
-    const s = section("Host key", "Scan, compare the fingerprint with the host's own (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on it), then trust it.");
+    const s = fold(`${e.id}:trust`, "Host key", e.trusted.length ? "trusted" : "not trusted",
+      "Scan, compare the fingerprint with the host's own (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on it), then trust it.",
+      !e.trusted.length || (scanned && scanned.env === e.id));
     if (e.trusted.length) {
       const ul = el("ul", "ev-fps");
       for (const f of e.trusted) ul.append(el("li", null, f));
@@ -342,8 +361,11 @@ const EnvPage = (() => {
   }
 
   function secrets(e) {
-    const s = section(e.kind === "ssh" ? "Key and variables" : "Variables",
-      "Written here, never shown again — not to you, not to the assistant. Values in any output read •••.");
+    const count = `${e.vars.length} variable${e.vars.length === 1 ? "" : "s"}`;
+    const s = fold(`${e.id}:vars`, e.kind === "ssh" ? "Key and variables" : "Variables",
+      e.kind === "ssh" ? `${e.key_set ? "key set" : "no key"} · ${count}` : count,
+      "Written here, never shown again — not to you, not to the assistant. Values in any output read •••.",
+      e.kind === "ssh" && !e.key_set);
     if (e.kind === "ssh") {
       const key = el("textarea", "ev-key");
       key.placeholder = e.key_set ? "A key is set. Paste another to replace it." : "-----BEGIN OPENSSH PRIVATE KEY-----";
@@ -392,7 +414,10 @@ const EnvPage = (() => {
       inp.onkeydown = (ev) => { if (ev.key === "Enter") fn({currentTarget: r.lastChild}); };
       return r;
     };
-    s.append(row,
+    const more = fold(`${e.id}:work`, "Checkout, logs, a command", null);
+    more.classList.add("ev-sub");
+    s.append(row, more);
+    more.append(
       line(br, "Checkout", (ev) => br.value.trim() && act({op: "checkout", env: e.id, branch: br.value.trim()}, `Checkout ${br.value}`, ev.currentTarget),
         "Clone the project's remote into the folder the first time, then fetch, switch and fast-forward"),
       line(path, "Logs", (ev) => path.value.trim() && act({op: "logs", env: e.id, path: path.value.trim()}, `Logs ${path.value}`, ev.currentTarget),
@@ -400,7 +425,7 @@ const EnvPage = (() => {
       line(cmd, "Run", (ev) => cmd.value.trim() && act({op: "run", env: e.id, command: cmd.value}, cmd.value, ev.currentTarget),
         "In the folder, with the variables, to its end"));
     const files = button("linkbtn", "Files in the folder", (ev) => act({op: "files", env: e.id, path: path.value.trim() || "."}, "Files", ev.currentTarget));
-    s.append(files);
+    more.append(files);
     return s;
   }
 

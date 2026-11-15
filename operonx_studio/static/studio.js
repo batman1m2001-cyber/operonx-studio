@@ -49,6 +49,24 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") for (const d of document.querySelectorAll("details.paneabout[open]")) d.open = false;
 });
 
+/* The one notice for variables the resource files read and nothing sets (names only; values never
+ * leave the server). The same words and look on every screen that can run something. Null when
+ * every variable is set: a screen says nothing about what is fine. */
+function envNotice(env) {
+  const missing = Object.entries(env || {}).filter(([, x]) => x === "missing").map(([k]) => k);
+  if (!missing.length) return null;
+  const many = missing.length > 1;
+  const note = el("div", "envnotice");
+  note.setAttribute("role", "status");
+  note.append(el("b", null, `Not set: ${missing.join(", ")}`),
+    el("span", null, ` — a resource that reads ${many ? "them" : "it"} fails when it is used. Add ${many ? "them" : "it"} to the project's .env.`));
+  const go = el("button", "linkbtn", "Resources");
+  go.type = "button";
+  go.onclick = () => switchTab("resources");
+  note.append(" ", go);
+  return note;
+}
+
 /* One search field for every list: a magnifier, the input, a clear
  * button once there is text, and a key hint ("/") while it is empty.
  * Returns the <label>; its input is `.input`. onInput(value) runs after

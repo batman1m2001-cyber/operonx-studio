@@ -177,6 +177,7 @@ const ProjectMode = (() => {
 
   function drawSide() {
     side.textContent = "";
+    side.hidden = false;
     if (failed) { side.append(section("engine", "Project status", null, missing())); return; }
     if (!doc) { side.append(el("p", "pm-quiet", "Reading where the project stands…")); return; }
     const d = doc;
@@ -184,6 +185,10 @@ const ProjectMode = (() => {
     const waiting = d.needs_you.filter((q) => q.source === "board" || q.card);
     const needs = waiting.length;
     const work = d.working_on.filter((w) => w.card);
+    // nothing waits and nothing is in progress: the column would be two empty headings, so the
+    // conversation takes its width (the Board still says so in its own words)
+    side.hidden = !needs && !work.length;
+    if (side.hidden) return;
     head.append(el("span", needs ? "hot" : null, needs ? `${plural(needs, "thing")} need${needs === 1 ? "s" : ""} you` : "Nothing needs you"),
       el("span", null, `${work.length} in progress`));
     // on a phone the column folds above the conversation: the summary is its handle

@@ -35,12 +35,8 @@ const ServicesView = (() => {
     box.append(head);
 
     if (env) {
-      const missing = Object.entries(env.env || {}).filter(([, x]) => x === "missing").map(([k]) => k);
-      const line = el("div", "svcenv " + (missing.length ? "bad" : "ok"));
-      line.append(el("b", null, "Environment"),
-        el("span", null, missing.length ? ` — ${missing.length} variable${missing.length > 1 ? "s" : ""} the resources need ${missing.length > 1 ? "are" : "is"} not set: ${missing.join(", ")}`
-                                         : " — every variable the resources need is set"));
-      box.append(line);
+      const note = envNotice(env.env);
+      if (note) box.append(note);
     }
 
     const queued = (queues.queues || []).length ? queueSection(queues.queues) : null;
