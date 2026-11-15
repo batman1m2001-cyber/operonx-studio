@@ -41,9 +41,10 @@ async function showResources() {
   q.placeholder = "Find a resource";
   q.setAttribute("aria-label", "Find a resource");
   const add = Icons.button("plus", "Add a resource", "primary needs-edit", "Declare a new resource in " + hub.file);
-  head.append(el("h2", null, "Resources"), resSwitch(showResources), el("div", "spacer"), q, add);
-  page.append(head, el("p", "panesub rh-sub",
-    `The models, services and stores ops call by name, in ${hub.file}. Secret values stay in .env and never leave the server.`));
+  head.append(el("h2", null, "Resources"),
+    paneAbout(`The models, services and stores ops call by name, in ${hub.file}. Secret values stay in .env and never leave the server.`),
+    resSwitch(showResources), el("div", "spacer"), q, add);
+  page.append(head);
   const adder = el("div", "rh-adder");
   adder.hidden = true;
   page.append(adder);

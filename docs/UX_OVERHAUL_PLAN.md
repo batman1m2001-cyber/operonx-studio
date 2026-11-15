@@ -1,7 +1,7 @@
 # OperonX Studio — UX/UI Overhaul
 **Plan ID:** `OPERONX_STUDIO_UX_OVERHAUL`
 
-**Status:** U0–U2 done (2026-11-15); U3 next
+**Status:** U0–U3 done (2026-11-15); U4 next
 
 **Objective:** Redesign and refine the entire OperonX Studio interface while preserving all existing application logic, execution semantics, APIs, and backend behavior.
 
@@ -542,7 +542,7 @@ The interface should make the underlying complexity feel simpler, not make the a
 | U0 — UX audit | Done 2026-11-15 | on `ui/factory-view` | [UX_AUDIT.md](UX_AUDIT.md): 25 screens × desktop/phone × dark/light on 3 real projects; 5 findings, the screen inventory, an 11-item backlog. Images in `docs/img/ux-overhaul/u0/`. No code changed. |
 | U1 — Design foundation | Done 2026-11-15 | `ui/u1-foundation` | [U1 write-up](#u1-write-up) |
 | U2 — Flow workspace | Done 2026-11-15 | `ui/u2-flow` | [U2 write-up](#u2-write-up) |
-| U3 — Inspection & configuration | Not started | | |
+| U3 — Inspection & configuration | Done 2026-11-15 | `ui/u3-inspect` | [U3 write-up](#u3-write-up) |
 | U4 — Runs & monitoring | Not started | | |
 | U5 — Navigation & remaining screens | Not started | | |
 | U6 — Responsive & final polish | Not started | | |
@@ -636,6 +636,34 @@ screen shot. Screenshots: `docs/img/ux-overhaul/u2/`.
   left-to-right or wrapped layout is a layout-engine change, not taken here.
 - With the side panel closed, the desktop has only the top-bar button to reach the assistant: U3
   gives it a visible Ask bar.
+
+## U3 write-up
+
+**What changed, and why.**
+- **The assistant is reachable while its panel is closed.** U2 closed the side panel by default; on
+  a desktop that left only a top-bar icon. The "Ask the assistant…" bar the phone already had now
+  shows bottom right on every screen (not in Project mode, which is the conversation itself). A
+  click opens the panel on the Assistant tab.
+- **The open panel's empty conversation** is the question and the starters; the paragraph that
+  repeated the placeholder is gone (audit finding 3).
+- **What a screen is sits one click away.** A new `paneAbout()` puts an (i) beside the title; the
+  explanation opens under it and closes on a click elsewhere or Esc (keyboard: it is a `<details>`).
+  Used on Services, Alerts, Resources, and on Runs for where the runs are stored (audit finding 4).
+  On a phone this gives Services and Runs back three to five lines above the content.
+- **The inspector** was reviewed and left alone: its peek on a click (U2 kept it) already shows the
+  op, its input, "Run this op", then settings by section, with the rest folded.
+
+![services](img/ux-overhaul/u3/services-before-after.webp)
+![runs](img/ux-overhaul/u3/runs-before-after.webp)
+
+**Files.** `static/studio.js` (`paneAbout`), `static/studio.css` (the U3 block), `static/alerts.js`,
+`static/services.js`, `static/resources.js`, `static/runs.js`.
+
+**Checks.** `node --test tests/js/`: 198 pass. No `.py` changed. Shot on desktop and phone, dark and
+light; no page error. Screenshots: `docs/img/ux-overhaul/u3/`.
+
+**Deferred.** The Storage screen's retention intro and the Jobs records path stay where they are
+(each is the only text of its section). The missing-key notice is U5.
 
 # 11. Needs backend
 
