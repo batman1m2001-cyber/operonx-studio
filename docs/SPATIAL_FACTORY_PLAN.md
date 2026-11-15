@@ -203,3 +203,4 @@ Not built by this plan. Each item says what the picture cannot show without it.
 | B2 | A job's graph when it is not a served flow | `job.graph` names a graph absent from `ir.graphs` (13 of 24 jobs in mr-finance) | those jobs' place under a flow; they sit in the unresolved group |
 | B3 | Named stages or groups | no such field in the IR | stage names inside a flow |
 | B4 | Live execution events | runs are polled | a box lighting up the moment a run starts |
+| B5 | A declared area for each service, job and flow (a convention, owner 2026-11-15) | areas are guessed from the module path, and a service or job has one only through the flow it runs | exact zones: today a door with no flow has no area, and two modules of one business area are two domains |

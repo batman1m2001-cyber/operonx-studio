@@ -89,7 +89,8 @@ window.FactoryView = (() => {
       const stage = h("div", "fv-stage"), wires = document.createElementNS(SVG, "svg");
       wires.setAttribute("class", "fv-wires");
       const main = h("div", "fv-main"), colB = h("div", "fv-col"), colR = h("div", "fv-col");
-      stage.append(wires, main, colB, colR); root.append(heads, stage);
+      const zones = ["session", "graph", "agraph", "res"].map(k => { const z = h("div", "fv-zone"); z.style.setProperty("--zone", `var(--k-${k})`); return z; });
+      stage.append(wires, main, colB, colR); root.append(...zones, heads, stage);
       const toggle = (c, id) => c.addEventListener("click", (ev) => { ev.stopPropagation(); if (open.has(id)) open.delete(id); else open.add(id); locked = null; render(); });
 
       // ── doors and flows: one row each; flows that share a block sit together, then those that name a resource ──
@@ -163,8 +164,8 @@ window.FactoryView = (() => {
       for (const p of pairs) { if (!buses.has(p.dst)) buses.set(p.dst, {dst: p.dst, kind: p.kind, taps: []}); buses.get(p.dst).taps.push(p); }
       const far = [...buses.values()].filter(b => b.kind === "needs");
       const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-      root.style.setProperty("--fv-gap1", `${clamp(30 + buses.size * 6, 76, 150)}px`);
-      root.style.setProperty("--fv-gap2", `${clamp(34 + far.length * 5, 60, 90)}px`);
+      root.style.setProperty("--fv-gap1", `${clamp(56 + buses.size * 6, 96, 176)}px`);
+      root.style.setProperty("--fv-gap2", `${clamp(52 + far.length * 5, 76, 110)}px`);
 
       /* spread a column: each child as near the height it asks for as the others allow */
       const settle = (col, wantY) => {
@@ -220,13 +221,22 @@ window.FactoryView = (() => {
             for (let j = 0; j < i; j++) { const t = order[j]; for (const y of b.ys) if (y > t.lo && y < t.hi) c++; }
             for (let j = i + 1; j < order.length; j++) { const t = order[j]; if (b.exit > t.lo && b.exit < t.hi) c++; } }
           return c; };
-        lanes.sort((a, b) => b.exit - a.exit);
-        for (let pass = 0, best = cost(lanes), moved = true; moved && pass < 24; pass++) { moved = false;
-          for (let i = 0; i < lanes.length - 1; i++) { [lanes[i], lanes[i + 1]] = [lanes[i + 1], lanes[i]]; const c = cost(lanes);
-            if (c < best) { best = c; moved = true; } else [lanes[i], lanes[i + 1]] = [lanes[i + 1], lanes[i]]; } }
-        const g1 = [main.getBoundingClientRect().right - o.left, colB.getBoundingClientRect().left - o.left], g2 = colB.getBoundingClientRect().right - o.left;
-        const step = Math.min(13, (g1[1] - g1[0] - 36) / Math.max(1, lanes.length - 1)), x0 = (g1[0] + g1[1]) / 2 - step * (lanes.length - 1) / 2;
-        lanes.forEach((bus, i) => { bus.x = x0 + i * step; });
+        // the lines to blocks are one bundle and the lines to resources another; inside a bundle, lanes are
+        // ordered so trunks cross least, and the two bundles stand in whichever order crosses least
+        const tidy = (order) => { let best = cost(order);
+          for (let pass = 0, moved = true; moved && pass < 24; pass++) { moved = false;
+            for (let i = 0; i < order.length - 1; i++) { if (order[i].kind !== order[i + 1].kind) continue;
+              [order[i], order[i + 1]] = [order[i + 1], order[i]]; const c = cost(order);
+              if (c < best) { best = c; moved = true; } else [order[i], order[i + 1]] = [order[i + 1], order[i]]; } }
+          return [best, order]; };
+        const byExit = (k) => lanes.filter(b => b.kind === k).sort((a, b) => b.exit - a.exit);
+        const [ca, la] = tidy([...byExit("uses"), ...byExit("needs")]), [cb, lb] = tidy([...byExit("needs"), ...byExit("uses")]);
+        lanes = ca <= cb ? la : lb;
+        const PAD = 12, APART = 16;                              // a zone's margin round its column; the space between the two bundles
+        const g1 = [main.getBoundingClientRect().right - o.left + PAD, colB.getBoundingClientRect().left - o.left - PAD], g2 = colB.getBoundingClientRect().right - o.left + PAD;
+        const split = lanes.findIndex((b, i) => i && b.kind !== lanes[i - 1].kind), apart = split > 0 ? APART : 0;
+        const step = Math.min(6, (g1[1] - g1[0] - 28 - apart) / Math.max(1, lanes.length - 1)), x0 = (g1[0] + g1[1]) / 2 - (step * (lanes.length - 1) + apart) / 2;
+        lanes.forEach((bus, i) => { bus.x = x0 + i * step + (split > 0 && i >= split ? apart : 0); });
         // a card's taps leave it one under the other, ordered so its own lines never cross each other
         const port = new Map(), leaving = new Map();
         for (const bus of lanes) for (const p of bus.taps) { if (!leaving.has(p.src)) leaving.set(p.src, []); leaving.get(p.src).push(bus); }
@@ -234,21 +244,30 @@ window.FactoryView = (() => {
           const up = list.filter(x => x.exit < b.y).sort((x, y) => x.x - y.x), down = list.filter(x => x.exit >= b.y).sort((x, y) => y.x - x.x);
           [...up, ...down].forEach((bus, k) => port.set(`${src}|${bus.dst}`, b.y + (k - (n - 1) / 2) * gap)); }
         const jog = far.filter(bus => Math.abs(bus.cross - at.get(bus.dst).y) > 1).sort((a, b) => a.cross - b.cross);
-        const wire = (d, cls, n, src, dst, label) => {
+        const wire = (d, cls, n, src, dst, label, rest) => {
           const p = document.createElementNS(SVG, "path"); p.setAttribute("d", d);
           p.setAttribute("class", `fv-wire ${cls}`); p.style.strokeWidth = (1.3 + (dense ? Math.min(1.2, Math.log2(n) * 0.2) : Math.min(2.2, Math.log2(n) * 0.55))).toFixed(1);
           p.dataset.src = src; p.dataset.dst = dst; wires.append(p);
+          if (cls !== "door") { const e = document.createElementNS(SVG, "path"); e.setAttribute("d", d); e.setAttribute("class", `fv-energy ${cls} ${rest ? "rest" : ""}`);
+            e.style.animationDelay = `${-((wires.childElementCount * 137) % 1800)}ms`; e.dataset.src = src; e.dataset.dst = dst; wires.append(e); }
           if (label) { const t = document.createElementNS(SVG, "text"); t.setAttribute("x", label[0]); t.setAttribute("y", label[1]); t.setAttribute("class", `fv-count ${cls}`);
             t.dataset.src = src; t.dataset.dst = dst; t.textContent = `×${count(n)}`; wires.append(t); }
         };
         for (const bus of lanes) { const d = at.get(bus.dst);
+          // at rest the lights run each trunk once from either end: along its highest tap and its lowest
+          const ends = bus.taps.map(p => port.get(`${p.src}|${bus.dst}`)), hiTap = Math.min(...ends), loTap = Math.max(...ends);
           for (const p of bus.taps) { const s = at.get(p.src), py = port.get(`${p.src}|${bus.dst}`);
             const pts = [[s.r, py], [bus.x, py], [bus.x, bus.exit]];
-            if (bus.kind === "needs" && jog.includes(bus)) { const x = g2 + 16 + jog.indexOf(bus) * 5; pts.push([x, bus.cross], [x, d.y]); }
+            if (bus.kind === "needs" && jog.includes(bus)) { const x = g2 + 12 + jog.indexOf(bus) * 5; pts.push([x, bus.cross], [x, d.y]); }
             pts.push([d.l, bus.kind === "uses" || !jog.includes(bus) ? bus.exit : d.y]);
-            wire(ortho(pts), p.kind, p.count, p.src, p.dst, p.count > 1 ? [bus.x - 5, py - 4] : null); } }
+            wire(ortho(pts), p.kind, p.count, p.src, p.dst, p.count > 1 ? [bus.x - 5, py - 4] : null, py === hiTap || py === loTap); } }
         for (const r of main.querySelectorAll(".fv-row")) { const d = r.querySelector(".fv-doors"), c = r.querySelector(".fv-card");
           if (d && c && d.lastElementChild) { const a = box(d.lastElementChild), b = box(c); wire(`M${a.r} ${b.y}L${b.l} ${b.y}`, "door", 1, `row:${c.dataset.id}`, c.dataset.id); } }
+        const ro = root.getBoundingClientRect(), hs = [...heads.children].map(c => c.getBoundingClientRect());
+        const doorLeft = Math.min(...[...root.querySelectorAll(".fv-chip, .fv-head:first-child > *")].map(c => c.getBoundingClientRect().left));
+        const top = hs[0].top - ro.top - PAD, hgt = stage.getBoundingClientRect().bottom - ro.top + PAD + 2 - top;
+        [[doorLeft - PAD - 2, hs[1].left - 2 * PAD - 2], [hs[1].left - PAD, hs[1].right + PAD], [hs[2].left - PAD, hs[2].right + PAD], [hs[3].left - PAD, hs[3].right + PAD]]
+          .forEach(([l, r], i) => { zones[i].style.cssText += `left:${Math.round(l - ro.left)}px;width:${Math.round(r - l)}px;top:${Math.round(top)}px;height:${Math.round(hgt)}px`; });
         light();
       };
 
