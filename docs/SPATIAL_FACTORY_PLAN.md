@@ -2,7 +2,7 @@
 
 **Plan ID:** `OPERONX_SPATIAL_FACTORY_PLAN` (refactored 2026-11-15)
 
-**Status:** F0–F4 done. F5 is next.
+**Status:** F0–F5 done. F6 is next.
 
 **The first version of this plan**, as the owner wrote it, is kept word for word in
 [SPATIAL_FACTORY_PLAN_V1.md](SPATIAL_FACTORY_PLAN_V1.md). This file replaces it wherever the two differ.
@@ -173,11 +173,16 @@ Write-up: [FACTORY_NAVIGATION.md](FACTORY_NAVIGATION.md).
 - Find by name ( / ): a flow, service, job, shared block or resource; its cluster or core item is
   selected and brought to the middle.
 
-### F5 — Runtime
+### F5 — Runtime (done)
 
-From data the studio already serves (`/flows/stats`, runs): runs and errors per flow on the picture,
-a failing flow visible from the top level, a link to its runs. The run line in the editor is unchanged.
-Live updates are not part of this (B4).
+Write-up: [FACTORY_RUNTIME.md](FACTORY_RUNTIME.md). From `/flows/stats`, the last 7 days:
+
+- a run light per flow: red when runs failed, green when it ran clean, dark when it did not run;
+- runs and failures on a flow's name (failing flows per domain past 30 flows), a failing name edged red;
+- the card's doors open that service's or job's runs in the Runs hub;
+- the numbers are fetched again each time the picture is returned to, and repaint in place.
+
+Live updates are not part of this (B4). The run line in the editor is unchanged.
 
 ### F6 — Remaining Studio screens
 
@@ -208,8 +213,8 @@ reach for select, open and search.
 | F1 — Lab | Done 2026-11-15, closed: its five looks dropped | lab repo, to 2e41956 | §1, §4, §5 of this file |
 | F2 — Factory model | Done 2026-11-15 | `ui/f2-factory-model` | [FACTORY_MODEL.md](FACTORY_MODEL.md) |
 | F3 — Factory picture | Done 2026-11-15 | #207 | [FACTORY_PICTURE.md](FACTORY_PICTURE.md) |
-| F4 — Dependencies and navigation | Done 2026-11-15 | `ui/f4-factory-navigation` | [FACTORY_NAVIGATION.md](FACTORY_NAVIGATION.md) |
-| F5 — Runtime | Not started | | |
+| F4 — Dependencies and navigation | Done 2026-11-15 | #208 | [FACTORY_NAVIGATION.md](FACTORY_NAVIGATION.md) |
+| F5 — Runtime | Done 2026-11-15 | `ui/f5-factory-runtime` | [FACTORY_RUNTIME.md](FACTORY_RUNTIME.md) |
 | F6 — Remaining screens | Not started | | |
 | F7 — Scale and polish | Not started | | |
 

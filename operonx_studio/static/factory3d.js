@@ -11,7 +11,7 @@
  * lists it; a double click on a flow, or a row of the card, opens the flow in the editor. / finds by name.
  *
  * An ES module, loaded on demand by factory.js — the studio's pages do not pay for three.js until
- * the picture is opened. mount(host, ir, stats, {onOpen(flow, node)}) → {pause, resume, fit, select, reveal, dispose}. */
+ * the picture is opened. mount(host, ir, stats, {onOpen(flow, node), onRuns(door)}) → {pause, resume, fit, select, reveal, setStats, dispose}. */
 import * as THREE from "./vendor/three/three.module.min.js";
 import { EffectComposer } from "./vendor/three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "./vendor/three/addons/postprocessing/RenderPass.js";
@@ -53,7 +53,7 @@ const opCube = (n) => ({
 const doorsOf = (ids) => { const seen = new Set(ids.flatMap(i => model.upstream(i).filter(x => /^[sj]:/.test(x)))); return [...seen].map(i => model.by.get(i)); };
 const clusters = grouped
   ? model.domains.map(d => { const fs = d.flows.map(i => model.by.get(i)); return {id: d.id, name: d.name || "(no module)", members: d.flows, sub: `${fs.length} flows`,
-      cubes: fs.map(f => { const sh = model.outOf(f.id).some(l => l.kind === "uses" && model.by.get(l.dst).shared); return {m: f.errors ? "flowAlert" : sh ? "flowShare" : "flow", h: 0.4 + Math.min(1.8, f.ops / 28)}; }), doors: doorsOf(d.flows)}; })
+      cubes: fs.map(f => { const sh = model.outOf(f.id).some(l => l.kind === "uses" && model.by.get(l.dst).shared); return {m: sh ? "flowShare" : "flow", h: 0.4 + Math.min(1.8, f.ops / 28), flow: f.id}; }), doors: doorsOf(d.flows)}; })
   : model.flows.map(f => { const g = ir.graphs.find(x => x.name === f.name); return {id: f.id, name: f.name, members: [f.id], sub: `${g.nodes.length} ops`, cubes: g.nodes.map(opCube), doors: doorsOf([f.id])}; });
 const asked = new Map(); for (const d of model.unresolved) { if (!asked.has(d.asks)) asked.set(d.asks, new Set()); asked.get(d.asks).add(d); for (const l of model.into(d.id)) asked.get(d.asks).add(model.by.get(l.src)); }
 for (const [name, ds] of asked) clusters.push({id: `?:${name}`, name, members: [], sub: "not among this project's graphs", cubes: [], doors: [...ds], ghost: true});
@@ -217,6 +217,7 @@ const light = (x, y, z, sx, sy, sz, sig, lod = "mid", gain = 1.5) => lights[lod]
 const TI = {natural: tok("ti-natural"), silver: tok("ti-silver"), dark: tok("ti-dark"), graphite: tok("ti-graphite"), black: tok("ti-black"), plate: tok("plate"), plateCore: tok("plate-core"), smoke: tok("glass-smoke"), frost: tok("glass-frost")};
 const PLAIN = (c, fin = 0) => [c, c, 0, fin];
 const boxes = [], shadows = [], engraved = [], pucks = [], kinds = new Set();
+const status = [];                                                 // where a flow's run light sits: on its part (a domain's cluster) or on its plate
 const foot = (x, y, z, sx, sy, sz, grounded = true) => { boxes.push({x, y, z, sx, sy, sz, owner}); if (grounded) shadows.push({x, y, z, sx, sz}); };
 
 /* a titanium body with a recessed glass panel in a thin frame: the construction most parts share */
@@ -237,7 +238,6 @@ const PARTS = {
   resOp(x, y, z, h) { framed(x, y, z, 0.72, h, 0.72, TI.dark, TI.smoke, 0.085, 0.5); strip(x, y, z, 0.72, "sig-resource", 0.46, 1.6); pip(x + 0.14, y + h - 0.02, z + 0.14, 0.14, "sig-resource"); },
   flow(x, y, z, h) { framed(x, y, z, 0.72, h, 0.72, TI.natural, TI.smoke); strip(x, y, z, 0.72, "sig-workflow", 0.2, 1.15); },
   flowShare(x, y, z, h) { framed(x, y, z, 0.72, h, 0.72, TI.silver, TI.smoke, 0.085, 1); strip(x, y, z, 0.72, "sig-workflow", 0.46, 1.6); },
-  flowAlert(x, y, z, h) { framed(x, y, z, 0.72, h, 0.72, TI.natural, TI.smoke); pip(x, y + h - 0.02, z, 0.3, "sig-error", 1.5); },
   /* a nested graph: a structural frame — a dark base, and a narrower framed tower standing in it, lit blue where they meet */
   module(x, y, z, h) { const b = Math.min(0.3, h * 0.4); metal.add(x, y, z, 0.72, b, 0.72, TI.dark, PLAIN(0.03));
     framed(x, y + b, z, 0.56, h - b, 0.56, TI.natural, TI.frost, 0.07, 1);
@@ -285,7 +285,8 @@ for (const c of clusters) { owner = c.id;
   metal.add(c.x, 0, c.z, padX, 0.14, padZ, c.ghost ? TI.graphite : TI.plate, PLAIN(0.035, 0.3)); foot(c.x, 0, c.z, padX, 0.14, padZ, false);
   let top = 0.6;
   c.cubes.forEach((q, i) => { const r = Math.floor(i / c.cols), k = i % c.cols, inRow = Math.min(c.cols, c.cubes.length - r * c.cols);
-    const [x, z] = world(s, c.u + (k - (inRow - 1) / 2), RIN + 0.5 + r + 0.5); part(q.m, x, 0.14, z, 0.72, q.h, 0.72); top = Math.max(top, q.h); });
+    const [x, z] = world(s, c.u + (k - (inRow - 1) / 2), RIN + 0.5 + r + 0.5); part(q.m, x, 0.14, z, 0.72, q.h, 0.72); top = Math.max(top, q.h);
+    if (q.flow) status.push({flow: q.flow, x, y: 0.14 + q.h - 0.02, z, s: 0.3}); });
   c.doors.forEach((d, i) => { const r = Math.floor(i / c.perRow), k = i % c.perRow, inRow = Math.min(c.perRow, c.doors.length - r * c.perRow);
     const [x, z] = world(s, c.u + (k - (inRow - 1) / 2) * 0.5, RIN + c.wv - 0.45 - r * 0.5); part(d.type === "job" ? "job" : "service", x, 0.14, z, 0.3, 0.26, 0.3); });
   if (c.strands.length) { const sig = c.strands.some(t => t.kind === "needs") ? "sig-resource" : "sig-neutral";
@@ -293,7 +294,8 @@ for (const c of clusters) { owner = c.id;
       metal.add(x, y, z, alongX ? w : 0.3, 0.11, alongX ? 0.3 : w, TI.silver, PLAIN(0.018, 1)); light(x, y + 0.11, z, alongX ? w * 0.5 : 0.05, 0.006, alongX ? 0.05 : w * 0.5, sig); } }
   if (s.out[1] !== 1 && !c.ghost) engraved.push({text: c.name, x: c.x, y: 0.141, z: c.z + padZ / 2 - 0.2, size: 0.2, max: padX - 0.5});
   const nS = c.doors.filter(d => d.type === "service").length, nJ = c.doors.length - nS;
-  labels.push({x: c.x - padX / 2, y: 0.9, z: c.z - padZ / 2, cls: c.ghost ? "ghost" : "", owner: c.id, title: c.name, sub: [c.sub, nS ? `${nS} service${nS > 1 ? "s" : ""}` : "", nJ ? `${nJ} job${nJ > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ")});
+  if (!grouped && !c.ghost) status.push({flow: c.id, x: c.x - padX / 2 + 0.34, y: 0.14, z: c.z - padZ / 2 + 0.34, s: 0.24});
+  labels.push({x: c.x - padX / 2, y: 0.9, z: c.z - padZ / 2, cls: c.ghost ? "ghost" : "", owner: c.id, flows: c.members, title: c.name, sub: [c.sub, nS ? `${nS} service${nS > 1 ? "s" : ""}` : "", nJ ? `${nJ} job${nJ > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ")});
 }
 owner = null;
 metal.build(); glass.build(); smoked.build(3);
@@ -322,6 +324,19 @@ for (const k of ["far", "mid"]) { const list = lights[k]; if (!list.length) cont
     M.compose(v3.set(b.x, b.y + b.sy / 2, b.z).addScaledVector(DIR, 1.45 * r), camera.quaternion, new THREE.Vector3(r * 2, r * 2, 1)); halo.setMatrixAt(i, M);
     halo.setColorAt(i, col.copy(sigs[b.sig]).multiplyScalar((k === "mid" ? 0.26 : 0.42) * b.gain / 1.5)); });
   halo.frustumCulled = false; halo.renderOrder = 4; lod[k].add(halo); lightSets.push({list, mesh, halo, sigs, glow: k === "mid" ? 0.26 : 0.42}); }
+/* run lights (F5): one per flow, red when runs failed in the window, green when it ran clean (a cluster per flow only:
+ * a thousand green lights say nothing), dark when it did not run. Their own mesh, so new numbers repaint it in place. */
+const statusMesh = status.length ? new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), new THREE.MeshBasicMaterial(), status.length) : null;
+const statusHalo = status.length ? new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false}), status.length) : null;
+if (statusMesh) { statusMesh.frustumCulled = statusHalo.frustumCulled = false; statusHalo.renderOrder = 4; scene.add(statusMesh, statusHalo); }
+const SIG = {bad: tok("sig-error"), ok: tok("sig-ok")}, NONE = new THREE.Matrix4().makeScale(0, 0, 0);
+function paintStatus() { if (!statusMesh) return;
+  status.forEach((b, i) => { const e = model.by.get(b.flow), c = e.errors ? SIG.bad : e.runs && !grouped ? SIG.ok : null;
+    if (!c) { statusMesh.setMatrixAt(i, NONE); statusHalo.setMatrixAt(i, NONE); return; }
+    const g = e.errors ? 1.5 : 1.0, r = b.s * 2.2 + 0.16;
+    M.makeScale(b.s, 0.012, b.s); M.setPosition(b.x, b.y, b.z); statusMesh.setMatrixAt(i, M); statusMesh.setColorAt(i, col.copy(c).multiplyScalar(g * 1.1));
+    M.compose(v3.set(b.x, b.y, b.z).addScaledVector(DIR, 1.45 * r), camera.quaternion, new THREE.Vector3(r * 2, r * 2, 1)); statusHalo.setMatrixAt(i, M); statusHalo.setColorAt(i, col.copy(c).multiplyScalar(e.errors ? 0.42 : 0.2)); });
+  for (const m of [statusMesh, statusHalo]) { m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; } }
 /* identifiers cut into the plates: flat, dark, legible only close up */
 lod.close = new THREE.Group(); scene.add(lod.close);
 for (const e of engraved) { const cv = document.createElement("canvas"), x = cv.getContext("2d"), font = "600 44px -apple-system, 'SF Pro Text', Inter, 'Segoe UI', sans-serif";
@@ -404,7 +419,7 @@ document.addEventListener("keydown", onKey);
 
 // ── words: names float over what they name ────────────────────────
 for (const l of labels) { const d = document.createElement("div"); d.className = `lb ${l.cls}`; const b = document.createElement("b"); b.textContent = l.title; d.append(b);
-  if (l.sub) { const s = document.createElement("span"); s.textContent = l.sub; d.append(s); }
+  if (l.sub) { const s = document.createElement("span"); s.textContent = l.sub; d.append(s); l.subEl = s; }
   if (l.owner) { d.classList.add("open"); d.onclick = () => select(l.owner); d.ondblclick = () => { if (/^f:/.test(l.owner) && opts.onOpen) opts.onOpen(l.title); }; } labelHost.append(d); l.el = d; l.p = new THREE.Vector3(l.x, l.y, l.z); }
 function place() { const put = [];
   for (const l of labels) { v3.copy(l.p).project(camera); l.sx = (v3.x + 1) / 2 * vw(); l.sy = (1 - v3.y) / 2 * vh(); l.w = l.w || l.el.offsetWidth; l.hh = l.hh || l.el.offsetHeight; }
@@ -413,8 +428,19 @@ function place() { const put = [];
     put.push(l); l.el.style.left = `${l.sx}px`; l.el.style.top = `${l.sy}px`; } }
 titleEl.textContent = model.name || NAME;
 countsEl.textContent = `${model.counts.flows.toLocaleString()} flows${grouped ? ` in ${model.counts.domains} domains` : ""} · ${model.counts.services} services · ${model.counts.jobs} jobs · ${model.counts.sharedBlocks} shared blocks · ${model.counts.resources} resources`;
-legend.innerHTML = [[grouped ? "flow" : "op", "sig-workflow"], ...(kinds.has("agent") ? [["agent", "sig-agent"]] : []), ["resource", "sig-resource"], ["job", "sig-job"], ...(kinds.has("flowAlert") ? [["error", "sig-error"]] : [])]
-  .map(([t, c]) => `<span><i style="background:var(--fx-${c})"></i>${t}</span>`).join("") + `<span class="note">titanium: the parts · silver: shared · light: a signal</span>`;
+/* the numbers of the last days, on the picture: lights, names, the legend. Called again when they change. */
+function setStats(st) { const fl = (st && st.flows) || {}, days = (st && st.days) || 7;
+  for (const f of model.flows) { const x = fl[f.name] || {}; f.runs = x.runs || 0; f.errors = x.errors || 0; f.avgMs = x.avg_ms == null ? null : x.avg_ms; }
+  paintStatus();
+  let failing = 0, ran = 0;
+  for (const l of labels) { if (!l.flows || !l.subEl) continue; const fs = l.flows.map(i => model.by.get(i)), runs = sum(fs, f => f.runs), bad = fs.filter(f => f.errors).length, errs = sum(fs, f => f.errors);
+    failing += bad; ran += runs ? 1 : 0;
+    l.subEl.textContent = [l.sub, runs ? `${runs.toLocaleString()} runs` : "", bad ? (grouped ? `${bad} failing` : `${errs.toLocaleString()} failed`) : ""].filter(Boolean).join(" · ");
+    l.el.classList.toggle("bad", bad > 0); l.w = l.hh = 0; }
+  legend.innerHTML = [[grouped ? "flow" : "op", "sig-workflow"], ...(kinds.has("agent") ? [["agent", "sig-agent"]] : []), ["resource", "sig-resource"], ["job", "sig-job"],
+    ...(failing ? [[`failed in ${days} days`, "sig-error"]] : []), ...(ran && !grouped ? [["ran clean", "sig-ok"]] : [])]
+    .map(([t, c]) => `<span><i style="background:var(--fx-${c})"></i>${t}</span>`).join("") + `<span class="note">titanium: the parts · silver: shared · light: a signal</span>`;
+  if (typeof sel !== "undefined" && sel) describe(); }
 
 
 // ── selection: a part's own links stay lit, the rest goes quiet; a card says what they are (F4) ──
@@ -444,7 +470,7 @@ function describe() { card.textContent = ""; card.hidden = !sel; if (!sel) retur
     if (rows.length > max) ul.append(mk("div", "fx-row more", `and ${rows.length - max} more`)); card.append(ul); };
   const open = (name, at) => () => opts.onOpen && opts.onOpen(name, at);
   const flowRow = (f) => ({name: f.name, note: [`${f.ops} ops`, f.runs ? `${f.runs.toLocaleString()} runs` : "", f.errors ? `${f.errors} failed` : ""].filter(Boolean).join(" · "), go: open(f.name)});
-  const doorRow = (d) => ({name: d.name, note: d.type === "job" ? d.kind : `${d.kind} ${d.path || ""}`.trim()});
+  const doorRow = (d) => ({name: d.name, note: d.type === "job" ? d.kind : `${d.kind} ${d.path || ""}`.trim(), go: opts.onRuns ? () => opts.onRuns(d) : null});
   const toCore = (kind) => pairs.filter(p => p.src === sel && p.kind === kind).map(p => ({name: spot.get(p.dst).name, note: p.count > 1 ? `×${p.count}` : "", go: () => select(p.dst)}));
   const c = spot.get(sel), e = model.by.get(sel);
   if (c.ghost) { head("Not in this project", c.name, "doors ask for this graph, and the project does not list it"); list("Asked for by", c.doors.map(doorRow)); return; }
@@ -452,7 +478,7 @@ function describe() { card.textContent = ""; card.hidden = !sel; if (!sel) retur
     if (grouped) { head("Domain", c.name, c.sub); list("Flows", c.members.map(i => model.by.get(i)).sort((a, b) => b.errors - a.errors || b.runs - a.runs || b.ops - a.ops).map(flowRow), 200); }
     else { head("Flow", c.name, [c.sub, e.runs ? `${e.runs.toLocaleString()} runs in 7 days` : "", e.errors ? `${e.errors} failed` : ""].filter(Boolean).join(" · "));
       const go = mk("button", "fx-go", "Open in the editor"); go.type = "button"; go.onclick = open(c.name); card.append(go); }
-    list("Comes in through", c.doors.map(doorRow), 12); list("Uses, shared with other flows", toCore("uses")); list("Needs", toCore("needs")); return; }
+    list("Comes in through — a row opens its runs", c.doors.map(doorRow), 12); list("Uses, shared with other flows", toCore("uses")); list("Needs", toCore("needs")); return; }
   const users = pairs.filter(p => p.dst === sel).map(p => ({name: spot.get(p.src).name, note: p.count > 1 ? `×${p.count}` : "", go: () => select(p.src)}));
   if (c.kind === "block") { head("Shared block", c.name, e.kind === "op" ? `one op · ${e.definedAt}` : `a nested graph of ${e.ops} ops`);
     if (grouped) list("Used in", users); list("Used by", e.uses.map(u => ({name: model.by.get(u.flow).name, note: `as ${u.name}`, go: open(model.by.get(u.flow).name, u.at)})), 80); return; }
@@ -476,6 +502,7 @@ find.oninput = () => { const q = find.value.trim().toLowerCase(); found.textCont
     b.onclick = () => { if (reveal(t.id)) { find.value = ""; found.hidden = true; } }; found.append(b); } };
 find.onkeydown = (e) => { if (e.key === "Enter") { const b = found.querySelector("button"); if (b) b.click(); } else if (e.key === "Escape") { find.value = ""; found.hidden = true; find.blur(); } e.stopPropagation(); };
 
+setStats(stats);
 fit(); resize();
 const T0 = performance.now(), still = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let raf = 0, live = true;
@@ -487,7 +514,7 @@ function frame() { raf = 0; if (!live) return; if (!host.clientWidth) { raf = re
   composer.render(); place(); host.dataset.ready = "1"; raf = requestAnimationFrame(frame); }
 frame();
 return {
-  fit, select, reveal,
+  fit, select, reveal, setStats,
   pause() { live = false; if (raf) cancelAnimationFrame(raf); raf = 0; },
   resume() { if (!live) { live = true; frame(); } },
   dispose() { this.pause(); sized.disconnect(); document.removeEventListener("keydown", onKey);

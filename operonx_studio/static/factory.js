@@ -15,7 +15,12 @@ window.Factory = (() => {
     if (document.body.dataset.tab !== "flow") switchTab("flow");
     document.body.classList.add("factory-on");
     FlowRail.render();
-    if (view && seen === state.ir) return view.resume();
+    if (view && seen === state.ir) {                 // back on the picture: as it was left, with the latest numbers
+      view.resume();
+      const mine = view;
+      api(`/api/p/${PID}/flows/stats?days=7`).then(st => { if (view === mine) mine.setStats(st); }).catch(() => {});
+      return;
+    }
     if (view) { view.dispose(); view = null; }
     host.textContent = "";
     host.append(el("p", "fx-note", "Building the picture…"));
@@ -27,6 +32,8 @@ window.Factory = (() => {
       view = mod.mount(host, state.ir, stats, {onOpen(name, node) {          // a flow, and (from a shared block) the op that uses it
         FlowRail.open(name);
         if (node) requestAnimationFrame(() => { if (state.sel !== node && state.cardEls && state.cardEls.has(node)) select(node); });
+      }, onRuns(door) {                                 // a service's or a job's runs, in the Runs hub
+        RunsView.openFolder({kind: door.type === "job" ? "job" : "service", name: door.name});
       }});
     } catch (err) {
       loading = null;
