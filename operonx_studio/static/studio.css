@@ -6318,24 +6318,32 @@ h2 > .paneabout { margin-left: 6px; }
 .rh-v { max-width: 100%; color: var(--text); }
 .rh-v.rh-var { color: var(--accent-strong); background: var(--accent-soft); border-radius: var(--r-2xs); padding: 0 6px; }
 
-/* Light theme: the same card as dark, in light. The whole card is glass tinted with its kind's hue,
-   strongest under the icon and fading to the right, with a highlight along the top and an edge in
-   the same hue: a function is cool slate, an LLM op lavender, a graph indigo, speech pink. */
+/* Light theme op cards. Dark glows because coloured glass sits on black; on a light, lavender stage
+   the same translucent tint mixes with what is behind it and reads as a smudge. So light is the
+   opposite recipe: a bright, nearly opaque card with a crisp white edge, and the kind as a small
+   saturated tile under the icon (white icon on the hue), with a soft glow of the hue beneath.
+   A plain function keeps a quiet tile so the LLM, graph and speech ops stand out. */
 :root:not([data-theme="dark"]) #world .node.cell,
 :root:not([data-theme="dark"]) #world .node.cell.funcop,
 :root:not([data-theme="dark"]) #world .node.cell.graphop {
   --kc: var(--kind, var(--k-func));
-  --kc-a: 44%; --kc-b: 17%;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, .55) 0, rgba(255, 255, 255, 0) 46%),
-    linear-gradient(90deg, color-mix(in srgb, var(--kc) var(--kc-a), transparent) 0, color-mix(in srgb, var(--kc) var(--kc-b), transparent) 70%),
-    rgba(255, 255, 255, .72);
-  border-color: color-mix(in srgb, var(--kc) 34%, rgba(255, 255, 255, .6));
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--kc) 14%, transparent), 0 6px 16px -8px color-mix(in srgb, var(--kc) 30%, transparent);
+  background: linear-gradient(180deg, #fff 0, rgba(255, 255, 255, .94) 100%);
+  border-color: rgba(255, 255, 255, .95);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--kc) 22%, transparent),
+    0 1px 2px rgba(60, 50, 120, .10), 0 8px 18px -8px color-mix(in srgb, var(--kc) 45%, transparent);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
 }
-:root:not([data-theme="dark"]) #world .node.cell.funcop { --kc: #6f7fa6; --kc-a: 20%; --kc-b: 6%; }
-:root:not([data-theme="dark"]) #world .node.cell.graphop { --kc: var(--k-graph); --kc-a: 46%; --kc-b: 20%; }
-:root:not([data-theme="dark"]) #world .node.cell .iconband { color: color-mix(in srgb, var(--kc) 80%, var(--text)); border-right-color: color-mix(in srgb, var(--kc) 22%, transparent); }
+:root:not([data-theme="dark"]) #world .node.cell .iconband {
+  top: 5px; bottom: 5px; left: 5px; width: 32px; border: 0; border-radius: var(--r-sm);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--kc) 78%, #fff) 0, var(--kc) 100%);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), 0 2px 6px -2px color-mix(in srgb, var(--kc) 60%, transparent);
+}
+:root:not([data-theme="dark"]) #world .node.cell.funcop { --kc: #7c86a8; }
+:root:not([data-theme="dark"]) #world .node.cell.funcop .iconband {
+  background: linear-gradient(145deg, #f3f2fb 0, #e6e5f4 100%); color: #5b6485; box-shadow: inset 0 1px 0 #fff; }
+:root:not([data-theme="dark"]) #world .node.cell.graphop { --kc: var(--k-graph); }
+:root:not([data-theme="dark"]) #world .node.cell .iconband .oxpic { filter: brightness(0) invert(1); }
 
 /* Runs: the compare tick box sits beside the status dot with a gap, both on the row's middle line
    (the global checkbox rule zeroed its margin, so it touched the dot) */
