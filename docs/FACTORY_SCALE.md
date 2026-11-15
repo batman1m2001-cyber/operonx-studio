@@ -2,6 +2,9 @@
 
 ## Scale
 
+> The drawing described here (instanced calls, a frame loop that steps down, bloom) was replaced the day
+> after: see [FACTORY_CPU.md](FACTORY_CPU.md). The build and selection times below still hold.
+
 Two generated projects (copies of real graphs under made-up names, `factory-lab/data`), mounted in the
 studio's own page with `factory3d.js`:
 
