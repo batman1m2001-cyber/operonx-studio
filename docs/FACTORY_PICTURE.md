@@ -1,5 +1,8 @@
 # The Factory picture (SPATIAL_FACTORY_PLAN F3)
 
+> How it is drawn changed on 2026-11-16 (no instancing, no post-processing, a frame only on a change):
+> see [FACTORY_CPU.md](FACTORY_CPU.md). What is drawn, and where it lives, is as written here.
+
 **Result.** A project opens as one picture: a core of what its flows share and need, a cluster of
 parts for every flow, cables in bundles between them. It is the first row of the flows rail on the
 Flow screen. The scene was checked in the lab on mr-finance (14 flows, 90 services, 24 jobs) and on a generated

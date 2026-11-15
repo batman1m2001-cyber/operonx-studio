@@ -32,23 +32,37 @@
   --fx-fiber-uses: var(--fx-fiber-lav);          /* a connection to a shared block */
   --fx-fiber-needs: var(--fx-fiber-blue);   /* a data connection to a resource */
   --fx-text: var(--fx-silver); --fx-text-2: var(--fx-titanium);
-  --fx-label: color-mix(in srgb, var(--fx-graphite) 72%, transparent);
+  --fx-label: color-mix(in srgb, var(--fx-graphite) 88%, transparent);   /* no blur behind it: on a machine with no GPU a blurred pane is redone on the CPU every time something under it moves */
 }
 @media (prefers-reduced-transparency: reduce) { #factory { --fx-label: var(--fx-graphite); } }
 body.factory-on[data-tab="flow"] #factory { display: block; }
 body.factory-on[data-tab="flow"] .main > #stage, body.factory-on[data-tab="flow"] #minimap,
-body.factory-on[data-tab="flow"] .canvasbar > :not(#btn-flowrail) { display: none; }
+body.factory-on[data-tab="flow"] .canvasbar > :not(#btn-flowrail):not(#btn-factory) { display: none; }
+/* no GPU (factory3d.js marks it): the studio's glass rail and bar lie over the picture, and a blurred pane is blurred again on the
+ * CPU for every frame the picture moves under it — 69 ms a frame against 17 without (docs/FACTORY_CPU.md). So there, over the picture, glass is not blurred. */
+body.factory-on.fx-soft[data-tab="flow"] *, body.factory-on.fx-soft[data-tab="flow"] *::before, body.factory-on.fx-soft[data-tab="flow"] *::after {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+/* and its frame takes the studio's own unblurred tint, so the rail still reads over the picture */
+body.factory-on.fx-soft[data-tab="flow"]:not(.ax-focus) :is(header.bar, .rail, #sidebar, .flowrail, .canvasbar) { --glass-tint: var(--glass-still); }
 /* under the floating frame the picture fills the screen and the chrome floats over it, as over the canvas */
 body.floatframe:not(.ax-focus) .main > #factory { position: absolute; inset: 0;
   --fx-left: calc(var(--rail-w) + var(--flowrail-w) + 4 * var(--glass-gap) + 14px); --fx-top: calc(var(--bar-h) + 3 * var(--glass-gap) + 10px); }
 body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(var(--rail-w) + 3 * var(--glass-gap) + 14px); }
 #factory .fx-gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 #factory .fx-gl:active { cursor: grabbing; }
+/* the lights on the cables: elements on the cables' own paths, in a layer that follows the camera (factory3d.js) */
+#factory .fx-sparks { position: absolute; inset: 0; pointer-events: none; overflow: hidden;
+  clip-path: inset(calc(var(--fx-top) - 10px) 0 0 calc(var(--fx-left) - 14px)); }   /* never under the studio's glass rail and bar: a light moving there would have them blurred again every frame */
+#factory .fx-sparks > div { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-origin: 0 0; }
+#factory .fx-sparks i { position: absolute; left: 0; top: 0; width: 3px; height: 3px; margin: -1.5px; border-radius: 50%; background: #fff;
+  box-shadow: 0 0 4px 1.5px rgba(200, 184, 255, .85); offset-rotate: 0deg; offset-distance: 0%; transform: scale(var(--s, 1)); animation: fx-run linear infinite; }
+#factory .fx-sparks i.quiet { opacity: .08; }
+@keyframes fx-run { to { offset-distance: 100%; } }
+@media (prefers-reduced-motion: reduce) { #factory .fx-sparks i { animation: none; } }
 #factory .fx-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 /* a name: a slip of frosted glass with a metal hairline, tied to its cluster by a pin */
 #factory .lb { position: absolute; transform: translate(-50%, -100%); white-space: nowrap; text-align: center; padding: 3px 9px; border-radius: 7px;
-  background: var(--fx-label); border: 1px solid color-mix(in srgb, var(--fx-titanium) 24%, transparent);
-  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+  background: var(--fx-label); border: 1px solid color-mix(in srgb, var(--fx-titanium) 24%, transparent); }
 #factory .lb:not(.item):not(.core) { margin-top: -12px; }
 #factory .lb:not(.item):not(.core)::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 12px; background: color-mix(in srgb, var(--fx-titanium) 70%, transparent); }
 #factory .lb b { display: block; font-weight: 600; font-size: 12.5px; letter-spacing: .01em; color: var(--fx-text); }
@@ -66,14 +80,14 @@ body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(v
 #factory .fx-hud { position: absolute; left: var(--fx-left); top: var(--fx-top); pointer-events: none; }
 /* find by name: under the legend */
 #factory .fx-find { display: block; pointer-events: auto; margin-top: 34px; width: 280px; max-width: 60vw; padding: 6px 10px; border-radius: 8px; font: inherit; font-size: 12px;
-  color: var(--fx-text); background: var(--fx-label); border: 1px solid color-mix(in srgb, var(--fx-titanium) 28%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+  color: var(--fx-text); background: var(--fx-label); border: 1px solid color-mix(in srgb, var(--fx-titanium) 28%, transparent); }
 #factory .fx-find::placeholder { color: color-mix(in srgb, var(--fx-titanium) 80%, transparent); }
 #factory .fx-find:focus { outline: none; border-color: var(--fx-sig-agent); }
 #factory .fx-found { pointer-events: auto; margin-top: 4px; width: 280px; max-width: 60vw; border-radius: 8px; overflow: hidden; background: var(--fx-graphite); border: 1px solid var(--fx-gunmetal); }
 /* the selection's card */
 #factory .fx-card { position: absolute; right: 18px; top: calc(var(--fx-top) + 44px); width: 300px; max-width: calc(100% - 36px); overflow-y: auto; padding: 14px 14px 10px;
-  border-radius: 12px; background: color-mix(in srgb, var(--fx-graphite) 86%, transparent); border: 1px solid color-mix(in srgb, var(--fx-titanium) 26%, transparent);
-  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); height: fit-content; max-height: calc(100% - var(--fx-top) - 128px); }
+  border-radius: 12px; background: color-mix(in srgb, var(--fx-graphite) 94%, transparent); border: 1px solid color-mix(in srgb, var(--fx-titanium) 26%, transparent);
+  height: fit-content; max-height: calc(100% - var(--fx-top) - 128px); }
 #factory .fx-card[hidden] { display: none; }
 #factory .fx-card .fx-x { position: absolute; right: 8px; top: 6px; border: 0; background: none; color: var(--fx-text-2); font-size: 18px; line-height: 1; cursor: pointer; padding: 4px 6px; }
 #factory .fx-card .fx-x:hover { color: var(--fx-text); }

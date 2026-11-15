@@ -10,11 +10,14 @@ window.Factory = (() => {
   let view = null, seen = null, loading = null;
   let model = null, modelOf = null;                  // the factory model of the IR in hand, for placed()
   const on = () => document.body.classList.contains("factory-on");
+  const btn = document.getElementById("btn-factory");     // in the canvas bar, so the picture does not depend on the rail being open
+  const mark = () => { if (btn) btn.setAttribute("aria-pressed", String(on())); };
+  if (btn) btn.onclick = () => (on() ? (hide(), FlowRail.render()) : show());
 
   async function show() {
     if (!host) return;
     if (document.body.dataset.tab !== "flow") switchTab("flow");
-    document.body.classList.add("factory-on");
+    document.body.classList.add("factory-on"); mark();
     FlowRail.render();
     if (view && seen === state.ir) {                 // back on the picture: as it was left, with the latest numbers
       view.resume();
@@ -54,7 +57,7 @@ window.Factory = (() => {
 
   function hide() {
     if (!on()) return;
-    document.body.classList.remove("factory-on");
+    document.body.classList.remove("factory-on"); mark();
     if (view) view.pause();
   }
 

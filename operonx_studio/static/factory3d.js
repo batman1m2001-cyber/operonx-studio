@@ -10,21 +10,22 @@
  * A click selects a cluster or a core item: what it links to stays lit, the rest goes quiet, and a card
  * lists it; a double click on a flow, or a row of the card, opens the flow in the editor. / finds by name.
  *
+ * It has to run on a machine with no GPU (the owner's, and a bank's remote desktop): nothing is lit per
+ * pixel, there are no post-processing passes, and a frame is drawn only when something changed — while the
+ * camera moves the last frame is slid and scaled in place, and the lights on the cables are not part of the
+ * 3D frame at all (see `draw` and the sparks).
+ *
  * An ES module, loaded on demand by factory.js — the studio's pages do not pay for three.js until
  * the picture is opened. mount(host, ir, stats, {onOpen(flow, node), onRuns(door), onDoor(service)}) → {pause, resume, fit, select, reveal, setStats, dispose}. */
 import * as THREE from "./vendor/three/three.module.min.js";
-import { EffectComposer } from "./vendor/three/addons/postprocessing/EffectComposer.js";
-import { RenderPass } from "./vendor/three/addons/postprocessing/RenderPass.js";
-import { UnrealBloomPass } from "./vendor/three/addons/postprocessing/UnrealBloomPass.js";
-import { OutputPass } from "./vendor/three/addons/postprocessing/OutputPass.js";
 
 export function mount(host, ir, stats, opts = {}) {
 const FactoryModel = window.FactoryModel, NAME = ir.name || "";
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 host.textContent = "";
-const canvas = mk("canvas", "fx-gl"), labelHost = mk("div", "fx-labels"), hud = mk("div", "fx-hud"), legend = mk("div", "fx-legend"), resetBtn = mk("button", "fx-reset", "Reset view");
+const canvas = mk("canvas", "fx-gl"), sparkHost = mk("div", "fx-sparks"), labelHost = mk("div", "fx-labels"), hud = mk("div", "fx-hud"), legend = mk("div", "fx-legend"), resetBtn = mk("button", "fx-reset", "Reset view");
 resetBtn.type = "button"; resetBtn.title = "Fit the whole project  (F)"; canvas.setAttribute("aria-label", "The project as one model: drag to move, scroll to zoom");
-const titleEl = mk("h2"), countsEl = mk("p"); hud.append(titleEl, countsEl); host.append(canvas, labelHost, hud, legend, resetBtn);
+const titleEl = mk("h2"), countsEl = mk("p"); hud.append(titleEl, countsEl); host.append(canvas, sparkHost, labelHost, hud, legend, resetBtn);
 const vw = () => host.clientWidth || 1, vh = () => host.clientHeight || 1;
 /* Colours are the --fx-* tokens on #factory (studio.css) and nowhere else; `tok` reads one. */
 const css = getComputedStyle(host);
@@ -99,8 +100,15 @@ const world = (s, u, v) => [s.tan[0] * u + s.out[0] * v, s.tan[1] * u + s.out[1]
 
 // ── scene ─────────────────────────────────────────────────────────
 const v3 = new THREE.Vector3(), M = new THREE.Matrix4(), col = new THREE.Color();
-const renderer = new THREE.WebGLRenderer({canvas, antialias: true, powerPreference: "high-performance"});
-renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+/* No GPU: the browser then draws WebGL on the CPU, where antialiasing alone is 40% of a frame and every pixel
+ * of a dense screen is paid for — so there it is one sample a pixel and one pixel a pixel. */
+const SOFT = (() => { try { const c = document.createElement("canvas"), g = c.getContext("webgl2") || c.getContext("webgl"); if (!g) return false;
+  const d = g.getExtension("WEBGL_debug_renderer_info"), name = String(d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER));
+  const lose = g.getExtension("WEBGL_lose_context"); if (lose) lose.loseContext();
+  return /swiftshader|llvmpipe|softpipe|software|basic render|warp/i.test(name); } catch { return false; } })();
+document.body.classList.toggle("fx-soft", SOFT);                  // and the studio's glass over the picture is not blurred (factory.css)
+const renderer = new THREE.WebGLRenderer({canvas, antialias: !SOFT});
+renderer.setPixelRatio(SOFT ? 1 : Math.min(2, window.devicePixelRatio || 1));
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.22;
 const scene = new THREE.Scene(); scene.background = tok("bg");
 const DIR = new THREE.Vector3(1, 1, 1).normalize();
@@ -108,33 +116,33 @@ const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -500, 1000);
 camera.position.copy(DIR.clone().multiplyScalar(200)); camera.lookAt(0, 0, 0); camera.updateMatrixWorld();
 const RIGHT = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0), UP = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
 
-/* Light: a product studio, as the environment metal reflects. The camera never turns, so every family
- * of faces looks at one place in the room; a soft panel stands in each: broad and cool-white over the
- * tops, dimmer for the two sides, and narrow bright ones where the chamfers look — that is what puts a
- * silver line on every machined edge without drawing one. */
-{ const refl = (n) => new THREE.Vector3(...n).normalize().multiplyScalar(2 * new THREE.Vector3(...n).normalize().dot(DIR)).sub(DIR).normalize();
-  const panels = [[[0, 1, 0], 0.5, 2.0, [0.93, 0.97, 1.0]], [[1, 0, 0], 0.26, 2.0, [0.97, 0.97, 1.0]], [[0, 0, 1], 0.12, 2.0, [0.84, 0.88, 1.0]], [[1, 1, 0], 1.7, 7.0], [[0, 1, 1], 1.25, 7.0], [[1, 0, 1], 0.6, 7.0], [[1, 1, 1], 1.5, 9.0]];
-  const room = new THREE.Scene();
-  room.add(new THREE.Mesh(new THREE.SphereGeometry(10, 48, 24), new THREE.ShaderMaterial({side: THREE.BackSide,
-    uniforms: {uDir: {value: panels.map(p => refl(p[0]))}, uLobe: {value: panels.map(p => new THREE.Vector2(p[1], p[2]))}, uCol: {value: panels.map(p => new THREE.Vector3(...(p[3] || [0.96, 0.98, 1.0])))}},
-    vertexShader: `varying vec3 vD; void main() { vD = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader: `varying vec3 vD; uniform vec3 uDir[7]; uniform vec2 uLobe[7]; uniform vec3 uCol[7];
-      void main() { vec3 d = normalize(vD); vec3 l = vec3(0.95, 0.975, 1.0) * (0.035 + 0.05 * smoothstep(-1.0, 1.0, d.y));
-        for (int i = 0; i < 7; i++) l += uCol[i] * uLobe[i].x * pow(max(dot(d, uDir[i]), 0.0), uLobe[i].y);
-        gl_FragColor = vec4(l, 1.0); }`})));
-  const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromScene(room, 0.015).texture; pm.dispose(); }
+/* Light: a product studio, worked out once. The camera never turns, so each family of faces mirrors one
+ * place in the room, and what it shows there is a constant: a soft cool panel over the tops, dimmer ones for
+ * the two sides, narrow bright ones where the chamfers look (the silver line on every machined edge). So
+ * nothing is lit per pixel: a face carries its shade as a vertex colour. */
+const refl = (n) => { const u = new THREE.Vector3(...n).normalize(); return u.clone().multiplyScalar(2 * u.dot(DIR)).sub(DIR).normalize(); };
+const PANELS = [[[0, 1, 0], 0.5, 2.0, [0.93, 0.97, 1.0]], [[1, 0, 0], 0.26, 2.0, [0.97, 0.97, 1.0]], [[0, 0, 1], 0.12, 2.0, [0.84, 0.88, 1.0]], [[1, 1, 0], 1.7, 7.0], [[0, 1, 1], 1.25, 7.0], [[1, 0, 1], 0.6, 7.0], [[1, 1, 1], 1.5, 9.0]].map(p => ({d: refl(p[0]), amp: p[1], exp: p[2], col: p[3] || [0.96, 0.98, 1.0]}));
+function shadeOf(n) { const d = refl(n), base = 0.035 + 0.05 * THREE.MathUtils.smoothstep(d.y, -1, 1), l = [0.95 * base, 0.975 * base, base];
+  for (const p of PANELS) { const w = p.amp * Math.pow(Math.max(d.dot(p.d), 0), p.exp); for (let i = 0; i < 3; i++) l[i] += p.col[i] * w; }
+  const edge = n.filter(x => Math.abs(x) > 0.01).length > 1 ? EDGE : 1; return l.map(x => x * edge); }
+const EDGE = 0.8;                                                  // a chamfer is satin too: its highlight is a little spread
 
 /* Geometry: one machined box for every box-like part. Its vertices carry which corner they belong to
- * and how the chamfer, the top frame and the recess pull them in; the size comes per instance, so a
- * chamfer is the same 3 hundredths on a small module and on a plate. shape = (chamfer, frame, recess):
- * with frame = chamfer and recess = 0 it is a plain chamfered block. */
-function machinedBox() {
+ * and how the chamfer, the top frame and the recess pull them in; a part's size is applied when it is
+ * written out (Batch.write), so a chamfer is the same 3 hundredths on a small module and on a plate. shape = (chamfer, frame, recess):
+ * with frame = chamfer and recess = 0 it is a plain chamfered block.
+ * The camera never turns, so the faces that look away from it are not built at all; and `plain` is the same
+ * box as its three seen faces only, for when a chamfer would be less than a pixel. */
+function machinedBox(plain) {
   const tris = [], vx = (a, b, c) => ({c: [a, b, c], k: [0, 1, 1], f: 0, r: 0}), vy = (a, b, c) => ({c: [a, b, c], k: [1, 0, 1], f: 0, r: 0}), vz = (a, b, c) => ({c: [a, b, c], k: [1, 1, 0], f: 0, r: 0});
   const vi = (a, c, r) => ({c: [a, 1, c], k: [0, 0, 0], f: 1, r});
   const at = (v) => [v.c[0] * (0.5 - (v.k[0] * 0.1 + v.f * 0.22)), v.c[1] > 0 ? 1 - v.k[1] * 0.1 - v.r * 0.1 : v.k[1] * 0.1, v.c[2] * (0.5 - (v.k[2] * 0.1 + v.f * 0.22))];
   const face = (vs, n) => { for (let i = 1; i < vs.length - 1; i++) { const t = [vs[0], vs[i], vs[i + 1]], [a, b, c] = t.map(v => new THREE.Vector3(...at(v)));
+    if (n[0] + n[1] + n[2] < 0.01) return;
     if (b.sub(a).cross(c.sub(a)).dot(new THREE.Vector3(...n)) < 0) t.reverse(); tris.push({t, n: new THREE.Vector3(...n).normalize().toArray()}); } };
-  const S = [-1, 1];
+  const S = [-1, 1], pv = (a, b, c) => ({c: [a, b, c], k: [0, 0, 0], f: 0, r: 0});
+  if (plain) { face([pv(1, -1, -1), pv(1, 1, -1), pv(1, 1, 1), pv(1, -1, 1)], [1, 0, 0]); face([pv(-1, -1, 1), pv(1, -1, 1), pv(1, 1, 1), pv(-1, 1, 1)], [0, 0, 1]); face([pv(-1, 1, -1), pv(1, 1, -1), pv(1, 1, 1), pv(-1, 1, 1)], [0, 1, 0]); }
+  else {
   for (const a of S) face([vx(a, -1, -1), vx(a, 1, -1), vx(a, 1, 1), vx(a, -1, 1)], [a, 0, 0]);
   for (const c of S) face([vz(-1, -1, c), vz(1, -1, c), vz(1, 1, c), vz(-1, 1, c)], [0, 0, c]);
   for (const a of S) { face([vy(a, 1, -1), vy(a, 1, 1), vi(a, 1, 0), vi(a, -1, 0)], [0, 1, 0]); face([vi(a, -1, 0), vi(a, 1, 0), vi(a, 1, 1), vi(a, -1, 1)], [-a, 0, 0]); }
@@ -143,36 +151,32 @@ function machinedBox() {
   for (const a of S) for (const b of S) face([vx(a, b, -1), vx(a, b, 1), vy(a, b, 1), vy(a, b, -1)], [a, b, 0]);
   for (const a of S) for (const c of S) face([vx(a, -1, c), vx(a, 1, c), vz(a, 1, c), vz(a, -1, c)], [a, 0, c]);
   for (const b of S) for (const c of S) face([vy(-1, b, c), vy(1, b, c), vz(1, b, c), vz(-1, b, c)], [0, b, c]);
-  for (const a of S) for (const b of S) for (const c of S) face([vx(a, b, c), vy(a, b, c), vz(a, b, c)], [a, b, c]);
-  const g = new THREE.BufferGeometry(), flat = (f, n) => new THREE.BufferAttribute(new Float32Array(tris.flatMap(T => T.t.flatMap(v => f(v, T)))), n);
-  g.setAttribute("position", flat(v => at(v), 3)); g.setAttribute("normal", flat((v, T) => T.n, 3));
-  g.setAttribute("corner", flat(v => v.c, 3)); g.setAttribute("kk", flat(v => v.k, 3)); g.setAttribute("fr", flat(v => [v.f, v.r], 2));
-  return g;
+  for (const a of S) for (const b of S) for (const c of S) face([vx(a, b, c), vy(a, b, c), vz(a, b, c)], [a, b, c]); }
+  /* a vertex: its corner, its pulls, its face's shade and kind (0 a side, 1 a top, 2 a chamfer) */
+  return tris.flatMap(T => { const shade = shadeOf(T.n), face = T.n[1] > 0.9 ? 1 : Math.abs(T.n[0]) + Math.abs(T.n[1]) + Math.abs(T.n[2]) > 1.2 ? 2 : 0;
+    return T.t.map(v => ({c: v.c, k: v.k, f: v.f, r: v.r, shade, face})); });
 }
-/* Material: titanium or glass, both physically lit by the room. Brushed grain runs one way everywhere
- * (across the tops, round the sides) and is only drawn where a streak is wider than a pixel. */
-function machined({metal, rough, grain, clear, opacity}) {
-  const m = new THREE.MeshStandardMaterial({metalness: metal, roughness: rough, transparent: !!clear, opacity: opacity == null ? 1 : opacity, depthWrite: !clear});
-  m.defines = {GRAIN: grain.toFixed(3)}; if (!metal) m.defines.GLASS = 1; m.customProgramCacheKey = () => `machined${grain}:${metal}`;
-  m.onBeforeCompile = (sh) => {
-    sh.vertexShader = sh.vertexShader.replace("#include <common>", `#include <common>
-      attribute vec3 corner; attribute vec3 kk; attribute vec2 fr; attribute vec3 dims; attribute vec4 shape; varying vec3 vWp; varying vec3 vObjN; varying vec4 vC; varying vec3 vFx;`)
-      .replace("#include <begin_vertex>", `vec3 hh = dims * 0.5; vec2 pull = kk.xz * shape.x + fr.x * shape.y;
-        float yy = corner.y > 0.0 ? dims.y - kk.y * shape.x - fr.y * shape.z : kk.y * shape.x;
-        vec3 transformed = vec3(corner.x * (hh.x - pull.x), yy, corner.z * (hh.z - pull.y));
-        vObjN = normal; vWp = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
-        vC = vec4(corner.x, yy / max(dims.y, 0.0001), corner.z, yy); vFx = vec3(fr, shape.w);`);
-    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", `#include <common>
-      varying vec3 vWp; varying vec3 vObjN; varying vec4 vC; varying vec3 vFx; float fxHash(float n) { return fract(sin(n * 127.1) * 43758.5453); }`)
-      .replace("#include <color_fragment>", `#include <color_fragment>
-        { /* which face this is: a chamfer, a top (its frame or its floor), a side (outer, or the wall of a recess) */
-          bool cham = abs(vObjN.x) + abs(vObjN.y) + abs(vObjN.z) > 1.2, top = vObjN.y > 0.9, wall = !top && !cham && vFx.x > 0.5;
-          float away = -(vC.x + vC.z) * 0.5;                       // -1 at the corner nearest the eye, +1 at the farthest
-          #ifdef GLASS
-            /* glass: darker than the metal round it, and a soft panel of the room lying across it */
-            float sheen = top ? pow(smoothstep(-1.0, 1.0, away), 2.2) : 0.35 * vC.y;
-            totalEmissiveRadiance += vec3(0.74, 0.86, 1.0) * (0.008 + 0.075 * sheen);
-          #else
+/* Material: titanium or glass. A face's shade comes with its vertices; the fragment only adds what varies
+ * across a face — the brushed grain (drawn only where a streak is wider than a pixel), the soft band of the
+ * room across tops and sides, the darkening down a recess and at the foot of a side. */
+function machined({glass, grain = 0, clear, opacity = 1}) {
+  return new THREE.ShaderMaterial({transparent: !!clear, depthWrite: !clear, uniforms: {uOpacity: {value: opacity}},
+    defines: Object.assign({GRAIN: grain.toFixed(3)}, glass ? {GLASS: 1} : {}),
+    vertexShader: `attribute vec4 aC; attribute vec4 aFx; attribute vec3 shade; attribute vec3 aCol;
+      varying vec3 vWp; varying vec4 vC; varying vec4 vFx; varying vec3 vShade; varying vec3 vCol;
+      void main() { vec4 wp = modelMatrix * vec4(position, 1.0); vWp = wp.xyz; vShade = shade; vCol = aCol; vC = aC; vFx = aFx;
+        gl_Position = projectionMatrix * viewMatrix * wp; }`,
+    fragmentShader: `varying vec3 vWp; varying vec4 vC; varying vec4 vFx; varying vec3 vShade; varying vec3 vCol; uniform float uOpacity;
+      float fxHash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+      void main() { /* which face this is: a chamfer, a top (its frame or its floor), a side (outer, or the wall of a recess) */
+        bool cham = vFx.w > 1.5, top = vFx.w > 0.5 && !cham, wall = !top && !cham && vFx.x > 0.5;
+        float away = -(vC.x + vC.z) * 0.5;                         // -1 at the corner nearest the eye, +1 at the farthest
+        vec3 c;
+        #ifdef GLASS
+          /* glass: darker than the metal round it, a faint mirror, and a soft panel of the room lying across it */
+          float sheen = top ? pow(smoothstep(-1.0, 1.0, away), 2.2) : 0.35 * vC.y;
+          c = vCol * 0.3 + vShade * 0.04 + vec3(0.74, 0.86, 1.0) * (0.008 + 0.075 * sheen);
+        #else
             float gx = top ? vWp.x - vWp.z : vWp.y, fine = clamp(1.0 - fwidth(gx) * 80.0, 0.0, 1.0);
             float tone = 1.0 + (fxHash(floor(gx * 80.0)) - 0.5) * GRAIN * fine * (cham ? 0.0 : 1.0);
             vec3 tint = vec3(1.0);
@@ -181,35 +185,63 @@ function machined({metal, rough, grain, clear, opacity}) {
             else if (top) { float u = away * 0.7 + (vC.x - vC.z) * 0.15; tone *= 0.9 + 0.2 * away + (0.16 + 0.2 * vFx.z) * exp(-pow((u - 0.3) / 0.3, 2.0)); tint = vec3(0.975, 0.99, 1.03); }   // a satin top, a touch cooler
             else if (wall) tone *= mix(0.72, 0.3, vFx.y);                             // down into a recess
             else { tone *= mix(0.66, 1.0, smoothstep(0.0, 0.34, vC.w)) * (0.86 + 0.2 * vC.y + (0.12 + 0.2 * vFx.z) * exp(-pow((vC.y - 0.74) / 0.2, 2.0))); }   // a side: darker where it meets the plate
-            diffuseColor.rgb *= tone * tint;
-          #endif
-        }`)
-      .replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>
-        #ifndef GLASS
-        { bool cham = abs(vObjN.x) + abs(vObjN.y) + abs(vObjN.z) > 1.2;
-          roughnessFactor *= cham ? 0.52 - 0.14 * vFx.z : (vObjN.y > 0.9 && vFx.y < 0.5 ? 0.62 : 1.0 - 0.22 * vFx.z); }
-        #endif`);
-  };
-  return m;
+            c = vCol * vShade * tone * tint;
+        #endif
+        gl_FragColor = vec4(c, uOpacity);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`});
 }
 /* a batch: every part of one material is one draw call */
-const BOX = machinedBox();
+const BOX = machinedBox(), BOX_PLAIN = machinedBox(true);
+/* a light, a run light: a small box as its three seen faces */
+const seenBox = () => { const g = new THREE.BoxGeometry(1, 1, 1).toNonIndexed(), p = g.getAttribute("position"), n = g.getAttribute("normal"), keep = [];
+  for (let i = 0; i < p.count; i += 3) if (n.getX(i) + n.getY(i) + n.getZ(i) > 0.5) for (let j = i; j < i + 3; j++) keep.push(p.getX(j), p.getY(j) + 0.5, p.getZ(j));
+  const o = new THREE.BufferGeometry(); o.setAttribute("position", new THREE.BufferAttribute(new Float32Array(keep), 3)); return o; };
 let owner = null;                                                  // the cluster or core item being built: everything drawn meanwhile is its
+/* Nothing in the picture is an InstancedMesh. With no GPU the browser draws instances some ten times slower
+ * a triangle than plain geometry (measured: docs/FACTORY_CPU.md), and nothing here moves — so every copy of a
+ * shape is written out into one buffer, and a copy's colour is its vertices' colour. */
+class Copies extends THREE.Mesh {
+  constructor(src, material, count) { const V = src.getAttribute("position").count, g = new THREE.BufferGeometry(), uv = src.getAttribute("uv"), ix = src.index;
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * V * 3), 3)); g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(count * V * 3).fill(1), 3));
+    if (uv) { const a = new Float32Array(count * V * 2); for (let i = 0; i < count; i++) a.set(uv.array, i * V * 2); g.setAttribute("uv", new THREE.BufferAttribute(a, 2)); }
+    if (ix) { const a = new Uint32Array(count * ix.count); for (let i = 0; i < count; i++) for (let j = 0; j < ix.count; j++) a[i * ix.count + j] = ix.array[j] + i * V; g.setIndex(new THREE.BufferAttribute(a, 1)); }
+    material.vertexColors = true; super(g, material); this.src = src; this.V = V; this.count = count; this.frustumCulled = false;
+    const pos = g.getAttribute("position"), tint = g.getAttribute("color");   // the two names the code that paints copies already uses
+    this.instanceMatrix = {set needsUpdate(v) { pos.needsUpdate = true; }}; this.instanceColor = {set needsUpdate(v) { tint.needsUpdate = true; }}; }
+  setMatrixAt(i, m) { const p = this.src.getAttribute("position"), out = this.geometry.getAttribute("position"), e = m.elements;
+    for (let j = 0; j < this.V; j++) { const x = p.getX(j), y = p.getY(j), z = p.getZ(j);
+      out.setXYZ(i * this.V + j, e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14]); } out.needsUpdate = true; }
+  setColorAt(i, c) { const own = this.src.getAttribute("color"), out = this.geometry.getAttribute("color");   // a shape's own vertex colours (a junction's faces) times the copy's
+    for (let j = 0; j < this.V; j++) out.setXYZ(i * this.V + j, c.r * (own ? own.getX(j) : 1), c.g * (own ? own.getY(j) : 1), c.b * (own ? own.getZ(j) : 1)); out.needsUpdate = true; } }
+/* a batch: every part of one material is one mesh, each part written out from the box's template — plain
+ * when far off (6 triangles a part), machined once it is near enough to show (28; built the first time) */
 class Batch { constructor(material, sorted) { this.material = material; this.sorted = sorted; this.items = []; }
   add(x, y, z, sx, sy, sz, color, shape) { this.items.push({x, y, z, sx, sy, sz, color, shape, owner}); }
   build(order) { let list = this.items; if (!list.length) return null; if (this.sorted) list = list.slice().sort((a, b) => (a.x + a.y + a.z) - (b.x + b.y + b.z));
-    const g = BOX.clone(), each = (f, n) => new THREE.InstancedBufferAttribute(new Float32Array(list.flatMap(f)), n);
-    g.setAttribute("dims", each(b => [b.sx, b.sy, b.sz], 3)); g.setAttribute("shape", each(b => [b.shape[0], b.shape[1], b.shape[2], b.shape[3] || 0], 4));
-    const mesh = new THREE.InstancedMesh(g, this.material, list.length);
-    list.forEach((b, i) => { M.makeTranslation(b.x, b.y, b.z); mesh.setMatrixAt(i, M);
-      const j = this.spread ? (Math.abs(Math.sin(b.x * 12.9898 + b.z * 78.233) * 43758.5453) % 1) - 0.5 : 0;
-      b.base = b.color.clone().multiplyScalar(1 + j * (this.spread || 0)); mesh.setColorAt(i, b.base); });
-    mesh.frustumCulled = false; mesh.renderOrder = order || 0; scene.add(mesh); this.mesh = mesh; this.list = list; return mesh; }
-  /* each instance at its own tone times k(owner): how a selection quiets the rest */
-  tone(k) { if (!this.mesh) return; this.list.forEach((b, i) => this.mesh.setColorAt(i, col.copy(b.base).multiplyScalar(k(b.owner)))); this.mesh.instanceColor.needsUpdate = true; } }
-const metal = new Batch(machined({metal: 1, rough: 0.42, grain: 0.16})); metal.spread = 0.14;
-const glass = new Batch(machined({metal: 0, rough: 0.04, grain: 0}));                                   // a glass panel set in a frame
-const smoked = new Batch(machined({metal: 0, rough: 0.05, grain: 0, clear: CLEAR, opacity: CLEAR ? 0.36 : 1}), true); // an enclosure you see into
+    for (const b of list) { const j = this.spread ? (Math.abs(Math.sin(b.x * 12.9898 + b.z * 78.233) * 43758.5453) % 1) - 0.5 : 0; b.base = b.color.clone().multiplyScalar(1 + j * (this.spread || 0)); b.k = 1; }
+    this.list = list; this.geo = {far: this.write(BOX_PLAIN)};
+    const mesh = new THREE.Mesh(this.geo.far, this.material); mesh.frustumCulled = false; mesh.renderOrder = order || 0; scene.add(mesh); this.mesh = mesh; return mesh; }
+  write(T) { const n = this.list.length, V = T.length, P = new Float32Array(n * V * 3), C = new Float32Array(n * V * 4), F = new Float32Array(n * V * 4), S = new Float32Array(n * V * 3), K = new Float32Array(n * V * 3);
+    this.list.forEach((b, i) => { const ch = b.shape[0], frame = b.shape[1], recess = b.shape[2], fin = b.shape[3] || 0;
+      for (let j = 0; j < V; j++) { const v = T[j], o = i * V + j, yy = v.c[1] > 0 ? b.sy - v.k[1] * ch - v.r * recess : v.k[1] * ch;
+        P[o * 3] = b.x + v.c[0] * (b.sx / 2 - v.k[0] * ch - v.f * frame); P[o * 3 + 1] = b.y + yy; P[o * 3 + 2] = b.z + v.c[2] * (b.sz / 2 - v.k[2] * ch - v.f * frame);
+        C[o * 4] = v.c[0]; C[o * 4 + 1] = yy / Math.max(b.sy, 1e-4); C[o * 4 + 2] = v.c[2]; C[o * 4 + 3] = yy;
+        F[o * 4] = v.f; F[o * 4 + 1] = v.r; F[o * 4 + 2] = fin; F[o * 4 + 3] = v.face; S.set(v.shade, o * 3);
+        K[o * 3] = b.base.r * b.k; K[o * 3 + 1] = b.base.g * b.k; K[o * 3 + 2] = b.base.b * b.k; } });
+    const g = new THREE.BufferGeometry(); g.userData.V = V;
+    for (const [name, a, size] of [["position", P, 3], ["aC", C, 4], ["aFx", F, 4], ["shade", S, 3], ["aCol", K, 3]]) g.setAttribute(name, new THREE.BufferAttribute(a, size)); return g; }
+  detail(fine) { if (!this.mesh) return; if (fine && !this.geo.fine) this.geo.fine = this.write(BOX); this.mesh.geometry = fine ? this.geo.fine : this.geo.far; }
+  dispose() { for (const g of Object.values(this.geo || {})) g.dispose(); }
+  /* each part at its own tone times k(owner): how a selection quiets the rest */
+  tone(k) { if (!this.mesh) return; for (const b of this.list) b.k = k(b.owner);
+    for (const g of Object.values(this.geo)) { const a = g.getAttribute("aCol").array, V = g.userData.V; let o = 0;
+      for (const b of this.list) { const r = b.base.r * b.k, gg = b.base.g * b.k, bb = b.base.b * b.k; for (let j = 0; j < V; j++) { a[o++] = r; a[o++] = gg; a[o++] = bb; } }
+      g.getAttribute("aCol").needsUpdate = true; } } }
+const metal = new Batch(machined({grain: 0.16})); metal.spread = 0.14;
+const glass = new Batch(machined({glass: true}));                                   // a glass panel set in a frame
+const smoked = new Batch(machined({glass: true, clear: CLEAR, opacity: CLEAR ? 0.36 : 1}), true); // an enclosure you see into
 /* signal lights: the only colour in the picture. `far` ones are seen from any distance (an error);
  * the rest appear once a component is large enough to carry them */
 const lights = {far: [], mid: []};
@@ -301,33 +333,36 @@ owner = null;
 metal.build(); glass.build(); smoked.build(3);
 /* the junctions' eight-sided bodies */
 let puckMesh = null;
-if (pucks.length) { const g = new THREE.CylinderGeometry(1, 1, 1, 8); g.rotateY(Math.PI / 8); g.translate(0, 0.5, 0);
-  const mesh = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({metalness: 1, roughness: 0.38, flatShading: true}), pucks.length);
+if (pucks.length) { const g = new THREE.CylinderGeometry(1, 1, 1, 8).toNonIndexed(); g.rotateY(Math.PI / 8); g.translate(0, 0.5, 0); g.computeVertexNormals();   // one normal a face
+  const nn = g.getAttribute("normal"), cc = new Float32Array(nn.count * 3);
+  for (let i = 0; i < nn.count; i++) cc.set(shadeOf([nn.getX(i), nn.getY(i), nn.getZ(i)].map(x => Math.abs(x) < 0.01 ? 0 : x)).map(x => x / (Math.abs(nn.getY(i)) > 0.9 ? 1 : EDGE)), i * 3);
+  g.setAttribute("color", new THREE.BufferAttribute(cc, 3));
+  const mesh = new Copies(g, new THREE.MeshBasicMaterial({vertexColors: true}), pucks.length);
   pucks.forEach((b, i) => { M.makeScale(b.r, b.h, b.r); M.setPosition(b.x, b.y, b.z); mesh.setMatrixAt(i, M); mesh.setColorAt(i, b.color); }); mesh.frustumCulled = false; scene.add(mesh); puckMesh = mesh; }
 /* where a part meets the plate it stands on, the plate is a little darker */
 { const cv = document.createElement("canvas"); cv.width = cv.height = 64; const x = cv.getContext("2d"), gr = x.createRadialGradient(32, 32, 14, 32, 32, 32);
   gr.addColorStop(0, "rgba(0,0,0,0.85)"); gr.addColorStop(1, "rgba(0,0,0,0)"); x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
   const g = new THREE.PlaneGeometry(1, 1); g.rotateX(-Math.PI / 2);
-  const mesh = new THREE.InstancedMesh(g, new THREE.MeshBasicMaterial({map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, opacity: 0.6}), shadows.length);
+  const mesh = new Copies(g, new THREE.MeshBasicMaterial({map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, opacity: 0.6}), shadows.length);
   shadows.forEach((b, i) => { M.makeScale(b.sx + 0.42, 1, b.sz + 0.42); M.setPosition(b.x, b.y + 0.003, b.z); mesh.setMatrixAt(i, M); }); mesh.frustumCulled = false; mesh.renderOrder = 1; scene.add(mesh); }
 const lod = {}, lightSets = [];
 const glowTex = (() => { const cv = document.createElement("canvas"); cv.width = cv.height = 64; const x = cv.getContext("2d"), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
   gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.25, "rgba(255,255,255,0.42)"); gr.addColorStop(0.6, "rgba(255,255,255,0.1)"); gr.addColorStop(1, "rgba(255,255,255,0)");
   x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(cv); })();
 for (const k of ["far", "mid"]) { const list = lights[k]; if (!list.length) continue; const sigs = {};
-  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), new THREE.MeshBasicMaterial(), list.length);
+  const mesh = new Copies(seenBox(), new THREE.MeshBasicMaterial(), list.length);
   list.forEach((b, i) => { M.makeScale(b.sx, b.sy, b.sz); M.setPosition(b.x, b.y, b.z); mesh.setMatrixAt(i, M); mesh.setColorAt(i, col.copy(sigs[b.sig] || (sigs[b.sig] = tok(b.sig))).multiplyScalar(b.gain * 1.1)); });
   mesh.frustumCulled = false; lod[k] = new THREE.Group(); lod[k].add(mesh); scene.add(lod[k]);
   /* each light's glow: a soft disc of its own colour, facing the eye, a little in front of the light */
-  const halo = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false}), list.length);
+  const halo = new Copies(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false}), list.length);
   list.forEach((b, i) => { const r = Math.min(1.5, Math.max(b.sx, b.sy, b.sz) * 2.2 + 0.16);
     M.compose(v3.set(b.x, b.y + b.sy / 2, b.z).addScaledVector(DIR, 1.45 * r), camera.quaternion, new THREE.Vector3(r * 2, r * 2, 1)); halo.setMatrixAt(i, M);
     halo.setColorAt(i, col.copy(sigs[b.sig]).multiplyScalar((k === "mid" ? 0.26 : 0.42) * b.gain / 1.5)); });
   halo.frustumCulled = false; halo.renderOrder = 4; lod[k].add(halo); lightSets.push({list, mesh, halo, sigs, glow: k === "mid" ? 0.26 : 0.42}); }
 /* run lights (F5): one per flow, red when runs failed in the window, green when it ran clean (a cluster per flow only:
  * a thousand green lights say nothing), dark when it did not run. Their own mesh, so new numbers repaint it in place. */
-const statusMesh = status.length ? new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), new THREE.MeshBasicMaterial(), status.length) : null;
-const statusHalo = status.length ? new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false}), status.length) : null;
+const statusMesh = status.length ? new Copies(seenBox(), new THREE.MeshBasicMaterial(), status.length) : null;
+const statusHalo = status.length ? new Copies(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false}), status.length) : null;
 if (statusMesh) { statusMesh.frustumCulled = statusHalo.frustumCulled = false; statusHalo.renderOrder = 4; scene.add(statusMesh, statusHalo); }
 const SIG = {bad: tok("sig-error"), ok: tok("sig-ok")}, NONE = new THREE.Matrix4().makeScale(0, 0, 0);
 function paintStatus() { if (!statusMesh) return;
@@ -363,19 +398,21 @@ for (const c of clusters) { const s = c.side; if (!c.strands.length) continue;
       path.add(new THREE.LineCurve3(from, p1)); path.add(new THREE.QuadraticBezierCurve3(p1, q, p2)); from = p2; }
     path.add(new THREE.LineCurve3(from, pts[pts.length - 1]));
     const len = path.getLength();
-    const tube = new THREE.Mesh(new THREE.TubeGeometry(path, Math.max(12, Math.round(len * 2.2)), 0.034, 6, false), cableMat[p.kind]); scene.add(tube);
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(path, Math.max(10, Math.round(len * 1.3)), 0.034, 4, false), cableMat[p.kind]); scene.add(tube);
     cables.push({mesh: tube, owner: c.id, kind: p.kind});
     runs.push({owner: c.id, kind: p.kind, pts: path.getSpacedPoints(Math.max(8, Math.round(len * 2))), len, kind: p.kind, phase: (((k * 0.37 + c.u * 0.11) % 1) + 1) % 1});
   }); }
-/* energy: small lights travelling every strand from its cluster to the core */
-const sparkGeo = new THREE.SphereGeometry(0.06, 8, 6), sparks = new THREE.InstancedMesh(sparkGeo, new THREE.MeshBasicMaterial({color: 0xffffff}), runs.length);
-runs.forEach((r, i) => sparks.setColorAt(i, col.setHex(0xffffff).multiplyScalar(1.5)));
-sparks.frustumCulled = false; scene.add(sparks);
+/* energy: a small light travelling every strand from its cluster to the core. They are not in the 3D frame:
+ * each is an element moved along its strand's path by a CSS animation, in a layer that follows the camera —
+ * so they keep running while the picture itself is drawn once and left alone. */
+const sparkLayer = mk("div"); sparkHost.append(sparkLayer);
+const PX = 20, still = matchMedia("(prefers-reduced-motion: reduce)").matches;   // PX: the layer's own pixels per unit, before the camera's
+for (const r of runs) { const e = mk("i"), secs = r.len / 4.2;
+  e.style.offsetPath = `path("${r.pts.map((q, i) => `${i ? "L" : "M"}${(q.dot(RIGHT) * PX).toFixed(1)} ${(-q.dot(UP) * PX).toFixed(1)}`).join("")}")`;
+  if (still) e.style.offsetDistance = `${Math.round(r.phase * 100)}%`; else { e.style.animationDuration = `${secs.toFixed(2)}s`; e.style.animationDelay = `${(-r.phase * secs).toFixed(2)}s`; }
+  sparkLayer.append(e); r.el = e; }
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.5, 0.5, 1.18); composer.addPass(bloom);
-composer.addPass(new OutputPass());
+
 
 // ── camera: fit, pan, zoom ────────────────────────────────────────
 const view = {cx: 0, cy: 0, zoom: 1};
@@ -388,14 +425,35 @@ function fit() { const us = [], vs = [];
   const iL = Math.max(0, hud.offsetLeft - 14), iT = Math.max(0, hud.offsetTop - 10), fw = Math.max(200, vw() - iL), fh = Math.max(200, vh() - iT);
   view.span = Math.max(hgt * 1.1 * vh() / fh, w * 1.08 * vh() / fw); view.zoom = 1;
   const k = view.span / vh(); view.cx -= iL / 2 * k; view.cy += iT / 2 * k; apply(); }
-function apply() { const a = vw() / vh(), hgt = view.span / view.zoom;
+/* Drawing. A frame is drawn when something changed, never otherwise. While the camera moves, the last frame is
+ * slid and scaled where it stands (the camera never turns, so a move is exactly that) and a new one is drawn
+ * when the camera rests — or straight away on a machine that draws one in a frame's time. */
+const gl = renderer.getContext(), onePx = new Uint8Array(4);
+let drawn = null, dirty = true, needPlace = true, lastMove = 0, spent = 0, frames = 0, raf = 0, live = true;
+function draw() { const t0 = performance.now(); renderer.render(scene, camera);
+  if (SOFT) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, onePx);   // drawn on the CPU: wait for it, so `spent` is what the frame really cost
+  spent = performance.now() - t0; frames++; drawn = {cx: view.cx, cy: view.cy, k: view.span / view.zoom / vh()}; canvas.style.transform = ""; dirty = false;
+  if (spent > 160 && renderer.getPixelRatio() > 1) { renderer.setPixelRatio(1); renderer.setSize(vw(), vh(), false); drawn = null; dirty = true; }   // a dense screen, a slow machine: one pixel per pixel
+  host.dataset.ready = "1"; }
+function frame() { raf = 0; if (!live) return; if (!host.clientWidth) return;                    // hidden: the resize on coming back draws it
+  if (dirty && (!drawn || spent < 14 || performance.now() - lastMove > 110)) draw();
+  if (needPlace) { place(); needPlace = false; }
+  if (dirty) raf = requestAnimationFrame(frame); }
+const kick = () => { if (live && !raf) raf = requestAnimationFrame(frame); };
+const redraw = () => { dirty = true; kick(); };
+function apply() { const a = vw() / vh(), hgt = view.span / view.zoom, k = hgt / vh();
+  sparkLayer.style.transform = `translate(${-view.cx / k}px, ${view.cy / k}px) scale(${1 / (PX * k)})`;
+  sparkLayer.style.setProperty("--s", Math.min(1, 2.4 * PX * k).toFixed(3));   // close up a light stays a point, not a disc
+  if (drawn) canvas.style.transform = `translate(${(drawn.cx - view.cx) / k}px, ${-(drawn.cy - view.cy) / k}px) scale(${drawn.k / k})`;
+  lastMove = performance.now(); needPlace = true; redraw();
   camera.left = -hgt * a / 2; camera.right = hgt * a / 2; camera.top = hgt / 2; camera.bottom = -hgt / 2; camera.updateProjectionMatrix();
   camera.position.copy(DIR.clone().multiplyScalar(200)).add(RIGHT.clone().multiplyScalar(view.cx)).add(UP.clone().multiplyScalar(view.cy)); camera.updateMatrixWorld();
   // detail by distance: a light or an engraving is drawn once it would be more than a speck
-  const px = vh() / hgt; if (lod.mid) lod.mid.visible = px >= 13; lod.close.visible = px >= 30; }
-function resize() { renderer.setSize(vw(), vh(), false); composer.setSize(vw(), vh()); apply(); }
+  const px = vh() / hgt; if (lod.mid) lod.mid.visible = px >= 13; lod.close.visible = px >= 30;
+  for (const b of [metal, glass, smoked]) b.detail(px >= 13); }
+function resize() { renderer.setSize(vw(), vh(), false); drawn = null; canvas.style.transform = ""; apply(); }
 const sized = new ResizeObserver(() => { if (host.clientWidth) resize(); }); sized.observe(host);
-canvas.addEventListener("wheel", (e) => { e.preventDefault(); view.zoom = Math.max(0.6, Math.min(12, view.zoom * Math.exp(-e.deltaY * 0.0012))); apply(); }, {passive: false});
+for (const on of [canvas, labelHost]) on.addEventListener("wheel", (e) => { e.preventDefault(); view.zoom = Math.max(0.6, Math.min(12, view.zoom * Math.exp(-e.deltaY * 0.0012))); apply(); }, {passive: false});   // over a name too
 let drag = null;
 let moved = 0;
 /* two fingers: the distance between them is the zoom */
@@ -411,7 +469,7 @@ canvas.addEventListener("pointerup", lift); canvas.addEventListener("pointercanc
 canvas.tabIndex = 0;
 canvas.addEventListener("dblclick", (e) => { const id = pick(e); if (id && /^f:/.test(id) && opts.onOpen) opts.onOpen(model.by.get(id).name); });
 /* what is under the pointer: the eye's ray against every part's box, the nearest hit */
-function pick(e) { const r = canvas.getBoundingClientRect(), nx = (e.clientX - r.left) / r.width * 2 - 1, ny = 1 - (e.clientY - r.top) / r.height * 2;
+function pick(e) { const r = host.getBoundingClientRect(), nx = (e.clientX - r.left) / r.width * 2 - 1, ny = 1 - (e.clientY - r.top) / r.height * 2;
   const o = camera.position.clone().addScaledVector(RIGHT, nx * camera.right).addScaledVector(UP, ny * camera.top), d = DIR.clone().negate();
   let best = null, bt = Infinity;
   for (const b of boxes) { if (!b.owner) continue; let t0 = -Infinity, t1 = Infinity;
@@ -457,6 +515,7 @@ function setStats(st) { const fl = (st && st.flows) || {}, days = (st && st.days
   legend.innerHTML = [[grouped ? "flow" : "op", "sig-workflow"], ...(kinds.has("agent") ? [["agent", "sig-agent"]] : []), ["resource", "sig-resource"], ["job", "sig-job"],
     ...(failing ? [[`failed in ${days} days`, "sig-error"]] : []), ...(ran && !grouped ? [["ran clean", "sig-ok"]] : [])]
     .map(([t, c]) => `<span><i style="background:var(--fx-${c})"></i>${t}</span>`).join("") + `<span class="note">titanium: the parts · silver: shared · light: a signal</span>`;
+  needPlace = true; redraw();
   if (typeof sel !== "undefined" && sel) describe(); }
 
 
@@ -475,7 +534,8 @@ function select(id) { sel = id && spot.has(id) ? id : null;
   // a cable is lit when it is the selected cluster's, or runs from a cluster to the selected item
   const wired = (c) => !lit || c.owner === sel || pairs.some(p => p.src === c.owner && p.dst === sel && p.kind === c.kind);
   for (const c of cables) c.mesh.material = wired(c) ? cableMat[c.kind] : cableDim[c.kind];
-  runs.forEach((r, i) => sparks.setColorAt(i, col.setHex(0xffffff).multiplyScalar(wired(r) ? 1.5 : 0.08))); if (runs.length) sparks.instanceColor.needsUpdate = true;
+  for (const r of runs) r.el.classList.toggle("quiet", !wired(r));
+  redraw();
   for (const l of labels) { l.el.classList.toggle("quiet", !!lit && !(l.owner && lit.has(l.owner))); l.el.classList.toggle("picked", !!sel && l.owner === sel); }
   describe(); }
 /* the card: what the selected thing is, what leads to it and what it leads to — every row goes somewhere */
@@ -525,29 +585,15 @@ find.onkeydown = (e) => { if (e.key === "Enter") { const b = found.querySelector
 
 setStats(stats);
 fit(); resize();
-const T0 = performance.now(), still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-let raf = 0, live = true;
-let lastAt = performance.now(), slow = 0, tier = 0;
-renderer.info.autoReset = false;                                   // a frame is several passes: count them all
-function frame() { raf = 0; if (!live) return; if (!host.clientWidth) { raf = requestAnimationFrame(frame); return; }   // hidden: wait, draw nothing
-  renderer.info.reset();
-  // a slow machine: after twenty slow frames draw at one pixel per pixel, and if that is not enough, without the bloom
-  { const now = performance.now(), dt = now - lastAt; lastAt = now; slow = dt > 45 && dt < 2000 ? slow + 1 : Math.max(0, slow - 1);
-    if (slow > 20 && tier < 2) { tier++; slow = 0; if (tier === 1) { renderer.setPixelRatio(1); resize(); } else bloom.enabled = false; } }
-  const t = still ? 0.37 : (performance.now() - T0) / 1000;
-  runs.forEach((r, i) => { const f = ((t * 4.2) / r.len + r.phase) % 1, x = f * (r.pts.length - 1), a = r.pts[Math.floor(x)], b = r.pts[Math.min(r.pts.length - 1, Math.floor(x) + 1)];
-    v3.lerpVectors(a, b, x - Math.floor(x)); M.makeTranslation(v3.x, v3.y + 0.02, v3.z); sparks.setMatrixAt(i, M); });
-  sparks.instanceMatrix.needsUpdate = true;
-  composer.render(); place(); host.dataset.ready = "1"; raf = requestAnimationFrame(frame); }
-frame();
+kick();
 return {
   fit, select, reveal, setStats,
   /* what a frame costs: for the scale checks */
-  cost: () => ({tier, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, parts: metal.items.length + glass.items.length + smoked.items.length, lights: lights.far.length + lights.mid.length, cables: cables.length, names: labels.length}),
+  cost: () => ({software: SOFT, drawMs: +spent.toFixed(1), frames, pixelRatio: renderer.getPixelRatio(), calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, parts: metal.items.length + glass.items.length + smoked.items.length, lights: lights.far.length + lights.mid.length, cables: cables.length, names: labels.length}),
   pause() { live = false; if (raf) cancelAnimationFrame(raf); raf = 0; },
-  resume() { if (!live) { live = true; frame(); } },
+  resume() { if (!live) { live = true; kick(); } },
   dispose() { this.pause(); sized.disconnect(); document.removeEventListener("keydown", onKey);
     scene.traverse(o => { if (o.geometry) o.geometry.dispose(); for (const m of [].concat(o.material || [])) { for (const k of ["map", "alphaMap"]) if (m[k]) m[k].dispose(); m.dispose(); } });
-    if (scene.environment) scene.environment.dispose(); composer.dispose(); renderer.dispose(); host.textContent = ""; delete host.dataset.ready; },
+    for (const b of [metal, glass, smoked]) b.dispose(); renderer.dispose(); host.textContent = ""; delete host.dataset.ready; },
 };
 }

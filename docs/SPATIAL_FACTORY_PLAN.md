@@ -203,8 +203,8 @@ Write-up: [FACTORY_SCALE.md](FACTORY_SCALE.md).
 
 - The generated 1,199- and 2,999-flow projects, mounted in the studio page: the picture is built in
   1.2–1.5 s, about 90 draw calls a frame at either size, a selection repaints in 20–35 ms.
-- A slow machine is noticed (twenty slow frames) and the picture steps down: one pixel per pixel, then
-  no bloom.
+- With no GPU the picture holds 60 frames a second: it is drawn only on a change, with no instancing,
+  bloom or per-pixel light ([FACTORY_CPU.md](FACTORY_CPU.md), which replaced this phase's frame governor).
 - Keyboard: Tab reaches every name, Enter selects it and moves into its card, where Enter opens;
   arrows move the picture, + and - zoom, F fits, / finds, Esc clears.
 - Phone width: two fingers zoom, the card is a sheet at the bottom, nothing overflows sideways.
@@ -231,7 +231,8 @@ Write-up: [FACTORY_SCALE.md](FACTORY_SCALE.md).
 | F4 — Dependencies and navigation | Done 2026-11-15 | #208 | [FACTORY_NAVIGATION.md](FACTORY_NAVIGATION.md) |
 | F5 — Runtime | Done 2026-11-15 | #209 | [FACTORY_RUNTIME.md](FACTORY_RUNTIME.md) |
 | F6 — Remaining screens | Done 2026-11-15 | #210 | §6 F6 of this file |
-| F7 — Scale and polish | Done 2026-11-15 | `ui/f7-factory-scale` | [FACTORY_SCALE.md](FACTORY_SCALE.md) |
+| F7 — Scale and polish | Done 2026-11-15 | #211 | [FACTORY_SCALE.md](FACTORY_SCALE.md) |
+| After — the picture with no GPU | Done 2026-11-16 | `perf/factory-cpu` | [FACTORY_CPU.md](FACTORY_CPU.md) |
 
 ## 9. Needs backend
 
