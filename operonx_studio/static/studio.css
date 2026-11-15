@@ -6291,3 +6291,12 @@ h2 > .paneabout { margin-left: 6px; }
 .ev-fold.ev-sub { border-bottom: 0; padding: 0; margin-top: 4px; }
 .ev-fold > .linkbtn { margin-top: 6px; }
 .pm-status[hidden] { display: none; }
+
+/* ── UX_OVERHAUL_PLAN U6: the phone ── */
+/* the (i) note opens under its title across the screen: anchored to the icon it ran off the right edge */
+@media (max-width: 720px) {
+  .paneabout { position: static; }
+  .paneabout-body { left: 12px; right: 12px; top: auto; width: auto; max-width: none; margin-top: 30px; }
+  /* it lies over the page's own text here, which a tinted glass lets through: an opaque sheet */
+  .popover.paneabout-body { background: var(--rt-bay); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

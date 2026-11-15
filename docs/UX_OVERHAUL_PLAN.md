@@ -1,7 +1,7 @@
 # OperonX Studio — UX/UI Overhaul
 **Plan ID:** `OPERONX_STUDIO_UX_OVERHAUL`
 
-**Status:** U0–U5 done (2026-11-15); U6 next
+**Status:** COMPLETE — U0–U6 done (2026-11-15)
 
 **Objective:** Redesign and refine the entire OperonX Studio interface while preserving all existing application logic, execution semantics, APIs, and backend behavior.
 
@@ -545,7 +545,7 @@ The interface should make the underlying complexity feel simpler, not make the a
 | U3 — Inspection & configuration | Done 2026-11-15 | `ui/u3-inspect` | [U3 write-up](#u3-write-up) |
 | U4 — Runs & monitoring | Done 2026-11-15 | `ui/u4-runs` | [U4 write-up](#u4-write-up) |
 | U5 — Navigation & remaining screens | Done 2026-11-15 | `ui/u5-screens` | [U5 write-up](#u5-write-up) |
-| U6 — Responsive & final polish | Not started | | |
+| U6 — Responsive & final polish | Done 2026-11-15 | `ui/u6-polish` | [U6 write-up](#u6-write-up) |
 
 ## U1 write-up
 
@@ -723,6 +723,45 @@ action; folds open by keyboard (they are `<details>`).
 
 **Remaining.** An SSH host's folds were checked by reading the code only: the test studio has no SSH
 host, and adding one would write to the project's state.
+
+## U6 write-up
+
+**What was checked.**
+
+| check | how | result |
+|---|---|---|
+| every screen, both sizes, both themes | 3 projects × 19 screens + runs, 1440×900 and 390×844, dark and light: 284 shots | 0 page errors |
+| nothing runs off the screen | every element's right edge measured on 19 screens at 390 and 768 px | none |
+| the pieces this plan added, opened on a phone | the (i) note, a run's Details, Environments' folds | one bug, fixed (below) |
+| Reduce Transparency | `data-glass="solid"` on Flow and a run page | the minimap, the note, the assistant pill and Details are opaque surfaces |
+| keyboard | every new control is a `<summary>` or a `<button>`; each has a `:focus-visible` ring | reachable and visible |
+| tests | `node --test tests/js/` 198 pass; the four Python suites that read the frontend 59 pass | green |
+
+**The one bug.** On a phone the (i) note opened from its icon and ran 16–57 px off the right edge, and
+its glass let the page's text show through. It now opens under the title across the screen, on an
+opaque sheet. ![note](img/ux-overhaul/u6/phone-info-note.webp)
+
+Reduce Transparency: ![solid](img/ux-overhaul/u6/reduce-transparency.webp)
+
+The result, real projects: ![final](img/ux-overhaul/u6/final-sheet.webp)
+
+**Files.** `static/studio.css` (the U6 block).
+
+## The overhaul, in numbers
+
+| | before | after |
+|---|---|---|
+| callbot flow (26 ops), cards on screen at 1440 px | 13 of 28 | 19 of 28, and a minimap shows the rest |
+| 17-op flow | cut on both sides | whole, at 93% |
+| a run's first step | 213 px down | 177 px |
+| Environments, controls on screen | 33 | about 10 |
+| font sizes / radii in `studio.css` | 36 / 49 distinct | the token scale |
+| `.py` files changed | | 0 |
+
+**Deferred, for the owner to weigh.** A tall, narrow flow still scrolls (the layout is top-down only; a
+left-to-right option is a layout feature, not polish). Paddings and z-index values are not on a scale.
+An SSH host's folds on Environments were read, not run. The far-out "zones" view (the factory idea)
+was not built: the minimap answered the same question without hiding a wire or a label.
 
 # 11. Needs backend
 
