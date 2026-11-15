@@ -9,6 +9,7 @@
 <link rel="icon" type="image/png" href="/static/operonx-favicon.png">
 <script>/* the theme and the glass before the first paint (theme.js keeps them in step) */try{var t="dark";document.documentElement.dataset.theme=t;var g=localStorage.getItem("ox:glass")||"system";if(g==="system")g=matchMedia("(prefers-reduced-transparency: reduce), (prefers-contrast: more)").matches?"solid":"glass";document.documentElement.dataset.glass=g}catch(e){}</script>
 <link rel="stylesheet" href="/static/studio.css">
+<link rel="stylesheet" href="/static/factory.css">
 </head>
 <body data-tab="flow">
 <div class="shell">
@@ -88,6 +89,8 @@
         </div>
       </div>
     </div>
+    <!-- the project as one picture: the first row of the flows rail (factory.js) -->
+    <div id="factory"></div>
     <div id="traces" hidden></div>
     <div id="jobs" hidden></div>
     <div id="resources" hidden></div>
@@ -174,6 +177,8 @@
 <script src="/static/motion.js"></script>
 <script src="/static/jobs.js"></script>
 <script src="/static/flowrail.js"></script>
+<script src="/static/factorymodel.js"></script>
+<script src="/static/factory.js"></script>
 <script src="/static/runview.js"></script>
 <script src="/static/runs.js"></script>
 <script src="/static/monitor.js"></script>

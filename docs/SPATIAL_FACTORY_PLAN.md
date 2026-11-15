@@ -2,7 +2,7 @@
 
 **Plan ID:** `OPERONX_SPATIAL_FACTORY_PLAN` (refactored 2026-11-15)
 
-**Status:** F0, F1 and F2 done. F3 is next.
+**Status:** F0–F3 done. F4 is next.
 
 **The first version of this plan**, as the owner wrote it, is kept word for word in
 [SPATIAL_FACTORY_PLAN_V1.md](SPATIAL_FACTORY_PLAN_V1.md). This file replaces it wherever the two differ.
@@ -30,6 +30,13 @@ Two things came out of that, and they reshape the plan:
    that exist are inside the flows: the same sub-graphs and ops are used by several of them. A picture
    that does not show those shared parts has nothing to connect, in any style.
 
+**A second change, the same day (2026-11-15).** F3 was first built as the 2D picture this plan asked
+for: four columns of cards with wires between them. On mr-finance (90 services, 24 jobs, 14 flows) the
+owner judged it too tangled to read, whatever the wiring (one wire per pair, then buses, then zones and
+bundles). At that density he reversed the "no 3D" decision **for the Factory picture only**: the
+project is drawn as one isometric model, and 2D stays for a single flow. §3 below is the decision as it
+now stands. The 2D picture is kept, unmerged, on the branch `ui/f3-factory-picture`.
+
 ## 2. Goal (unchanged)
 
 A person opens a project and understands it as one system without opening each flow: what comes in,
@@ -44,9 +51,16 @@ These are fixed. Do not ask the owner to choose between alternatives.
 - **Two levels, not three.** The Factory picture (the project) and the Flow editor (one flow). The
   middle level of the first plan, a spatial overview of one workflow, is dropped: the 2D editor is the
   flow view, unchanged.
-- **The Factory picture is 2D**, drawn in the studio's own language: the same glass cards, kind
-  colours, icons and wires as the flow canvas. No 3D engine, no isometric drawing, no new metaphor
-  objects (buildings, towers, rings).
+- **The Factory picture is an isometric 3D model; a flow is 2D.** A core in the middle holds what the
+  flows share (shared blocks) and need (resources); every flow is a cluster of parts round it, one part
+  per op (past 30 flows a cluster is a domain, one part per flow); doors are small parts on a cluster's
+  outer edge; links are cables in bundles from a cluster to the core. A fixed isometric camera: pan,
+  zoom and fit, never a free orbit. The five looks in §1 failed as free 3D scenes of unrelated objects;
+  this one is a fixed drawing of the model in §4.
+- **Titanium is the material, colour is a signal.** Parts are machined titanium (natural, silver,
+  dark, graphite) with glass panels; a part of each kind has its own construction, not its own colour.
+  Colour appears only as small lights, in the flow canvas's own lavender and blue; red is an error.
+  The colours are the `--fx-*` tokens in `static/factory.css` and nowhere else; no global token changes.
 - **It is an architecture picture.** Its job is to show how the parts of a project connect. Anything
   on it that is not an entity or a relation of the project does not belong.
 - **Real data only.** Every box is an entity the studio already serves; every line is a relation read
@@ -134,17 +148,18 @@ relations with counts, the domains, the derived shared blocks and the unresolved
 - A written check against mr-finance: the numbers in §4 come out of the module.
 - Done when: the module answers, for any entity, "what leads here" and "what does this lead to".
 
-### F3 — The Factory picture
+### F3 — The Factory picture (done)
 
-The page: the four layers drawn in the studio's language, grouped by the rules in §5.
+The project as one isometric model, drawn from the factory model and nothing else. Write-up:
+[FACTORY_PICTURE.md](FACTORY_PICTURE.md).
 
-- Where it lives: the Flow hub with no flow chosen. The flows rail gets a first entry, the project's
-  picture; choosing a flow opens the editor as today.
-- Built first as a static page in the lab on mr-finance and on the 1,200-flow project.
-- **Review checkpoint:** the owner sees that one page before it goes into the studio. The look failed
-  five times in F1; this is one picture to accept or correct, not a choice between alternatives.
-- Done when: mr-finance reads as doors → flows → shared blocks → resources on one screen, and the
-  1,200-flow project reads as its domains on one screen.
+- Where it lives: the Flow hub. The flows rail's first row is "Project picture"; choosing a flow, in
+  the rail or by its name on the picture, opens the 2D editor as today.
+- Built first as a static page in the lab on mr-finance and on the generated 1,199-flow project; the
+  owner reviewed it there through five rounds (layout, then material, then colour) before it was wired.
+- It costs nothing until opened: three.js (vendored, 0.7 MB) and the scene are imported on first use.
+- Left for F4: selecting a part (upstream and downstream), opening a flow from a domain cluster,
+  search. Left for F5: runs on the picture beyond the red light of a flow with errors.
 
 ### F4 — Dependencies and navigation
 
@@ -177,7 +192,7 @@ reach for select, open and search.
 4. The parts several flows share are visible as shared.
 5. From the picture, any flow is two actions away, and opens in the 2D editor.
 6. The 2D editor, runs and traces work exactly as before.
-7. The picture looks like the same product as the flow canvas in Dark.
+7. The picture belongs to the same product as the flow canvas in Dark: its lights are the canvas's lavender and blue.
 8. No backend logic, API contract or workflow semantics changed.
 
 ## 8. Progress
@@ -185,9 +200,9 @@ reach for select, open and search.
 | phase | status | PR | write-up |
 |---|---|---|---|
 | F0 — Data audit | Done 2026-11-15 | #204 | [FACTORY_DATA_AUDIT.md](FACTORY_DATA_AUDIT.md) |
-| F1 — Lab | Done 2026-11-15, closed: 3D dropped | lab repo, to 2e41956 | §1, §4, §5 of this file |
+| F1 — Lab | Done 2026-11-15, closed: its five looks dropped | lab repo, to 2e41956 | §1, §4, §5 of this file |
 | F2 — Factory model | Done 2026-11-15 | `ui/f2-factory-model` | [FACTORY_MODEL.md](FACTORY_MODEL.md) |
-| F3 — Factory picture | Not started | | |
+| F3 — Factory picture | Done 2026-11-15 | `ui/f3-factory-iso` | [FACTORY_PICTURE.md](FACTORY_PICTURE.md) |
 | F4 — Dependencies and navigation | Not started | | |
 | F5 — Runtime | Not started | | |
 | F6 — Remaining screens | Not started | | |
@@ -203,3 +218,4 @@ Not built by this plan. Each item says what the picture cannot show without it.
 | B2 | A job's graph when it is not a served flow | `job.graph` names a graph absent from `ir.graphs` (13 of 24 jobs in mr-finance) | those jobs' place under a flow; they sit in the unresolved group |
 | B3 | Named stages or groups | no such field in the IR | stage names inside a flow |
 | B4 | Live execution events | runs are polled | a box lighting up the moment a run starts |
+| B5 | A declared area for each service, job and flow (a convention, owner 2026-11-15) | areas are guessed from the module path, and a service or job has one only through the flow it runs | exact zones: today a door with no flow has no area, and two modules of one business area are two domains |

@@ -1,0 +1,73 @@
+/* operonx studio — the Factory picture's own styles and colours. */
+
+/* ── The Factory picture (factory.js, factory3d.js; SPATIAL_FACTORY_PLAN F3) ──────────────────────
+ * The project as one isometric model, in place of the canvas. Its colours are these --fx-* tokens and
+ * nothing else: the 3D scene reads them at start, the names and the legend use them as CSS. Titanium
+ * is the material; a signal colour is only ever a small light. They are the Factory's own: nothing
+ * outside #factory reads them.
+ *
+ * A file of its own, linked by project.html and served as written: studio.css goes through theme.py,
+ * which derives a dark twin of every colour in it, and these are already the dark values (the studio
+ * is dark-first; a Light set is deferred with the rest of Light). */
+#factory { display: none; position: relative; flex: 1; min-width: 0; overflow: hidden; z-index: 1;
+  background: var(--fx-bg); color: var(--fx-text); font: 13px/1.35 var(--font);
+  --fx-left: 18px; --fx-top: 14px;
+  /* materials */
+  --fx-ti-natural: #A5A9B1;      /* natural titanium, satin */
+  --fx-ti-silver: #CDD2DC;       /* silver titanium */
+  --fx-ti-dark: #565D7A;         /* dark titanium, a cool blue-grey */
+  --fx-plate: #717A94;           /* the plates the parts stand on: light slate titanium */
+  --fx-plate-core: #666E88;
+  --fx-fiber-lav: #B9A6F5; --fx-fiber-blue: #8FB4E8;
+  --fx-ti-graphite: #414658;     /* graphite titanium */
+  --fx-ti-black: #262838;        /* Space Black titanium */
+  --fx-glass-smoke: #090A16;     /* smoked glass */
+  --fx-glass-frost: #8D97B9;     /* frosted optical glass */
+  --fx-obsidian: #0D0E16; --fx-graphite: #181A27; --fx-gunmetal: #343D49; --fx-titanium: #8995A5; --fx-silver: #C5CED9;
+  /* signals: small lights only */
+  --fx-sig-workflow: #7FB0F5; --fx-sig-resource: #908CF8; --fx-sig-agent: #C0A6FA; --fx-sig-job: #DAD3FF;
+  --fx-sig-error: #FF5A4F; --fx-sig-ok: #57C98A; --fx-sig-neutral: #E8EEF5;
+  /* roles */
+  --fx-bg: var(--fx-obsidian);
+  --fx-fiber-uses: var(--fx-fiber-lav);          /* a connection to a shared block */
+  --fx-fiber-needs: var(--fx-fiber-blue);   /* a data connection to a resource */
+  --fx-text: var(--fx-silver); --fx-text-2: var(--fx-titanium);
+  --fx-label: color-mix(in srgb, var(--fx-graphite) 72%, transparent);
+}
+@media (prefers-reduced-transparency: reduce) { #factory { --fx-label: var(--fx-graphite); } }
+body.factory-on[data-tab="flow"] #factory { display: block; }
+body.factory-on[data-tab="flow"] .main > #stage, body.factory-on[data-tab="flow"] #minimap,
+body.factory-on[data-tab="flow"] .canvasbar > :not(#btn-flowrail) { display: none; }
+/* under the floating frame the picture fills the screen and the chrome floats over it, as over the canvas */
+body.floatframe:not(.ax-focus) .main > #factory { position: absolute; inset: 0;
+  --fx-left: calc(var(--rail-w) + var(--flowrail-w) + 4 * var(--glass-gap) + 14px); --fx-top: calc(var(--bar-h) + 3 * var(--glass-gap) + 10px); }
+body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(var(--rail-w) + 3 * var(--glass-gap) + 14px); }
+#factory .fx-gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+#factory .fx-gl:active { cursor: grabbing; }
+#factory .fx-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+/* a name: a slip of frosted glass with a metal hairline, tied to its cluster by a pin */
+#factory .lb { position: absolute; transform: translate(-50%, -100%); white-space: nowrap; text-align: center; padding: 3px 9px; border-radius: 7px;
+  background: var(--fx-label); border: 1px solid color-mix(in srgb, var(--fx-titanium) 24%, transparent);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+#factory .lb:not(.item):not(.core) { margin-top: -12px; }
+#factory .lb:not(.item):not(.core)::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 12px; background: color-mix(in srgb, var(--fx-titanium) 70%, transparent); }
+#factory .lb b { display: block; font-weight: 600; font-size: 12.5px; letter-spacing: .01em; color: var(--fx-text); }
+#factory .lb span { display: block; font-size: 10.5px; color: var(--fx-text-2); }
+#factory .lb.core b { font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; }
+#factory .lb.item { padding: 1px 6px; background: color-mix(in srgb, var(--fx-graphite) 55%, transparent); }
+#factory .lb.item b { font-size: 10.5px; font-weight: 550; }
+#factory .lb.ghost b { color: var(--fx-text-2); font-style: italic; }
+#factory .lb.open { pointer-events: auto; cursor: pointer; }
+#factory .lb.open:hover { border-color: var(--fx-sig-agent); }
+#factory .fx-hud { position: absolute; left: var(--fx-left); top: var(--fx-top); pointer-events: none; }
+#factory .fx-hud h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+#factory .fx-hud p { margin: 3px 0 0; color: var(--fx-text-2); font-size: 12px; }
+#factory .fx-legend { position: absolute; left: var(--fx-left); top: calc(var(--fx-top) + 46px); display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--fx-text-2); pointer-events: none; }
+#factory .fx-legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fx-silver) 45%, transparent); }
+#factory .fx-legend .note { color: color-mix(in srgb, var(--fx-titanium) 70%, transparent); }
+#factory .fx-reset { position: absolute; right: 18px; top: var(--fx-top); background: var(--fx-graphite); color: var(--fx-text); border: 1px solid var(--fx-gunmetal); border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer; }
+#factory .fx-reset:hover { border-color: var(--fx-titanium); }
+#factory .fx-note { position: absolute; left: var(--fx-left); top: calc(var(--fx-top) + 4px); margin: 0; max-width: 46ch; color: var(--fx-text-2); }
+/* its row in the flows rail */
+.flowrail .frrow.frpicture { grid-template-columns: minmax(0, 1fr); border-bottom: 1px solid var(--border); }
+.flowrail .frrow.frpicture .frname { font-family: var(--font); }
