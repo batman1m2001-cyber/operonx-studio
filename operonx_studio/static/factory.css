@@ -60,6 +60,8 @@ body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(v
 #factory .lb.open { pointer-events: auto; cursor: pointer; }
 #factory .lb.open:hover { border-color: var(--fx-sig-agent); }
 #factory .lb.quiet { opacity: .28; }
+#factory .lb.bad { border-color: color-mix(in srgb, var(--fx-sig-error) 70%, transparent); }
+#factory .lb.bad span { color: color-mix(in srgb, var(--fx-sig-error) 80%, var(--fx-text)); }
 #factory .lb.picked { border-color: var(--fx-sig-agent); box-shadow: 0 0 0 1px var(--fx-sig-agent), 0 0 18px color-mix(in srgb, var(--fx-sig-agent) 40%, transparent); }
 #factory .fx-hud { position: absolute; left: var(--fx-left); top: var(--fx-top); pointer-events: none; }
 /* find by name: under the legend */
