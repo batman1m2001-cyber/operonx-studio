@@ -2,7 +2,7 @@
 
 **Plan ID:** `OPERONX_SPATIAL_FACTORY_PLAN` (refactored 2026-11-15)
 
-**Status:** F0–F5 done. F6 is next.
+**Status:** F0–F6 done. F7 is next.
 
 **The first version of this plan**, as the owner wrote it, is kept word for word in
 [SPATIAL_FACTORY_PLAN_V1.md](SPATIAL_FACTORY_PLAN_V1.md). This file replaces it wherever the two differ.
@@ -184,10 +184,18 @@ Write-up: [FACTORY_RUNTIME.md](FACTORY_RUNTIME.md). From `/flows/stats`, the las
 
 Live updates are not part of this (B4). The run line in the editor is unchanged.
 
-### F6 — Remaining Studio screens
+### F6 — Remaining Studio screens (done)
 
-Most of the first plan's F6 was done by UX_OVERHAUL_PLAN (U0–U6). What is left is a check that
-Services and Jobs link into the picture (a service row → its place on it) and back.
+Most of the first plan's F6 was done by UX_OVERHAUL_PLAN (U0–U6). What was left, and is now built:
+
+- **Services → picture.** A service row has a "Picture" link: the picture opens with the service's
+  flow selected and centred (or the group of doors that ask for a graph the project does not list).
+  A service with no place on the picture (an asgi mount) has no link.
+- **Jobs → picture.** The same link on a job's page.
+- **Picture → Services and Jobs.** In a flow's card, a job's row opens the job's page (with its
+  runs); a service's row opens its runs, and the ↗ beside it goes to its row on the Services screen.
+
+On mr-finance: 89 of 90 services and 24 of 24 jobs have the link.
 
 ### F7 — Scale and polish
 
@@ -214,8 +222,8 @@ reach for select, open and search.
 | F2 — Factory model | Done 2026-11-15 | `ui/f2-factory-model` | [FACTORY_MODEL.md](FACTORY_MODEL.md) |
 | F3 — Factory picture | Done 2026-11-15 | #207 | [FACTORY_PICTURE.md](FACTORY_PICTURE.md) |
 | F4 — Dependencies and navigation | Done 2026-11-15 | #208 | [FACTORY_NAVIGATION.md](FACTORY_NAVIGATION.md) |
-| F5 — Runtime | Done 2026-11-15 | `ui/f5-factory-runtime` | [FACTORY_RUNTIME.md](FACTORY_RUNTIME.md) |
-| F6 — Remaining screens | Not started | | |
+| F5 — Runtime | Done 2026-11-15 | #209 | [FACTORY_RUNTIME.md](FACTORY_RUNTIME.md) |
+| F6 — Remaining screens | Done 2026-11-15 | `ui/f6-factory-links` | §6 F6 of this file |
 | F7 — Scale and polish | Not started | | |
 
 ## 9. Needs backend

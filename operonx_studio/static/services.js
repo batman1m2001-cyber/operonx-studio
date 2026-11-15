@@ -93,12 +93,20 @@ const ServicesView = (() => {
       for (const s of l.detail) {
         const row = el("div", "svcrow");
         const what = s.kind === "http" ? `http ${s.method || "POST"} ${s.path}` : s.kind === "asgi" ? `asgi ${s.path}` : `${s.kind} ${s.path || ""}`;
+        row.dataset.service = s.name;
         const name = el("div", "svcname");
         name.append(el("b", null, s.name), el("span", "mono", what));
         if (s.workers > 1) name.append(el("span", "chip", `${s.workers} workers`));
         row.append(name);
         if (s.description) row.append(el("div", "svcdesc", s.description));
         const links = el("div", "svclinks");
+        if (window.Factory && Factory.placed(`s:${s.name}`)) {      // where it stands on the project picture (factory.js)
+          const pic = el("button", "linkbtn", "Picture");
+          pic.type = "button";
+          pic.title = "Where this service stands on the project picture";
+          pic.onclick = () => Factory.reveal(`s:${s.name}`);
+          links.append(pic);
+        }
         if (s.kind !== "asgi") {
           const play = el("button", "linkbtn needs-edit", "Playground");
           play.type = "button";
