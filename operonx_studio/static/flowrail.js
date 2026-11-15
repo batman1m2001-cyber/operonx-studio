@@ -181,9 +181,9 @@ window.FlowRail = (() => {
     else if (btn) btn.click();
   });
   const saved = keep.get(ON, null);
-  // closed until asked for: the canvas owns the screen, and the flow's name in
-  // the top bar is the picker (docs/UX_OVERHAUL_PLAN.md U2)
-  show(saved === "on", false);
+  // open on a wide screen unless the user closed it: the list of flows with their sizes is how
+  // a project is read (the owner's call, 2026-11-15; U2 had closed it by default)
+  show(saved ? saved === "on" : innerWidth > 760, false);
 
   return {items, sorted, render, open, show};
 })();

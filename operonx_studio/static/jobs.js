@@ -10,7 +10,7 @@ function renderProjectMenu() {
   const close = () => { box.hidden = true; $("#btn-project").setAttribute("aria-expanded", "false"); };
   // the flows rail's rows, for when the rail is hidden (flowrail.js)
   const rows = window.FlowRail.sorted().map(it => ({
-    name: it.g.name, sub: it.sub, find: it.find, title: it.title,
+    name: it.g.name, sub: [`${it.ops} op${it.ops === 1 ? "" : "s"}`, it.sub].filter(Boolean).join(" · "), find: it.find, title: it.title,
     current: !!(state.graph && state.graph.name === it.g.name),
     pick: () => { close(); window.FlowRail.open(it.g.name); },
   }));
