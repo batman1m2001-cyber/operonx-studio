@@ -95,6 +95,26 @@ function resourceSummary(cat, r) {
   return picked.map(k => [k, r.fields[k]]);
 }
 
+/* A field's value as a person reads it. A "${NAME:default}" template shows the default, with the
+ * variable that overrides it in the tooltip; a bare "${NAME}" shows as $NAME. The template as
+ * written stays in the form the row opens. */
+function envValue(v) {
+  const raw = typeof v === "string" ? v : JSON.stringify(v);
+  const box = el("span", "rh-v mono");
+  box.title = raw;
+  const m = /^\$\{([A-Za-z_][A-Za-z0-9_]*)(?::([\s\S]*))?\}$/.exec(raw);
+  if (!m) { box.textContent = raw; return box; }
+  if (m[2] != null && m[2] !== "") {
+    box.textContent = m[2];
+    box.title = m[2] + "\nthe default; $" + m[1] + " overrides it";
+  } else {
+    box.textContent = "$" + m[1];
+    box.title = "read from $" + m[1];
+    box.classList.add("rh-var");
+  }
+  return box;
+}
+
 function envLight(r) {
   const vars = Object.entries(r.env || {});
   if (!vars.length) return null;
@@ -114,7 +134,7 @@ function resourceRow(cat, r, hub) {
   const sum = el("span", "rh-sum");
   for (const [k, v] of resourceSummary(cat, r)) {
     const it = el("span", "rh-kv");
-    it.append(el("span", "rh-k", k), el("span", "rh-v mono", typeof v === "string" ? v : JSON.stringify(v)));
+    it.append(el("span", "rh-k", k), envValue(v));
     sum.append(it);
   }
   top.append(sum);
