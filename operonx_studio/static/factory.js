@@ -24,7 +24,10 @@ window.Factory = (() => {
         api(`/api/p/${PID}/flows/stats?days=7`).catch(() => null)]);
       if (!on()) return host.textContent = "";
       seen = state.ir;
-      view = mod.mount(host, state.ir, stats, {onOpen: (name) => FlowRail.open(name)});
+      view = mod.mount(host, state.ir, stats, {onOpen(name, node) {          // a flow, and (from a shared block) the op that uses it
+        FlowRail.open(name);
+        if (node) requestAnimationFrame(() => { if (state.sel !== node && state.cardEls && state.cardEls.has(node)) select(node); });
+      }});
     } catch (err) {
       loading = null;
       host.textContent = "";
