@@ -1,7 +1,7 @@
 # OperonX Studio — UX/UI Overhaul
 **Plan ID:** `OPERONX_STUDIO_UX_OVERHAUL`
 
-**Status:** Not started (2026-11-15)
+**Status:** U0 done (2026-11-15); U1 next
 
 **Objective:** Redesign and refine the entire OperonX Studio interface while preserving all existing application logic, execution semantics, APIs, and backend behavior.
 
@@ -539,7 +539,7 @@ The interface should make the underlying complexity feel simpler, not make the a
 
 | Phase | Status | PR | Write-up |
 |---|---|---|---|
-| U0 — UX audit | Not started | | |
+| U0 — UX audit | Done 2026-11-15 | on `ui/factory-view` | [UX_AUDIT.md](UX_AUDIT.md): 25 screens × desktop/phone × dark/light on 3 real projects; 5 findings, the screen inventory, an 11-item backlog. Images in `docs/img/ux-overhaul/u0/`. No code changed. |
 | U1 — Design foundation | Not started | | |
 | U2 — Flow workspace | Not started | | |
 | U3 — Inspection & configuration | Not started | | |
