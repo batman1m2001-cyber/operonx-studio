@@ -1,7 +1,7 @@
 # OperonX Studio — UX/UI Overhaul
 **Plan ID:** `OPERONX_STUDIO_UX_OVERHAUL`
 
-**Status:** U0, U1 done (2026-11-15); U2 next
+**Status:** U0–U2 done (2026-11-15); U3 next
 
 **Objective:** Redesign and refine the entire OperonX Studio interface while preserving all existing application logic, execution semantics, APIs, and backend behavior.
 
@@ -541,7 +541,7 @@ The interface should make the underlying complexity feel simpler, not make the a
 |---|---|---|---|
 | U0 — UX audit | Done 2026-11-15 | on `ui/factory-view` | [UX_AUDIT.md](UX_AUDIT.md): 25 screens × desktop/phone × dark/light on 3 real projects; 5 findings, the screen inventory, an 11-item backlog. Images in `docs/img/ux-overhaul/u0/`. No code changed. |
 | U1 — Design foundation | Done 2026-11-15 | `ui/u1-foundation` | [U1 write-up](#u1-write-up) |
-| U2 — Flow workspace | Not started | | |
+| U2 — Flow workspace | Done 2026-11-15 | `ui/u2-flow` | [U2 write-up](#u2-write-up) |
 | U3 — Inspection & configuration | Not started | | |
 | U4 — Runs & monitoring | Not started | | |
 | U5 — Navigation & remaining screens | Not started | | |
@@ -582,6 +582,60 @@ and light) and compared with the baseline pixel by pixel: the differences are te
 `docs/img/ux-overhaul/u1/`.
 
 **Remaining.** None for U1.
+
+## U2 write-up
+
+**The decision.** A refined graph canvas with a minimap, not a factory scene. The audit's problem was
+that a real flow did not fit and nothing showed the rest; compact cards, tighter rows, a fit that
+uses the screen and a minimap solve exactly that, and every existing interaction keeps working. A
+pseudo-3D floor would have added depth without adding anything a reader needs, so it is not built.
+
+| | before | after |
+|---|---|---|
+| 17 ops (runline-lab `kitchen_sink`) | cut on both sides at 70% | the whole flow at 93% |
+| 26 ops (the callbot) | 13 of 28 cards on screen | 19 of 28, and a minimap frames where the view is |
+| canvas share of a 1440 px screen | 43% | 95% |
+
+![17 ops](img/ux-overhaul/u2/flow-17-ops-before-after.webp)
+![26 ops](img/ux-overhaul/u2/flow-26-ops-before-after.webp)
+
+**What changed, and why.**
+- **Compact cards.** An op is a rounded rectangle as wide as its name (132 px floor, was a 180 px oval),
+  44 px high (was 58). One shape for every op kind; the kind is the colour band and the icon. Ingress
+  and egress keep their labelled frame, a fan-out keeps its stack, the BranchOp rail and the agent card
+  are untouched.
+- **Tighter rows.** The layout's gaps went 78 → 56 px between rows and 56 → 40 px between cards.
+- **A fit that uses the screen.** The landing view fits what is drawn (the old one fitted the extent,
+  which carries 150–200 px of slack on two sides) and never goes under 65% (a name is 9 px there).
+- **A minimap.** Bottom right, only when the flow does not fit: every card as a block in its kind
+  colour, opened GraphOps as outlines, the view as a lavender frame. Click or drag moves the view.
+  This is the overview the factory idea was after.
+- **The canvas owns the screen.** The flows list and the side panel are closed until asked for; a
+  choice the user makes is remembered as before. The flow's name in the top bar is the picker, `[`
+  and `]` still toggle the two panels, and a click on an op still opens its Inspect as a peek.
+
+**Files.**
+
+| file | change |
+|---|---|
+| `static/studio.css` | the U2 block: compact cards, the minimap |
+| `static/canvas.js` | card width floor 180 → 132; `state.content` (the drawn box); `initView` fits it, floor 65%, centred |
+| `static/flowlayout.js` | `H_GAP` 56 → 40, `V_GAP` 78 → 56 |
+| `static/minimap.js` (new) | the model (pure) and the drawing |
+| `static/project.html` | the minimap's element and script |
+| `static/flowrail.js`, `static/shell.js` | both panels closed by default |
+| `tests/js/minimap.test.mjs` (new) | 4 tests of the model |
+
+**Checks.** `node --test tests/js/`: 198 pass (194 + 4). No `.py` changed. On the three projects, in a
+browser: a click selects and opens Inspect, a double click opens an op's data with its wires, "open
+every nested graph" lays the containers out, the phone view opens on START. No page error on any
+screen shot. Screenshots: `docs/img/ux-overhaul/u2/`.
+
+**Remaining / deferred.**
+- A very tall, narrow flow (the callbot) still needs a scroll; the layout is top-down only. A
+  left-to-right or wrapped layout is a layout-engine change, not taken here.
+- With the side panel closed, the desktop has only the top-bar button to reach the assistant: U3
+  gives it a visible Ask bar.
 
 # 11. Needs backend
 

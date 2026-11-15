@@ -181,7 +181,9 @@ window.FlowRail = (() => {
     else if (btn) btn.click();
   });
   const saved = keep.get(ON, null);
-  show(saved ? saved === "on" : innerWidth > 760, false);
+  // closed until asked for: the canvas owns the screen, and the flow's name in
+  // the top bar is the picker (docs/UX_OVERHAUL_PLAN.md U2)
+  show(saved === "on", false);
 
   return {items, sorted, render, open, show};
 })();

@@ -1340,7 +1340,8 @@ function render() {
     const need = Math.max(...m.els.map((_, j) => natural[i][j] - laidOut[i].widths[j]));
     const want = Math.ceil(m.it.w + need + 8);
     const cap = m.card.querySelector(".dfports") ? 420 : m.card.querySelector(".agcount") ? 400 : 310;
-    const w = Math.max(180, Math.min(cap, want));
+    // as wide as its name, down to a compact floor (UX_OVERHAUL_PLAN U2)
+    const w = Math.max(132, Math.min(cap, want));
     if (want > cap) {
       // a name cut short says itself in full on hover
       m.card.dataset.capped = "";
@@ -1487,6 +1488,14 @@ function render() {
   if (endIt) bottom = Math.max(bottom, endIt.y + B_H + 40);
   // width includes the right margin where loop returns bulge
   state.extent = {minX: -40, minY, maxX: maxX + 150, maxY: bottom};
+  // what is drawn, without the extent's slack: the landing view fits this
+  {
+    const boxes = flat.nodes.concat([startIt, endIt].filter(Boolean));
+    state.content = boxes.length ? {
+      minX: Math.min(...boxes.map(n => n.x)), minY: Math.min(...boxes.map(n => n.y)),
+      maxX: Math.max(...boxes.map(n => n.x + n.w)), maxY: Math.max(...boxes.map(n => n.y + n.h)),
+    } : null;
+  }
 
   for (const layer of [svg, $("#edgetop"), $("#dflinks")]) {
     layer.setAttribute("width", maxX + 620);
@@ -2762,21 +2771,26 @@ function initView(fresh) {
     stage.scrollTop = saved.y || 0;
     return;
   }
-  const w = Math.max(1, ex.maxX - ex.minX), h = Math.max(1, ex.maxY - ex.minY);
+  const cb = state.content || ex;
+  const w = Math.max(1, cb.maxX - cb.minX), h = Math.max(1, cb.maxY - cb.minY);
   // the open part of the box: clear of the chrome floating over it
   const i = stageInset(), ow = r.width - i.l - i.r, oh = r.height - i.t - i.b;
-  const room = (n) => n - VIEW_PAD * 2 - 24;
+  const room = (n) => n - 48;
   const all = Math.min(room(ow) / w, room(oh) / h);
-  state.view.scale = all >= 0.7 ? Math.min(1, all) : Math.min(1, Math.max(0.7, room(ow) / w));
+  // the whole flow when a name stays readable (a compact card's is 14px: 9px
+  // on screen at 65%); a larger flow lands at that floor, its minimap showing the rest
+  const s = state.view.scale = Math.min(1, Math.max(0.65, all));
   applyView();
-  const inner = w * state.view.scale + VIEW_PAD * 2, wide = inner + i.l + i.r;
-  // a flow wider than the box lands on its START, where reading begins
-  // (a phone at the readable 70% used to open on the middle, sides cut)
+  // world pixels of a content point: applyView's own transform
+  const wx = (x) => (x - ex.minX) * s + VIEW_PAD + i.l, wy = (y) => (y - ex.minY) * s + VIEW_PAD + i.t;
+  // centred across; a flow wider than the box lands on its START, where
+  // reading begins (a phone used to open on the middle, sides cut)
   const start = state.startAt;
-  const x = start && inner > ow ? (start.x - ex.minX) * state.view.scale + VIEW_PAD - ow / 2
-    : (inner - ow) / 2;
-  stage.scrollLeft = Math.max(0, Math.min(wide - r.width, x));
-  stage.scrollTop = 0;
+  const cx = start && w * s > room(ow) ? wx(start.x) : wx((cb.minX + cb.maxX) / 2);
+  stage.scrollLeft = Math.max(0, cx - i.l - ow / 2);
+  // centred down when it all fits, from the top when it does not
+  const top = wy(cb.minY) - i.t, tall = h * s;
+  stage.scrollTop = Math.max(0, tall <= oh - 48 ? top - (oh - tall) / 2 : top - 24);
 }
 // the user's own view, remembered once they stop moving it
 let _viewSave = 0;
