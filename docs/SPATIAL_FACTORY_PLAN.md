@@ -2,7 +2,7 @@
 
 **Plan ID:** `OPERONX_SPATIAL_FACTORY_PLAN` (refactored 2026-11-15)
 
-**Status:** F0 and F1 done. F2 is next and waits for the owner's go.
+**Status:** F0, F1 and F2 done. F3 is next.
 
 **The first version of this plan**, as the owner wrote it, is kept word for word in
 [SPATIAL_FACTORY_PLAN_V1.md](SPATIAL_FACTORY_PLAN_V1.md). This file replaces it wherever the two differ.
@@ -74,7 +74,7 @@ RESOURCES      models, stores and other declared resources
 | service → flow | IR: `service.graph` | |
 | schedule → job | IR: `service.job` | a schedule service runs a job |
 | job → flow | IR: `job.graph` | absent when the job's graph is not a served flow (B2) |
-| flow → shared block | **derived**: nested graphs with the same set of op names are one block | exact identity needs B1 |
+| flow → shared block | **derived**: nested graphs of the same op functions, kinds and wiring are one block; ops defined at the same file and line are one op | one named identity needs B1 |
 | flow → resource | IR: `node.resource`, nested graphs included | |
 | flow → flow | not in the data | B1 |
 | grouping (domain) | IR: the module in `graph.entry`, e.g. `pages.graph:pages_flow` → `pages` | |
@@ -84,8 +84,8 @@ Checked on mr-finance (a copy of the repository, read with the studio's own extr
 | layer | what is there |
 |---|---|
 | doors | 90 services (66 http, 22 schedule, 1 websocket, 1 asgi) and 24 jobs |
-| flows | 14, in 10 modules; `pages_flow` alone holds 36 ops on one level |
-| shared blocks | 17 nested graphs are only 3 distinct blocks: one (9 ops) is used 12 times, one 3 times, one twice; 27 op names appear in more than one flow |
+| flows | 14, in 13 domains; `pages_flow` alone holds 36 ops on one level |
+| shared blocks | 8 blocks, 4 of them shared between flows: one nested graph of 9 ops (`held_*`) is used 11 times by 4 flows, and three op functions are each used by 2 flows |
 | resources | 8 declared, 3 of them used by a flow, each by one flow |
 | unresolved | 13 jobs run `market_flow`, which is not among the 14 flows (B2) |
 
@@ -186,7 +186,7 @@ reach for select, open and search.
 |---|---|---|---|
 | F0 — Data audit | Done 2026-11-15 | #204 | [FACTORY_DATA_AUDIT.md](FACTORY_DATA_AUDIT.md) |
 | F1 — Lab | Done 2026-11-15, closed: 3D dropped | lab repo, to 2e41956 | §1, §4, §5 of this file |
-| F2 — Factory model | Not started | | |
+| F2 — Factory model | Done 2026-11-15 | `ui/f2-factory-model` | [FACTORY_MODEL.md](FACTORY_MODEL.md) |
 | F3 — Factory picture | Not started | | |
 | F4 — Dependencies and navigation | Not started | | |
 | F5 — Runtime | Not started | | |
