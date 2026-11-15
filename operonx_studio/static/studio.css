@@ -6353,3 +6353,78 @@ h2 > .paneabout { margin-left: 6px; }
 
 /* an agent graph's card: the operonx mark at the size of the other kinds' icons (it was 30px in a 40px band) */
 #world .node.cell .gband .oxg .oxpic { width: 21px; height: 12px; }
+
+/* ── the Factory picture (factoryview.js) ────────────────────────────────
+   doors → flows → shared blocks → resources. Cards are the flow canvas's
+   glass cells: one thin edge in the kind's colour, the kind's band and
+   icon, a specular line along the top. */
+#factory { position: absolute; inset: 0; overflow: auto; cursor: default;
+  padding: calc(var(--bar-h) + 3 * var(--glass-gap)) 0 0 calc(var(--rail-w) + var(--flowrail-w) + 4 * var(--glass-gap)); }
+body.flowrail-off #factory { padding-left: calc(var(--rail-w) + 3 * var(--glass-gap)); }
+.fv { position: relative; box-sizing: border-box; min-width: 900px; max-width: 1400px; margin: 0 auto; padding: 20px 28px 96px; color: var(--text); font-size: var(--fs-md); }
+.fv-heads, .fv-stage { display: grid; grid-template-columns: minmax(232px, 1fr) minmax(200px, 290px) minmax(60px, 110px) minmax(190px, 250px) minmax(50px, 90px) minmax(150px, 220px); column-gap: 0; }
+.fv-main { grid-column: 1 / span 2; display: grid; grid-template-columns: subgrid; row-gap: 8px; align-content: start; }
+.fv-head { padding: 0 0 16px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fv-head:first-child { align-items: flex-end; padding-right: 28px; }
+.fv-head:nth-child(3) { grid-column: 4; } .fv-head:nth-child(4) { grid-column: 6; }
+.fv-head b { font-size: var(--fs-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--text-2); font-weight: 700; }
+.fv-head span { font-size: var(--fs-sm); color: var(--text-3); }
+.fv-stage { position: relative; align-items: start; }
+.fv-wires { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 0; }
+.fv-row { grid-column: 1 / span 2; display: grid; grid-template-columns: subgrid; align-items: center; position: relative; z-index: 1; }
+.fv-row.inner .fv-card { margin-left: 22px; }
+.fv-row.ghostrow { margin-top: 10px; }
+.fv-doors { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 6px; padding-right: 28px; }
+.fv-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--r-pill); font-size: var(--fs-sm); color: var(--text-2);
+  border: 1px solid color-mix(in srgb, var(--k-session) 34%, var(--og-edge)); background: color-mix(in srgb, var(--k-session) 9%, var(--og-fill)); white-space: nowrap; }
+.fv-chip.job { border-color: color-mix(in srgb, var(--warn) 34%, var(--og-edge)); background: color-mix(in srgb, var(--warn) 8%, var(--og-fill)); }
+.fv-chip svg { width: 13px; height: 13px; color: var(--k-session); } .fv-chip.job svg { color: var(--warn); }
+.fv-chip b { color: var(--text); font-weight: 650; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.fv-col { position: relative; z-index: 1; grid-column: 4; }
+.fv-col + .fv-col { grid-column: 6; }
+.fv-stage .fv-col > * { position: absolute; left: 0; right: 0; box-sizing: border-box; }
+.fv-card { position: relative; box-sizing: border-box; min-height: 46px; padding: 6px 14px 6px 52px; display: flex; align-items: center; border-radius: var(--r-md); cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--kind) var(--og-line), var(--og-edge));
+  background: linear-gradient(180deg, var(--og-spec) 0, transparent 42%),
+    linear-gradient(90deg, color-mix(in srgb, var(--kind) var(--og-band), transparent) 0 40px, transparent 40px),
+    color-mix(in srgb, var(--kind) var(--og-tint), var(--og-fill));
+  -webkit-backdrop-filter: blur(var(--og-blur)) saturate(140%); backdrop-filter: blur(var(--og-blur)) saturate(140%);
+  box-shadow: inset 0 1px 0 var(--og-rim), var(--og-drop);
+  transition: opacity .16s ease, border-color .16s ease, box-shadow .16s ease; }
+.fv-card:hover { border-color: color-mix(in srgb, var(--kind) var(--og-line-hover), var(--og-edge)); }
+.fv-band { position: absolute; left: 0; top: 0; bottom: 0; width: 40px; display: grid; place-items: center; color: var(--kind);
+  border-right: 1px solid color-mix(in srgb, var(--kind) 22%, transparent); }
+.fv-band svg { width: 16px; height: 16px; }
+.fv-body { display: flex; flex-direction: column; min-width: 0; }
+.fv-name { font-size: var(--fs-base); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fv-sub { font-size: var(--fs-xs); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fv-err { color: var(--err); font-weight: 650; }
+.fv-err::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--err); margin-right: 4px; vertical-align: 1px; }
+/* a flow, a domain and a resource are one line: the name, and what it holds at the far end */
+.fv-card.flow, .fv-card.domain, .fv-card.resource { min-height: 38px; padding-top: 4px; padding-bottom: 4px; }
+.fv-card.flow .fv-body, .fv-card.domain .fv-body, .fv-card.resource .fv-body { flex: 1; flex-direction: row; align-items: baseline; justify-content: space-between; gap: 12px; }
+.fv-card.flow .fv-name, .fv-card.domain .fv-name, .fv-card.resource .fv-name { flex: 0 0 auto; max-width: 100%; }
+.fv-card.flow .fv-sub, .fv-card.domain .fv-sub, .fv-card.resource .fv-sub { flex: 0 1 auto; min-width: 0; text-align: right; }
+.fv-card.ghost { border-style: dashed; background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.fv-card.ghost .fv-name { color: var(--text-2); }
+.fv-card.idle { opacity: .6; }
+.fv-card.group { padding-right: 34px; }
+.fv-group > .fv-card + .fv-card { margin: 8px 0 0 18px; }
+.fv-twist { position: absolute; right: 10px; top: 50%; translate: 0 -50%; color: var(--text-3); display: grid; transition: rotate .16s ease; rotate: -90deg; }
+.fv-twist svg { width: 14px; height: 14px; } .fv-card.group.open .fv-twist { rotate: 0deg; }
+.fv-note { font-size: var(--fs-sm); color: var(--text-3); padding: 4px 2px; }
+.fv-more { all: unset; cursor: pointer; font-size: var(--fs-sm); color: var(--accent-strong); padding: 4px 2px; }
+.fv-more:hover { text-decoration: underline; }
+.fv-wire { fill: none; stroke: var(--rt-wire); opacity: var(--fv-rest, .5); stroke-linecap: round; transition: opacity .16s ease; }
+.fv-wire.needs { stroke: var(--k-res); }
+.fv-wire.door { stroke: color-mix(in srgb, var(--k-session) 60%, transparent); stroke-width: 1 !important; opacity: .45; }
+.fv-row.ghostrow .fv-chip, .fv-row.looserow .fv-chip { opacity: .8; }
+.fv-count { font-size: 10.5px; font-weight: 650; fill: var(--rt-wire-lit); opacity: .9; text-anchor: middle; paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; display: none; }
+.fv-focus .fv-count.on { display: block; } .fv-count.needs { fill: var(--k-res); }
+/* something is pointed at or kept: it, what leads to it and what it leads to stay; the rest steps back */
+.fv-focus .fv-card:not(.on), .fv-focus .fv-row:not(.on) .fv-doors, .fv-focus .fv-note, .fv-focus .fv-more { opacity: .28; }
+.fv-focus .fv-wire:not(.on) { opacity: .05; }
+.fv-focus .fv-wire.on { opacity: .95; stroke: var(--rt-wire-lit); } .fv-focus .fv-wire.needs.on { stroke: var(--k-res); }
+.fv-focus .fv-wire.door.on { stroke: var(--k-session); opacity: .8; }
+.fv-card.kept { border-color: var(--flow-accent);
+  box-shadow: inset 0 1px 0 var(--og-rim), 0 0 0 1px var(--flow-accent), 0 0 0 4px var(--flow-accent-ring), 0 0 18px 2px var(--flow-glow), var(--og-drop); }

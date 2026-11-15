@@ -61,7 +61,7 @@
       const wired = g.nodes.map(n => n.source && n.source.wired_at && n.source.wired_at.file).filter(Boolean);
       const domain = firstPart(moduleOf(g.entry) || serviceModule.get(g.name) || wired[0] || "");
       const st = flowStats[g.name] || {};
-      return put({id: `f:${g.name}`, type: "flow", name: g.name, domain, ops: opsIn(g), runs: st.runs || 0, errors: st.errors || 0, avgMs: st.avg_ms == null ? null : st.avg_ms});
+      return put({id: `f:${g.name}`, type: "flow", name: g.name, domain, steps: g.nodes.length, ops: opsIn(g), runs: st.runs || 0, errors: st.errors || 0, avgMs: st.avg_ms == null ? null : st.avg_ms});
     });
     const flowOf = new Map(flows.map(f => [f.name, f]));
 
