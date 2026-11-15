@@ -6265,3 +6265,18 @@ h2 > .paneabout { margin-left: 6px; }
 #sidebar .ax-hello p { display: none; }
 /* reading text over other text: the frosted glass, not the menu's clear one */
 .popover.paneabout-body { --glass-tint: var(--glass-frost); --glass-blur: var(--glass-blur-frost); }
+
+/* ── UX overhaul U4: a run's header in one line ──────────────────────────
+   status, took, cost, errors, the slowest and the most expensive op; the
+   counts, the start and where it came from open under "Details" */
+.runfacts { align-items: center; }
+.runfacts > .highlights { margin: 0; }
+.runmore { font-size: var(--fs-sm); }
+.runmore > summary { list-style: none; cursor: pointer; color: var(--text-3); padding: 2px 8px; border-radius: var(--r-pill); }
+.runmore > summary::-webkit-details-marker { display: none; }
+.runmore > summary::after { content: " ▾"; }
+.runmore[open] > summary::after { content: " ▴"; }
+.runmore > summary:hover { color: var(--text); background: var(--surface-3); }
+.runmore > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.runmore[open] { flex-basis: 100%; }
+.runmore-body { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; }

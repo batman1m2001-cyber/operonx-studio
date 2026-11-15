@@ -1,7 +1,7 @@
 # OperonX Studio — UX/UI Overhaul
 **Plan ID:** `OPERONX_STUDIO_UX_OVERHAUL`
 
-**Status:** U0–U3 done (2026-11-15); U4 next
+**Status:** U0–U4 done (2026-11-15); U5 next
 
 **Objective:** Redesign and refine the entire OperonX Studio interface while preserving all existing application logic, execution semantics, APIs, and backend behavior.
 
@@ -543,7 +543,7 @@ The interface should make the underlying complexity feel simpler, not make the a
 | U1 — Design foundation | Done 2026-11-15 | `ui/u1-foundation` | [U1 write-up](#u1-write-up) |
 | U2 — Flow workspace | Done 2026-11-15 | `ui/u2-flow` | [U2 write-up](#u2-write-up) |
 | U3 — Inspection & configuration | Done 2026-11-15 | `ui/u3-inspect` | [U3 write-up](#u3-write-up) |
-| U4 — Runs & monitoring | Not started | | |
+| U4 — Runs & monitoring | Done 2026-11-15 | `ui/u4-runs` | [U4 write-up](#u4-write-up) |
 | U5 — Navigation & remaining screens | Not started | | |
 | U6 — Responsive & final polish | Not started | | |
 
@@ -664,6 +664,35 @@ light; no page error. Screenshots: `docs/img/ux-overhaul/u3/`.
 
 **Deferred.** The Storage screen's retention intro and the Jobs records path stay where they are
 (each is the only text of its section). The missing-key notice is U5.
+
+## U4 write-up
+
+**What changed, and why.** A run's header answers four questions in one line: did it work (the
+status beside the id), how long, how much, and what to look at (the errors with "Next error", the
+slowest and the most expensive op). The counts (LLM calls, tokens, steps), the start time and where
+the run came from (eval, item, parent run, code version) open under "Details". Before, those were
+three lines above the first step on every run (audit finding 4).
+
+| | before | after |
+|---|---|---|
+| first step on a 900 px desktop screen | 213 px down | 177 px |
+| header lines on a phone | 7 | 4 |
+
+![run header](img/ux-overhaul/u4/run-header-before-after.webp)
+
+A failed run, the case that matters most: ![failed](img/ux-overhaul/u4/failed-run.webp)
+
+**Reviewed and left alone.** The Runs list (its storage line moved in U3), the run line and the
+tree/timeline/workflow views, Monitor and Alerts: each already leads with its data, and no metric
+was added or invented.
+
+**Files.** `static/runview.js` (the header), `static/studio.css` (the U4 block).
+
+**Checks.** `node --test tests/js/`: 198 pass. No `.py` changed. An ok run and a failed run opened in
+the tree and workflow views, desktop and phone, both themes; "Details" opens and closes by click and
+keyboard; "Next error" still walks the failed ops. Screenshots: `docs/img/ux-overhaul/u4/`.
+
+**Remaining.** None.
 
 # 11. Needs backend
 

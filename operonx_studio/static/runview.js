@@ -214,20 +214,27 @@ const RunView = (() => {
     line.append(pill(fmtMs(s.duration_ms || data.total_ms || 0), "Took"));
     const cost = money(s.cost_usd, s.unpriced);
     if (cost) line.append(pill(cost, "Cost", "p-cost"));
-    if (s.llm_calls) line.append(pill(`${s.llm_calls} LLM call${s.llm_calls > 1 ? "s" : ""}`));
+    // the counts, the start time and where it came from are one click away
+    // (docs/UX_OVERHAUL_PLAN.md U4): the first line answers "did it work, how
+    // long, how much, what to look at"
+    const more = el("details", "runmore");
+    more.append(el("summary", null, "Details"));
+    const moreBox = el("div", "runmore-body");
+    more.append(moreBox);
+    if (s.llm_calls) moreBox.append(pill(`${s.llm_calls} LLM call${s.llm_calls > 1 ? "s" : ""}`));
     if (s.tokens_in || s.tokens_out) {
-      line.append(pill(`${compact(s.tokens_in || 0)} → ${compact(s.tokens_out || 0)}`, "Tokens", null,
+      moreBox.append(pill(`${compact(s.tokens_in || 0)} → ${compact(s.tokens_out || 0)}`, "Tokens", null,
         `${s.tokens_in || 0} in, ${s.tokens_out || 0} out${s.tokens_cached ? `, ${s.tokens_cached} cached` : ""}`));
     }
-    line.append(pill(`${recs.length} step${recs.length === 1 ? "" : "s"}`));
+    moreBox.append(pill(`${recs.length} step${recs.length === 1 ? "" : "s"}`));
     const origin = originLine(s);
     if (s.started_at) {
       const at = new Date(s.started_at * 1000);
-      line.append(pill(at.toLocaleString([], {hour12: false, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit"}),
+      moreBox.append(pill(at.toLocaleString([], {hour12: false, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit"}),
         null, null, `Started ${at.toISOString()}`));
     }
     // where it came from (the service, its door, the session, the code) ends the line
-    if (origin) line.append(origin);
+    if (origin) moreBox.append(origin);
     if (failed && (s.metadata || {}).durable && ["job", "service", "playground"].includes(s.origin)
         && !(window.Account && Account.viewOnly)) {
       line.append(retryButton(run, mode));
@@ -239,6 +246,7 @@ const RunView = (() => {
       next.onclick = () => (mode === "workflow" ? RunLineView.nextError() : nextTreeError());
       line.append(next);
     }
+    line.append(more);
     head.append(line);
     const slowed = slowedLine(s.metadata || {});
     if (slowed) head.append(slowed);
@@ -287,7 +295,7 @@ const RunView = (() => {
       };
       if (slow) fact("Slowest", slow.op, `${fmtMs(slow.total_ms)} (${Math.round(100 * slow.total_ms / total)}%)`);
       if (dear) fact("Most expensive", dear.op, money(dear.cost_usd, 0));
-      head.append(hl);
+      line.insertBefore(hl, more);
     }
     return head;
   }
