@@ -54,7 +54,7 @@ Examples, each the first thing under a page title:
 
 The plan's rule (level 1, 2, 3) puts all of these at level 2 or 3.
 
-### 5. The styles grew without a scale
+### 5. Sizes grew without a scale (colours and shadows did not)
 
 Counted in `studio.css` (6,189 lines, 440 tokens):
 
@@ -63,14 +63,16 @@ Counted in `studio.css` (6,189 lines, 440 tokens):
 | font sizes | 36 (12px ×88, 11.5px ×62, 11px ×60, 12.5px ×51, 10.5px ×24 … down to 6.5px) | `--fs-xs … --fs-2xl`, used in 335 of 689 places |
 | font weights | 10 (450, 550, 650 among them) | none |
 | border radii | 49 | `--r-xs … --r-lg`, used in 165 of 450 places |
-| box shadows | 101 | none |
-| paddings | 222 | none |
-| hard-coded colours outside the tokens | 183 hex, 92 rgba | 440 tokens |
+| paddings | 222 values in 588 places | none |
 | z-index values | 25 (up to 9001) | none |
-| transition durations | 23 | none |
+| transition durations | 23 | `--tr`, one |
 
-The screens look related because they share the glass and the lavender, not because they share sizes.
-Page titles, for example, are a different size and weight on Board, Git, Files, Runs and Monitor.
+Corrected 2026-11-15 during U1: the first version of this table also listed 183 hard-coded colours
+and 101 shadows. That count was wrong. The hex values sit inside token blocks further down the file;
+outside token definitions there are 11 hex colours and 3 rgba, and of the 101 distinct shadows only 2
+carry a literal colour (the rest are rings and insets built from tokens). Colours and shadows are in
+good shape. Page titles and empty states are also already shared (`.panehead`, `paneNote`), so
+backlog item 2 shrinks to the missing-key notice (item 10).
 
 ## Screen inventory
 

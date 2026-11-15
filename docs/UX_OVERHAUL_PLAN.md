@@ -1,7 +1,7 @@
 # OperonX Studio — UX/UI Overhaul
 **Plan ID:** `OPERONX_STUDIO_UX_OVERHAUL`
 
-**Status:** U0 done (2026-11-15); U1 next
+**Status:** U0, U1 done (2026-11-15); U2 next
 
 **Objective:** Redesign and refine the entire OperonX Studio interface while preserving all existing application logic, execution semantics, APIs, and backend behavior.
 
@@ -540,12 +540,48 @@ The interface should make the underlying complexity feel simpler, not make the a
 | Phase | Status | PR | Write-up |
 |---|---|---|---|
 | U0 — UX audit | Done 2026-11-15 | on `ui/factory-view` | [UX_AUDIT.md](UX_AUDIT.md): 25 screens × desktop/phone × dark/light on 3 real projects; 5 findings, the screen inventory, an 11-item backlog. Images in `docs/img/ux-overhaul/u0/`. No code changed. |
-| U1 — Design foundation | Not started | | |
+| U1 — Design foundation | Done 2026-11-15 | `ui/u1-foundation` | [U1 write-up](#u1-write-up) |
 | U2 — Flow workspace | Not started | | |
 | U3 — Inspection & configuration | Not started | | |
 | U4 — Runs & monitoring | Not started | | |
 | U5 — Navigation & remaining screens | Not started | | |
 | U6 — Responsive & final polish | Not started | | |
+
+## U1 write-up
+
+**What changed.** `studio.css` only. Every single-value font size, border radius, font weight and
+state-change duration now comes from one scale:
+
+| | before | after |
+|---|---|---|
+| font sizes | 36 values, 335 of 689 uses on a token | 19 values; 9 tokens (`--fs-2xs` 10 … `--fs-2xl` 26, new: `--fs-2xs`, `--fs-h` 18) cover 677 of 689 uses. Left alone: 8 canvas micro-labels under 9.5 px, `em` sizes, one 30 px hero |
+| border radii | 49 values, 165 of 450 uses on a token | 36 values, 354 of 450 uses on 7 tokens (`--r-2xs` 4 … `--r-xl` 18, `--r-pill`); what stays literal is `50%`, `0`, `2px` pips and the multi-value shapes |
+| font weights | 10 | 4 (400, 500, 600, 700) |
+| transition durations | 23 | `--t-fast` .12s, `--t-med` .2s, `--t-slow` .3s for state changes; long loops (pulses, sparks) keep their own |
+| literal colours | 2 shadows, 2 inks | on `--sh-2`, `--sh-3`, `--on-strong`, `--on-fill` |
+
+**Why.** Audit finding 5. The scale had to exist before U2–U5 restyle components, or each would add
+more one-off sizes. The brand did not move: lavender (`--accent`, `--flow-accent`) and the icon set are
+untouched.
+
+**What the audit got wrong, found here.** Colours and shadows were already tokenised (11 literal hex
+outside token blocks, not 183), and page titles and empty states were already shared (`.panehead`,
+`paneNote`). UX_AUDIT.md is corrected. So U1 is smaller than planned: no new header or empty-state
+component was needed.
+
+**Not done, on purpose.** Paddings (222 values in 588 places) and z-index (25 values) are not snapped:
+a mechanical change there moves layout and stacking on every screen for no visible gain. Each later
+phase puts the components it touches on a 4 px grid.
+
+**Files.** `operonx_studio/static/studio.css`; `docs/UX_AUDIT.md`, this plan.
+
+**Checks.** `node --test tests/js/`: 194 pass. `git diff --stat origin/main -- '*.py'`: empty. All 25
+screens of meeting-prep-brd plus the runline-lab Flow and run screens re-shot (desktop and phone, dark
+and light) and compared with the baseline pixel by pixel: the differences are text moving by a pixel
+(the largest: Home, where the hero title went 23 → 20 px). Before/after:
+`docs/img/ux-overhaul/u1/`.
+
+**Remaining.** None for U1.
 
 # 11. Needs backend
 

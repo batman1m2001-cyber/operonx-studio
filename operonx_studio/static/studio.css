@@ -5110,7 +5110,7 @@ body.pmode #sidebar, body.pmode #dragbar, body.pmode #btn-right, body.pmode .ax-
 body.pmode #canvasbar { display: none !important; }
 /* the slim rail's names: on hover, beside the icon (the rail itself scrolls, so the label floats) */
 #railtip { position: fixed; z-index: 120; pointer-events: none; padding: 4px 9px; border-radius: var(--r-sm);
-  background: var(--strong, #1d232b); color: #fff; font-size: var(--fs-sm); font-weight: 500; white-space: nowrap;
+  background: var(--text); color: var(--on-strong); font-size: var(--fs-sm); font-weight: 500; white-space: nowrap;
   box-shadow: var(--sh-2); transform: translateY(-50%); }
 #railtip[hidden] { display: none; }
 
@@ -5141,7 +5141,7 @@ body.pmode #canvasbar { display: none !important; }
   letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); }
 .pm-count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--r-md); background: var(--surface-3);
   color: var(--text-2); font-size: var(--fs-xs); line-height: 18px; text-align: center; letter-spacing: 0; }
-.pm-count.hot { background: var(--err); color: #fff; }
+.pm-count.hot { background: var(--err); color: var(--on-fill); }
 .pm-list { display: flex; flex-direction: column; gap: 2px; }
 .pm-item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 8px; align-items: baseline; width: 100%;
   padding: 6px 8px; margin: 0 -8px; border: none; border-radius: var(--r-sm); background: none; text-align: left;
@@ -5312,7 +5312,7 @@ button.pm-w { cursor: pointer; }
 .ox-hand-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .ox-hand-paused { position: fixed; z-index: 9001; left: 50%; bottom: 18px; transform: translateX(-50%);
   display: flex; gap: 10px; align-items: center; padding: 6px 12px; border-radius: var(--r-pill); font-size: var(--fs-md);
-  background: var(--panel); color: var(--text); border: 1px solid var(--line); box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); box-shadow: var(--sh-2); }
 .ox-hand-paused[hidden] { display: none; }
 .ax-follow.on { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
@@ -5744,7 +5744,7 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
 .ax-graph-note { display: flex; align-items: center; gap: 6px; margin: 0 0 .65em; font-size: var(--fs-md); color: var(--text-3); }
 .ax-graph-note svg { width: 14px; height: 14px; flex: none; }
 .ax-graph-ov { position: fixed; inset: 16px; z-index: 900; display: flex; flex-direction: column; background: var(--surface);
-  border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: 0 20px 60px rgba(0, 0, 0, .28); overflow: hidden; }
+  border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--sh-3); overflow: hidden; }
 .ax-graph-ovbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); font-size: var(--fs-md); }
 .ax-graph-ovbar b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-graph-n { color: var(--text-3); font-size: var(--fs-sm); margin-right: auto; }
@@ -6196,3 +6196,9 @@ body.floatframe:not(.ax-focus) #sidebar > #chatdock { background: color-mix(in s
 :root:not([data-glass="solid"]) body.page :is(.projlist, .logincard) {
   -webkit-backdrop-filter: blur(var(--glass-blur-frame)) saturate(var(--glass-sat));
   backdrop-filter: blur(var(--glass-blur-frame)) saturate(var(--glass-sat)); }
+
+/* ── UX overhaul U1: the type scale moved 12.5px to 13px; on a phone the Monitor's
+   range switch keeps its refresh button on the same row ── */
+@media (max-width: 760px) {
+  .monhead .tlmodes button { padding: 0 9px; }
+}
