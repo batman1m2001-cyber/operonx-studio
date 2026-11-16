@@ -2,6 +2,13 @@
 
 > How it is drawn changed on 2026-11-16 (no instancing, no post-processing, a frame only on a change):
 > see [FACTORY_CPU.md](FACTORY_CPU.md). What is drawn, and where it lives, is as written here.
+>
+> The look was calmed the same day (the owner: too colourful, the bright solids glare; keep the glass):
+> the plates are slabs of dark glass with a lit rim instead of light slate titanium, the silver and natural
+> titanium are a step darker with half the shine band, exposure is 1.0 (was 1.22) and a light's glow is
+> under half of what it was. The wheel moves the picture as it scrolls the flow canvas (shift for sideways)
+> and zooms about the pointer with ctrl or a trackpad pinch; the card and the reset button keep clear of
+> the studio's side panel when it is open.
 
 **Result.** A project opens as one picture: a core of what its flows share and need, a cluster of
 parts for every flow, cables in bundles between them. It is the first row of the flows rail on the
