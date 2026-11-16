@@ -109,7 +109,7 @@ const SOFT = (() => { try { const c = document.createElement("canvas"), g = c.ge
 document.body.classList.toggle("fx-soft", SOFT);                  // and the studio's glass over the picture is not blurred (factory.css)
 const renderer = new THREE.WebGLRenderer({canvas, antialias: !SOFT});
 renderer.setPixelRatio(SOFT ? 1 : Math.min(2, window.devicePixelRatio || 1));
-renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.22;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
 const scene = new THREE.Scene(); scene.background = tok("bg");
 const DIR = new THREE.Vector3(1, 1, 1).normalize();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -500, 1000);
@@ -159,9 +159,9 @@ function machinedBox(plain) {
 /* Material: titanium or glass. A face's shade comes with its vertices; the fragment only adds what varies
  * across a face — the brushed grain (drawn only where a streak is wider than a pixel), the soft band of the
  * room across tops and sides, the darkening down a recess and at the foot of a side. */
-function machined({glass, grain = 0, clear, opacity = 1}) {
+function machined({glass, slab, grain = 0, clear, opacity = 1}) {
   return new THREE.ShaderMaterial({transparent: !!clear, depthWrite: !clear, uniforms: {uOpacity: {value: opacity}},
-    defines: Object.assign({GRAIN: grain.toFixed(3)}, glass ? {GLASS: 1} : {}),
+    defines: Object.assign({GRAIN: grain.toFixed(3)}, glass ? {GLASS: 1} : {}, slab ? {SLAB: 1} : {}),
     vertexShader: `attribute vec4 aC; attribute vec4 aFx; attribute vec3 shade; attribute vec3 aCol;
       varying vec3 vWp; varying vec4 vC; varying vec4 vFx; varying vec3 vShade; varying vec3 vCol;
       void main() { vec4 wp = modelMatrix * vec4(position, 1.0); vWp = wp.xyz; vShade = shade; vCol = aCol; vC = aC; vFx = aFx;
@@ -172,7 +172,11 @@ function machined({glass, grain = 0, clear, opacity = 1}) {
         bool cham = vFx.w > 1.5, top = vFx.w > 0.5 && !cham, wall = !top && !cham && vFx.x > 0.5;
         float away = -(vC.x + vC.z) * 0.5;                         // -1 at the corner nearest the eye, +1 at the farthest
         vec3 c;
-        #ifdef GLASS
+        #ifdef SLAB
+          /* a plate: a slab of dark glass, as the studio's own panes — a soft sheen lying across it, a thin lit rim, nothing bright */
+          float lie = top ? pow(smoothstep(-1.0, 1.0, away), 1.5) : 0.25 * vC.y;
+          c = cham ? vCol * 2.1 : vCol * (top ? 0.72 + 0.5 * lie : 0.5 + 0.3 * vC.y) + vec3(0.74, 0.8, 1.0) * 0.02 * lie;
+        #elif defined(GLASS)
           /* glass: darker than the metal round it, a faint mirror, and a soft panel of the room lying across it */
           float sheen = top ? pow(smoothstep(-1.0, 1.0, away), 2.2) : 0.35 * vC.y;
           c = vCol * 0.3 + vShade * 0.04 + vec3(0.74, 0.86, 1.0) * (0.008 + 0.075 * sheen);
@@ -182,9 +186,9 @@ function machined({glass, grain = 0, clear, opacity = 1}) {
             vec3 tint = vec3(1.0);
             if (cham) tone *= 1.1 + 0.1 * vFx.z;                                     // a polished edge
             else if (top && vFx.y < 0.5) tone *= 1.1;                                 // the frame round a panel: polished
-            else if (top) { float u = away * 0.7 + (vC.x - vC.z) * 0.15; tone *= 0.9 + 0.2 * away + (0.16 + 0.2 * vFx.z) * exp(-pow((u - 0.3) / 0.3, 2.0)); tint = vec3(0.975, 0.99, 1.03); }   // a satin top, a touch cooler
+            else if (top) { float u = away * 0.7 + (vC.x - vC.z) * 0.15; tone *= 0.9 + 0.2 * away + (0.08 + 0.08 * vFx.z) * exp(-pow((u - 0.3) / 0.3, 2.0)); tint = vec3(0.975, 0.99, 1.03); }   // a satin top, a touch cooler
             else if (wall) tone *= mix(0.72, 0.3, vFx.y);                             // down into a recess
-            else { tone *= mix(0.66, 1.0, smoothstep(0.0, 0.34, vC.w)) * (0.86 + 0.2 * vC.y + (0.12 + 0.2 * vFx.z) * exp(-pow((vC.y - 0.74) / 0.2, 2.0))); }   // a side: darker where it meets the plate
+            else { tone *= mix(0.66, 1.0, smoothstep(0.0, 0.34, vC.w)) * (0.86 + 0.2 * vC.y + (0.06 + 0.08 * vFx.z) * exp(-pow((vC.y - 0.74) / 0.2, 2.0))); }   // a side: darker where it meets the plate
             c = vCol * vShade * tone * tint;
         #endif
         gl_FragColor = vec4(c, uOpacity);
@@ -240,13 +244,14 @@ class Batch { constructor(material, sorted) { this.material = material; this.sor
       for (const b of this.list) { const r = b.base.r * b.k, gg = b.base.g * b.k, bb = b.base.b * b.k; for (let j = 0; j < V; j++) { a[o++] = r; a[o++] = gg; a[o++] = bb; } }
       g.getAttribute("aCol").needsUpdate = true; } } }
 const metal = new Batch(machined({grain: 0.16})); metal.spread = 0.14;
+const slab = new Batch(machined({slab: true}));                                    // a plate: dark glass
 const glass = new Batch(machined({glass: true}));                                   // a glass panel set in a frame
 const smoked = new Batch(machined({glass: true, clear: CLEAR, opacity: CLEAR ? 0.36 : 1}), true); // an enclosure you see into
 /* signal lights: the only colour in the picture. `far` ones are seen from any distance (an error);
  * the rest appear once a component is large enough to carry them */
 const lights = {far: [], mid: []};
 const light = (x, y, z, sx, sy, sz, sig, lod = "mid", gain = 1.5) => lights[lod].push({x, y, z, sx, sy, sz, sig, gain, owner});
-const TI = {natural: tok("ti-natural"), silver: tok("ti-silver"), dark: tok("ti-dark"), graphite: tok("ti-graphite"), black: tok("ti-black"), plate: tok("plate"), plateCore: tok("plate-core"), smoke: tok("glass-smoke"), frost: tok("glass-frost")};
+const TI = {natural: tok("ti-natural"), silver: tok("ti-silver"), dark: tok("ti-dark"), graphite: tok("ti-graphite"), black: tok("ti-black"), plate: tok("plate"), plateCore: tok("plate-core"), plateUnder: tok("plate-under"), smoke: tok("glass-smoke"), frost: tok("glass-frost")};
 const PLAIN = (c, fin = 0) => [c, c, 0, fin];
 const boxes = [], shadows = [], engraved = [], pucks = [], kinds = new Set();
 const status = [];                                                 // where a flow's run light sits: on its part (a domain's cluster) or on its plate
@@ -304,8 +309,8 @@ const part = (m, x, y, z, w, h, d) => { kinds.add(m); const n0 = pucks.length; P
 
 const labels = [];
 // the core: a two-step Space Black plate, its items standing on it, each one's name cut into the plate
-metal.add(0, -0.16, 0, coreHalf * 2 + 1.6, 0.16, coreHalf * 2 + 1.6, TI.graphite, PLAIN(0.04)); foot(0, -0.16, 0, coreHalf * 2 + 1.6, 0.16, coreHalf * 2 + 1.6, false);
-metal.add(0, 0, 0, coreHalf * 2, 0.22, coreHalf * 2, TI.plateCore, PLAIN(0.04, 0.4));
+slab.add(0, -0.16, 0, coreHalf * 2 + 1.6, 0.16, coreHalf * 2 + 1.6, TI.plateUnder, PLAIN(0.04)); foot(0, -0.16, 0, coreHalf * 2 + 1.6, 0.16, coreHalf * 2 + 1.6, false);
+slab.add(0, 0, 0, coreHalf * 2, 0.22, coreHalf * 2, TI.plateCore, PLAIN(0.04, 0.4));
 for (const it of core) { owner = it.id; part(it.m, it.x, 0.22, it.z, 1.7, it.h, 1.7); engraved.push({text: it.name, x: it.x, y: 0.221, z: it.z + 1.22, size: 0.24});
   if (core.length <= 9) labels.push({x: it.x, y: 0.22 + it.h + 0.5, z: it.z, cls: "item", title: it.name, owner: it.id}); }
 owner = null;
@@ -314,7 +319,7 @@ labels.push({x: coreHalf + 0.6, y: -1.6, z: coreHalf + 0.6, cls: "core", title: 
 // the clusters: a graphite plate each; where a bundle of fibres leaves it, and where it reaches the core, a port
 for (const c of clusters) { owner = c.id;
   const s = c.side, alongX = !Math.abs(s.out[0]), padX = alongX ? c.wu : c.wv, padZ = alongX ? c.wv : c.wu;
-  metal.add(c.x, 0, c.z, padX, 0.14, padZ, c.ghost ? TI.graphite : TI.plate, PLAIN(0.035, 0.3)); foot(c.x, 0, c.z, padX, 0.14, padZ, false);
+  slab.add(c.x, 0, c.z, padX, 0.14, padZ, c.ghost ? TI.plateUnder : TI.plate, PLAIN(0.035, 0.3)); foot(c.x, 0, c.z, padX, 0.14, padZ, false);
   let top = 0.6;
   c.cubes.forEach((q, i) => { const r = Math.floor(i / c.cols), k = i % c.cols, inRow = Math.min(c.cols, c.cubes.length - r * c.cols);
     const [x, z] = world(s, c.u + (k - (inRow - 1) / 2), RIN + 0.5 + r + 0.5); part(q.m, x, 0.14, z, 0.72, q.h, 0.72); top = Math.max(top, q.h);
@@ -330,7 +335,7 @@ for (const c of clusters) { owner = c.id;
   labels.push({x: c.x - padX / 2, y: 0.9, z: c.z - padZ / 2, cls: c.ghost ? "ghost" : "", owner: c.id, flows: c.members, title: c.name, sub: [c.sub, nS ? `${nS} service${nS > 1 ? "s" : ""}` : "", nJ ? `${nJ} job${nJ > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ")});
 }
 owner = null;
-metal.build(); glass.build(); smoked.build(3);
+metal.build(); slab.build(); glass.build(); smoked.build(3);
 /* the junctions' eight-sided bodies */
 let puckMesh = null;
 if (pucks.length) { const g = new THREE.CylinderGeometry(1, 1, 1, 8).toNonIndexed(); g.rotateY(Math.PI / 8); g.translate(0, 0.5, 0); g.computeVertexNormals();   // one normal a face
@@ -357,8 +362,8 @@ for (const k of ["far", "mid"]) { const list = lights[k]; if (!list.length) cont
   const halo = new Copies(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false}), list.length);
   list.forEach((b, i) => { const r = Math.min(1.5, Math.max(b.sx, b.sy, b.sz) * 2.2 + 0.16);
     M.compose(v3.set(b.x, b.y + b.sy / 2, b.z).addScaledVector(DIR, 1.45 * r), camera.quaternion, new THREE.Vector3(r * 2, r * 2, 1)); halo.setMatrixAt(i, M);
-    halo.setColorAt(i, col.copy(sigs[b.sig]).multiplyScalar((k === "mid" ? 0.26 : 0.42) * b.gain / 1.5)); });
-  halo.frustumCulled = false; halo.renderOrder = 4; lod[k].add(halo); lightSets.push({list, mesh, halo, sigs, glow: k === "mid" ? 0.26 : 0.42}); }
+    halo.setColorAt(i, col.copy(sigs[b.sig]).multiplyScalar((k === "mid" ? 0.11 : 0.2) * b.gain / 1.5)); });
+  halo.frustumCulled = false; halo.renderOrder = 4; lod[k].add(halo); lightSets.push({list, mesh, halo, sigs, glow: k === "mid" ? 0.11 : 0.2}); }
 /* run lights (F5): one per flow, red when runs failed in the window, green when it ran clean (a cluster per flow only:
  * a thousand green lights say nothing), dark when it did not run. Their own mesh, so new numbers repaint it in place. */
 const statusMesh = status.length ? new Copies(seenBox(), new THREE.MeshBasicMaterial(), status.length) : null;
@@ -422,9 +427,13 @@ function fit() { const us = [], vs = [];
   const w = hi(us) - lo(us), hgt = hi(vs) - lo(vs) + 5;                    // room above for the names
   view.cx = (hi(us) + lo(us)) / 2; view.cy = (hi(vs) + lo(vs)) / 2 + 1.6;
   // the studio's rail and bar float over the picture: fit into what they leave free (the heading marks its corner)
-  const iL = Math.max(0, hud.offsetLeft - 14), iT = Math.max(0, hud.offsetTop - 10), fw = Math.max(200, vw() - iL), fh = Math.max(200, vh() - iT);
+  const iL = Math.max(0, hud.offsetLeft - 14), iT = Math.max(0, hud.offsetTop - 10), iR = covered(), fw = Math.max(200, vw() - iL - iR), fh = Math.max(200, vh() - iT);
   view.span = Math.max(hgt * 1.1 * vh() / fh, w * 1.08 * vh() / fw); view.zoom = 1;
-  const k = view.span / vh(); view.cx -= iL / 2 * k; view.cy += iT / 2 * k; apply(); }
+  const k = view.span / vh(); view.cx -= (iL - iR) / 2 * k; view.cy += iT / 2 * k; apply(); }
+/* how much of the picture's right the studio's side panel covers (0 when it is closed, or beside the picture) */
+const sidePanel = document.getElementById("sidebar");
+function covered() { const h = host.getBoundingClientRect(), r = sidePanel && sidePanel.getBoundingClientRect();
+  const w = r && r.width && r.height && r.left > h.left + 200 && r.left < h.right ? Math.round(h.right - r.left) : 0; host.style.setProperty("--fx-right", `${w}px`); return w; }
 /* Drawing. A frame is drawn when something changed, never otherwise. While the camera moves, the last frame is
  * slid and scaled where it stands (the camera never turns, so a move is exactly that) and a new one is drawn
  * when the camera rests — or straight away on a machine that draws one in a frame's time. */
@@ -450,10 +459,17 @@ function apply() { const a = vw() / vh(), hgt = view.span / view.zoom, k = hgt /
   camera.position.copy(DIR.clone().multiplyScalar(200)).add(RIGHT.clone().multiplyScalar(view.cx)).add(UP.clone().multiplyScalar(view.cy)); camera.updateMatrixWorld();
   // detail by distance: a light or an engraving is drawn once it would be more than a speck
   const px = vh() / hgt; if (lod.mid) lod.mid.visible = px >= 13; lod.close.visible = px >= 30;
-  for (const b of [metal, glass, smoked]) b.detail(px >= 13); }
-function resize() { renderer.setSize(vw(), vh(), false); drawn = null; canvas.style.transform = ""; apply(); }
-const sized = new ResizeObserver(() => { if (host.clientWidth) resize(); }); sized.observe(host);
-for (const on of [canvas, labelHost]) on.addEventListener("wheel", (e) => { e.preventDefault(); view.zoom = Math.max(0.6, Math.min(12, view.zoom * Math.exp(-e.deltaY * 0.0012))); apply(); }, {passive: false});   // over a name too
+  for (const b of [metal, slab, glass, smoked]) b.detail(px >= 13); }
+function resize() { covered(); renderer.setSize(vw(), vh(), false); drawn = null; canvas.style.transform = ""; apply(); }
+const sized = new ResizeObserver(() => { if (host.clientWidth) resize(); }); sized.observe(host); if (sidePanel) sized.observe(sidePanel);
+/* the wheel, as on the flow canvas: it moves the picture (a trackpad's two fingers, a mouse wheel, shift for sideways);
+ * with ctrl — which is also how a browser reports a trackpad's pinch — it zooms about the pointer */
+const zoomAt = (e, f) => { const r = host.getBoundingClientRect(), sx = e.clientX - r.left - r.width / 2, sy = e.clientY - r.top - r.height / 2, k0 = view.span / view.zoom / vh();
+  view.zoom = Math.max(0.6, Math.min(12, view.zoom * f)); const k1 = view.span / view.zoom / vh(); view.cx += sx * (k0 - k1); view.cy -= sy * (k0 - k1); apply(); };
+for (const on of [canvas, labelHost]) on.addEventListener("wheel", (e) => { e.preventDefault(); const u = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? vh() : 1;
+  if (e.ctrlKey || e.metaKey) return zoomAt(e, Math.exp(-e.deltaY * u * 0.0022));
+  const k = view.span / view.zoom / vh(), dx = (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * u, dy = (e.shiftKey && !e.deltaX ? 0 : e.deltaY) * u;
+  view.cx += dx * k; view.cy -= dy * k; apply(); }, {passive: false});   // over a name too
 let drag = null;
 let moved = 0;
 /* two fingers: the distance between them is the zoom */
@@ -527,7 +543,7 @@ let sel = null;
 function select(id) { sel = id && spot.has(id) ? id : null;
   const lit = sel ? new Set([sel]) : null; if (lit) for (const p of pairs) { if (p.src === sel) lit.add(p.dst); if (p.dst === sel) lit.add(p.src); }
   const k = (o) => !lit || (o != null && lit.has(o)) ? 1 : o == null ? 0.5 : QUIET;
-  for (const b of [metal, glass, smoked]) b.tone(k);
+  for (const b of [metal, slab, glass, smoked]) b.tone(k);
   if (puckMesh) { pucks.forEach((b, i) => puckMesh.setColorAt(i, col.copy(b.color).multiplyScalar(k(b.owner)))); puckMesh.instanceColor.needsUpdate = true; }
   for (const L of lightSets) { L.list.forEach((b, i) => { const f = k(b.owner) < 1 ? 0.12 : 1; L.mesh.setColorAt(i, col.copy(L.sigs[b.sig]).multiplyScalar(b.gain * 1.1 * f)); L.halo.setColorAt(i, col.copy(L.sigs[b.sig]).multiplyScalar(L.glow * b.gain / 1.5 * f)); });
     L.mesh.instanceColor.needsUpdate = true; L.halo.instanceColor.needsUpdate = true; }
@@ -589,11 +605,11 @@ kick();
 return {
   fit, select, reveal, setStats,
   /* what a frame costs: for the scale checks */
-  cost: () => ({software: SOFT, drawMs: +spent.toFixed(1), frames, pixelRatio: renderer.getPixelRatio(), calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, parts: metal.items.length + glass.items.length + smoked.items.length, lights: lights.far.length + lights.mid.length, cables: cables.length, names: labels.length}),
+  cost: () => ({software: SOFT, drawMs: +spent.toFixed(1), frames, pixelRatio: renderer.getPixelRatio(), calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, parts: metal.items.length + slab.items.length + glass.items.length + smoked.items.length, lights: lights.far.length + lights.mid.length, cables: cables.length, names: labels.length}),
   pause() { live = false; if (raf) cancelAnimationFrame(raf); raf = 0; },
   resume() { if (!live) { live = true; kick(); } },
   dispose() { this.pause(); sized.disconnect(); document.removeEventListener("keydown", onKey);
     scene.traverse(o => { if (o.geometry) o.geometry.dispose(); for (const m of [].concat(o.material || [])) { for (const k of ["map", "alphaMap"]) if (m[k]) m[k].dispose(); m.dispose(); } });
-    for (const b of [metal, glass, smoked]) b.dispose(); renderer.dispose(); host.textContent = ""; delete host.dataset.ready; },
+    for (const b of [metal, slab, glass, smoked]) b.dispose(); renderer.dispose(); host.textContent = ""; delete host.dataset.ready; },
 };
 }
