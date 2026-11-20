@@ -74,3 +74,8 @@ tint (40%) because they open over running text. `factory.css` keeps only what be
 the blur at rest, the names). On the other pages the change is mostly the lit edge: their backdrop
 (`canvas-bg-dark.webp`) is nearly flat, and clear glass shows only what is behind it.
 
+**The backdrop.** Clear glass shows only what is behind it, and `canvas-bg-dark.webp` was made quiet on purpose (a graph
+runs over it). So the pages get their own: `backdrop-dark.webp` — the operonx glyph large and lit in the lower right,
+the lavender glows about doubled, the centre still calm (`docs/img/canvas/backdrop.html?m=dark&g=lit`, 2560×1440, 45 KB).
+The flow canvas keeps the quiet one; the Factory picture has its own ground.
+
