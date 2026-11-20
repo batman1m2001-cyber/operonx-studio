@@ -538,7 +538,8 @@ function place() { const put = [];
   for (const l of labels) { v3.copy(l.p).project(camera); l.sx = (v3.x + 1) / 2 * vw(); l.sy = (1 - v3.y) / 2 * vh(); l.w = l.w || l.el.offsetWidth; l.hh = l.hh || l.el.offsetHeight; }
   for (const l of labels.slice().sort((a, b) => a.sy - b.sy)) {
     for (const q of put) if (Math.abs(q.sx - l.sx) < (q.w + l.w) / 2 + 6 && l.sy - l.hh < q.sy + 2 && l.sy > q.sy - q.hh) l.sy = q.sy + l.hh + 3;
-    put.push(l); l.el.style.left = `${l.sx}px`; l.el.style.top = `${l.sy}px`; } }
+    put.push(l); l.el.style.left = `${l.sx}px`; l.el.style.top = `${l.sy}px`; }
+  const edge = vw() - covered(); for (const l of labels) l.el.classList.toggle("under", l.sx + l.w / 2 > edge + 8 && l.sx - l.w / 2 > edge - l.w); }   // a name under the side panel steps back
 titleEl.textContent = model.name || NAME;
 countsEl.textContent = `${model.counts.flows.toLocaleString()} flows${grouped ? ` in ${model.counts.domains} domains` : ""} · ${model.counts.services} services · ${model.counts.jobs} jobs · ${model.counts.sharedBlocks} shared blocks · ${model.counts.resources} resources${model.counts.stores ? ` · ${model.counts.stores} store${model.counts.stores > 1 ? "s" : ""}` : ""}`;
 /* the numbers of the last days, on the picture: lights, names, the legend. Called again when they change. */
