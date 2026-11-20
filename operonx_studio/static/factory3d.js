@@ -111,10 +111,10 @@ const SOFT = (() => { try { const c = document.createElement("canvas"), g = c.ge
   const lose = g.getExtension("WEBGL_lose_context"); if (lose) lose.loseContext();
   return /swiftshader|llvmpipe|softpipe|software|basic render|warp/i.test(name); } catch { return false; } })();
 document.body.classList.toggle("fx-soft", SOFT);                  // and the studio's glass over the picture is not blurred (factory.css)
-const renderer = new THREE.WebGLRenderer({canvas, antialias: !SOFT, alpha: true});
+const renderer = new THREE.WebGLRenderer({canvas, antialias: !SOFT});
 renderer.setPixelRatio(SOFT ? 1 : Math.min(2, window.devicePixelRatio || 1));
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
-const scene = new THREE.Scene(); renderer.setClearColor(0x000000, 0);   // nothing behind the parts: they stand on the sheet of fog over the cosmos (factory.css, #factory::before)
+const scene = new THREE.Scene(); scene.background = tok("bg");
 const DIR = new THREE.Vector3(1, 1, 1).normalize();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -500, 1000);
 camera.position.copy(DIR.clone().multiplyScalar(200)); camera.lookAt(0, 0, 0); camera.updateMatrixWorld();
