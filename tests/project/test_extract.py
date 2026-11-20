@@ -686,3 +686,57 @@ def test_the_op_after_end_is_carried_apart_from_the_exits(tmp_path):
     assert g["finals"] == ["c"]
     assert g["exits"] == ["w"] and g["entries"] == ["w"]
     assert "c" in {n["name"] for n in g["nodes"]}
+
+
+STORES = """
+from operonx.core import END, PARENT, START, graph, op
+
+@op(writes="inbox")
+def keep(rows: list):
+    \"\"\"Keep the new rows.\"\"\"
+    return {"kept": len(rows)}
+
+@op(reads=["inbox", "events"])
+def feed(tick: int):
+    return {"items": tick}
+
+@graph
+def ingest(rows):
+    \"\"\"Fetch the news and keep it.
+
+    A second paragraph nobody shows.\"\"\"
+    k = keep(rows=rows)
+    START >> k >> END
+
+@graph
+def pages(tick):
+    f = feed(tick=tick)
+    START >> f >> END
+"""
+
+STORES_MANIFEST = (
+    '[project]\nname="d"\n[[graph]]\nname="ingest"\nentry="wf:ingest"\n[[graph]]\nname="pages"\nentry="wf:pages"\n'
+    '[stores.inbox]\ndescription = "News waiting\\n  for the CIO."\n[stores.audit]\ndescription = "Who did what."\n'
+)
+
+
+def test_a_flow_says_what_it_is_for_and_ops_say_their_stores(tmp_path):
+    """PROJECT_DECLARATIONS_PLAN D2: a graph's docstring is its description; `@op(reads=, writes=)` reach
+    the node; `stores` lists every store with who reads and writes it, described from `[stores.*]`."""
+    ir = extract_project(project(tmp_path, STORES, STORES_MANIFEST))
+    by = {g["name"]: g for g in ir["graphs"]}
+    assert by["ingest"]["description"] == "Fetch the news and keep it."
+    assert "description" not in by["pages"]  # nobody described it
+    assert by["ingest"]["nodes"][0]["writes"] == ["inbox"] and "reads" not in by["ingest"]["nodes"][0]
+    assert by["pages"]["nodes"][0]["reads"] == ["inbox", "events"]
+    stores = {s["name"]: s for s in ir["stores"]}
+    assert list(stores) == ["audit", "events", "inbox"]
+    assert stores["inbox"]["description"] == "News waiting for the CIO."
+    assert stores["inbox"]["writers"] == [{"graph": "ingest", "op": "ingest.k"}]
+    assert stores["inbox"]["readers"] == [{"graph": "pages", "op": "pages.f"}]
+    assert stores["events"] == {"name": "events", "description": "", "readers": [{"graph": "pages", "op": "pages.f"}], "writers": []}
+    assert stores["audit"]["readers"] == [] and stores["audit"]["writers"] == []  # described, used by no op
+
+
+def test_a_project_with_no_stores_has_an_empty_list(tmp_path):
+    assert extract_project(project(tmp_path, LINEAR, LINEAR_MANIFEST))["stores"] == []

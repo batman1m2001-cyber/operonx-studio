@@ -307,7 +307,7 @@ def test_project_mode_has_its_pages_and_the_board_lives_inside_it(client, tmp_pa
     assert page.status_code == 200
     html = page.text
     pages = [p for p in ("now", "board", "plans", "checklist", "changes", "settings") if f'data-ppage="{p}"' in html]
-    assert pages == ["now", "board", "changes", "settings"]  # Checklist and Questions are sections of Now
+    assert pages == ["now", "board", "changes"]  # Checklist and Questions are sections of Now; Settings is its own hub
     assert 'data-tab="project"' in html and 'data-tab="board"' not in html  # the rail's Board became Project
     shell = (Path(__file__).resolve().parents[2] / "operonx_studio" / "static" / "shell.js").read_text(encoding="utf-8")
     assert 'if (name === "board") { switchTab("project", {page: "board"}); return; }' in shell

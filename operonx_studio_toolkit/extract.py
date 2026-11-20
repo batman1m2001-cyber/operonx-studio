@@ -557,6 +557,12 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
         value = _slot(op, extra)
         if value is not None:
             node[extra] = _json_safe(value)
+    # The project's stores the op says it reads and writes (`@op(reads=,
+    # writes=)`, operonx ≥ 1.39): names, declared and not checked.
+    for extra in ("reads", "writes"):
+        names = [str(n) for n in (_slot(op, extra) or ())]
+        if names:
+            node[extra] = names
     agent = _agent_of(op)
     if agent is not None:
         node["agent"] = agent
@@ -839,8 +845,57 @@ def extract_graph(
     # The @graph function name, not the manifest label — the label is ours.
     fn_anchors = by_graph.get(attr, {})
     out = {"name": spec.name, "entry": spec.entry, "inputs": _json_safe(spec.inputs)}
+    # What the flow is for: the first paragraph of its @graph function's
+    # docstring. A flow nobody described has none, and says so by absence.
+    try:
+        doc = (inspect.getdoc(spec.resolve(root)) or "").split("\n\n")[0]
+    except Exception:  # noqa: BLE001 — a description is never worth failing the extract for
+        doc = ""
+    if doc.strip():
+        out["description"] = " ".join(doc.split())
     out.update(_subgraph(instance, root, fn_anchors, module))
     return out
+
+
+def extract_stores(manifest: Manifest, graphs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The project's stores: every name an op reads or writes, with who
+    does, and its description when ``operonx.toml`` gives one::
+
+        [stores.inbox]
+        description = "News items waiting for the CIO."
+
+    A store is one name across the project, so a flow that writes it and a
+    flow that reads it are seen to work together, though neither calls the
+    other. A store described and used by no op is listed with no users."""
+    described: Dict[str, str] = {}
+    source = getattr(manifest, "source", None) or Path(manifest.root) / "operonx.toml"
+    if source and Path(source).is_file():
+        try:
+            import tomllib
+
+            table = tomllib.loads(Path(source).read_text(encoding="utf-8")).get("stores") or {}
+            if isinstance(table, dict):
+                described = {str(k): " ".join(str((v or {}).get("description") or "").split())
+                             for k, v in table.items() if isinstance(v, dict)}
+        except Exception:  # noqa: BLE001 — the manifest already parsed; a bad [stores] costs its text only
+            described = {}
+    stores: Dict[str, Dict[str, Any]] = {
+        name: {"name": name, "description": text, "readers": [], "writers": []} for name, text in described.items()
+    }
+
+    def walk(flow: str, nodes: List[Dict[str, Any]]) -> None:
+        for node in nodes:
+            for key, side in (("reads", "readers"), ("writes", "writers")):
+                for name in node.get(key) or ():
+                    entry = stores.setdefault(name, {"name": name, "description": "", "readers": [], "writers": []})
+                    entry[side].append({"graph": flow, "op": node.get("id") or node.get("name")})
+            inner = node.get("graph")
+            if isinstance(inner, dict):
+                walk(flow, inner.get("nodes") or [])
+
+    for g in graphs:
+        walk(str(g.get("name")), g.get("nodes") or [])
+    return [stores[name] for name in sorted(stores)]
 
 
 # ── resources and env ────────────────────────────────────────────────────
@@ -1130,5 +1185,6 @@ def extract_project(manifest: Manifest) -> Dict[str, Any]:
         "services": application["services"],
         "jobs": application["jobs"],
         "resources": extract_resources(manifest),
+        "stores": extract_stores(manifest, graphs),
         "dependencies": extract_dependencies(manifest.root),
     }
