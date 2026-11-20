@@ -83,3 +83,11 @@ The flow canvas keeps the quiet one; the Factory picture has its own ground.
 buttons and project buttons (they lie straight on the backdrop, in no pane), the flows find box, and the chosen row
 (`--accent-soft` was an opaque `#231e38`; on glass it is lavender at 17%). All in the last block of `studio-dark.css`.
 
+**The backdrop, second version (the owner's): the cosmos.** `backdrop-dark.webp` is now deep space with one figure in it:
+a DNA double helix as the backbone; an arch springing from it and returning to it; five junctions evenly spaced on the
+arch, operonx-glyph constellations seated at them; three ribs falling from the arch onto three lit points of the backbone
+(the middle one runs on through it to a node below); a faint inner arc and a faint keel. Lines pass behind what they
+join: the network is drawn on its own sheet, cut away along the strands and over each constellation's footprint, and
+laid down first. Drawn by `docs/img/canvas/cosmos.html` (canvas 2D, seeded; open it and save the canvas as WebP,
+2560×1440, 264 KB). On the home page the arch's crown and middle rib run behind the centre column.
+
