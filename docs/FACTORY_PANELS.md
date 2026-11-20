@@ -79,3 +79,7 @@ runs over it). So the pages get their own: `backdrop-dark.webp` — the operonx 
 the lavender glows about doubled, the centre still calm (`docs/img/canvas/backdrop.html?m=dark&g=lit`, 2560×1440, 45 KB).
 The flow canvas keeps the quiet one; the Factory picture has its own ground.
 
+**What was still solid.** The ask bar (its own rule outranked the glass list), the home page's composer, starter
+buttons and project buttons (they lie straight on the backdrop, in no pane), the flows find box, and the chosen row
+(`--accent-soft` was an opaque `#231e38`; on glass it is lavender at 17%). All in the last block of `studio-dark.css`.
+
