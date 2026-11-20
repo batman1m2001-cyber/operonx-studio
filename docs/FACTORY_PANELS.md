@@ -91,3 +91,10 @@ join: the network is drawn on its own sheet, cut away along the strands and over
 laid down first. Drawn by `docs/img/canvas/cosmos.html` (canvas 2D, seeded; open it and save the canvas as WebP,
 2560×1440, 264 KB). On the home page the arch's crown and middle rib run behind the centre column.
 
+
+## Backdrop polish (after the owner's look at the live pages)
+
+- **The three spheres are gone.** Under glass they were dim discs nobody could name. `cosmos.html` no longer draws them.
+- **A page of text is darker.** `--glass-page` went from a .30 to a .50 tint: the backdrop's bright nodes no longer sit behind the words (Services, Jobs, Runs…). Bars and panels keep the clear glass.
+- **Home has a shade down the middle.** The arch and the backbone cross exactly where the column of text is. Moving the figure right was tried and was worse (a constellation landed behind the title), so the figure stays and `body.page` gets a soft dark band behind the column, clear at the sides.
+- **The Factory stands on fog over the cosmos.** It was the one screen with a ground of its own. Now, bottom to top: the cosmos → one sheet of fog (`#factory::before`: its own copy of the backdrop, blur 3px, a .46 tint) → the parts (the canvas is clear: `alpha: true`, no scene background) → labels and panels. The sheet is blurred once, not per frame; drag measured 46 frames/s on software GL, 45 before.
