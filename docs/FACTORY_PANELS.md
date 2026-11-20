@@ -46,3 +46,18 @@ That is the `news` store of mr-finance as its card lists it: written by, read by
 - A **line can be clicked** (`pickLine`): its card says what kind of connection it is and lists what is at its
   far end — for a data line, the stores written and read, with the ops that do it.
 - A store that only jobs use stands in the middle too, without a line; its card lists the jobs.
+
+## Clear glass (Flow section)
+
+The owner's reference: glass you can see through, drawn by its edge. On the Flow section (the picture and the
+editor) the studio's panes change from frosted to clear — `factory.css`, last block:
+
+| | frosted (before) | clear (now) |
+|---|---|---|
+| tint | nearly opaque | 20–34% dark; 50% where nothing is blurred (no GPU), 66% for the side panel's running text |
+| blur | 6 / 10 / 24 px | 2 / 5 / 8 px |
+| edge | one rim line | bright upper rim, hairline all round, a fainter line below, a slanting sheen |
+
+A name on the picture that falls under the side panel steps back, so it does not read through the text.
+Not done: the bending of what is behind the glass (refraction). In a browser that is an SVG displacement filter
+on the backdrop — Chromium only, and redone on the CPU for every frame on a machine with no GPU.
