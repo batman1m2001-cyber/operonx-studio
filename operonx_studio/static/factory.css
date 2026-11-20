@@ -174,14 +174,3 @@ body.factory-on.fx-soft.fx-rest[data-tab="flow"]:not(.ax-focus) :is(.rail, .flow
 #factory .lb.item { background: rgba(18, 20, 33, .30); }
 #factory .fx-find, #factory .fx-reset { background: rgba(18, 20, 33, .40); border-color: rgba(255, 255, 255, .16); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .24); }
 @media (prefers-reduced-transparency: reduce) { body[data-tab="flow"] { --glass-still: rgba(16, 18, 30, .96); } }
-
-/* ── the ground is fog over the cosmos ───────────────────────────────────────────────────────────
- * The picture had a ground of its own, so this was the one screen without the studio's backdrop.
- * Now the cosmos lies at the bottom, one sheet of frosted glass lies over all of it — the fog — and
- * everything else stands on that sheet: the parts (the picture is drawn on a clear canvas), the
- * labels, the panels. The sheet carries its own blurred copy of the backdrop, so nothing is blurred
- * again when the picture moves (no GPU: a backdrop-filter here would be). Solid glass keeps the old
- * ground. */
-:root:not([data-glass="solid"]) #factory::before { content: ""; position: absolute; inset: -48px; z-index: 0; pointer-events: none;
-  background: linear-gradient(rgba(13, 14, 22, .46), rgba(13, 14, 22, .46)), url("/static/backdrop-dark.webp") center / cover no-repeat;
-  filter: blur(3px); }
