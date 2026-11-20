@@ -12,11 +12,12 @@ const GLYPH = "M 465 45 C 400 80, 362 118, 330 150 C 282 200, 222 268, 150 262 C
 // ?g=faint: the glyph sinks into the backdrop (a graph often runs over it); its light spots stay bright
 // ?g=quiet: nothing competes with the graph: no orbs or sparks, the glyph a third of faint,
 //   the glows and the bright edges about halved; the glass curves at the edges stay
-const G = new URLSearchParams(location.search).get("g"), INK = G==="ink", QUIET = G==="quiet";
-const F = G==="faint" ? .22 : QUIET ? .075 : 1, GL = QUIET ? .6 : 1, HI = QUIET ? .5 : 1;
+// ?g=lit: the backdrop behind clear glass — the glyph large and lit, the lavender glows about doubled; the centre stays calm
+const G = new URLSearchParams(location.search).get("g"), INK = G==="ink", QUIET = G==="quiet", LIT = G==="lit";
+const F = G==="faint" ? .22 : QUIET ? .075 : 1, GL = QUIET ? .6 : LIT ? 2.1 : 1, HI = QUIET ? .5 : 1;
 function draw(mode){
  const t={...T[mode]}, s=document.getElementById("s");
- t.glowO*=GL; t.glow2O*=GL; t.edgeO*=HI;
+ t.glowO*=GL; t.glow2O*=GL; t.edgeO*=HI; if (LIT) { t.sheetO*=1.7; t.logoFill*=1.5; }
  let d=`<defs>
   <linearGradient id="base" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${t.base[0]}"/><stop offset=".5" stop-color="${t.base[1]}"/><stop offset="1" stop-color="${t.base[2]}"/></linearGradient>
   <radialGradient id="gA" cx=".88" cy=".05" r=".55"><stop offset="0" stop-color="${t.glow}" stop-opacity="${t.glowO}"/><stop offset="1" stop-color="${t.glow}" stop-opacity="0"/></radialGradient>
@@ -51,7 +52,7 @@ function draw(mode){
  d+=`<path d="M 1380 140 C 1800 300, 2300 380, 2640 360" fill="none" stroke="${t.edge}" stroke-width="1.1" opacity="${t.edgeO*.3}"/>`;
  if (!QUIET) [[1980,268,7],[2520,358,6],[1600,1236,6]].forEach(o=>{ d+=`<circle cx="${o[0]}" cy="${o[1]}" r="${o[2]*5}" fill="url(#spark)" opacity=".55"/><circle cx="${o[0]}" cy="${o[1]}" r="${o[2]}" fill="url(#orb)"/>`; });
  // the operonx glyph, glass, bottom-right: the corner the graph rarely reaches
- const L = `translate(1840 930) rotate(-6) scale(1.25)`;
+ const L = LIT ? `translate(1470 730) rotate(-6) scale(1.95)` : `translate(1840 930) rotate(-6) scale(1.25)`;
  if (INK) { const ink = mode==='dark' ? "#07081a" : "#2c2940", hi = mode==='dark' ? "#9d8cff" : "#b7a6ff";
  d+=`<g transform="${L}">
    <path d="${GLYPH}" fill="none" stroke="${ink}" stroke-width="54" stroke-linecap="round" opacity="${mode==='dark'?.55:.18}" filter="url(#b40)" transform="translate(0 10)"/>
