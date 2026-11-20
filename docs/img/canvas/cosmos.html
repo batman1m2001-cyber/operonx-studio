@@ -23,16 +23,12 @@ for (let i = 0; i < 60; i++) blob(1500 + R() * 1100, 200 + R() * 700, 60 + R() *
 x.globalCompositeOperation = "source-over"; for (let i = 0; i < 26; i++) blob(300 + R() * 2200, 300 + R() * 1000, 120 + R() * 260, "5,5,9", .30, .4 + R() * .6);   // dark lanes
 x.globalCompositeOperation = "lighter";
 for (let i = 0; i < 340; i++) { const m = R(), r = m < .9 ? .5 + R() * .6 : m < .985 ? 1.1 + R() * .8 : 2 + R(); const sx = R() * W, sy = R() * H; dot(sx, sy, r, `rgba(${210 + R() * 45 | 0},${205 + R() * 40 | 0},255,${.2 + R() * .55})`); if (r > 2) blob(sx, sy, r * 9, "190,180,255", .28); }
-// 2. midground: distant spheres, orbital curves
-const sphere = (cx, cy, r, a) => { x.globalCompositeOperation = "source-over"; const b = x.createRadialGradient(cx - r * .35, cy + r * .4, r * .1, cx, cy, r); b.addColorStop(0, `rgba(30,27,62,${a})`); b.addColorStop(1, `rgba(9,9,18,${a})`); x.fillStyle = b; x.beginPath(); x.arc(cx, cy, r, 0, 7); x.fill();
-  x.globalCompositeOperation = "lighter"; x.save(); x.beginPath(); x.arc(cx, cy, r, 0, 7); x.clip(); x.filter = `blur(${r * .07}px)`; x.strokeStyle = `rgba(170,150,255,${a * .9})`; x.lineWidth = r * .07; x.beginPath(); x.arc(cx, cy, r * .99, Math.PI * .55, Math.PI * 1.25); x.stroke(); x.filter = "none"; x.restore();
-  x.strokeStyle = `rgba(210,196,255,${a * .85})`; x.lineWidth = 1.5; x.beginPath(); x.arc(cx, cy, r, Math.PI * .62, Math.PI * 1.18); x.stroke(); };
-sphere(2290, 250, 215, .9); sphere(250, 250, 86, .6); sphere(2440, 1500, 230, .8);
+// 2. midground: orbital curves
 const orbit = (cx, cy, rx, ry, rot, a, at) => { x.save(); x.translate(cx, cy); x.rotate(rot * Math.PI / 180); x.strokeStyle = `rgba(170,160,255,${a})`; x.lineWidth = 1.1; x.beginPath(); x.ellipse(0, 0, rx, ry, 0, 0, 7); x.stroke(); const px = Math.cos(at) * rx, py = Math.sin(at) * ry; blob(px, py, 26, "200,185,255", .5); dot(px, py, 3, "rgba(245,240,255,.9)"); x.restore(); };
 // the orbital system the constellations belong to: thin, faint, each round something
 const ring = (cx, cy, rx, ry, rot, a) => { x.save(); x.translate(cx, cy); x.rotate(rot * Math.PI / 180); x.strokeStyle = `rgba(170,160,255,${a})`; x.lineWidth = 1; x.beginPath(); x.ellipse(0, 0, rx, ry, 0, 0, 7); x.stroke(); x.restore(); };
 const ARCH0 = {cx: 1250, cy: 1050};
-ring(ARCH0.cx, ARCH0.cy, 1090, 1010, 0, .05); ring(2290, 250, 330, 92, -24, .14);   // the arch's own orbit, a breath outside it; the far sphere's ring
+ring(ARCH0.cx, ARCH0.cy, 1090, 1010, 0, .05);   // the arch's own orbit, a breath outside it
 // 2b. galaxies in the shape of the operonx glyph, scattered through the depth: star dust along the glyph, a bright core at its crossing
 function galaxy(cx, cy, sc, rot, flat, br) { const GP = document.getElementById("g"), GL = GP.getTotalLength(), M = 240, pts = [], ph = R() * 6.283, u = 1 / sc * (.5 + sc * .62) * 1.5; br = Math.min(1, br * 1.3);   // u: one screen-ish pixel in glyph units
   for (let i = 0; i <= M; i++) { const s0 = i / M * GL, p = GP.getPointAtLength(s0), q = GP.getPointAtLength(Math.min(GL, s0 + 1.5)), dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1; pts.push({x: p.x, y: p.y, nx: -dy / d, ny: dx / d, z: .5 + .5 * Math.sin(i / M * 6.283 * 1.5 + ph)}); }   // z: how near this stretch is
@@ -89,7 +85,7 @@ const on = (T, f) => T[Math.round(f * (T.length - 1))];
 // THE FIGURE. One arch springs from the backbone, rises over it and comes back down to it; the hubs lie on that arch, evenly
 // spaced; from each hub a rib falls to the backbone; a second, inner arc ties the ribs half way down; a shallow keel hangs
 // below. The constellations sit AT the junctions (their crossing node is the junction), so every line ends in a thing.
-const ARCH = {cx: 1250, cy: 1050, rx: 1010, ry: 930}, hub = (deg) => [ARCH.cx + ARCH.rx * Math.cos(deg * Math.PI / 180), ARCH.cy + ARCH.ry * Math.sin(deg * Math.PI / 180)];
+const ARCH = {cx: ARCH0.cx, cy: 1050, rx: 1010, ry: 930}, hub = (deg) => [ARCH.cx + ARCH.rx * Math.cos(deg * Math.PI / 180), ARCH.cy + ARCH.ry * Math.sin(deg * Math.PI / 180)];
 const HB = [200, 235, 270, 305, 340].map(hub), RIBF = [.14, .30, .47, .63, .78];
 const seat = (p, sc, rot, flat, br) => [p[0] - 70 * sc * Math.cos(rot * Math.PI / 180), p[1] - 70 * sc * Math.sin(rot * Math.PI / 180), sc, rot, flat, br];   // a constellation whose crossing node is p
 const spine = (f) => { const o = on(near, f); return [o.x, o.y]; }, FT = RIBF.map(spine), MD = HB.map((h, i) => [(h[0] + FT[i][0]) / 2 + (i - 2) * 26 + (i === 0 ? 40 : i === 4 ? -40 : 0), h[1] * .46 + FT[i][1] * .54]), KL = [[690, 1345], [1290, 1395], [1930, 1335]];

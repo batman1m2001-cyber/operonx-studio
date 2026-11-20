@@ -429,7 +429,7 @@
   --glass-clear: rgba(24, 26, 42, .20);
   --glass-menu: rgba(20, 22, 36, .40);
   --glass-frost: rgba(16, 18, 30, .34);
-  --glass-page: rgba(18, 19, 30, .30);
+  --glass-page: rgba(14, 15, 25, .50);   /* a page of text: darker than the bars, or the backdrop's lights sit behind the words */
   --glass-blur-clear: 2px; --glass-blur-menu: 6px; --glass-blur-frost: 8px; --glass-blur-frame: 8px;
   --glass-sat: 165%;
   --glass-sheen: linear-gradient(128deg, rgba(255, 255, 255, .13), rgba(255, 255, 255, .03) 30%, rgba(255, 255, 255, 0) 55%, rgba(255, 255, 255, .045));
@@ -463,3 +463,9 @@
 /* the ask bar's own rule names #sidebar, so it outranks the block above */
 :root[data-theme="dark"]:not([data-glass="solid"]) body:has(#sidebar.off):not(.pmode):not(.ax-focus):not(.page) .ax-askbar:not(.stepped) {
   background: var(--glass-sheen), var(--glass-menu); }
+
+/* a page without the frame (home, login): its column of text is in the middle, where the backdrop's arch and backbone cross — a
+   soft shade down the middle, clear at the sides */
+:root[data-theme="dark"]:not([data-glass="solid"]) body.page {
+  background: linear-gradient(90deg, rgba(8, 8, 16, 0) 12%, rgba(8, 8, 16, .58) 32%, rgba(8, 8, 16, .58) 68%, rgba(8, 8, 16, 0) 88%) fixed,
+    url("/static/backdrop-dark.webp") center / cover no-repeat fixed, var(--glass-under); }
