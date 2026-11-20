@@ -61,3 +61,9 @@ editor) the studio's panes change from frosted to clear — `factory.css`, last 
 A name on the picture that falls under the side panel steps back, so it does not read through the text.
 Not done: the bending of what is behind the glass (refraction). In a browser that is an SVG displacement filter
 on the backdrop — Chromium only, and redone on the CPU for every frame on a machine with no GPU.
+
+**A little blur, at rest only.** With no blur at all the picture under a pane competes with its text. On a machine with no
+GPU a blurred pane costs nothing while what is behind it stands still, so: `fx-rest` (factory3d.js, 320 ms after the last
+move) turns on `blur(1.5px)` for the rail, the flows list and the side panel; any move turns it off; the sparks are clipped
+out from under the panes, so nothing behind them changes at rest. Measured on the software renderer: 60 frames a second at
+rest with and without it. Names under the flows list step back like those under the side panel.
