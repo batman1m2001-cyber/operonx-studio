@@ -94,33 +94,33 @@ body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(v
 #factory .fx-find:focus { outline: none; border-color: var(--fx-sig-agent); }
 #factory .fx-found { pointer-events: auto; margin-top: 4px; width: 280px; max-width: 60vw; border-radius: 8px; overflow: hidden; background: var(--fx-graphite); border: 1px solid var(--fx-gunmetal); }
 /* the selection's card */
-#factory .fx-card { position: absolute; right: calc(18px + var(--fx-right, 0px)); top: calc(var(--fx-top) + 44px); width: 300px; max-width: calc(100% - 36px); overflow-y: auto; padding: 14px 14px 10px;
+:is(#factory, #fx-inspect) .fx-card { position: absolute; right: calc(18px + var(--fx-right, 0px)); top: calc(var(--fx-top) + 44px); width: 300px; max-width: calc(100% - 36px); overflow-y: auto; padding: 14px 14px 10px;
   border-radius: 12px; background: color-mix(in srgb, var(--fx-graphite) 94%, transparent); border: 1px solid color-mix(in srgb, var(--fx-titanium) 26%, transparent);
   height: fit-content; max-height: calc(100% - var(--fx-top) - 128px); }
-#factory .fx-card[hidden] { display: none; }
-#factory .fx-card .fx-x { position: absolute; right: 8px; top: 6px; border: 0; background: none; color: var(--fx-text-2); font-size: 18px; line-height: 1; cursor: pointer; padding: 4px 6px; }
-#factory .fx-card .fx-x:hover { color: var(--fx-text); }
-#factory .fx-card .fx-kind { margin: 0; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--fx-sig-agent); }
-#factory .fx-card h3 { margin: 3px 0 0; font: 600 15px var(--mono); color: var(--fx-text); overflow-wrap: anywhere; }
-#factory .fx-card .fx-says { margin: 7px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--fx-text); }
-#factory .fx-row.said { flex-wrap: wrap; }
-#factory .fx-row em { flex-basis: 100%; font-style: normal; font-size: 11px; line-height: 1.35; color: var(--fx-text-2); text-align: left; white-space: normal; overflow-wrap: anywhere;
+:is(#factory, #fx-inspect) .fx-card[hidden] { display: none; }
+:is(#factory, #fx-inspect) .fx-card .fx-x { position: absolute; right: 8px; top: 6px; border: 0; background: none; color: var(--fx-text-2); font-size: 18px; line-height: 1; cursor: pointer; padding: 4px 6px; }
+:is(#factory, #fx-inspect) .fx-card .fx-x:hover { color: var(--fx-text); }
+:is(#factory, #fx-inspect) .fx-card .fx-kind { margin: 0; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--fx-sig-agent); }
+:is(#factory, #fx-inspect) .fx-card h3 { margin: 3px 0 0; font: 600 15px var(--mono); color: var(--fx-text); overflow-wrap: anywhere; }
+:is(#factory, #fx-inspect) .fx-card .fx-says { margin: 7px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--fx-text); }
+:is(#factory, #fx-inspect) .fx-row.said { flex-wrap: wrap; }
+:is(#factory, #fx-inspect) .fx-row em { flex-basis: 100%; font-style: normal; font-size: 11px; line-height: 1.35; color: var(--fx-text-2); text-align: left; white-space: normal; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-#factory .fx-card .fx-sub { margin: 4px 0 0; font-size: 11.5px; color: var(--fx-text-2); overflow-wrap: anywhere; }
-#factory .fx-card h4 { margin: 14px 0 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--fx-text-2); }
-#factory .fx-go { margin-top: 10px; width: 100%; padding: 7px 10px; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer;
+:is(#factory, #fx-inspect) .fx-card .fx-sub { margin: 4px 0 0; font-size: 11.5px; color: var(--fx-text-2); overflow-wrap: anywhere; }
+:is(#factory, #fx-inspect) .fx-card h4 { margin: 14px 0 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--fx-text-2); }
+:is(#factory, #fx-inspect) .fx-go { margin-top: 10px; width: 100%; padding: 7px 10px; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer;
   color: var(--fx-obsidian); background: var(--fx-sig-agent); border: 0; }
-#factory .fx-go:hover { background: color-mix(in srgb, var(--fx-sig-agent) 85%, white); }
-#factory .fx-row { display: flex; align-items: baseline; justify-content: flex-start; gap: 8px; width: 100%; padding: 5px 8px; border: 0; border-radius: 6px; background: none; color: var(--fx-text); font: inherit; font-size: 12px; text-align: left; }
-#factory button.fx-row { cursor: pointer; }
-#factory button.fx-row:hover { background: color-mix(in srgb, var(--fx-titanium) 16%, transparent); }
-#factory .fx-row b { font: 550 12px var(--mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#factory .fx-row span { margin-left: auto; flex: none; max-width: 55%; color: var(--fx-text-2); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#factory .fx-row.more { color: var(--fx-text-2); }
-#factory .fx-pair { display: flex; align-items: center; }
-#factory .fx-pair .fx-row { min-width: 0; }
-#factory .fx-also { flex: none; border: 0; border-radius: 6px; background: none; color: var(--fx-text-2); font: inherit; font-size: 12px; padding: 4px 7px; cursor: pointer; }
-#factory .fx-also:hover { color: var(--fx-text); background: color-mix(in srgb, var(--fx-titanium) 16%, transparent); }
+:is(#factory, #fx-inspect) .fx-go:hover { background: color-mix(in srgb, var(--fx-sig-agent) 85%, white); }
+:is(#factory, #fx-inspect) .fx-row { display: flex; align-items: baseline; justify-content: flex-start; gap: 8px; width: 100%; padding: 5px 8px; border: 0; border-radius: 6px; background: none; color: var(--fx-text); font: inherit; font-size: 12px; text-align: left; }
+:is(#factory, #fx-inspect) button.fx-row { cursor: pointer; }
+:is(#factory, #fx-inspect) button.fx-row:hover { background: color-mix(in srgb, var(--fx-titanium) 16%, transparent); }
+:is(#factory, #fx-inspect) .fx-row b { font: 550 12px var(--mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(#factory, #fx-inspect) .fx-row span { margin-left: auto; flex: none; max-width: 55%; color: var(--fx-text-2); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:is(#factory, #fx-inspect) .fx-row.more { color: var(--fx-text-2); }
+:is(#factory, #fx-inspect) .fx-pair { display: flex; align-items: center; }
+:is(#factory, #fx-inspect) .fx-pair .fx-row { min-width: 0; }
+:is(#factory, #fx-inspect) .fx-also { flex: none; border: 0; border-radius: 6px; background: none; color: var(--fx-text-2); font: inherit; font-size: 12px; padding: 4px 7px; cursor: pointer; }
+:is(#factory, #fx-inspect) .fx-also:hover { color: var(--fx-text); background: color-mix(in srgb, var(--fx-titanium) 16%, transparent); }
 /* a Services row the picture sent you to */
 #services .fx-flash { animation: fx-flash 1.6s ease-out; }
 @keyframes fx-flash { from { box-shadow: 0 0 0 2px #C0A6FA, 0 0 22px rgba(192, 166, 250, .5); } to { box-shadow: 0 0 0 2px transparent, 0 0 0 transparent; } }
@@ -133,7 +133,7 @@ body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(v
 #factory .fx-reset:hover { border-color: var(--fx-titanium); }
 #factory .fx-note { position: absolute; left: var(--fx-left); top: calc(var(--fx-top) + 4px); margin: 0; max-width: 46ch; color: var(--fx-text-2); }
 #factory .fx-gl:focus-visible { outline: 2px solid color-mix(in srgb, var(--fx-sig-agent) 70%, transparent); outline-offset: -2px; }
-#factory .lb:focus-visible, #factory .fx-row:focus-visible, #factory .fx-go:focus-visible, #factory .fx-also:focus-visible, #factory .fx-reset:focus-visible, #factory .fx-x:focus-visible {
+:is(#factory, #fx-inspect) .lb:focus-visible, :is(#factory, #fx-inspect) .fx-row:focus-visible, :is(#factory, #fx-inspect) .fx-go:focus-visible, :is(#factory, #fx-inspect) .fx-also:focus-visible, :is(#factory, #fx-inspect) .fx-reset:focus-visible, :is(#factory, #fx-inspect) .fx-x:focus-visible {
   outline: 2px solid var(--fx-sig-agent); outline-offset: 1px; }
 /* a phone: the card is a sheet at the bottom, the legend's note goes, the find box takes the width */
 @media (max-width: 760px) {
@@ -146,3 +146,13 @@ body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(v
 /* its row in the flows rail */
 .flowrail .frrow.frpicture { grid-template-columns: minmax(0, 1fr); border-bottom: 1px solid var(--border); }
 .flowrail .frrow.frpicture .frname { font-family: var(--font); }
+
+/* the card in the studio's side panel (its Inspect tab), where an op's inspector is on the flow canvas: the
+ * picture keeps its whole width, and the assistant is one tab away */
+#fx-inspect { display: none; flex: 1; min-height: 0; overflow-y: auto; }
+body.factory-on[data-tab="flow"] #sidebar > #inspector { display: none; }
+body.factory-on[data-tab="flow"] #inspector:not([hidden]) + #fx-inspect { display: block; }
+#fx-inspect .fx-card { position: static; width: auto; max-width: none; max-height: none; overflow: visible; padding: 16px; border: 0; border-radius: 0; background: none; box-shadow: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none; }
+#fx-inspect .fx-card .fx-x { display: none; }                    /* the panel has its own close */
+#fx-inspect .fx-hint { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--fx-text-2); }

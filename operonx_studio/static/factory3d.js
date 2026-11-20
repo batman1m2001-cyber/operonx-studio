@@ -45,7 +45,7 @@ const used = model.resources.filter(r => r.flows.length);
 if (used.length <= MANY) for (const r of used) { core.push({id: r.id, name: r.name, m: "resource", h: 1.0, kind: "resource"}); boxOfRes.set(r.id, r.id); }
 else { const kinds = new Map(); for (const r of used) { if (!kinds.has(r.kind)) kinds.set(r.kind, []); kinds.get(r.kind).push(r); }
   for (const [k, rs] of kinds) { const id = rs.length > 1 ? `k:${k}` : rs[0].id; core.push({id, name: rs.length > 1 ? `${k} ×${rs.length}` : rs[0].name, m: "resource", h: 0.9 + Math.min(1.6, rs.length * 0.18), kind: "resource"}); for (const r of rs) boxOfRes.set(r.id, id); } }
-for (const s of model.stores.filter(s => s.flows.length)) core.push({id: s.id, name: s.name, m: "store", h: 0.8, kind: "store"});
+for (const s of model.stores.filter(s => s.writers.length || s.readers.length)) core.push({id: s.id, name: s.name, m: "store", h: 0.8, kind: "store"});
 
 /* the clusters */
 const sharedAt = new Set(model.blocks.filter(b => b.shared).flatMap(b => b.uses.map(u => u.at)));
@@ -494,7 +494,7 @@ canvas.addEventListener("pointerdown", (e) => { drag = [e.clientX, e.clientY]; m
 canvas.addEventListener("pointermove", (e) => { if (fingers.has(e.pointerId)) fingers.set(e.pointerId, [e.clientX, e.clientY]);
   if (fingers.size === 2) { const d = apart(); view.zoom = Math.max(0.6, Math.min(12, view.zoom * d / spread)); spread = d; apply(); return; }
   if (!drag) return; moved += Math.abs(e.clientX - drag[0]) + Math.abs(e.clientY - drag[1]); const k = (view.span / view.zoom) / vh(); view.cx -= (e.clientX - drag[0]) * k; view.cy += (e.clientY - drag[1]) * k; drag = [e.clientX, e.clientY]; apply(); });
-const lift = (e) => { const click = e.type === "pointerup" && drag && moved < 5 && fingers.size <= 1; fingers.delete(e.pointerId); drag = null; if (click) select(pick(e)); };
+const lift = (e) => { const click = e.type === "pointerup" && drag && moved < 5 && fingers.size <= 1; fingers.delete(e.pointerId); drag = null; if (click) select(pick(e) || pickLine(e)); };
 canvas.addEventListener("pointerup", lift); canvas.addEventListener("pointercancel", lift);
 canvas.tabIndex = 0;
 canvas.addEventListener("dblclick", (e) => { const id = pick(e); if (id && /^f:/.test(id) && opts.onOpen) opts.onOpen(model.by.get(id).name); });
@@ -506,6 +506,14 @@ function pick(e) { const r = host.getBoundingClientRect(), nx = (e.clientX - r.l
     for (const [oa, da, lo, hi] of [[o.x, d.x, b.x - b.sx / 2, b.x + b.sx / 2], [o.y, d.y, b.y, b.y + b.sy], [o.z, d.z, b.z - b.sz / 2, b.z + b.sz / 2]]) {
       const a = (lo - oa) / da, c = (hi - oa) / da; t0 = Math.max(t0, Math.min(a, c)); t1 = Math.min(t1, Math.max(a, c)); }
     if (t0 <= t1 && t0 < bt) { bt = t0; best = b.owner; } }
+  return best; }
+/* a line under the pointer: the strand whose drawn path passes within a few pixels. "l:<cluster>|<kind>" */
+function pickLine(e) { const r = host.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top; let best = null, bd = 8;
+  for (const run of runs) { let ax = 0, ay = 0;
+    run.pts.forEach((q, i) => { v3.copy(q).project(camera); const bx = (v3.x + 1) / 2 * r.width, by = (1 - v3.y) / 2 * r.height;
+      if (i) { const dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy || 1))), d = Math.hypot(px - ax - t * dx, py - ay - t * dy);
+        if (d < bd) { bd = d; best = `l:${run.owner}|${run.kind}`; } }
+      ax = bx; ay = by; }); }
   return best; }
 resetBtn.onclick = fit;
 const onKey = (e) => { if (e.ctrlKey || e.metaKey || e.altKey || !host.clientWidth) return;
@@ -544,33 +552,43 @@ function setStats(st) { const fl = (st && st.flows) || {}, days = (st && st.days
     l.el.classList.toggle("bad", bad > 0); l.w = l.hh = 0; }
   legend.innerHTML = [[grouped ? "flow" : "op", "sig-workflow"], ...(kinds.has("agent") ? [["agent", "sig-agent"]] : []), ["resource", "sig-resource"], ...(model.stores.length ? [["store · data between flows", "sig-store"]] : []), ["job", "sig-job"],
     ...(failing ? [[`failed in ${days} days`, "sig-error"]] : []), ...(ran && !grouped ? [["ran clean", "sig-ok"]] : [])]
-    .map(([t, c]) => `<span><i style="background:var(--fx-${c})"></i>${t}</span>`).join("") + `<span class="note">titanium: the parts · silver: shared · light: a signal</span>`;
+    .map(([t, c]) => `<span><i style="background:var(--fx-${c})"></i>${t}</span>`).join("") + `<span class="note">click a part or a line</span>`;
   needPlace = true; redraw();
   if (typeof sel !== "undefined" && sel) describe(); }
 
 
 // ── selection: a part's own links stay lit, the rest goes quiet; a card says what they are (F4) ──
 const QUIET = 0.2, cableDim = {uses: cableMat.uses.clone(), needs: cableMat.needs.clone(), data: cableMat.data.clone()}; for (const m of Object.values(cableDim)) m.color.multiplyScalar(0.16);
-const card = mk("aside", "fx-card"); card.hidden = true; host.append(card);
+/* the card stands in the studio's side panel when the page gives it a place there (opts.cardHost), else over the picture */
+const docked = opts.cardHost || null;
+const card = mk("aside", "fx-card"); card.hidden = true; (docked || host).append(card);
+if (docked) for (const n of ["text", "text-2", "sig-agent", "sig-store", "sig-error", "obsidian", "titanium", "graphite"]) docked.style.setProperty(`--fx-${n}`, css.getPropertyValue(`--fx-${n}`));
 const spot = new Map(); for (const it of core) spot.set(it.id, it); for (const c of clusters) spot.set(c.id, c);
-let sel = null;
-function select(id) { sel = id && spot.has(id) ? id : null;
-  const lit = sel ? new Set([sel]) : null; if (lit) for (const p of pairs) { if (p.src === sel) lit.add(p.dst); if (p.dst === sel) lit.add(p.src); }
+let sel = null, selLine = null;                                    // selLine: a selected line, {owner: its cluster, kind}
+function select(id) { const line = typeof id === "string" && id.startsWith("l:") ? {owner: id.slice(2, id.lastIndexOf("|")), kind: id.slice(id.lastIndexOf("|") + 1)} : null;
+  sel = line ? (spot.has(line.owner) ? id : null) : id && spot.has(id) ? id : null; selLine = sel && line ? line : null;
+  const lit = sel ? new Set([selLine ? selLine.owner : sel]) : null;
+  if (lit) for (const p of pairs) { if (selLine) { if (p.src === selLine.owner && strandKind(p.kind) === selLine.kind) lit.add(p.dst); } else { if (p.src === sel) lit.add(p.dst); if (p.dst === sel) lit.add(p.src); } }
   const k = (o) => !lit || (o != null && lit.has(o)) ? 1 : o == null ? 0.5 : QUIET;
   for (const b of [metal, slab, glass, smoked]) b.tone(k);
   if (puckMesh) { pucks.forEach((b, i) => puckMesh.setColorAt(i, col.copy(b.color).multiplyScalar(k(b.owner)))); puckMesh.instanceColor.needsUpdate = true; }
   for (const L of lightSets) { L.list.forEach((b, i) => { const f = k(b.owner) < 1 ? 0.12 : 1; L.mesh.setColorAt(i, col.copy(L.sigs[b.sig]).multiplyScalar(b.gain * 1.1 * f)); L.halo.setColorAt(i, col.copy(L.sigs[b.sig]).multiplyScalar(L.glow * b.gain / 1.5 * f)); });
     L.mesh.instanceColor.needsUpdate = true; L.halo.instanceColor.needsUpdate = true; }
   // a cable is lit when it is the selected cluster's, or runs from a cluster to the selected item
-  const wired = (c) => !lit || c.owner === sel || pairs.some(p => p.src === c.owner && p.dst === sel && strandKind(p.kind) === c.kind);
+  const wired = (c) => !lit || (selLine ? c.owner === selLine.owner && c.kind === selLine.kind : c.owner === sel) || !selLine && pairs.some(p => p.src === c.owner && p.dst === sel && strandKind(p.kind) === c.kind);
   for (const c of cables) c.mesh.material = wired(c) ? cableMat[c.kind] : cableDim[c.kind];
   for (const r of runs) r.el.classList.toggle("quiet", !wired(r));
   redraw();
   for (const l of labels) { l.el.classList.toggle("quiet", !!lit && !(l.owner && lit.has(l.owner))); l.el.classList.toggle("picked", !!sel && l.owner === sel); }
-  describe(); }
+  describe(); if (sel && docked) setTimeout(uncover, 260); }
+/* the side panel opens over the right of the picture: what was picked moves out from under it */
+function uncover() { if (!sel) return; const t = spot.get(selLine ? selLine.owner : sel); if (!t) return;
+  const cw = covered(); v3.set(t.x, 0.6, t.z).project(camera); const sx = (v3.x + 1) / 2 * vw(), edge = vw() - cw - 150;
+  if (cw > 0 && sx > edge) { view.cx += (sx - edge) * (view.span / view.zoom / vh()); apply(); } }
 /* the card (docs/FACTORY_PANELS.md): what the selected thing is, in its own words; what comes in; what goes out;
  * what it works with — every row goes somewhere */
-function describe() { card.textContent = ""; card.hidden = !sel; if (!sel) return;
+function describe() { card.textContent = ""; card.hidden = !sel && !docked; if (opts.onSelect) opts.onSelect(sel);
+  if (!sel) { if (docked) card.append(mk("p", "fx-hint", "Click a flow, a store, a shared block, a resource or a line on the picture: what it is, and what it works with, is shown here.")); return; }
   const head = (kind, name, sub, says) => { const x = mk("button", "fx-x", "×"); x.type = "button"; x.title = "Clear the selection  (Esc)"; x.onclick = () => select(null);
     card.append(x, mk("p", "fx-kind", kind), mk("h3", null, name)); if (says) card.append(mk("p", "fx-says", says)); if (sub) card.append(mk("p", "fx-sub", sub)); };
   const list = (title, rows, max = 60) => { if (!rows.length) return; card.append(mk("h4", null, `${title} · ${rows.length}`)); const ul = mk("div", "fx-rows");
@@ -591,6 +609,16 @@ function describe() { card.textContent = ""; card.hidden = !sel; if (!sel) retur
       for (const w of s[theirs]) { if (w.id === fid) continue; if (!per.has(w.id)) per.set(w.id, {who: w, via: []}); per.get(w.id).via.push(s.name); } }
     return [...per.values()].map(({who, via}) => { const box = who.type === "flow" ? clusterOf.get(who.id) : null, d = model.by.get(who.id);
       return {name: who.name, note: who.type === "job" ? (who.jobs ? `${who.jobs.length} jobs` : "job") : "", desc: `through ${via.join(", ")}`, go: box ? () => select(box) : who.type === "job" && opts.onRuns ? () => opts.onRuns(d) : null}; }); };
+  if (selLine) {                                                     // a line: what moves along it, one row per thing at its far end
+    const cl = spot.get(selLine.owner), of = pairs.filter(p => p.src === selLine.owner && strandKind(p.kind) === selLine.kind);
+    const row = (p) => { const t = model.by.get(p.dst), mine = t && t.type === "store" && !grouped ? (p.kind === "writes" ? t.writers : t.readers).find(w => w.id === selLine.owner) : null;
+      return {name: spot.get(p.dst).name, note: mine && mine.ops.length ? mine.ops.join(", ") : p.count > 1 ? `×${p.count}` : "", desc: t && t.description, go: () => select(p.dst)}; };
+    const says = {uses: "Code this flow is built from, that other flows are built from too. Nothing moves along it at run time: it says the flows share the block.",
+      needs: "What this flow reaches out to while it runs: models, services, databases.", data: "Data this flow leaves in a store or picks up from one. The light runs the way the data goes."}[selLine.kind];
+    head("Connection", `${cl.name} ↔ shared`, `${of.length} ${selLine.kind === "data" ? "store" : selLine.kind === "uses" ? "shared block" : "resource"}${of.length > 1 ? "s" : ""}`, says);
+    if (selLine.kind === "data") { list("Writes", of.filter(p => p.kind === "writes").map(row)); list("Reads", of.filter(p => p.kind === "reads").map(row)); }
+    else list(selLine.kind === "uses" ? "Shared blocks" : "Resources", of.map(row));
+    list("From", [{name: cl.name, note: cl.sub, go: () => select(selLine.owner)}]); return; }
   const c = spot.get(sel), e = model.by.get(sel);
   if (c.ghost) { head("Not in this project", c.name, "doors ask for this graph, and the project does not list it"); list("Asked for by", c.doors.map(doorRow)); return; }
   if (c.members) {                                                   // a cluster: one flow, or a domain of flows
@@ -621,7 +649,7 @@ function reveal(id) { const e = model.by.get(id); let o = spot.has(id) ? id : nu
   view.cx = v3.dot(RIGHT) - iL / 2 * k; view.cy = v3.dot(UP); apply(); select(o); return true; }
 const find = mk("input", "fx-find"); find.type = "search"; find.placeholder = "Find a flow, service, job, block, resource…"; find.setAttribute("aria-label", "Find on the picture"); find.autocomplete = "off";
 const found = mk("div", "fx-found"); found.hidden = true; hud.append(find, found);
-const things = [...model.flows, ...model.blocks.filter(b => b.shared), ...model.resources.filter(r => r.flows.length), ...model.stores.filter(s => s.flows.length), ...model.doors];
+const things = [...model.flows, ...model.blocks.filter(b => b.shared), ...model.resources.filter(r => r.flows.length), ...model.stores.filter(s => s.writers.length || s.readers.length), ...model.doors];
 find.oninput = () => { const q = find.value.trim().toLowerCase(); found.textContent = ""; found.hidden = !q; if (!q) return;
   const hits = things.filter(t => `${t.name} ${t.path || ""}`.toLowerCase().includes(q)).slice(0, 8);
   if (!hits.length) found.append(mk("div", "fx-row more", "Nothing by that name"));
@@ -639,6 +667,7 @@ return {
   pause() { live = false; if (raf) cancelAnimationFrame(raf); raf = 0; },
   resume() { if (!live) { live = true; kick(); } },
   dispose() { this.pause(); sized.disconnect(); document.removeEventListener("keydown", onKey);
+    card.remove();
     scene.traverse(o => { if (o.geometry) o.geometry.dispose(); for (const m of [].concat(o.material || [])) { for (const k of ["map", "alphaMap"]) if (m[k]) m[k].dispose(); m.dispose(); } });
     for (const b of [metal, slab, glass, smoked]) b.dispose(); renderer.dispose(); host.textContent = ""; delete host.dataset.ready; },
 };

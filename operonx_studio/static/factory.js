@@ -7,7 +7,13 @@
 
 window.Factory = (() => {
   const host = document.getElementById("factory");
-  let view = null, seen = null, loading = null;
+  let view = null, seen = null, loading = null, shown = null;
+  /* where the picture's card stands: beside the op inspector, in the side panel (factory.css shows the one in use) */
+  function dock() {
+    let d = document.getElementById("fx-inspect"); const ins = document.getElementById("inspector");
+    if (!d && ins) { d = document.createElement("div"); d.id = "fx-inspect"; ins.after(d); }
+    return d;
+  }
   let model = null, modelOf = null;                  // the factory model of the IR in hand, for placed()
   const on = () => document.body.classList.contains("factory-on");
   const btn = document.getElementById("btn-factory");     // in the canvas bar, so the picture does not depend on the rail being open
@@ -44,7 +50,11 @@ window.Factory = (() => {
         api(`/api/p/${PID}/flows/stats?days=7`).catch(() => null)]);
       if (!on()) { host.textContent = ""; return; }
       seen = state.ir;
-      view = mod.mount(host, state.ir, stats, {onOpen(name, node) {          // a flow, and (from a shared block) the op that uses it
+      view = mod.mount(host, state.ir, stats, {cardHost: dock(), onSelect(id) {         // the card is the side panel's Inspect tab: a selection brings it forward
+        if (!on()) return;
+        if (id && id !== shown) { if (typeof peekSide === "function") peekSide("inspect"); } else if (!id && shown && typeof unpeek === "function") unpeek();
+        shown = id || null;
+      }, onOpen(name, node) {          // a flow, and (from a shared block) the op that uses it
         FlowRail.open(name);
         if (node) requestAnimationFrame(() => { if (state.sel !== node && state.cardEls && state.cardEls.has(node)) select(node); });
       }, onRuns(door) {                                 // a job's page has its runs; a service's are in the Runs hub
@@ -69,6 +79,8 @@ window.Factory = (() => {
   function hide() {
     if (!on()) return;
     document.body.classList.remove("factory-on"); mark();
+    if (shown && typeof unpeek === "function") unpeek();
+    shown = null;
     if (view) view.pause();
   }
 
