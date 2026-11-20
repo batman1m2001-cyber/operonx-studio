@@ -67,3 +67,10 @@ GPU a blurred pane costs nothing while what is behind it stands still, so: `fx-r
 move) turns on `blur(1.5px)` for the rail, the flows list and the side panel; any move turns it off; the sparks are clipped
 out from under the panes, so nothing behind them changes at rest. Measured on the software renderer: 60 frames a second at
 rest with and without it. Names under the flows list step back like those under the side panel.
+
+**Every page.** The clear-glass tokens moved from `factory.css` (Flow section only) to the last block of
+`studio-dark.css`, on `body`: the bar, the rail, the side panel, the page panes, the home page's cards. Menus keep more
+tint (40%) because they open over running text. `factory.css` keeps only what belongs to the picture (the unblurred tint,
+the blur at rest, the names). On the other pages the change is mostly the lit edge: their backdrop
+(`canvas-bg-dark.webp`) is nearly flat, and clear glass shows only what is behind it.
+

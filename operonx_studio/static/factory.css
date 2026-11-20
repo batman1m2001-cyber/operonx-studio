@@ -157,28 +157,9 @@ body.factory-on[data-tab="flow"] #inspector:not([hidden]) + #fx-inspect { displa
 #fx-inspect .fx-card .fx-x { display: none; }                    /* the panel has its own close */
 #fx-inspect .fx-hint { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--fx-text-2); }
 
-/* ── clear glass, on the Flow section (the picture and the editor) ───────────────────────────────
- * The studio's panes were frosted: a heavy blur under a nearly opaque tint, so what lies behind
- * was a smear. Here they are clear glass: a thin dark tint, little blur, and the glass is drawn by
- * its edge — a bright upper rim, a hairline all round, a slanting sheen. What is behind stays in
- * view. These are the dark values (the studio is dark-first); the tokens are studio.css's own. */
-body[data-tab="flow"] {
-  --glass-clear: rgba(24, 26, 42, .20);
-  --glass-menu: rgba(20, 22, 36, .30);
-  --glass-frost: rgba(16, 18, 30, .34);
-  --glass-still: rgba(14, 16, 27, .50);          /* where nothing is blurred (no GPU): a little more tint keeps the words readable */
-  --glass-blur-clear: 2px; --glass-blur-menu: 5px; --glass-blur-frost: 8px;
-  --glass-sat: 165%;
-  --glass-sheen: linear-gradient(128deg, rgba(255, 255, 255, .13), rgba(255, 255, 255, .03) 30%, rgba(255, 255, 255, 0) 55%, rgba(255, 255, 255, .045));
-  --glass-edge: rgba(255, 255, 255, .15);
-  --glass-rim: rgba(255, 255, 255, .46);
-  --glass-outline: rgba(0, 0, 0, .40);
-  --glass-shadow: 0 12px 32px rgba(0, 0, 0, .34), 0 1px 2px rgba(0, 0, 0, .30);
-}
-/* the edge of a sheet of glass: lit from above, a fainter line where the light leaves it below */
-body[data-tab="flow"].floatframe:not(.ax-focus) :is(header.bar, .rail, #sidebar, .flowrail), body[data-tab="flow"] :is(.canvasbar, .ax-askbar) {
-  box-shadow: inset 0 0 0 1px var(--glass-edge), inset 0 1px 0 var(--glass-rim), inset 0 -1px 0 rgba(255, 255, 255, .10), inset 1px 0 0 rgba(255, 255, 255, .07),
-    0 0 0 .5px var(--glass-outline), var(--glass-shadow); }
+/* ── clear glass over the picture (the studio's clear glass itself: studio-dark.css, last block) ──
+ * where nothing is blurred behind a pane (no GPU), a little more tint keeps its words readable */
+body[data-tab="flow"] { --glass-still: rgba(14, 16, 27, .50); }
 /* the side panel holds running text: with nothing blurred behind it, it takes more tint than the rest, and the
  * picture's names do not show through it (factory3d.js marks the ones under it) */
 body.factory-on.fx-soft[data-tab="flow"]:not(.ax-focus) #sidebar { --glass-tint: rgba(13, 15, 25, .58); }
@@ -192,6 +173,4 @@ body.factory-on.fx-soft.fx-rest[data-tab="flow"]:not(.ax-focus) :is(.rail, .flow
 #factory .lb { border-color: rgba(255, 255, 255, .16); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22); }
 #factory .lb.item { background: rgba(18, 20, 33, .30); }
 #factory .fx-find, #factory .fx-reset { background: rgba(18, 20, 33, .40); border-color: rgba(255, 255, 255, .16); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .24); }
-@media (prefers-reduced-transparency: reduce) {
-  body[data-tab="flow"] { --glass-clear: rgba(16, 18, 30, .92); --glass-menu: rgba(16, 18, 30, .94); --glass-frost: rgba(16, 18, 30, .95); --glass-still: rgba(16, 18, 30, .96); }
-}
+@media (prefers-reduced-transparency: reduce) { body[data-tab="flow"] { --glass-still: rgba(16, 18, 30, .96); } }
