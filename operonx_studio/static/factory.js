@@ -11,8 +11,19 @@ window.Factory = (() => {
   let model = null, modelOf = null;                  // the factory model of the IR in hand, for placed()
   const on = () => document.body.classList.contains("factory-on");
   const btn = document.getElementById("btn-factory");     // in the canvas bar, so the picture does not depend on the rail being open
-  const mark = () => { if (btn) btn.setAttribute("aria-pressed", String(on())); };
+  const mark = () => { if (btn) btn.setAttribute("aria-pressed", String(on())); try { store(`factory:${PID}`, on()); } catch { /* a convenience */ } };
   if (btn) btn.onclick = () => (on() ? (hide(), FlowRail.render()) : show());
+  /* the Flow section's first two screens are one tab in two views: the picture, and the editor (factory.css
+   * marks the one in view) */
+  const tabs = {factory: document.querySelector('#hubtabs [data-view="factory"]'), flows: document.querySelector('#hubtabs [data-view="flows"]')};
+  if (tabs.factory) tabs.factory.addEventListener("click", () => show());
+  if (tabs.flows) tabs.flows.addEventListener("click", () => { if (on()) { hide(); FlowRail.render(); } });
+  /* a project opens on its picture, unless it was left on the editor or the address names an op */
+  (function first(tries) {
+    if (typeof state === "undefined" || !state.ir) { if (tries) setTimeout(() => first(tries - 1), 150); return; }
+    let want = true; try { want = recall(`factory:${PID}`, true) !== false; } catch { /* default */ }
+    if (want && document.body.dataset.tab === "flow" && !/[?&]op=/.test(location.search) && (state.ir.graphs || []).length > 1) show();
+  })(80);
 
   async function show() {
     if (!host) return;

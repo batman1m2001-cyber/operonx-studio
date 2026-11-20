@@ -30,12 +30,18 @@
   /* roles */
   --fx-bg: var(--fx-obsidian);
   --fx-fiber-uses: var(--fx-fiber-lav);          /* a connection to a shared block */
+  --fx-fiber-data: #C9A46A; --fx-sig-store: #E2B66E;   /* a store, and the data that moves through it: the one warm colour */
   --fx-fiber-needs: var(--fx-fiber-blue);   /* a data connection to a resource */
   --fx-text: var(--fx-silver); --fx-text-2: var(--fx-titanium);
   --fx-label: color-mix(in srgb, var(--fx-graphite) 88%, transparent);   /* no blur behind it: on a machine with no GPU a blurred pane is redone on the CPU every time something under it moves */
 }
 @media (prefers-reduced-transparency: reduce) { #factory { --fx-label: var(--fx-graphite); } }
 body.factory-on[data-tab="flow"] #factory { display: block; }
+/* one tab, two views: only the view on screen reads as the open one */
+body.factory-on #hubtabs [data-view="flows"].active, body:not(.factory-on) #hubtabs [data-view="factory"].active { color: var(--text-2); font-weight: 500; }
+body.factory-on #hubtabs [data-view="flows"].active::after, body:not(.factory-on) #hubtabs [data-view="factory"].active::after { background: none; }
+body.factory-on[data-tab="flow"] #hubtabs [data-view="factory"] { color: var(--text); font-weight: 600; }
+body.factory-on[data-tab="flow"] #hubtabs [data-view="factory"]::after { background: var(--accent); }
 body.factory-on[data-tab="flow"] .main > #stage, body.factory-on[data-tab="flow"] #minimap,
 body.factory-on[data-tab="flow"] .canvasbar > :not(#btn-flowrail):not(#btn-factory) { display: none; }
 /* no GPU (factory3d.js marks it): the studio's glass rail and bar lie over the picture, and a blurred pane is blurred again on the
@@ -57,6 +63,7 @@ body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(v
 #factory .fx-sparks i { position: absolute; left: 0; top: 0; width: 3px; height: 3px; margin: -1.5px; border-radius: 50%; background: #fff;
   box-shadow: 0 0 3px 1px rgba(200, 184, 255, .55); offset-rotate: 0deg; offset-distance: 0%; transform: scale(var(--s, 1)); animation: fx-run linear infinite; }
 #factory .fx-sparks i.quiet { opacity: .08; }
+#factory .fx-sparks i.data { background: var(--fx-sig-store); }
 @keyframes fx-run { to { offset-distance: 100%; } }
 @media (prefers-reduced-motion: reduce) { #factory .fx-sparks i { animation: none; } }
 #factory .fx-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
@@ -70,6 +77,8 @@ body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(v
 #factory .lb.core b { font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; }
 #factory .lb.item { padding: 1px 6px; background: color-mix(in srgb, var(--fx-graphite) 55%, transparent); }
 #factory .lb.item b { font-size: 10.5px; font-weight: 550; }
+#factory .lb.store { padding: 0 5px; border-color: color-mix(in srgb, var(--fx-sig-store) 28%, transparent); }
+#factory .lb.store b { font: 500 9.5px var(--mono); color: color-mix(in srgb, var(--fx-sig-store) 62%, var(--fx-text)); }
 #factory .lb.ghost b { color: var(--fx-text-2); font-style: italic; }
 #factory .lb.open { pointer-events: auto; cursor: pointer; }
 #factory .lb.open:hover { border-color: var(--fx-sig-agent); }
@@ -93,6 +102,10 @@ body.floatframe:not(.ax-focus).flowrail-off .main > #factory { --fx-left: calc(v
 #factory .fx-card .fx-x:hover { color: var(--fx-text); }
 #factory .fx-card .fx-kind { margin: 0; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--fx-sig-agent); }
 #factory .fx-card h3 { margin: 3px 0 0; font: 600 15px var(--mono); color: var(--fx-text); overflow-wrap: anywhere; }
+#factory .fx-card .fx-says { margin: 7px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--fx-text); }
+#factory .fx-row.said { flex-wrap: wrap; }
+#factory .fx-row em { flex-basis: 100%; font-style: normal; font-size: 11px; line-height: 1.35; color: var(--fx-text-2); text-align: left; white-space: normal; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 #factory .fx-card .fx-sub { margin: 4px 0 0; font-size: 11.5px; color: var(--fx-text-2); overflow-wrap: anywhere; }
 #factory .fx-card h4 { margin: 14px 0 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--fx-text-2); }
 #factory .fx-go { margin-top: 10px; width: 100%; padding: 7px 10px; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer;

@@ -40,7 +40,7 @@ const ids = (xs) => xs.map(x => x.id || x).sort();
 
 test("doors: a service runs its flow, a schedule runs a job, a job runs its flow", () => {
   const m = FM.build(project());
-  assert.deepEqual(m.counts, {flows: 3, services: 5, jobs: 3, blocks: 2, sharedBlocks: 2, resources: 3, domains: 2, unresolved: 2});
+  assert.deepEqual(m.counts, {flows: 3, services: 5, jobs: 3, blocks: 2, sharedBlocks: 2, resources: 3, stores: 0, domains: 2, unresolved: 2});
   assert.equal(m.by.get("s:order").flow, "f:orders");
   assert.equal(m.by.get("s:nightly").job, "j:sweep");
   assert.equal(m.by.get("j:sweep").flow, "f:refunds");
@@ -167,4 +167,26 @@ test("a project of 1,200 flows is modelled in well under a second", () => {
   assert.equal(m.counts.domains, 14);
   assert.equal(m.blocks.find(b => b.kind === "graph").uses.length, 1200);
   assert.ok(ms < 800, `took ${ms.toFixed(0)} ms`);
+});
+
+test("stores: a flow that writes one and a flow that reads it are linked through it; a job that seeds it is a writer", () => {
+  const ir = project();
+  ir.graphs[0].description = "Take an order.";
+  ir.stores = [
+    {name: "orders", description: "Orders taken, waiting to ship.",
+      writers: [{graph: "orders", op: "orders.take"}, {graph: "orders", op: "orders.stock.read"}, {job: "prices", op: "prices.seed"}],
+      readers: [{graph: "report", op: "report.ask"}, {graph: "nowhere", op: "x"}]},
+    {name: "unused", description: "", writers: [], readers: []},
+  ];
+  const m = FM.build(ir, null);
+  assert.equal(m.by.get("f:orders").description, "Take an order.");
+  const s = m.by.get("t:orders");
+  assert.equal(s.description, "Orders taken, waiting to ship.");
+  assert.deepEqual(s.writers, [{id: "f:orders", name: "orders", type: "flow", ops: ["take", "read"]}, {id: "j:prices", name: "prices", type: "job", ops: ["seed"]}]);
+  assert.deepEqual(s.readers.map(r => r.id), ["f:report"]);                    // a reader the project does not list is left out
+  assert.deepEqual(s.flows, ["f:orders", "f:report"]);
+  assert.deepEqual(m.outOf("f:orders").filter(l => l.dst === "t:orders").map(l => [l.kind, l.count]), [["writes", 2]]);
+  assert.deepEqual(m.outOf("f:report").filter(l => l.dst === "t:orders").map(l => l.kind), ["reads"]);
+  assert.deepEqual(m.by.get("t:unused").flows, []);
+  assert.equal(m.counts.stores, 2);
 });

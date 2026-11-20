@@ -883,19 +883,52 @@ def extract_stores(manifest: Manifest, graphs: List[Dict[str, Any]]) -> List[Dic
         name: {"name": name, "description": text, "readers": [], "writers": []} for name, text in described.items()
     }
 
-    def walk(flow: str, nodes: List[Dict[str, Any]]) -> None:
+    def walk(who: Dict[str, str], nodes: List[Dict[str, Any]]) -> None:
         for node in nodes:
             for key, side in (("reads", "readers"), ("writes", "writers")):
                 for name in node.get(key) or ():
                     entry = stores.setdefault(name, {"name": name, "description": "", "readers": [], "writers": []})
-                    entry[side].append({"graph": flow, "op": node.get("id") or node.get("name")})
+                    entry[side].append({**who, "op": node.get("id") or node.get("name")})
             inner = node.get("graph")
             if isinstance(inner, dict):
-                walk(flow, inner.get("nodes") or [])
+                walk(who, inner.get("nodes") or [])
 
     for g in graphs:
-        walk(str(g.get("name")), g.get("nodes") or [])
+        walk({"graph": str(g.get("name"))}, g.get("nodes") or [])
+    for jobs, runs, nodes in _job_nodes(manifest, {str(g.get("entry")) for g in graphs}):
+        walk({"job": jobs[0], "jobs": jobs, "runs": runs}, nodes)
     return [stores[name] for name in sorted(stores)]
+
+
+def _job_nodes(manifest: Manifest, drawn: set) -> List[Tuple[List[str], str, List[Dict[str, Any]]]]:
+    """The ops of each job graph that is not one of the drawn flows, with
+    the jobs that run it: a job that seeds a store (an ingest, a backfill)
+    is that store's writer, and its graph is in no service. Jobs that run
+    the same graph are one entry. A job that cannot be built is left out."""
+    if not manifest.app:
+        return []
+    try:
+        from operonx.app import Application
+
+        jobs = list(Application.load(manifest.root / "operonx.toml").jobs)
+    except Exception:  # noqa: BLE001 — no application layer, no jobs
+        return []
+    by_entry: Dict[str, Tuple[List[str], str, List[Dict[str, Any]]]] = {}
+    for job in jobs:
+        fn = getattr(job, "graph", None)
+        entry = f"{getattr(fn, '__module__', '')}:{getattr(fn, '__name__', '')}"
+        if fn is None or entry in drawn:
+            continue
+        if entry in by_entry:
+            by_entry[entry][0].append(str(job.name))
+            continue
+        try:
+            spec = GraphSpec(name=str(job.name), entry=entry, bind={}, inputs={}, src=manifest.src, obj=fn)
+            by_entry[entry] = ([str(job.name)], entry.split(":")[-1],
+                               extract_graph(spec, manifest.root, {}).get("nodes") or [])
+        except Exception:  # noqa: BLE001
+            continue
+    return list(by_entry.values())
 
 
 # ── resources and env ────────────────────────────────────────────────────
