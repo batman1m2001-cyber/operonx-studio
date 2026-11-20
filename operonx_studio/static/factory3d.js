@@ -45,6 +45,7 @@ const used = model.resources.filter(r => r.flows.length);
 if (used.length <= MANY) for (const r of used) { core.push({id: r.id, name: r.name, m: "resource", h: 1.0, kind: "resource"}); boxOfRes.set(r.id, r.id); }
 else { const kinds = new Map(); for (const r of used) { if (!kinds.has(r.kind)) kinds.set(r.kind, []); kinds.get(r.kind).push(r); }
   for (const [k, rs] of kinds) { const id = rs.length > 1 ? `k:${k}` : rs[0].id; core.push({id, name: rs.length > 1 ? `${k} ×${rs.length}` : rs[0].name, m: "resource", h: 0.9 + Math.min(1.6, rs.length * 0.18), kind: "resource"}); for (const r of rs) boxOfRes.set(r.id, id); } }
+for (const s of model.stores.filter(s => s.flows.length)) core.push({id: s.id, name: s.name, m: "store", h: 0.8, kind: "store"});
 
 /* the clusters */
 const sharedAt = new Set(model.blocks.filter(b => b.shared).flatMap(b => b.uses.map(u => u.at)));
@@ -61,11 +62,14 @@ for (const [name, ds] of asked) clusters.push({id: `?:${name}`, name, members: [
 
 /* the links: one strand per (cluster, core item), all a cluster's strands one bundle */
 const clusterOf = new Map(); for (const c of clusters) for (const m of c.members) clusterOf.set(m, c.id);
-const boxOf = (id) => { const e = model.by.get(id); if (!e) return null; if (e.type === "flow") return clusterOf.get(id); if (e.type === "block") return e.shared ? id : null; if (e.type === "resource") return boxOfRes.get(id) || null; return null; };
+const boxOf = (id) => { const e = model.by.get(id); if (!e) return null; if (e.type === "flow") return clusterOf.get(id); if (e.type === "block") return e.shared ? id : null; if (e.type === "resource") return boxOfRes.get(id) || null; if (e.type === "store") return e.flows.length ? id : null; return null; };
+const strandKind = (k) => (k === "reads" || k === "writes" ? "data" : k);          // a flow's lines to the stores are one kind of strand
 const pairs = FactoryModel.pairs(model, boxOf);
 const strandsFor = (n) => (n === 0 ? 0 : n <= 3 ? 1 : n <= 8 ? 2 : 3);
 for (const c of clusters) { const mine = pairs.filter(p => p.src === c.id); c.links = mine;
-  c.strands = ["uses", "needs"].flatMap(k => Array.from({length: strandsFor(mine.filter(p => p.kind === k).length)}, () => ({kind: k}))); c.bw = Math.max(0, c.strands.length - 1) * STRAND; }
+  // a data strand's light runs the way the data goes: out to the core when the flow writes, back when it only reads
+  c.strands = ["uses", "needs", "data"].flatMap(k => { const of = mine.filter(p => strandKind(p.kind) === k), w = of.some(p => p.kind === "writes"), r = of.some(p => p.kind === "reads");
+    return Array.from({length: strandsFor(of.length)}, (_, i) => ({kind: k, rev: k === "data" && (!w || (r && i % 2 === 1))})); }); c.bw = Math.max(0, c.strands.length - 1) * STRAND; }
 
 // ── layout, on the ground plane ───────────────────────────────────
 for (const c of clusters) {
@@ -304,6 +308,11 @@ const PARTS = {
     for (const a of [-1, 1]) { metal.add(x + a * e, y + h - p, z, p, p, W - 2 * p, TI.natural, PLAIN(0.014, 1)); metal.add(x, y + h - p, z + a * e, W - 2 * p, p, p, TI.natural, PLAIN(0.014, 1)); }
     smoked.add(x, y + 0.16, z, W - 2 * p + 0.02, h - 0.16 - 0.03, W - 2 * p + 0.02, TI.smoke, PLAIN(0.01));
     light(x, y + 0.17, z, 0.62, Math.max(0.12, h * 0.42), 0.62, "sig-resource", "far", 0.8); },
+  /* a store: a dark base and three sheets of smoked glass stacked on it — what is kept — with an amber line */
+  store(x, y, z, h) { const W = 1.7;
+    metal.add(x, y, z, W, 0.14, W, TI.dark, PLAIN(0.04, 0.5)); strip(x, y, z, W, "sig-store", 0.16, 1.5, "mid", 0.05);
+    for (let i = 0; i < 3; i++) smoked.add(x, y + 0.19 + i * 0.2, z, W - 0.34, 0.13, W - 0.34, TI.smoke, PLAIN(0.02));
+    light(x, y + 0.145, z, W - 0.6, 0.03, W - 0.6, "sig-store", "far", 0.6); },
 };
 const part = (m, x, y, z, w, h, d) => { kinds.add(m); const n0 = pucks.length; PARTS[m](x, y, z, h); for (let i = n0; i < pucks.length; i++) pucks[i].owner = owner; foot(x, y, z, w, h, d); };
 
@@ -312,10 +321,13 @@ const labels = [];
 slab.add(0, -0.16, 0, coreHalf * 2 + 1.6, 0.16, coreHalf * 2 + 1.6, TI.plateUnder, PLAIN(0.04)); foot(0, -0.16, 0, coreHalf * 2 + 1.6, 0.16, coreHalf * 2 + 1.6, false);
 slab.add(0, 0, 0, coreHalf * 2, 0.22, coreHalf * 2, TI.plateCore, PLAIN(0.04, 0.4));
 for (const it of core) { owner = it.id; part(it.m, it.x, 0.22, it.z, 1.7, it.h, 1.7); engraved.push({text: it.name, x: it.x, y: 0.221, z: it.z + 1.22, size: 0.24});
-  if (core.length <= 9) labels.push({x: it.x, y: 0.22 + it.h + 0.5, z: it.z, cls: "item", title: it.name, owner: it.id}); }
+  if (core.length <= 9) labels.push({x: it.x, y: 0.22 + it.h + 0.5, z: it.z, cls: "item", title: it.name, owner: it.id});
+  else if (it.kind === "store" && core.length <= 40) labels.push({x: it.x, y: 0.22 + it.h + 0.25, z: it.z, cls: "item store", title: it.name, owner: it.id}); }   // a store is known by its name
 owner = null;
 const nBlocks = core.filter(i => i.kind === "block").length;
-labels.push({x: coreHalf + 0.6, y: -1.6, z: coreHalf + 0.6, cls: "core", title: "Core", sub: `${nBlocks} shared blocks · ${core.length - nBlocks} resources`});
+const nStores = core.filter(i => i.kind === "store").length;
+labels.push({x: coreHalf + 0.6, y: -1.6, z: coreHalf + 0.6, cls: "core", title: "Shared — what the flows have in common",
+  sub: [`${nBlocks} shared blocks`, `${core.length - nBlocks - nStores} resources`, nStores ? `${nStores} store${nStores > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ")});
 // the clusters: a graphite plate each; where a bundle of fibres leaves it, and where it reaches the core, a port
 for (const c of clusters) { owner = c.id;
   const s = c.side, alongX = !Math.abs(s.out[0]), padX = alongX ? c.wu : c.wv, padZ = alongX ? c.wv : c.wu;
@@ -386,7 +398,8 @@ for (const e of engraved) { const cv = document.createElement("canvas"), x = cv.
   const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({alphaMap: tex, color: 0x05060a, transparent: true, opacity: 0.7, depthWrite: false})); mesh.position.set(e.x, e.y, e.z); mesh.renderOrder = 1; lod.close.add(mesh); }
 
 /* cables: a strand is a thin lit tube on the ground — out of the cluster, along its lane, into the core */
-const cableMat = {uses: new THREE.MeshBasicMaterial({color: tok("fiber-uses").multiplyScalar(1.3)}), needs: new THREE.MeshBasicMaterial({color: tok("fiber-needs").multiplyScalar(1.3)})};
+const cableMat = {uses: new THREE.MeshBasicMaterial({color: tok("fiber-uses").multiplyScalar(1.3)}), needs: new THREE.MeshBasicMaterial({color: tok("fiber-needs").multiplyScalar(1.3)}),
+  data: new THREE.MeshBasicMaterial({color: tok("fiber-data").multiplyScalar(1.15)})};
 const runs = [], cables = [];                                                // sampled strands, for the lights that travel them
 const Y = 0.2;
 for (const c of clusters) { const s = c.side; if (!c.strands.length) continue;
@@ -405,7 +418,7 @@ for (const c of clusters) { const s = c.side; if (!c.strands.length) continue;
     const len = path.getLength();
     const tube = new THREE.Mesh(new THREE.TubeGeometry(path, Math.max(10, Math.round(len * 1.3)), 0.034, 4, false), cableMat[p.kind]); scene.add(tube);
     cables.push({mesh: tube, owner: c.id, kind: p.kind});
-    runs.push({owner: c.id, kind: p.kind, pts: path.getSpacedPoints(Math.max(8, Math.round(len * 2))), len, kind: p.kind, phase: (((k * 0.37 + c.u * 0.11) % 1) + 1) % 1});
+    runs.push({owner: c.id, kind: p.kind, pts: path.getSpacedPoints(Math.max(8, Math.round(len * 2))), len, rev: !!p.rev, phase: (((k * 0.37 + c.u * 0.11) % 1) + 1) % 1});
   }); }
 /* energy: a small light travelling every strand from its cluster to the core. They are not in the 3D frame:
  * each is an element moved along its strand's path by a CSS animation, in a layer that follows the camera —
@@ -415,6 +428,7 @@ const PX = 20, still = matchMedia("(prefers-reduced-motion: reduce)").matches;  
 for (const r of runs) { const e = mk("i"), secs = r.len / 4.2;
   e.style.offsetPath = `path("${r.pts.map((q, i) => `${i ? "L" : "M"}${(q.dot(RIGHT) * PX).toFixed(1)} ${(-q.dot(UP) * PX).toFixed(1)}`).join("")}")`;
   if (still) e.style.offsetDistance = `${Math.round(r.phase * 100)}%`; else { e.style.animationDuration = `${secs.toFixed(2)}s`; e.style.animationDelay = `${(-r.phase * secs).toFixed(2)}s`; }
+  if (r.kind === "data") e.className = "data"; if (r.rev && !still) e.style.animationDirection = "reverse";
   sparkLayer.append(e); r.el = e; }
 
 
@@ -518,7 +532,7 @@ function place() { const put = [];
     for (const q of put) if (Math.abs(q.sx - l.sx) < (q.w + l.w) / 2 + 6 && l.sy - l.hh < q.sy + 2 && l.sy > q.sy - q.hh) l.sy = q.sy + l.hh + 3;
     put.push(l); l.el.style.left = `${l.sx}px`; l.el.style.top = `${l.sy}px`; } }
 titleEl.textContent = model.name || NAME;
-countsEl.textContent = `${model.counts.flows.toLocaleString()} flows${grouped ? ` in ${model.counts.domains} domains` : ""} · ${model.counts.services} services · ${model.counts.jobs} jobs · ${model.counts.sharedBlocks} shared blocks · ${model.counts.resources} resources`;
+countsEl.textContent = `${model.counts.flows.toLocaleString()} flows${grouped ? ` in ${model.counts.domains} domains` : ""} · ${model.counts.services} services · ${model.counts.jobs} jobs · ${model.counts.sharedBlocks} shared blocks · ${model.counts.resources} resources${model.counts.stores ? ` · ${model.counts.stores} store${model.counts.stores > 1 ? "s" : ""}` : ""}`;
 /* the numbers of the last days, on the picture: lights, names, the legend. Called again when they change. */
 function setStats(st) { const fl = (st && st.flows) || {}, days = (st && st.days) || 7;
   for (const f of model.flows) { const x = fl[f.name] || {}; f.runs = x.runs || 0; f.errors = x.errors || 0; f.avgMs = x.avg_ms == null ? null : x.avg_ms; }
@@ -528,7 +542,7 @@ function setStats(st) { const fl = (st && st.flows) || {}, days = (st && st.days
     failing += bad; ran += runs ? 1 : 0;
     l.subEl.textContent = [l.sub, runs ? `${runs.toLocaleString()} runs` : "", bad ? (grouped ? `${bad} failing` : `${errs.toLocaleString()} failed`) : ""].filter(Boolean).join(" · ");
     l.el.classList.toggle("bad", bad > 0); l.w = l.hh = 0; }
-  legend.innerHTML = [[grouped ? "flow" : "op", "sig-workflow"], ...(kinds.has("agent") ? [["agent", "sig-agent"]] : []), ["resource", "sig-resource"], ["job", "sig-job"],
+  legend.innerHTML = [[grouped ? "flow" : "op", "sig-workflow"], ...(kinds.has("agent") ? [["agent", "sig-agent"]] : []), ["resource", "sig-resource"], ...(model.stores.length ? [["store · data between flows", "sig-store"]] : []), ["job", "sig-job"],
     ...(failing ? [[`failed in ${days} days`, "sig-error"]] : []), ...(ran && !grouped ? [["ran clean", "sig-ok"]] : [])]
     .map(([t, c]) => `<span><i style="background:var(--fx-${c})"></i>${t}</span>`).join("") + `<span class="note">titanium: the parts · silver: shared · light: a signal</span>`;
   needPlace = true; redraw();
@@ -536,7 +550,7 @@ function setStats(st) { const fl = (st && st.flows) || {}, days = (st && st.days
 
 
 // ── selection: a part's own links stay lit, the rest goes quiet; a card says what they are (F4) ──
-const QUIET = 0.2, cableDim = {uses: cableMat.uses.clone(), needs: cableMat.needs.clone()}; for (const m of Object.values(cableDim)) m.color.multiplyScalar(0.16);
+const QUIET = 0.2, cableDim = {uses: cableMat.uses.clone(), needs: cableMat.needs.clone(), data: cableMat.data.clone()}; for (const m of Object.values(cableDim)) m.color.multiplyScalar(0.16);
 const card = mk("aside", "fx-card"); card.hidden = true; host.append(card);
 const spot = new Map(); for (const it of core) spot.set(it.id, it); for (const c of clusters) spot.set(c.id, c);
 let sel = null;
@@ -548,39 +562,55 @@ function select(id) { sel = id && spot.has(id) ? id : null;
   for (const L of lightSets) { L.list.forEach((b, i) => { const f = k(b.owner) < 1 ? 0.12 : 1; L.mesh.setColorAt(i, col.copy(L.sigs[b.sig]).multiplyScalar(b.gain * 1.1 * f)); L.halo.setColorAt(i, col.copy(L.sigs[b.sig]).multiplyScalar(L.glow * b.gain / 1.5 * f)); });
     L.mesh.instanceColor.needsUpdate = true; L.halo.instanceColor.needsUpdate = true; }
   // a cable is lit when it is the selected cluster's, or runs from a cluster to the selected item
-  const wired = (c) => !lit || c.owner === sel || pairs.some(p => p.src === c.owner && p.dst === sel && p.kind === c.kind);
+  const wired = (c) => !lit || c.owner === sel || pairs.some(p => p.src === c.owner && p.dst === sel && strandKind(p.kind) === c.kind);
   for (const c of cables) c.mesh.material = wired(c) ? cableMat[c.kind] : cableDim[c.kind];
   for (const r of runs) r.el.classList.toggle("quiet", !wired(r));
   redraw();
   for (const l of labels) { l.el.classList.toggle("quiet", !!lit && !(l.owner && lit.has(l.owner))); l.el.classList.toggle("picked", !!sel && l.owner === sel); }
   describe(); }
-/* the card: what the selected thing is, what leads to it and what it leads to — every row goes somewhere */
+/* the card (docs/FACTORY_PANELS.md): what the selected thing is, in its own words; what comes in; what goes out;
+ * what it works with — every row goes somewhere */
 function describe() { card.textContent = ""; card.hidden = !sel; if (!sel) return;
-  const head = (kind, name, sub) => { const x = mk("button", "fx-x", "×"); x.type = "button"; x.title = "Clear the selection  (Esc)"; x.onclick = () => select(null);
-    card.append(x, mk("p", "fx-kind", kind), mk("h3", null, name)); if (sub) card.append(mk("p", "fx-sub", sub)); };
+  const head = (kind, name, sub, says) => { const x = mk("button", "fx-x", "×"); x.type = "button"; x.title = "Clear the selection  (Esc)"; x.onclick = () => select(null);
+    card.append(x, mk("p", "fx-kind", kind), mk("h3", null, name)); if (says) card.append(mk("p", "fx-says", says)); if (sub) card.append(mk("p", "fx-sub", sub)); };
   const list = (title, rows, max = 60) => { if (!rows.length) return; card.append(mk("h4", null, `${title} · ${rows.length}`)); const ul = mk("div", "fx-rows");
     for (const r of rows.slice(0, max)) { const b = mk(r.go ? "button" : "div", "fx-row"); if (r.go) { b.type = "button"; b.onclick = r.go; if (r.tip) b.title = r.tip; } b.append(mk("b", null, r.name)); if (r.note) b.append(mk("span", null, r.note));
+      if (r.desc) { b.classList.add("said"); b.append(mk("em", null, r.desc)); }
       if (!r.also) { ul.append(b); continue; }                        // a second place the row leads to
       const two = mk("div", "fx-pair"), a = mk("button", "fx-also", "↗"); a.type = "button"; a.title = r.also.tip; a.setAttribute("aria-label", r.also.tip); a.onclick = r.also.go; two.append(b, a); ul.append(two); }
     if (rows.length > max) ul.append(mk("div", "fx-row more", `and ${rows.length - max} more`)); card.append(ul); };
   const open = (name, at) => () => opts.onOpen && opts.onOpen(name, at);
-  const flowRow = (f) => ({name: f.name, note: [`${f.ops} ops`, f.runs ? `${f.runs.toLocaleString()} runs` : "", f.errors ? `${f.errors} failed` : ""].filter(Boolean).join(" · "), go: open(f.name)});
-  const doorRow = (d) => ({name: d.name, note: d.type === "job" ? d.kind : `${d.kind} ${d.path || ""}`.trim(), go: opts.onRuns ? () => opts.onRuns(d) : null,
+  const flowRow = (f) => ({name: f.name, note: [`${f.ops} ops`, f.runs ? `${f.runs.toLocaleString()} runs` : "", f.errors ? `${f.errors} failed` : ""].filter(Boolean).join(" · "), desc: f.description, go: open(f.name)});
+  const doorRow = (d) => ({name: d.name, note: d.type === "job" ? d.kind : `${d.kind} ${d.path || ""}`.trim(), desc: d.description, go: opts.onRuns ? () => opts.onRuns(d) : null,
     tip: d.type === "job" ? "Open this job, with its runs" : "Open this service's runs",
     also: d.type === "service" && opts.onDoor ? {tip: "Its row on the Services screen", go: () => opts.onDoor(d)} : null});
-  const toCore = (kind) => pairs.filter(p => p.src === sel && p.kind === kind).map(p => ({name: spot.get(p.dst).name, note: p.count > 1 ? `×${p.count}` : "", go: () => select(p.dst)}));
+  const toCore = (kind) => pairs.filter(p => p.src === sel && p.kind === kind).map(p => { const t = model.by.get(p.dst); return {name: spot.get(p.dst).name, note: p.count > 1 ? `×${p.count}` : "", desc: t && t.description, go: () => select(p.dst)}; });
+  /* who a flow works with through the stores: the ones that read what it writes, the ones that write what it reads */
+  const through = (fid, mine, theirs) => { const per = new Map();
+    for (const l of model.outOf(fid)) { if (l.kind !== mine) continue; const s = model.by.get(l.dst);
+      for (const w of s[theirs]) { if (w.id === fid) continue; if (!per.has(w.id)) per.set(w.id, {who: w, via: []}); per.get(w.id).via.push(s.name); } }
+    return [...per.values()].map(({who, via}) => { const box = who.type === "flow" ? clusterOf.get(who.id) : null, d = model.by.get(who.id);
+      return {name: who.name, note: who.type === "job" ? (who.jobs ? `${who.jobs.length} jobs` : "job") : "", desc: `through ${via.join(", ")}`, go: box ? () => select(box) : who.type === "job" && opts.onRuns ? () => opts.onRuns(d) : null}; }); };
   const c = spot.get(sel), e = model.by.get(sel);
   if (c.ghost) { head("Not in this project", c.name, "doors ask for this graph, and the project does not list it"); list("Asked for by", c.doors.map(doorRow)); return; }
   if (c.members) {                                                   // a cluster: one flow, or a domain of flows
     if (grouped) { head("Domain", c.name, c.sub); list("Flows", c.members.map(i => model.by.get(i)).sort((a, b) => b.errors - a.errors || b.runs - a.runs || b.ops - a.ops).map(flowRow), 200); }
-    else { head("Flow", c.name, [c.sub, e.runs ? `${e.runs.toLocaleString()} runs in 7 days` : "", e.errors ? `${e.errors} failed` : ""].filter(Boolean).join(" · "));
+    else { head("Flow", c.name, [c.sub, e.runs ? `${e.runs.toLocaleString()} runs in 7 days` : "", e.errors ? `${e.errors} failed` : ""].filter(Boolean).join(" · "), e.description);
       const go = mk("button", "fx-go", "Open in the editor"); go.type = "button"; go.onclick = open(c.name); card.append(go); }
-    list("Comes in through", c.doors.map(doorRow), 12); list("Uses, shared with other flows", toCore("uses")); list("Needs", toCore("needs")); return; }
+    // what it works with first: the data it gets and passes on; then how work comes in, then what it is built from
+    if (!grouped) { list("Gets data from", through(e.id, "reads", "writers")); list("Passes data to", through(e.id, "writes", "readers")); }
+    list("Reads", toCore("reads")); list("Writes", toCore("writes"));
+    list("Comes in through", c.doors.map(doorRow), 6);
+    list("Uses, shared with other flows", toCore("uses")); list("Needs", toCore("needs")); return; }
   const users = pairs.filter(p => p.dst === sel).map(p => ({name: spot.get(p.src).name, note: p.count > 1 ? `×${p.count}` : "", go: () => select(p.src)}));
-  if (c.kind === "block") { head("Shared block", c.name, e.kind === "op" ? `one op · ${e.definedAt}` : `a nested graph of ${e.ops} ops`);
+  if (c.kind === "store") { const row = (w) => { const box = w.type === "flow" ? clusterOf.get(w.id) : null;
+      return {name: w.name, note: w.type === "job" ? (w.jobs ? `${w.jobs.length} jobs` : "job") : "", desc: w.ops.join(", "), tip: w.jobs ? w.jobs.join(", ") : "", go: box ? () => select(box) : w.type === "job" && opts.onRuns ? () => opts.onRuns(model.by.get(w.id)) : null}; };
+    head("Store", c.name, `${e.writers.length} write it · ${e.readers.length} read it`, e.description || "A named place where one flow leaves data and another picks it up.");
+    list("Written by", e.writers.map(row)); list("Read by", e.readers.map(row)); return; }
+  if (c.kind === "block") { head("Shared block", c.name, e.kind === "op" ? `one op · ${e.definedAt}` : `a nested graph of ${e.ops} ops`, e.description || "Code more than one flow is built from.");
     if (grouped) list("Used in", users); list("Used by", e.uses.map(u => ({name: model.by.get(u.flow).name, note: `as ${u.name}`, go: open(model.by.get(u.flow).name, u.at)})), 80); return; }
   const rs = model.resources.filter(r => boxOfRes.get(r.id) === sel);
-  head(rs.length > 1 ? "Resources" : "Resource", c.name, rs.length > 1 ? "" : rs[0].key);
+  head(rs.length > 1 ? "Resources" : "Resource", c.name, rs.length > 1 ? "" : rs[0].key, "Something the project reaches out to — a model, a service, a database — declared in resources.yaml.");
   if (rs.length > 1) list("In this group", rs.map(r => ({name: r.name, note: `${r.flows.length} flows`})));
   if (grouped) list("Needed in", users); list("Needed by", [...new Set(rs.flatMap(r => r.flows))].map(i => flowRow(model.by.get(i))), 80); }
 /* go to a thing by name: its cluster or core item is selected and brought to the middle */
@@ -591,7 +621,7 @@ function reveal(id) { const e = model.by.get(id); let o = spot.has(id) ? id : nu
   view.cx = v3.dot(RIGHT) - iL / 2 * k; view.cy = v3.dot(UP); apply(); select(o); return true; }
 const find = mk("input", "fx-find"); find.type = "search"; find.placeholder = "Find a flow, service, job, block, resource…"; find.setAttribute("aria-label", "Find on the picture"); find.autocomplete = "off";
 const found = mk("div", "fx-found"); found.hidden = true; hud.append(find, found);
-const things = [...model.flows, ...model.blocks.filter(b => b.shared), ...model.resources.filter(r => r.flows.length), ...model.doors];
+const things = [...model.flows, ...model.blocks.filter(b => b.shared), ...model.resources.filter(r => r.flows.length), ...model.stores.filter(s => s.flows.length), ...model.doors];
 find.oninput = () => { const q = find.value.trim().toLowerCase(); found.textContent = ""; found.hidden = !q; if (!q) return;
   const hits = things.filter(t => `${t.name} ${t.path || ""}`.toLowerCase().includes(q)).slice(0, 8);
   if (!hits.length) found.append(mk("div", "fx-row more", "Nothing by that name"));
