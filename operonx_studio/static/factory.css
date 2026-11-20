@@ -181,7 +181,11 @@ body[data-tab="flow"].floatframe:not(.ax-focus) :is(header.bar, .rail, #sidebar,
     0 0 0 .5px var(--glass-outline), var(--glass-shadow); }
 /* the side panel holds running text: with nothing blurred behind it, it takes more tint than the rest, and the
  * picture's names do not show through it (factory3d.js marks the ones under it) */
-body.factory-on.fx-soft[data-tab="flow"]:not(.ax-focus) #sidebar { --glass-tint: rgba(13, 15, 25, .66); }
+body.factory-on.fx-soft[data-tab="flow"]:not(.ax-focus) #sidebar { --glass-tint: rgba(13, 15, 25, .58); }
+/* a little blur behind the panes, so what shows through does not compete with their text — only while the picture is at
+ * rest (factory3d.js sets fx-rest; the moving sparks are clipped out from under the panes, so nothing behind them changes) */
+body.factory-on.fx-soft.fx-rest[data-tab="flow"]:not(.ax-focus) :is(.rail, .flowrail, #sidebar) {
+  -webkit-backdrop-filter: blur(1.5px) !important; backdrop-filter: blur(1.5px) !important; }
 #factory .lb.under { opacity: .12; }
 /* the picture's own slips: names, the find box, reset */
 #factory { --fx-label: rgba(18, 20, 33, .42); }

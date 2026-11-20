@@ -463,7 +463,9 @@ function frame() { raf = 0; if (!live) return; if (!host.clientWidth) return;   
   if (needPlace) { place(); needPlace = false; }
   if (dirty) raf = requestAnimationFrame(frame); }
 const kick = () => { if (live && !raf) raf = requestAnimationFrame(frame); };
-const redraw = () => { dirty = true; kick(); };
+let restT = 0;                                                     // glass over the picture is blurred only while the picture is at rest (factory.css)
+const stir = () => { document.body.classList.remove("fx-rest"); clearTimeout(restT); restT = setTimeout(() => document.body.classList.add("fx-rest"), 320); };
+const redraw = () => { dirty = true; stir(); kick(); };
 function apply() { const a = vw() / vh(), hgt = view.span / view.zoom, k = hgt / vh();
   sparkLayer.style.transform = `translate(${-view.cx / k}px, ${view.cy / k}px) scale(${1 / (PX * k)})`;
   sparkLayer.style.setProperty("--s", Math.min(1, 2.4 * PX * k).toFixed(3));   // close up a light stays a point, not a disc
@@ -539,7 +541,9 @@ function place() { const put = [];
   for (const l of labels.slice().sort((a, b) => a.sy - b.sy)) {
     for (const q of put) if (Math.abs(q.sx - l.sx) < (q.w + l.w) / 2 + 6 && l.sy - l.hh < q.sy + 2 && l.sy > q.sy - q.hh) l.sy = q.sy + l.hh + 3;
     put.push(l); l.el.style.left = `${l.sx}px`; l.el.style.top = `${l.sy}px`; }
-  const edge = vw() - covered(); for (const l of labels) l.el.classList.toggle("under", l.sx + l.w / 2 > edge + 8 && l.sx - l.w / 2 > edge - l.w); }   // a name under the side panel steps back
+  const edge = vw() - covered(), left = Math.max(0, hud.offsetLeft - 14);
+  for (const l of labels) l.el.classList.toggle("under", (l.sx + l.w / 2 > edge + 8 && l.sx - l.w / 2 > edge - l.w) || (l.sx - l.w / 2 < left - 8 && l.sx + l.w / 2 < left + l.w));
+  sparkHost.style.clipPath = `inset(0 ${Math.max(0, vw() - edge)}px 0 ${left}px)`; }   // a name under the side panel steps back
 titleEl.textContent = model.name || NAME;
 countsEl.textContent = `${model.counts.flows.toLocaleString()} flows${grouped ? ` in ${model.counts.domains} domains` : ""} · ${model.counts.services} services · ${model.counts.jobs} jobs · ${model.counts.sharedBlocks} shared blocks · ${model.counts.resources} resources${model.counts.stores ? ` · ${model.counts.stores} store${model.counts.stores > 1 ? "s" : ""}` : ""}`;
 /* the numbers of the last days, on the picture: lights, names, the legend. Called again when they change. */
