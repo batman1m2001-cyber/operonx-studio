@@ -1880,7 +1880,7 @@ function deselect() {
  * graph is, its doors, and the painted run if any. */
 function renderFlowInfo() {
   if (window.FlowRail) window.FlowRail.render();
-  if (!state.sel) unpeek();   // the rail marks the flow on screen
+  if (!state.sel && !(window.Factory && Factory.on())) unpeek();   // on the picture the panel is the picture's (factory.js)   // the rail marks the flow on screen
   if (state.sel) return;
   // an execution is open in the run's tree: a code reload (the assistant
   // editing, say) must not wipe the panel the user is working in

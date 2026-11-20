@@ -38,7 +38,11 @@ That is the `news` store of mr-finance as its card lists it: written by, read by
 - `static/factory3d.js`: the store part, the `data` strand, the card (`describe`).
 - `static/factory.js`, `project.html`, `factory.css`: the Factory tab; the one warm colour (`--fx-sig-store`).
 
-## Not done
+## Where the card is, and lines
 
-- A line cannot be clicked: what moves along it is said in the card of either end.
-- A store used only by jobs is not drawn (it is in the IR).
+- The card is the side panel's **Inspect** tab (`#fx-inspect`, beside the op inspector), not a box over the
+  picture: a selection opens the panel the way a click on an op does, Esc lets it go, and the assistant is the
+  tab next to it. What was picked slides out from under the panel.
+- A **line can be clicked** (`pickLine`): its card says what kind of connection it is and lists what is at its
+  far end — for a data line, the stores written and read, with the ops that do it.
+- A store that only jobs use stands in the middle too, without a line; its card lists the jobs.

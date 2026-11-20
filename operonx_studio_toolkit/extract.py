@@ -914,20 +914,38 @@ def _job_nodes(manifest: Manifest, drawn: set) -> List[Tuple[List[str], str, Lis
     except Exception:  # noqa: BLE001 — no application layer, no jobs
         return []
     by_entry: Dict[str, Tuple[List[str], str, List[Dict[str, Any]]]] = {}
+
+    def leaves(job: Any) -> List[Any]:
+        """A job of steps is its steps' graphs, each a job of its own."""
+        steps = getattr(job, "steps", None)
+        return [leaf for step in steps for leaf in leaves(step)] if steps else [job]
+
     for job in jobs:
-        fn = getattr(job, "graph", None)
-        entry = f"{getattr(fn, '__module__', '')}:{getattr(fn, '__name__', '')}"
-        if fn is None or entry in drawn:
-            continue
-        if entry in by_entry:
-            by_entry[entry][0].append(str(job.name))
-            continue
-        try:
-            spec = GraphSpec(name=str(job.name), entry=entry, bind={}, inputs={}, src=manifest.src, obj=fn)
-            by_entry[entry] = ([str(job.name)], entry.split(":")[-1],
-                               extract_graph(spec, manifest.root, {}).get("nodes") or [])
-        except Exception:  # noqa: BLE001
-            continue
+        for leaf in leaves(job):
+            fn = getattr(leaf, "graph", None)
+            label = getattr(fn, "__name__", None) or getattr(fn, "name", None)
+            if fn is None or not label:
+                continue
+            entry = f"{getattr(fn, '__module__', '')}:{label}"
+            if entry in drawn or any(str(d).endswith(f":{label}") for d in drawn):
+                continue
+            if entry in by_entry:
+                if str(job.name) not in by_entry[entry][0]:
+                    by_entry[entry][0].append(str(job.name))
+                continue
+            try:
+                if getattr(fn, "_operonx_graph", False):
+                    spec = GraphSpec(name=str(job.name), entry=entry, bind={}, inputs={}, src=manifest.src, obj=fn)
+                    nodes = extract_graph(spec, manifest.root, {}).get("nodes") or []
+                elif _slot(fn, "_ops") is not None:
+                    # a graph already made (a job handed an instance): read as it stands. Calling
+                    # it would RUN it — it is an op, not a @graph function.
+                    nodes = _subgraph(fn, manifest.root, {}, "").get("nodes") or []
+                else:
+                    continue
+                by_entry[entry] = ([str(job.name)], str(label), nodes)
+            except Exception:  # noqa: BLE001
+                continue
     return list(by_entry.values())
 
 
