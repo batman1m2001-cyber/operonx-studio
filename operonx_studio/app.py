@@ -196,6 +196,8 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "name": graph.get("name"),
+        # what the flow is for: its @graph docstring (extract_graph)
+        **({"description": graph["description"]} if graph.get("description") else {}),
         "entries": graph.get("entries") or [],
         "exits": graph.get("exits") or [],
         # `END >> op`: drawn below the END terminal, wired from it (flowlayout.js)
@@ -216,7 +218,8 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                 **{k: nodes_by_id.get(n.id, {}).get(k) for k in
                    ("bound", "start", "end", "outputs", "inputs", "source",
                     "loop", "is_gen", "transient", "serve_role", "code",
-                    "resource", "routes", "description", "show_keys", "op_type", "agent")},
+                    "resource", "routes", "description", "show_keys", "op_type", "agent",
+                    "reads", "writes")},
                 # what the card says it holds is what opening it shows: a loop's
                 # members are laid out in the container, so they are counted, not
                 # the one hidden loop graph that holds them
@@ -1809,6 +1812,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             "services": ir.get("services") or ir.get("serves") or [],
             "jobs": ir.get("jobs") or [],
             "resources": ir.get("resources") or {},
+            # every store an op reads or writes, with who does (extract_stores)
+            "stores": ir.get("stores") or [],
             "traces_configured": True,
         }
 
