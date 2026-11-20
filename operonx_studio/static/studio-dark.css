@@ -414,7 +414,7 @@
 :root[data-theme="dark"] { --glass-page: rgba(24, 24, 32, .42); }
 :root[data-theme="dark"]:not([data-glass="solid"]) body.floatframe:not(.ax-focus),
 :root[data-theme="dark"]:not([data-glass="solid"]) body.page {
-  background: url("/static/backdrop-dark.webp") center / cover no-repeat fixed, var(--glass-under); }   /* the lit glyph: light for the clear glass to show (backdrop.html?g=lit); the flow canvas keeps the quiet one */
+  background: url("/static/backdrop-dark.webp") center / cover no-repeat fixed, var(--glass-under); }   /* the cosmos: the DNA backbone, the arch of operonx constellations over it (docs/img/canvas/cosmos.html); the flow canvas keeps the quiet one */
 :root[data-theme="dark"]:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > :is(.pane, #traces, #jobs, #resources),
 :root[data-theme="dark"]:not([data-glass="solid"]) body.page {
   --surface: rgba(255, 255, 255, .035); --surface-2: rgba(255, 255, 255, .05);

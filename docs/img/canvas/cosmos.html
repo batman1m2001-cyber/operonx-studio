@@ -1,0 +1,134 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#000}canvas{display:block}</style></head><body>
+<canvas id="c" width="2560" height="1440"></canvas>
+<svg width="0" height="0">
+ <path id="s1" d="M -180 1190 C 480 1400, 980 880, 1500 1020 S 2180 1230, 2720 360"/>
+ <path id="s2" d="M 1150 -120 C 1480 260, 2060 120, 2680 640"/>
+ <path id="g" d="M 465 45 C 400 80, 362 118, 330 150 C 282 200, 222 268, 150 262 C 70 255, 35 200, 38 150 C 42 90, 100 38, 185 40 C 255 42, 300 110, 330 150 C 366 196, 410 234, 462 258"/>
+</svg>
+<script>
+const V = "d", RICH = true, GAL = true;
+let seed = 20261120; const R = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+const N = () => { let u = 0; for (let i = 0; i < 6; i++) u += R(); return (u - 3) / .707; };
+const c = document.getElementById("c"), W = 2560, H = 1440; let x = c.getContext("2d");
+const blob = (cx, cy, r, rgb, a, sy = 1) => { x.save(); x.translate(cx, cy); x.scale(1, sy); const h = x.createRadialGradient(0, 0, 0, 0, 0, r); h.addColorStop(0, `rgba(${rgb},${a})`); h.addColorStop(.55, `rgba(${rgb},${a * .35})`); h.addColorStop(1, `rgba(${rgb},0)`); x.fillStyle = h; x.fillRect(-r, -r, r * 2, r * 2); x.restore(); };
+const dot = (px, py, r, col) => { x.fillStyle = col; x.beginPath(); x.arc(px, py, r, 0, 7); x.fill(); };
+// 1. background: black-indigo space, nebula, sparse stars
+let g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, "#07070d"); g.addColorStop(.5, "#06060b"); g.addColorStop(1, "#0a0916"); x.fillStyle = g; x.fillRect(0, 0, W, H);
+x.globalCompositeOperation = "lighter";
+const K = RICH ? 1.35 : 1;
+blob(2050, 980, 1150, "70,58,170", .16 * K, .7); blob(1500, 1150, 900, "44,62,150", .12 * K, .6); blob(2300, 300, 760, "92,62,190", .09 * K); blob(380, 1200, 800, "50,48,140", .10 * K, .6); blob(900, 200, 700, "40,44,110", .05 * K);
+for (let i = 0; i < 46; i++) blob(R() * W, 500 + R() * 900, 160 + R() * 320, R() < .5 ? "86,70,190" : "52,70,160", .018 * K, .5 + R() * .5);   // cloud texture
+for (let i = 0; i < 150; i++) { const t = R(), wx = -100 + t * 2700 + N() * 120, wy = 1180 - t * 330 + N() * (150 + 120 * t); blob(wx, wy, 50 + R() * 150, R() < .6 ? "98,80,225" : "60,84,200", .030 + .03 * t, .35 + R() * .5); }
+for (let i = 0; i < 60; i++) blob(1500 + R() * 1100, 200 + R() * 700, 60 + R() * 160, "86,72,210", .022, .4 + R() * .5);
+x.globalCompositeOperation = "source-over"; for (let i = 0; i < 26; i++) blob(300 + R() * 2200, 300 + R() * 1000, 120 + R() * 260, "5,5,9", .30, .4 + R() * .6);   // dark lanes
+x.globalCompositeOperation = "lighter";
+for (let i = 0; i < 340; i++) { const m = R(), r = m < .9 ? .5 + R() * .6 : m < .985 ? 1.1 + R() * .8 : 2 + R(); const sx = R() * W, sy = R() * H; dot(sx, sy, r, `rgba(${210 + R() * 45 | 0},${205 + R() * 40 | 0},255,${.2 + R() * .55})`); if (r > 2) blob(sx, sy, r * 9, "190,180,255", .28); }
+// 2. midground: distant spheres, orbital curves
+const sphere = (cx, cy, r, a) => { x.globalCompositeOperation = "source-over"; const b = x.createRadialGradient(cx - r * .35, cy + r * .4, r * .1, cx, cy, r); b.addColorStop(0, `rgba(30,27,62,${a})`); b.addColorStop(1, `rgba(9,9,18,${a})`); x.fillStyle = b; x.beginPath(); x.arc(cx, cy, r, 0, 7); x.fill();
+  x.globalCompositeOperation = "lighter"; x.save(); x.beginPath(); x.arc(cx, cy, r, 0, 7); x.clip(); x.filter = `blur(${r * .07}px)`; x.strokeStyle = `rgba(170,150,255,${a * .9})`; x.lineWidth = r * .07; x.beginPath(); x.arc(cx, cy, r * .99, Math.PI * .55, Math.PI * 1.25); x.stroke(); x.filter = "none"; x.restore();
+  x.strokeStyle = `rgba(210,196,255,${a * .85})`; x.lineWidth = 1.5; x.beginPath(); x.arc(cx, cy, r, Math.PI * .62, Math.PI * 1.18); x.stroke(); };
+sphere(2290, 250, 215, .9); sphere(250, 250, 86, .6); sphere(2440, 1500, 230, .8);
+const orbit = (cx, cy, rx, ry, rot, a, at) => { x.save(); x.translate(cx, cy); x.rotate(rot * Math.PI / 180); x.strokeStyle = `rgba(170,160,255,${a})`; x.lineWidth = 1.1; x.beginPath(); x.ellipse(0, 0, rx, ry, 0, 0, 7); x.stroke(); const px = Math.cos(at) * rx, py = Math.sin(at) * ry; blob(px, py, 26, "200,185,255", .5); dot(px, py, 3, "rgba(245,240,255,.9)"); x.restore(); };
+// the orbital system the constellations belong to: thin, faint, each round something
+const ring = (cx, cy, rx, ry, rot, a) => { x.save(); x.translate(cx, cy); x.rotate(rot * Math.PI / 180); x.strokeStyle = `rgba(170,160,255,${a})`; x.lineWidth = 1; x.beginPath(); x.ellipse(0, 0, rx, ry, 0, 0, 7); x.stroke(); x.restore(); };
+const ARCH0 = {cx: 1250, cy: 1050};
+ring(ARCH0.cx, ARCH0.cy, 1090, 1010, 0, .05); ring(2290, 250, 330, 92, -24, .14);   // the arch's own orbit, a breath outside it; the far sphere's ring
+// 2b. galaxies in the shape of the operonx glyph, scattered through the depth: star dust along the glyph, a bright core at its crossing
+function galaxy(cx, cy, sc, rot, flat, br) { const GP = document.getElementById("g"), GL = GP.getTotalLength(), M = 240, pts = [], ph = R() * 6.283, u = 1 / sc * (.5 + sc * .62) * 1.5; br = Math.min(1, br * 1.3);   // u: one screen-ish pixel in glyph units
+  for (let i = 0; i <= M; i++) { const s0 = i / M * GL, p = GP.getPointAtLength(s0), q = GP.getPointAtLength(Math.min(GL, s0 + 1.5)), dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1; pts.push({x: p.x, y: p.y, nx: -dy / d, ny: dx / d, z: .5 + .5 * Math.sin(i / M * 6.283 * 1.5 + ph)}); }   // z: how near this stretch is
+  blob(cx, cy, 380 * sc, "96,84,220", .07 * br, flat);
+  x.save(); x.translate(cx, cy); x.rotate(rot * Math.PI / 180); x.scale(sc, sc * flat); x.translate(-260, -150); x.lineCap = "round";
+  const d = new Path2D(GP.getAttribute("d")); x.filter = `blur(${Math.max(2.5, 20 * sc)}px)`; x.strokeStyle = `rgba(128,108,245,${.22 * br})`; x.lineWidth = 50; x.stroke(d); x.filter = "none";
+  // soft dust diffusing outward, then the fine particles that draw the two edges of the band, then a thread down its middle
+  const n = Math.round(700 + 6200 * sc);
+  for (let i = 0; i < n * .34; i++) { const o = pts[R() * M | 0], w = N() * (15 + 13 * R()); dot(o.x + o.nx * w + N() * 3, o.y + o.ny * w + N() * 3, (.32 + R() * .4) * u, `rgba(170,165,255,${(.05 + R() * .16) * (.45 + .55 * o.z) * br})`); }
+  for (let i = 0; i < n * .5; i++) { const o = pts[R() * M | 0], e = R() < .5 ? -11 : 11, w = e + N() * 1.5; dot(o.x + o.nx * w, o.y + o.ny * w, (.3 + R() * .45 + o.z * .28) * u, R() < .3 ? `rgba(250,246,255,${(.20 + R() * .5) * (.35 + .65 * o.z) * br})` : `rgba(198,186,255,${(.16 + R() * .42) * (.35 + .65 * o.z) * br})`); }
+  for (let i = 0; i < n * .16; i++) { const o = pts[R() * M | 0], w = N() * 3.2; dot(o.x + o.nx * w, o.y + o.ny * w, (.28 + R() * .35) * u, `rgba(150,165,255,${(.10 + R() * .3) * (.4 + .6 * o.z) * br})`); }
+  // filaments: hair-thin, their weight and light following the depth
+  for (const [off, a0] of [[-11, .55], [11, .55], [0, .22]]) for (let i = 0; i < M; i++) { const a = pts[i], b = pts[i + 1], z = (a.z + b.z) / 2; x.strokeStyle = off ? `rgba(206,196,255,${a0 * (.2 + .8 * z) * br})` : `rgba(140,150,255,${a0 * (.3 + .7 * z) * br})`; x.lineWidth = (.3 + .5 * z) * u; x.beginPath(); x.moveTo(a.x + a.nx * off, a.y + a.ny * off); x.lineTo(b.x + b.nx * off, b.y + b.ny * off); x.stroke(); }
+  // energy bridges across the band, sparse
+  for (let i = 6; i < M; i += 9) { const a = pts[i]; x.strokeStyle = `rgba(170,165,255,${.16 * (.2 + .8 * a.z) * br})`; x.lineWidth = .5 * u; x.beginPath(); x.moveTo(a.x - a.nx * 11, a.y - a.ny * 11); x.lineTo(a.x + a.nx * 11, a.y + a.ny * 11); x.stroke(); }
+  // the heart of the loop: a small bright bulge, stars thinning round it
+  for (let i = 0; i < n * .13; i++) { const rr = Math.abs(N()) * 40, an = R() * 6.283; dot(178 + Math.cos(an) * rr * 1.15, 152 + Math.sin(an) * rr * .9, (.3 + R() * .5) * u, `rgba(${R() < .4 ? "252,248,255" : "200,188,255"},${(.14 + R() * .46) * Math.max(.12, 1 - rr / 110) * br})`); }
+  const glow = (gx, gy, gr, a, core) => { const h = x.createRadialGradient(gx, gy, 0, gx, gy, gr); h.addColorStop(0, `rgba(255,251,255,${a})`); h.addColorStop(core, `rgba(214,200,255,${a * .45})`); h.addColorStop(1, "rgba(140,118,255,0)"); x.fillStyle = h; x.fillRect(gx - gr, gy - gr, gr * 2, gr * 2); };
+  glow(178, 152, 74, 1 * br, .14); glow(178, 152, 22, .9 * br, .5);
+  // nodes: the crossing, the two ends, three on the loop — small, polished, a restrained bloom
+  for (const [gx, gy, k] of [[330, 150, 1.25], [465, 45, 1], [462, 258, 1], [185, 40, .62], [38, 150, .62], [150, 262, .62]]) { const r = Math.max(2.4, 1.5 * u) * k; glow(gx, gy, r * 6.5, .42 * br, .2); dot(gx, gy, r, `rgba(252,249,255,${Math.min(1, .95 * br + .1)})`); x.strokeStyle = `rgba(205,194,255,${.4 * br})`; x.lineWidth = .5 * u; x.beginPath(); x.arc(gx, gy, r * 2.3, 0, 7); x.stroke(); }
+  x.restore(); }
+let GALS = [];
+function helix(id, A0, A1, dens, bright, phase0, draw) { const P = document.getElementById(id), L = P.getTotalLength(), STEP = 4, n = Math.ceil(L / STEP), T = [];
+  let ph = phase0; for (let i = 0; i <= n; i++) { const s = i * STEP, t = s / L, A = A0 + (A1 - A0) * t * t, p = P.getPointAtLength(s), q = P.getPointAtLength(Math.min(L, s + 2)), dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1; T.push({x: p.x, y: p.y, nx: -dy / d, ny: dx / d, A, ph, t}); ph += STEP / (A * 1.75); }
+  const at = (i, k) => { const o = T[i], f = o.ph + k * Math.PI; return [o.x + o.nx * o.A * Math.sin(f), o.y + o.ny * o.A * Math.sin(f), Math.cos(f)]; };
+  const fade = (t) => Math.min(1, t / .06, (1 - t) / .04) ;
+  if (!draw) return T;                     // the geometry only: the network is laid out against it before anything is drawn
+  // ribbons: a wide soft band along the spine, a thin glow along each strand
+  // (blurred in a few long pieces: one blurred stroke per segment is far too slow)
+  const piece = (i0, i1, f) => { x.beginPath(); for (let i = i0; i <= i1; i++) { const q = f(i); i === i0 ? x.moveTo(q[0], q[1]) : x.lineTo(q[0], q[1]); } x.stroke(); };
+  const CH = 8, cs = Math.floor(n / CH);
+  x.filter = "blur(34px)"; x.lineCap = "round"; for (let j = 0; j < CH; j++) { const o = T[j * cs + (cs >> 1)]; x.strokeStyle = `rgba(110,92,235,${.20 * bright * fade(o.t)})`; x.lineWidth = o.A * 2.1; piece(j * cs, Math.min(n, (j + 1) * cs), (i) => [T[i].x, T[i].y]); }
+  for (const k of [0, 1]) { x.filter = "blur(5px)"; for (let j = 0; j < CH; j++) { const o = T[j * cs + (cs >> 1)]; x.strokeStyle = `rgba(150,135,255,${.16 * bright * fade(o.t)})`; x.lineWidth = 2 + o.A * .04; piece(j * cs, Math.min(n, (j + 1) * cs), (i) => at(i, k)); } x.filter = "none";
+  }
+  // the two strands, each three hair-thin filaments, drawn from the far side to the near: one lavender-white, one cosmic blue
+  { const at2 = (i, k, e) => { const o = T[i], f = o.ph + k * Math.PI, w = o.A * (Math.sin(f) + e * Math.cos(f)); return [o.x + o.nx * w, o.y + o.ny * w, Math.cos(f)]; }, segs = [];
+    for (const k of [0, 1]) for (const e of [-.1, 0, .1]) for (let i = 0; i < n; i++) segs.push([at2(i, k, e), at2(i + 1, k, e), k, e, T[i].t]);
+    segs.sort((p, q) => p[0][2] - q[0][2]);
+    for (const [a, b, k, e, t] of segs) { const z = (a[2] + 1) / 2, f = fade(t) * bright; x.strokeStyle = k ? `rgba(132,150,255,${(.07 + .62 * z * z) * f * (e ? .5 : 1)})` : `rgba(230,218,255,${(.07 + .75 * z * z) * f * (e ? .5 : 1)})`; x.lineWidth = (e ? .4 : .7) + z * z * (e ? .8 : 2.1); x.beginPath(); x.moveTo(a[0], a[1]); x.lineTo(b[0], b[1]); x.stroke(); }
+  }
+  // rungs: fine filaments, a small node at each end
+  let next = Math.ceil(T[0].ph / .40) * .40; for (let i = 0; i < n; i++) { if (T[i].ph < next) continue; next += .40; const a = at(i, 0), b = at(i, 1), f = fade(T[i].t) * bright, len = Math.hypot(a[0] - b[0], a[1] - b[1]); if (len < T[i].A * .5) continue;
+    const lg = x.createLinearGradient(a[0], a[1], b[0], b[1]); lg.addColorStop(0, `rgba(200,186,255,${.5 * f})`); lg.addColorStop(.5, `rgba(130,138,255,${.2 * f})`); lg.addColorStop(1, `rgba(200,186,255,${.5 * f})`); x.strokeStyle = lg; x.lineWidth = 1; x.beginPath(); x.moveTo(a[0], a[1]); x.lineTo(b[0], b[1]); x.stroke();
+    for (const e of [a, b]) { const z = (e[2] + 1) / 2, r = (1.1 + T[i].A * .022) * (.6 + z * .7); dot(e[0], e[1], r * (.55 + z * .7), `rgba(235,228,255,${(.15 + .75 * z * z) * f})`); if (z > .7) blob(e[0], e[1], r * 7, "170,150,255", .22 * f); } }
+  // particle scattering round the strands
+  for (let j = 0; j < dens; j++) { const i = R() * n | 0, k = R() < .5 ? 0 : 1, o = T[i], a = at(i, k), z = (a[2] + 1) / 2, sp = o.A * (R() < .8 ? .09 : .42); dot(a[0] + N() * sp, a[1] + N() * sp, (.4 + R() * .9) * (.6 + z * .6), `rgba(${190 + R() * 60 | 0},${180 + R() * 50 | 0},255,${(.10 + R() * .42) * (.4 + z * .6) * bright * fade(o.t)})`); }
+  return T; }
+const far = helix("s2", 16, 34, 0, .5, 1.1, false), near = helix("s1", 46, 158, 0, 1, 0, false);
+// the network is drawn on a sheet of its own, cut away wherever a constellation or the backbone lies, and laid down first: its lines pass BEHIND the things they join
+const main = x, sheet = document.createElement("canvas"); sheet.width = W; sheet.height = H; x = sheet.getContext("2d"); x.globalCompositeOperation = "lighter";
+// the network: nodes off the helix, joined to it by fine filaments and particle streams; no two alike
+const on = (T, f) => T[Math.round(f * (T.length - 1))];
+// THE FIGURE. One arch springs from the backbone, rises over it and comes back down to it; the hubs lie on that arch, evenly
+// spaced; from each hub a rib falls to the backbone; a second, inner arc ties the ribs half way down; a shallow keel hangs
+// below. The constellations sit AT the junctions (their crossing node is the junction), so every line ends in a thing.
+const ARCH = {cx: 1250, cy: 1050, rx: 1010, ry: 930}, hub = (deg) => [ARCH.cx + ARCH.rx * Math.cos(deg * Math.PI / 180), ARCH.cy + ARCH.ry * Math.sin(deg * Math.PI / 180)];
+const HB = [200, 235, 270, 305, 340].map(hub), RIBF = [.14, .30, .47, .63, .78];
+const seat = (p, sc, rot, flat, br) => [p[0] - 70 * sc * Math.cos(rot * Math.PI / 180), p[1] - 70 * sc * Math.sin(rot * Math.PI / 180), sc, rot, flat, br];   // a constellation whose crossing node is p
+const spine = (f) => { const o = on(near, f); return [o.x, o.y]; }, FT = RIBF.map(spine), MD = HB.map((h, i) => [(h[0] + FT[i][0]) / 2 + (i - 2) * 26 + (i === 0 ? 40 : i === 4 ? -40 : 0), h[1] * .46 + FT[i][1] * .54]), KL = [[690, 1345], [1290, 1395], [1930, 1335]];
+GALS = [seat(HB[1], .70, -14, .66, .8), seat(HB[3], .46, 18, .6, .72), seat(HB[0], .28, -32, .8, .64), seat(HB[4], .26, 24, .6, .62), seat(MD[1], .20, -8, .7, .6), seat(MD[3], .18, 40, .75, .56), seat(KL[0], .28, -20, .5, .58), seat(KL[2], .30, 14, .6, .6),
+  [110, 360, .08, -40, .9, .65], [2470, 650, .09, 15, .7, .7], [140, 1340, .07, 30, .7, .6], [2390, 1300, .10, -12, .6, .7], [1010, 70, .06, 10, .8, .7]];
+const NODES = [[HB[2][0], HB[2][1], 7.5], [MD[0][0], MD[0][1], 3.6], [MD[2][0], MD[2][1], 5], [MD[4][0], MD[4][1], 3.6], [KL[1][0], KL[1][1], 5]];
+// the network, in three levels (the third is the two orbits above):
+//   primary   — a continuous luminous filament with a soft halo and a few particles travelling along it: constellation or hub -> the DNA backbone
+//   secondary — a thinner, dimmer filament between neighbours
+const cross = (cx, cy, sc, rot) => [cx + 70 * sc * Math.cos(rot * Math.PI / 180), cy + 70 * sc * Math.sin(rot * Math.PI / 180)];   // a constellation's crossing node
+const chain = (pts, tier) => { const P1 = tier === 1, n = pts.length, segs = [];
+  for (let i = 0; i < n - 1; i++) { const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n - 1, i + 2)]; segs.push([p1, [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6], [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6], p2]); }
+  const path = () => { x.beginPath(); x.moveTo(pts[0][0], pts[0][1]); for (const [, c1, c2, b] of segs) x.bezierCurveTo(c1[0], c1[1], c2[0], c2[1], b[0], b[1]); };
+  const at = ([a, c1, c2, b], t) => { const u = 1 - t; return [u * u * u * a[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * b[0], u * u * u * a[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * b[1]]; };
+  x.lineCap = "round"; x.lineJoin = "round";
+  if (P1) { x.filter = "blur(8px)"; x.strokeStyle = "rgba(128,108,255,.30)"; x.lineWidth = 7; path(); x.stroke(); x.filter = "blur(1.6px)"; x.strokeStyle = "rgba(170,155,255,.40)"; x.lineWidth = 2.6; path(); x.stroke(); x.filter = "none"; }
+  x.strokeStyle = P1 ? "rgba(214,204,255,.70)" : "rgba(180,170,255,.26)"; x.lineWidth = P1 ? 1.3 : .85; path(); x.stroke();
+  if (P1) for (const sg of segs) { const len = Math.hypot(sg[3][0] - sg[0][0], sg[3][1] - sg[0][1]), k = Math.max(2, Math.round(len / 130)), o0 = R();   // information on its way: a few bright grains with a short tail
+    for (let i = 0; i < k; i++) { const t = (i + o0) / k; for (let j2 = 0; j2 < 6; j2++) { const q = at(sg, Math.max(0, t - j2 * 5 / len)); dot(q[0], q[1], 1.6 - j2 * .2, `rgba(248,244,255,${.8 - j2 * .13})`); } const q = at(sg, t); blob(q[0], q[1], 12, "190,175,255", .45); } }
+  for (const e of [pts[0], pts[n - 1]]) dot(e[0], e[1], P1 ? 2.4 : 1.6, `rgba(250,247,255,${P1 ? .9 : .55})`); };
+// secondary: the inner arc through the ribs' middles, and the keel under the backbone
+chain([MD[0], MD[1], MD[2], MD[3], MD[4]], 2); chain([FT[1], KL[0], KL[1], KL[2], FT[3]], 2); 
+// primary: the arch, backbone to backbone, and three ribs — the middle one runs on through the backbone to the keel
+chain([FT[0], MD[0], HB[0], HB[1], HB[2], HB[3], HB[4], MD[4], FT[4]], 1);
+chain([HB[1], MD[1], FT[1]], 1); chain([HB[2], MD[2], FT[2], KL[1]], 1); chain([HB[3], MD[3], FT[3]], 1);
+x.globalCompositeOperation = "destination-out"; x.lineCap = "round"; x.lineJoin = "round";
+for (const T of [near, far]) for (const k of [0, Math.PI]) { x.filter = "blur(2px)"; x.strokeStyle = "rgba(0,0,0,.96)"; x.lineWidth = 6 + T[T.length >> 1].A * .05; x.beginPath(); T.forEach((o, i) => { const w = o.A * Math.sin(o.ph + k), px = o.x + o.nx * w, py = o.y + o.ny * w; i ? x.lineTo(px, py) : x.moveTo(px, py); }); x.stroke(); }
+for (const [cx, cy, sc, rot, flat] of GALS) { x.save(); x.translate(cx, cy); x.rotate(rot * Math.PI / 180); x.scale(sc, sc * flat); x.translate(-260, -150); x.filter = `blur(${Math.max(1.5, 5 * sc)}px)`; x.strokeStyle = "rgba(0,0,0,.95)"; x.lineWidth = 34; x.stroke(new Path2D(document.getElementById("g").getAttribute("d"))); x.restore();
+  // and its whole footprint, soft-edged: a line stops at the constellation's rim and comes out the other side — it never crosses the figure
+  x.save(); x.translate(cx, cy); x.rotate(rot * Math.PI / 180); x.scale(sc, sc * flat); x.translate(-260, -150); const fp = x.createRadialGradient(252, 150, 0, 252, 150, 300); fp.addColorStop(0, "rgba(0,0,0,1)"); fp.addColorStop(.80, "rgba(0,0,0,1)"); fp.addColorStop(1, "rgba(0,0,0,0)"); x.fillStyle = fp; x.filter = "none"; x.save(); x.translate(252, 150); x.scale(1, .62); x.translate(-252, -150); x.beginPath(); x.arc(252, 150, 300, 0, 7); x.fill(); x.restore(); x.restore(); }
+x.filter = "none"; x = main; x.globalCompositeOperation = "lighter"; x.drawImage(sheet, 0, 0);
+// then the things themselves, over it
+GALS.forEach((q) => galaxy(...q));
+helix("s2", 16, 34, 2600, .5, 1.1, true); helix("s1", 46, 158, 9500, 1, 0, true);
+for (const [nx, ny, r] of NODES) { blob(nx, ny, r * 17, "125,105,255", .34); blob(nx, ny, r * 5.5, "205,190,255", .62); dot(nx, ny, r, "rgba(250,246,255,.95)"); x.strokeStyle = "rgba(200,190,255,.35)"; x.lineWidth = 1; x.beginPath(); x.arc(nx, ny, r * 2.6, 0, 7); x.stroke(); }
+// energy intersections on the helix itself: three, the brightest things in the picture
+for (const [f, r] of [[.30, 5.5], [.47, 8], [.63, 6.5], [.14, 3.5], [.78, 4]]) { const o = on(near, f); blob(o.x, o.y, r * 20, "120,100,255", .30); blob(o.x, o.y, r * 6, "225,212,255", .6); dot(o.x, o.y, r * .9, "rgba(255,252,255,.95)"); }
+// room for the interface: the upper-left two thirds stay dark; the edges fall away
+x.globalCompositeOperation = "source-over"; const calm = x.createRadialGradient(900, 480, 100, 900, 480, 1150); calm.addColorStop(0, "rgba(5,5,10,.5)"); calm.addColorStop(1, "rgba(5,5,10,0)"); x.fillStyle = calm; x.fillRect(0, 0, W, H);
+const vg = x.createRadialGradient(W / 2, H / 2, H * .55, W / 2, H / 2, H * 1.08); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.55)"); x.fillStyle = vg; x.fillRect(0, 0, W, H);
+document.title = "done";
+</script></body></html>
