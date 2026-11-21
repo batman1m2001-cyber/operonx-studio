@@ -124,7 +124,7 @@ window.FlowRail = (() => {
     let rows = sorted();
     const maxOps = Math.max(1, ...rows.map(r => r.ops));
     if (q) rows = rows.filter(r => `${r.g.name} ${r.sub} ${r.find}`.toLowerCase().includes(q));
-    const pictured = !!pic();
+    const pictured = !!(window.Factory && Factory.on());   // the picture is the screen, built or still building: no flow is the open one
     if (!rows.length) list.append(el("div", "frnone", q ? "No flow matches" : "No flows"));
     for (const r of rows) {
       const b = el("button", "frrow" + ((pictured ? marked === `f:${r.g.name}` : state.graph && state.graph.name === r.g.name) ? " current" : ""));

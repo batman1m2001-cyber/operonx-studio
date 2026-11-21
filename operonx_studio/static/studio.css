@@ -6100,7 +6100,7 @@ code.ax-tool-res.cmd::before { content: "$ "; color: var(--text-3); }
 
 /* ── the Flow screen's flows rail (flowrail.js): every flow in view, its
    size and traffic at a glance; [ or the canvas bar's first button hides it */
-body { --flowrail-w: 310px; }
+body { --flowrail-w: 364px; }   /* 310 read as cramped once the rail lists services and jobs too (the owner, 2026-11-22) */
 .flowrail { width: var(--flowrail-w); flex: none; display: none; flex-direction: column; min-height: 0;
   position: relative; background: var(--surface); border-right: 1px solid var(--border); z-index: 15; }
 body[data-tab="flow"]:not(.flowrail-off):not(.pmode) .flowrail { display: flex; }
@@ -6112,7 +6112,7 @@ body[data-tab="flow"]:not(.flowrail-off):not(.pmode) .canvasbar { left: calc(var
 .flowrail .frsort button { height: 22px; padding: 0 8px; border-radius: var(--r-pill); border: 1px solid var(--border);
   background: none; color: var(--text-2); font: 500 11.5px var(--font); cursor: pointer; }
 .flowrail .frsort button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
-.flowrail .frcols, .flowrail .frrow { display: grid; grid-template-columns: minmax(0, 1fr) 44px 56px 34px; gap: 8px; align-items: center; }
+.flowrail .frcols, .flowrail .frrow { display: grid; grid-template-columns: minmax(0, 1fr) 52px 64px 38px; gap: 10px; align-items: center; }
 .flowrail .frcols { padding: 4px 12px 4px 15px; color: var(--text-3); font: 600 10px var(--font);
   letter-spacing: .06em; text-transform: uppercase; }
 .flowrail .frcols span:last-child { text-align: right; }
