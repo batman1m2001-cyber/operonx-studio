@@ -122,3 +122,55 @@ def test_an_inline_prompt_becomes_a_named_one(client, project):
                        ({"op": "nope", "name": "n"}, 404), ({"op": "b", "name": "whole"}, 409)):
         assert client.post(f"/api/p/{pid}/prompts/adopt", json=body).status_code == code, body
     assert not (project / "prompts" / "again.md").exists()
+
+
+# ── the prompt store (Settings → Prompts) ────────────────────────────────
+
+
+def test_the_toml_names_the_store_and_nothing_else_moves():
+    from operonx_studio.app import _with_prompt_store
+
+    added = _with_prompt_store('[project]\nname = "x"\n', "${PROMPT_STORE_DSN}")
+    assert added.startswith('[project]\nname = "x"\n\n') and added.endswith('[prompts]\nstore = "${PROMPT_STORE_DSN}"\n')
+    assert _with_prompt_store(added, "${PROMPT_STORE_DSN}") == added
+    assert _with_prompt_store('[prompts]\nstore = "old"\n\n[lint]\na = 1\n', "${V}") == '[prompts]\nstore = "${V}"\n\n[lint]\na = 1\n'
+    assert _with_prompt_store('[prompts]\n\n[lint]\na = 1\n', "${V}") == '[prompts]\nstore = "${V}"\n\n[lint]\na = 1\n'
+
+
+def test_settings_say_no_store_and_refuse_an_address_that_cannot_be_reached(client, project, monkeypatch):
+    monkeypatch.delenv("OPERONX_PROMPT_STORE", raising=False)
+    pid = client.post("/api/open", json={"path": str(project)}).json()["id"]
+    got = client.get(f"/api/p/{pid}/settings").json()["prompt_store"]
+    assert got["configured"] is False and got["project"] == "adopt"
+    assert client.get(f"/api/p/{pid}/prompts").json()["store"] is False
+    assert client.post(f"/api/p/{pid}/settings/prompt-store", json={"dsn": "mysql://x"}).status_code == 400
+    bad = client.post(f"/api/p/{pid}/settings/prompt-store", json={"dsn": "postgresql://nobody@127.0.0.1:9/none"})
+    assert bad.status_code == 400 and "could not be reached" in bad.json()["error"]
+    assert not (project / ".env").exists() and "[prompts]" not in (project / "operonx.toml").read_text()
+    assert client.post(f"/api/p/{pid}/settings/prompt-store/push").status_code == 409
+
+
+@pytest.mark.skipif(not __import__("os").environ.get("OPERONX_TEST_PG_DSN"), reason="OPERONX_TEST_PG_DSN is not set")
+def test_a_publish_reaches_the_store(client, project, monkeypatch):
+    import os
+    import uuid
+
+    from operonx import prompt_store
+
+    monkeypatch.delenv("OPERONX_PROMPT_STORE", raising=False)
+    monkeypatch.setenv("OPERONX_PROMPT_PROJECT", f"t-{uuid.uuid4().hex[:10]}")
+    monkeypatch.setattr(prompt_store, "_SERVED", {})
+    pid = client.post("/api/open", json={"path": str(project)}).json()["id"]
+    client.post(f"/api/p/{pid}/prompts/new", json={"name": "greet", "text": "Hello {{who}}."})
+    dsn = os.environ["OPERONX_TEST_PG_DSN"]
+    saved = client.post(f"/api/p/{pid}/settings/prompt-store", json={"dsn": dsn})
+    assert saved.status_code == 200, saved.text
+    assert dsn not in saved.text and saved.json()["prompt_store"]["configured"]
+    assert 'store = "${PROMPT_STORE_DSN}"' in (project / "operonx.toml").read_text()
+    assert f"PROMPT_STORE_DSN={dsn}" in (project / ".env").read_text()
+
+    done = client.post(f"/api/p/{pid}/prompts/publish", json={"name": "greet", "label": "production"}).json()
+    assert done["store"]["versions"] == [["greet", 1]] and done["store"]["labels"] == [["greet", "production", 1, None]]
+    view = client.get(f"/api/p/{pid}/settings").json()["prompt_store"]
+    assert view["serving"] == 1 and view["differs"] == [] and view["error"] is None and "127.0.0.1" in view["where"]
+    assert client.post(f"/api/p/{pid}/settings/prompt-store/push").json()["store"]["versions"] == []
