@@ -123,6 +123,8 @@ class ProjectWatcher:
     root: Path
     cache: Any = None      # a studio cache; defaults to the process-wide one
     _fingerprint: Tuple = field(default=(), init=False)
+    _checked_at: float = field(default=0.0, init=False)   # when the files were last looked at (monotonic)
+    _checking: Any = field(default=None, init=False, repr=False)
     _last: ExtractResult = field(default_factory=ExtractResult, init=False)
     _extracting: bool = field(default=False, init=False)
 
@@ -201,12 +203,26 @@ class ProjectWatcher:
             out.append((str(path), stat.st_mtime_ns, stat.st_size))
         return tuple(out)
 
+    #: A page asks ~15 things at once and most of them ask "did a file change?": each walked the
+    #: project (30–55 ms, hundreds of stats). One look answers every request of the same burst.
+    CHECK_EVERY = 0.25
+
     def changed(self) -> bool:
-        current = self.fingerprint()
-        if current != self._fingerprint:
-            self._fingerprint = current
-            return True
-        return False
+        import threading
+
+        if self._checking is None:
+            self._checking = threading.Lock()
+        if time.monotonic() - self._checked_at < self.CHECK_EVERY:
+            return False
+        with self._checking:
+            if time.monotonic() - self._checked_at < self.CHECK_EVERY:
+                return False   # another request looked while this one waited
+            current = self.fingerprint()
+            self._checked_at = time.monotonic()
+            if current != self._fingerprint:
+                self._fingerprint = current
+                return True
+            return False
 
     def interpreter(self) -> str:
         """The Python that will run extraction.

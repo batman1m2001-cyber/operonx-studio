@@ -74,6 +74,23 @@ class TestChangeDetection:
         (root / f"{mod}.py").write_text(WORKFLOW + "\n# touched\n", encoding="utf-8")
         assert watcher.changed() is True
 
+    def test_a_burst_of_requests_looks_at_the_files_once(self, project, monkeypatch):
+        """A page's ~15 requests each asked; one walk of the project answers them,
+        and the edit is seen by the next look after the burst."""
+        import time
+
+        root, mod = project
+        monkeypatch.setattr(ProjectWatcher, "CHECK_EVERY", 0.2)
+        watcher = ProjectWatcher(root=root)
+        looks = []
+        real = watcher.fingerprint
+        monkeypatch.setattr(watcher, "fingerprint", lambda: looks.append(1) or real())
+        assert watcher.changed() is True
+        (root / f"{mod}.py").write_text(WORKFLOW + "\n# touched\n", encoding="utf-8")
+        assert [watcher.changed() for _ in range(15)] == [False] * 15 and len(looks) == 1
+        time.sleep(0.25)
+        assert watcher.changed() is True and len(looks) == 2
+
     def test_new_file_is_detected(self, project):
         root, _ = project
         watcher = ProjectWatcher(root=root)

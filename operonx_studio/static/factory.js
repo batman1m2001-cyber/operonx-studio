@@ -25,10 +25,26 @@ window.Factory = (() => {
   if (tabs.factory) tabs.factory.addEventListener("click", () => show());
   if (tabs.flows) tabs.flows.addEventListener("click", () => { if (on()) { hide(); FlowRail.render(); } });
   /* a project opens on its picture, unless it was left on the editor or the address names an op */
+  function decide() {
+    let want = true; try { want = recall(`factory:${PID}`, true) !== false; } catch { /* default */ }
+    if (want && document.body.dataset.tab === "flow" && !state.sel && !/[?&]op=/.test(location.search) && (state.ir.graphs || []).length > 1) show();
+  }
   (function first(tries) {
     if (typeof state === "undefined" || !state.ir) { if (tries) setTimeout(() => first(tries - 1), 150); return; }
-    let want = true; try { want = recall(`factory:${PID}`, true) !== false; } catch { /* default */ }
-    if (want && document.body.dataset.tab === "flow" && !/[?&]op=/.test(location.search) && (state.ir.graphs || []).length > 1) show();
+    /* the address names another screen (Playground, Review, Jobs…): the body still says "flow" until the
+     * router has read it, and the picture — three.js, the model, a WebGL canvas — was built behind every
+     * such page. It is built when the Flow tab is first shown instead. */
+    const named = typeof Router !== "undefined" ? Router.parse(location).tab : null;
+    if (named && named !== "flow") {
+      const mo = new MutationObserver(() => {
+        if (document.body.dataset.tab !== "flow") return;
+        mo.disconnect();
+        requestAnimationFrame(() => { if (!on() && !view) decide(); });   // after a select_op has selected its op
+      });
+      mo.observe(document.body, {attributes: true, attributeFilter: ["data-tab"]});
+      return;
+    }
+    decide();
   })(80);
 
   async function show() {
