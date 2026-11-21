@@ -2450,12 +2450,21 @@ function boundaryCard(it) {
   } else {
     card.append(el("span", "blabel", n.name));
     card.title = n.boundary === "start"
-      ? "The flow's input boundary — the session starts here."
+      ? "START — the flow's input comes in here. Click to play the flow: give it an input and watch it run."
       : "The flow's output boundary — results leave here.";
   }
   card.onclick = (ev) => {
     ev.stopPropagation();
-    if (!n.knob) { toggleTerm(n.boundary); return; }   // the main flow's START / END
+    if (!n.knob) {                                     // the main flow's START / END
+      toggleTerm(n.boundary);
+      // START is where the flow's input comes in — and Play is giving it one: the same place.
+      // A click opens Play beside the plugs it lights (not for a viewer; not over a session going on).
+      if (n.boundary === "start" && !state.playOn && !(window.Account && Account.viewOnly)) {
+        if (window.oxPlay) window.oxPlay.follow();
+        switchTab("playground");
+      }
+      return;
+    }
     select(parentKey);
   };
   return card;

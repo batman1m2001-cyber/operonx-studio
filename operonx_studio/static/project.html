@@ -112,7 +112,7 @@
          is showing (the Flow tab, or a run's workflow view) -->
     <div id="minimap" class="minimap" hidden><canvas aria-label="The whole flow: click to move the view"></canvas></div>
     <div id="canvasbar" class="canvasbar" role="toolbar" aria-label="Canvas">
-      <button id="btn-play" class="playbtn needs-edit" aria-pressed="false" title="Play: run this flow's service here — chat with it, send it a form, call it — and watch its ops light up"><i data-icon="play"></i><span>Play</span></button>
+      <button id="btn-play" class="playbtn needs-edit" aria-pressed="false" title="Play: give this flow an input at its START and watch its ops light up"><i data-icon="play"></i><span>Play</span></button>
       <span class="tsep" aria-hidden="true"></span>
       <button id="btn-flowrail" class="iconbtn" aria-label="Show the flows" aria-pressed="true" title="Flows panel  ( [ )"><i data-icon="panelleft"></i></button>
       <button id="btn-factory" class="iconbtn" aria-label="Project picture" aria-pressed="false" title="Project picture: the whole project as one model"><i data-icon="box"></i></button>
@@ -143,8 +143,7 @@
     <aside id="sidebar" aria-label="Side panel">
       <nav id="sidetabs" role="tablist">
         <button data-side="assistant" class="active" role="tab"><i data-icon="spark"></i><span>Assistant</span><span class="tabdot" aria-hidden="true"></span></button>
-        <button data-side="inspect" role="tab">Inspect</button>
-        <button data-side="play" class="needs-edit" role="tab">Play</button>
+        <button data-side="inspect" role="tab" title="The node picked on the canvas: an op's detail, or START — the flow's input, where it is played">Node</button>
         <span class="spacer"></span>
         <button id="side-close" class="iconbtn" aria-label="Close the panel" title="Close"><i data-icon="x"></i></button>
       </nav>
