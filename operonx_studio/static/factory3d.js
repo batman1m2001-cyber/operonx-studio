@@ -434,7 +434,7 @@ for (const r of runs) { const e = mk("i"), secs = r.len / 4.2;
 
 
 // ── camera: fit, pan, zoom ────────────────────────────────────────
-const view = {cx: 0, cy: 0, zoom: 1};
+const view = {cx: 0, cy: 0, zoom: 1}, MIN_UNITS_PER_PX = 0.036;
 function fit() { const us = [], vs = [];
   for (const b of boxes) for (const sx of [-0.5, 0.5]) for (const sz of [-0.5, 0.5]) for (const y of [0, b.sy]) { v3.set(b.x + sx * b.sx, b.y + y, b.z + sz * b.sz); us.push(v3.dot(RIGHT)); vs.push(v3.dot(UP)); }
   const lo = (xs) => xs.reduce((a, b) => Math.min(a, b)), hi = (xs) => xs.reduce((a, b) => Math.max(a, b));
@@ -442,7 +442,10 @@ function fit() { const us = [], vs = [];
   view.cx = (hi(us) + lo(us)) / 2; view.cy = (hi(vs) + lo(vs)) / 2 + 1.6;
   // the studio's rail and bar float over the picture: fit into what they leave free (the heading marks its corner)
   const iL = Math.max(0, hud.offsetLeft - 14), iT = Math.max(0, hud.offsetTop - 10), iR = covered(), fw = Math.max(200, vw() - iL - iR), fh = Math.max(200, vh() - iT);
-  view.span = Math.max(hgt * 1.1 * vh() / fh, w * 1.08 * vh() / fw); view.zoom = 1;
+  // a small project is not blown up to fill the screen (a two-flow project was drawn at 2.2× a fourteen-flow one):
+  // at most ~1.4× the scale a large project fits at (mr-finance: ~0.052 world units a pixel). At exactly 1× the
+  // names of a small project, which do not shrink, overlap.
+  view.span = Math.max(hgt * 1.1 * vh() / fh, w * 1.08 * vh() / fw, MIN_UNITS_PER_PX * vh()); view.zoom = 1;
   const k = view.span / vh(); view.cx -= (iL - iR) / 2 * k; view.cy += iT / 2 * k; apply(); }
 /* how much of the picture's right the studio's side panel covers (0 when it is closed, or beside the picture) */
 const sidePanel = document.getElementById("sidebar");
