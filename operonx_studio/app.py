@@ -219,7 +219,7 @@ def _placed(graph: Dict[str, Any]) -> Dict[str, Any]:
                    ("bound", "start", "end", "outputs", "inputs", "source",
                     "loop", "is_gen", "transient", "serve_role", "code",
                     "resource", "routes", "description", "show_keys", "op_type", "agent",
-                    "reads", "writes")},
+                    "reads", "writes", "prompts")},
                 # what the card says it holds is what opening it shows: a loop's
                 # members are laid out in the container, so they are counted, not
                 # the one hidden loop graph that holds them
@@ -3826,6 +3826,8 @@ def build_studio_app(recents: Optional[Recents] = None):
                             continue
                         outs = row.get("outputs") or {}
                         samples.append({"run": s.trace_id, "origin": s.origin, "name": s.name, "started": s.started_at,
+                                        # the named prompts the op used, and their versions (operonx ≥ 1.40)
+                                        "prompts": (row.get("attrs") or {}).get("prompts") or [],
                                         "inputs": row.get("inputs") or {}, "status": row.get("status") or "ok",
                                         "error": row.get("error"),
                                         "content": outs.get("content"), "usage": outs.get("usage"),
@@ -3853,6 +3855,140 @@ def build_studio_app(recents: Optional[Recents] = None):
             else:
                 varying.append(k)
         return JSONResponse({"op": op, "samples": samples, "constant": constant, "varying": varying})
+
+    # The project's named prompts (operonx.prompts): `prompts/<name>.md`, their
+    # published versions and the labels that point at them. The page lists what
+    # is declared; which op uses which is in the IR (node.prompts).
+
+    def _prompt_card(root: Path, name: str) -> Dict[str, Any]:
+        from operonx import prompts as P
+
+        on: Dict[int, List[str]] = {}
+        for label, version in P.labels(root).get(name, {}).items():
+            on.setdefault(version, []).append(label)
+        raw = P._read(P.prompts_dir(root), name, None)
+        meta, _ = P._split(raw)
+        served = P.prompt(name, root=root)
+        working = P.prompt(name, version=None, label="\0none", root=root)
+        have = P.versions(name, root)
+        return {
+            "name": name, "file": f"prompts/{name}.md", "description": meta.get("description"),
+            "text": working.text, "raw": raw, "base": safewrite.sha(raw), "variables": list(working.variables),
+            "versions": [{"version": v, "labels": sorted(on.get(v, [])),
+                          "chars": len(P.prompt(name, version=v, root=root).text)} for v in reversed(have)],
+            "serving": {"version": served.version, "label": served.label},
+            # the working text is not what the newest version froze: there is something to publish
+            "unpublished": not have or P._read(P.prompts_dir(root), name, have[-1]) != raw,
+        }
+
+    @app.get("/api/p/{pid}/prompts")
+    def prompts_list(pid: str) -> JSONResponse:
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        try:
+            from operonx import prompts as P
+        except ImportError:  # an operonx older than 1.40 beside this studio
+            return JSONResponse({"prompts": [], "label": None})
+        out = []
+        for name in P.prompt_names(watcher.root):
+            try:
+                out.append(_prompt_card(watcher.root, name))
+            except Exception as exc:  # noqa: BLE001 — one unreadable prompt is not the page failing
+                out.append({"name": name, "file": f"prompts/{name}.md", "error": str(exc), "versions": []})
+        return JSONResponse({"prompts": out, "label": os.environ.get("OPERONX_PROMPT_LABEL") or P.DEFAULT_LABEL})
+
+    @app.get("/api/p/{pid}/prompts/text")
+    def prompt_text(pid: str, name: str, version: Optional[int] = None) -> JSONResponse:
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        from operonx import prompts as P
+
+        try:
+            got = P.prompt(name, version=version, label="\0none", root=watcher.root)
+        except P.PromptNotFound as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return JSONResponse({"name": name, "version": version, "text": got.text})
+
+    @app.get("/api/p/{pid}/prompts/diff")
+    def prompt_diff(pid: str, name: str, a: Optional[int] = None, b: Optional[int] = None) -> JSONResponse:
+        """Two texts of one prompt as a unified diff; a side left out is the working text."""
+        import difflib
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        from operonx import prompts as P
+
+        def side(v: Optional[int]) -> Tuple[str, str]:
+            return (P.prompt(name, version=v, label="\0none", root=watcher.root).text,
+                    f"{name} @ {'working text' if v is None else f'v{v}'}")
+
+        try:
+            (ta, la), (tb, lb) = side(a), side(b)
+        except P.PromptNotFound as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        diff = "\n".join(difflib.unified_diff(ta.splitlines(), tb.splitlines(), la, lb, lineterm="", n=2))
+        return JSONResponse({"diff": diff, "same": ta == tb})
+
+    @app.post("/api/p/{pid}/prompts/write")
+    def prompt_write(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        """Save a named prompt's working text (its body; the front matter is kept).
+        ``base`` is the file as the editor read it: a file changed since is refused."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        from operonx import prompts as P
+
+        name, text = str(body.get("name") or ""), str(body.get("text") or "")
+        try:
+            raw = P._read(P.prompts_dir(watcher.root), name, None)
+        except P.PromptNotFound as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        if not text.strip():
+            return JSONResponse({"error": "a prompt cannot be empty"}, status_code=400)
+        _, old_body = P._split(raw)
+        new = raw[: len(raw) - len(old_body)] + text.rstrip("\n") + "\n"
+        try:
+            w = safewrite.commit(watcher.root, P.prompts_dir(watcher.root) / f"{name}.md", new,
+                                 body.get("base") or safewrite.sha(raw), before=raw, watcher=watcher,
+                                 what=f"prompt {name}", who=_who(request))
+        except safewrite.WriteRefused as exc:
+            return JSONResponse(exc.to_dict(), status_code=409)
+        return JSONResponse({"prompt": _prompt_card(watcher.root, name), "write": w.id})
+
+    @app.post("/api/p/{pid}/prompts/publish")
+    def prompt_publish(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Freeze the working text as the next version; ``label`` also points that label at it."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        from operonx import prompts as P
+
+        name = str(body.get("name") or "")
+        try:
+            number, new = P.publish(name, watcher.root)
+            if body.get("label"):
+                P.set_label(name, str(body["label"]), number, watcher.root)
+        except (P.PromptNotFound, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"version": number, "new": new, "prompt": _prompt_card(watcher.root, name)})
+
+    @app.post("/api/p/{pid}/prompts/label")
+    def prompt_label(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Point a label at a version — the rollback. Served after the service restarts."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        from operonx import prompts as P
+
+        name = str(body.get("name") or "")
+        try:
+            before = P.set_label(name, str(body.get("label") or ""), int(body.get("version") or 0), watcher.root)
+        except (P.PromptNotFound, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"before": before, "prompt": _prompt_card(watcher.root, name)})
 
     @app.post("/api/p/{pid}/prompts/save")
     def prompt_save(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
