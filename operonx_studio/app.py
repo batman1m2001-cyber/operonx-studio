@@ -3795,32 +3795,50 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": "unknown project"}, status_code=404)
         pr = project_runs(watcher.root)
         samples: List[Dict[str, Any]] = []
-        cursor = None
-        for _ in range(20):  # pages of runs, newest first, until enough samples
-            page = pr.store.list_runs(None, "started_desc", 100, cursor)
-            for s in page.items:
-                if s.origin not in ("service", "job", "playground", "eval") or not (s.service or s.job):
-                    continue
-                if (s.metadata or {}).get("toy") == "rerun":
-                    continue  # the workbench's own tries are not samples of real inputs
-                if not any(r.op == op for r in pr.store.rollups(RunFilter(trace_ids=[s.trace_id]))):
-                    continue
-                rec = pr.store.get_run(s.trace_id)
-                for row in (rec.nodes if rec else []):
-                    if row.get("op_name") != op:
+        # Service by service, not the newest 2,000 runs of everything: one busy service (a summary called
+        # after every call) fills those 2,000 and the service that runs this op is never reached. A
+        # service whose newest 500 runs never ran the op is taken not to have it in its flow, and is left.
+        try:
+            names = [(g.get("origin"), g.get("name")) for g in pr.store.groups(None, by=["origin", "name"])]
+        except Exception:  # noqa: BLE001 — a store that cannot group: every run, as before
+            names = [(None, None)]
+        for origin, name in names:
+            if origin is not None and origin not in ("service", "job", "playground", "eval"):
+                continue
+            where = RunFilter(origin=origin, name=name) if origin is not None else None
+            cursor, found = None, 0
+            for depth in range(20):  # pages of this service's runs, newest first, until enough samples
+                page = pr.store.list_runs(where, "started_desc", 100, cursor)
+                cand = [s for s in page.items
+                        if s.origin in ("service", "job", "playground", "eval") and (s.service or s.job)
+                        # the workbench's own tries are not samples of real inputs
+                        and (s.metadata or {}).get("toy") != "rerun"]
+                # which of this page's runs ran the op: asked once for the page, not once a run (2,000 runs
+                # were 2,000 questions — 56 s on a project with 9,000 runs)
+                ran = ({r.trace_id for r in pr.store.rollups(RunFilter(trace_ids=[s.trace_id for s in cand]))
+                        if r.op == op} if cand else set())
+                for s in cand:
+                    if s.trace_id not in ran:
                         continue
-                    outs = row.get("outputs") or {}
-                    samples.append({"run": s.trace_id, "origin": s.origin, "name": s.name, "started": s.started_at,
-                                    "inputs": row.get("inputs") or {}, "status": row.get("status") or "ok",
-                                    "error": row.get("error"),
-                                    "content": outs.get("content"), "usage": outs.get("usage"),
-                                    "cost_usd": outs.get("cost_usd"), "duration_ms": row.get("duration_ms")})
+                    rec = pr.store.get_run(s.trace_id)
+                    for row in (rec.nodes if rec else []):
+                        if row.get("op_name") != op:
+                            continue
+                        outs = row.get("outputs") or {}
+                        samples.append({"run": s.trace_id, "origin": s.origin, "name": s.name, "started": s.started_at,
+                                        "inputs": row.get("inputs") or {}, "status": row.get("status") or "ok",
+                                        "error": row.get("error"),
+                                        "content": outs.get("content"), "usage": outs.get("usage"),
+                                        "cost_usd": outs.get("cost_usd"), "duration_ms": row.get("duration_ms")})
+                        found += 1
+                        break
+                    if found >= limit:
+                        break
+                cursor = page.next_cursor
+                if found >= limit or not cursor or (depth >= 4 and not found):
                     break
-                if len(samples) >= limit:
-                    break
-            cursor = page.next_cursor
-            if len(samples) >= limit or not cursor:
-                break
+        samples.sort(key=lambda smp: smp["started"] or 0, reverse=True)
+        samples = samples[:limit]
 
         def placeholder(v: Any) -> bool:
             return isinstance(v, str) and v.startswith("<") and v.endswith(">")

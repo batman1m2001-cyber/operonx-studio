@@ -3615,6 +3615,16 @@ button.chip.kbpagechip.on { background: var(--accent-soft); color: var(--accent-
 .pwtext { min-height: 64px; font-size: var(--fs-md); line-height: 1.5; }
 .pwfield input { min-height: 34px; padding: 6px 10px; font-size: var(--fs-md); max-width: 220px; }
 .pwsave { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+/* a chat op's prompt: the messages every sample starts with, to be read as text */
+.pwcap { display: flex; align-items: baseline; gap: 10px; }
+.pwcap b { font-size: var(--fs-md); font-weight: 600; color: var(--text); }
+.pwcap span { font-size: var(--fs-sm); color: var(--text-3); }
+.pwlead.edited .pwcap b { color: var(--accent-strong); }
+.pwprose { font-family: var(--font); font-size: 14px; line-height: 1.6; padding: 14px 16px; white-space: pre-wrap; resize: vertical; }
+.pwsaid { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; font-size: var(--fs-md); line-height: 1.5; color: var(--text); }
+.pwsaid b { font-size: var(--fs-sm); font-weight: 600; color: var(--text-3); padding-top: 1px; }
+.pwsaid span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
+.pwmore { font-size: var(--fs-sm); }
 .pwask { font-size: var(--fs-md); }
 .pwsamples { display: flex; flex-direction: column; border-radius: var(--r-md); }
 .pwrow { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px 10px; padding: 12px 14px; }

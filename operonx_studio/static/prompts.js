@@ -37,7 +37,22 @@ const PromptsView = (() => {
 
   const text = (x) => (typeof x === "string" ? x : JSON.stringify(x, null, 2));
   const money = (x) => (x == null ? "unpriced" : `$${x < 0.01 ? x.toFixed(5) : x.toFixed(3)}`);
-  const toks = (u) => (u ? `${u.prompt_tokens ?? "?"} → ${u.completion_tokens ?? "?"} tokens` : "");
+  const toks = (u) => (u ? `${u.prompt_tokens ?? u.input_tokens ?? "?"} → ${u.completion_tokens ?? u.output_tokens ?? "?"} tokens` : "");
+
+  /* A chat op takes one input, `messages`, and it differs in every sample — yet the prompt is in it:
+   * the messages every sample starts with (the system message, as a rule). Those are the prompt;
+   * what follows them is the case. Returns how many leading messages are shared, 0 when none. */
+  function sharedLead(samples) {
+    const lists = samples.map(s => s.inputs && s.inputs.messages);
+    if (!lists.length || !lists.every(Array.isArray)) return 0;
+    let n = 0;
+    while (lists.every(l => l.length > n) && lists.every(l => JSON.stringify(l[n]) === JSON.stringify(lists[0][n]))) n++;
+    // a lone sample shares all of itself: only its system messages are the prompt
+    if (samples.length === 1) { n = 0; while (n < lists[0].length && lists[0][n] && lists[0][n].role === "system") n++; }
+    return n;
+  }
+  const ROLE = {system: "System prompt", user: "User", assistant: "Assistant", tool: "Tool"};
+  const said = (m) => (m && typeof m.content === "string" ? m.content : text(m && m.content !== undefined ? m.content : m));
 
   /* The prompt files the resources name: a field called like a prompt whose
    * value is a YAML file in the project. */
@@ -131,7 +146,37 @@ const PromptsView = (() => {
     const edits = {};
     const sec = el("section", "pwprompt");
     sec.append(el("div", "stitle", "The prompt — the same in every sample"));
+    /* a piece of prompt text, to be read: its name, its size, the text in a reading face */
+    const prose = (title, val, key, label, editable = true) => {
+      const f = el("div", "pwfield pwlead");
+      const cap = el("div", "pwcap");
+      cap.append(el("b", null, title), el("span", null, `${val.length.toLocaleString()} characters · the same in every sample`));
+      const inp = el("textarea", "pwtext pwprose");
+      inp.value = val; inp.spellcheck = false; inp.readOnly = !editable;
+      inp.setAttribute("aria-label", title);
+      inp.style.height = `${Math.min(460, 34 + 22 * Math.max(2, val.split("\n").reduce((n, ln) => n + 1 + Math.floor(ln.length / 110), 0)))}px`;
+      const saveRow = el("div", "pwsave");
+      saveRow.hidden = true;
+      inp.oninput = () => {
+        edits[key] = inp.value;
+        if (inp.value === val) delete edits[key];
+        f.classList.toggle("edited", key in edits);
+        saveRow.hidden = !(key in edits);
+      };
+      const sb = el("button", "linkbtn needs-edit", "Save this text where it lives…");
+      sb.type = "button";
+      sb.onclick = () => saveText(saveRow, v.op, label, val, inp.value);
+      saveRow.append(sb);
+      f.append(cap, inp, saveRow);
+      return f;
+    };
+    const PART = {system: "System prompt", user: "User message — the template"};
+    const parts = (val) => val && typeof val === "object" && !Array.isArray(val) && Object.keys(val).length && Object.values(val).every(x => typeof x === "string");
     for (const [k, val] of Object.entries(got.constant)) {
+      // a {system, user} template is read part by part, not as JSON; the messages built from it are
+      // the same text again and are not shown twice
+      if (k === "prompt" && parts(val)) { for (const [p, x] of Object.entries(val)) sec.append(prose(PART[p] || p, x, `prompt.${p}`, `prompt.${p}`)); continue; }
+      if (k === "messages" && parts(got.constant.prompt)) continue;
       const f = el("label", "pwfield");
       f.append(el("span", "mono", k));
       // an object (a {system, user} template) always gets the room to read as JSON
@@ -154,7 +199,13 @@ const PromptsView = (() => {
       f.append(inp, saveRow);
       sec.append(f);
     }
-    if (!Object.keys(got.constant).length) sec.append(el("div", "note", "Every input differs between samples — there is no fixed prompt to edit here."));
+    const lead = got.varying.includes("messages") && !parts(got.constant.prompt) ? sharedLead(got.samples) : 0;
+    const first = lead ? got.samples[0].inputs.messages : [];
+    for (let i = 0; i < lead; i++) {
+      const m = first[i];
+      sec.append(prose(ROLE[m.role] || m.role || "Message", said(m), `messages#${i}`, `messages[${i}].content`, typeof m.content === "string"));
+    }
+    if (!Object.keys(got.constant).length && !lead) sec.append(el("div", "note", "Every input differs between samples — there is no fixed prompt to edit here."));
     main.append(sec);
 
     // the samples, and what the edit makes of them
@@ -170,11 +221,22 @@ const PromptsView = (() => {
       cb.onchange = () => { cb.checked ? picks.add(i) : picks.delete(i); go.textContent = `Try it on ${picks.size}`; };
       const data = el("div", "pwdata");
       data.append(el("span", "note", `${smp.origin} · ${smp.name} · ${fmtAgo(smp.started * 1000)}`));
-      for (const k of got.varying.slice(0, 2)) data.append(el("div", "mono pwvar", `${k}: ${text(smp.inputs[k]).slice(0, 220)}`));
+      let shown = 0;
+      if (lead) {                                    // the case is the conversation after the prompt: its last turns, as said
+        const rest = smp.inputs.messages.slice(lead);
+        if (rest.length > 2) data.append(el("div", "note pwmore", `${rest.length - 2} earlier message${rest.length - 2 === 1 ? "" : "s"}`));
+        for (const m of rest.slice(-2)) {
+          const ln = el("div", "pwsaid");
+          ln.append(el("b", null, ROLE[m.role] || m.role || "message"), el("span", null, said(m).slice(0, 600)));
+          data.append(ln);
+        }
+        shown = 1;
+      }
+      for (const k of got.varying.filter(k => !(k === "messages" && (lead || parts(got.constant.prompt)))).slice(0, 2 - shown)) data.append(el("div", "mono pwvar", `${k}: ${text(smp.inputs[k]).slice(0, 220)}`));
       const pair = el("div", "rerunpair pwpair");
       const then = el("div");
       then.append(el("div", "stitle", `Then · ${fmtMs(smp.duration_ms || 0)} · ${toks(smp.usage)} · ${money(smp.cost_usd)}`),
-                  el("pre", "mono" + (smp.status === "error" ? " bad" : ""), smp.status === "error" ? String(smp.error || "").trim().split("\n").pop() : text(smp.content ?? "")));
+                  el("pre", "mono" + (smp.status === "error" ? " bad" : smp.content ? "" : " muted"), smp.status === "error" ? String(smp.error || "").trim().split("\n").pop() : (text(smp.content ?? "") || "(empty answer)")));
       const now = el("div", "pwnow");
       now.append(el("div", "stitle", "Now"), el("pre", "mono muted", "—"));
       pair.append(then, now);
@@ -198,6 +260,12 @@ const PromptsView = (() => {
         slot.append(el("div", "stitle", "Now · running…"));
         const inputs = {...smp.inputs};
         for (const [k, x] of Object.entries(edits)) {
+          if (k.startsWith("prompt.")) { inputs.prompt = {...inputs.prompt, [k.slice(7)]: x}; continue; }   // one part of a template
+          if (k.startsWith("messages#")) {             // an edited prompt message, put back in its place
+            const i = +k.slice(9);
+            inputs.messages = inputs.messages.map((m, j) => (j === i ? {...m, content: x} : m));
+            continue;
+          }
           const orig = got.constant[k];
           inputs[k] = typeof orig === "string" ? x : (() => { try { return JSON.parse(x); } catch { return x; } })();
         }
