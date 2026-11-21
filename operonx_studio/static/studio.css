@@ -1320,6 +1320,9 @@ svg.icon.kglyph { width: 1em; height: 1em; vertical-align: -.125em; stroke-width
 .bnode.b-end:not(.knob) .bglyph { width: 8px; height: 8px; border: none; border-radius: 2px; overflow: hidden; text-indent: -99px;
   background: color-mix(in srgb, var(--accent) 78%, transparent); }
 .bnode.b-end:not(.knob) .blabel { color: color-mix(in srgb, var(--accent) 80%, var(--text)); }
+/* every card's kind stripe (.node::before) was left on the two ends: a pale 4×2 stub before the glyph,
+   a white dot on END's quiet outline */
+.node.bnode:not(.knob)::before { display: none; }
 /* a container's boundary KNOB: the same contact sitting on the border
    line itself, with a white collar so the dashed edge reads as passing
    behind it */
