@@ -9,9 +9,9 @@ every other screen stay as they are.
 
 | Today | Mock of the target (mr-finance, real data) |
 |---|---|
-| ![today](img/neural/today.png) | ![mock](img/neural/mock8-overview.png) |
+| ![today](img/neural/today.png) | ![mock](img/neural/mock9-overview.png) |
 
-Hovering a store in the mock: ![hover](img/neural/mock8-hover.png)
+Hovering a store in the mock: ![hover](img/neural/mock9-hover.png)
 
 The mock is a standalone canvas page, not studio code. Its crystal heights come from a hash of the
 flow's name, because it was given op counts only; the real picture sizes each crystal from its op.
@@ -52,10 +52,10 @@ the whole was forced onto a ring. Mock 6 (the images above) is drawn to that.
 
 | Kind | Shape | Why it cannot be mistaken |
 |---|---|---|
-| workflow | an engineered crystalline platform (the owner's eighth brief: mock 7's spiral read as crystals grown at random): a faceted core at the centre, one flat-topped translucent block per op on the platform's own grid, filled ring by ring round the core and stepped down ring by ring, the two axes lit. 114 ops is five full rings; 3 ops is three blocks beside the core | the only large structure, the only one with a core |
+| workflow | an engineered crystalline platform (the owner's ninth brief: mock 8's blocks read as bars standing side by side): a foundation slab; on it one unit per op, units touching, filled ring by ring round the core and stepped down ring by ring, so the rings read as terraces; the two axes a little higher and lit; a faceted core on top. 114 ops is five terraces; 3 ops is three units beside the core | the only large structure, the only one with a core |
 | store | a synaptic junction: a nucleus, four short terminals | compact, star-like, no platform |
-| service | a gateway on a small plinth: two posts and a lintel over a lit opening, its ports on the lintel; a WebSocket's are a joined pair | periwinkle, a frame |
-| job | an execution beacon on a small plinth: a tapered crystal; one a schedule starts carries a small clock face | lavender, a spire with a clock |
+| service | a miniature interface dock: a base plate, a low titanium wedge high at the front, a lit cool-blue aperture in its near face (a WebSocket's is a joined pair), two contacts on the slope | low, wide, blue-lit |
+| job | an execution beacon: a round foot, a slender mast, a lit core at its head; one a schedule starts carries a level ring round the mast with a marker on it | tall, thin, round-footed, violet |
 
 Scale: store < service, job < workflow. **Not drawn, by the owner's rule:** radial needles, spikes,
 petals, membranes, a ring round every entity, a ring or ellipse round the centre, glow that says
@@ -103,7 +103,7 @@ flowchart LR
 | a job's schedule as text | the picture's model says only that a schedule starts it; N1 checks whether the IR carries the expression and shows it on hover if it does |
 | a service that runs no flow (mr-finance's one `asgi` mount) | it exists in the model with no link; it is drawn in the band, unattached |
 
-![close: a workflow, its gateways and beacons](img/neural/mock8-zoom.png)
+![close: a workflow, its gateways and beacons](img/neural/mock9-zoom.png)
 
 ## What exists today (read from the code)
 
