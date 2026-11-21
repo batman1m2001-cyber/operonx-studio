@@ -3625,6 +3625,24 @@ button.chip.kbpagechip.on { background: var(--accent-soft); color: var(--accent-
 .pwsaid b { font-size: var(--fs-sm); font-weight: 600; color: var(--text-3); padding-top: 1px; }
 .pwsaid span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
 .pwmore { font-size: var(--fs-sm); }
+/* a named prompt (prompts/<name>.md): its head, its versions */
+.pwnamed { padding: 10px 14px; border-radius: var(--r-md); background: var(--surface); }
+.pwhint { margin-top: 10px; font-size: var(--fs-sm); line-height: 1.45; }
+.pwnhead { display: flex; flex-direction: column; gap: 6px; }
+.pwntitle { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pwntitle h3 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text); }
+.pwndesc { margin: 0; font-size: var(--fs-md); color: var(--text-2); }
+.pwnmeta { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--text-3); }
+.pwchip { font-size: var(--fs-sm); padding: 2px 9px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); white-space: nowrap; }
+.pwchip.live { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+.pwchip.warn { background: var(--warn-soft); color: var(--warn); }
+.pwacts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 34px; }
+.pwversions { display: flex; flex-direction: column; gap: 4px; }
+.pwver { display: grid; grid-template-columns: 52px 96px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 9px 12px; border-radius: var(--r-md); background: var(--surface); }
+.pwver b { font-size: var(--fs-md); color: var(--text); }
+.pwchips { display: flex; gap: 6px; flex-wrap: wrap; }
+.pwvtools { display: flex; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
+.pwdiff { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .pwask { font-size: var(--fs-md); }
 .pwsamples { display: flex; flex-direction: column; border-radius: var(--r-md); }
 .pwrow { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px 10px; padding: 12px 14px; }

@@ -93,3 +93,51 @@ def test_saving_writes_the_text_where_it_lives(client, project):
     twice = client.post(f"/api/p/{pid}/prompts/save", json={"original": updated, "updated": "z"})
     assert twice.status_code == 409 and sorted(twice.json()["found"]) == ["prompts/copy.txt", "prompts/helpdesk.txt"]
     assert client.post(f"/api/p/{pid}/prompts/save", json={"original": "short", "updated": "short"}).status_code == 400
+
+
+# ── named prompts (operonx.prompts, PROMPTS_PLAN P3) ─────────────────────
+
+
+def test_named_prompts_are_listed_with_their_versions_and_labels(client, project):
+    pytest.importorskip("operonx.prompts")
+    (project / "prompts" / "guard.md").write_text("---\ndescription: the rule\n---\nAnswer {{who}} briefly.\n")
+    pid = client.post("/api/open", json={"path": str(project)}).json()["id"]
+
+    (card,) = client.get(f"/api/p/{pid}/prompts").json()["prompts"]
+    assert (card["name"], card["description"], card["text"], card["variables"]) == (
+        "guard", "the rule", "Answer {{who}} briefly.", ["who"])
+    assert card["versions"] == [] and card["unpublished"] and card["serving"] == {"version": None, "label": None}
+
+    got = client.post(f"/api/p/{pid}/prompts/publish", json={"name": "guard", "label": "production"}).json()
+    assert got["version"] == 1 and got["prompt"]["serving"] == {"version": 1, "label": "production"}
+    assert not got["prompt"]["unpublished"]
+
+    # an edit is saved to the working text, the front matter kept; production still serves v1
+    edited = client.post(f"/api/p/{pid}/prompts/write",
+                         json={"name": "guard", "text": "Answer {{who}} in one line.", "base": got["prompt"]["base"]}).json()
+    assert (project / "prompts" / "guard.md").read_text() == "---\ndescription: the rule\n---\nAnswer {{who}} in one line.\n"
+    assert edited["prompt"]["unpublished"] and edited["prompt"]["serving"]["version"] == 1
+    # the file as the editor read it has moved on: a stale write is refused
+    assert client.post(f"/api/p/{pid}/prompts/write",
+                       json={"name": "guard", "text": "x", "base": got["prompt"]["base"]}).status_code == 409
+
+    assert client.post(f"/api/p/{pid}/prompts/publish", json={"name": "guard"}).json()["version"] == 2
+    diff = client.get(f"/api/p/{pid}/prompts/diff", params={"name": "guard", "a": 1, "b": 2}).json()
+    assert "-Answer {{who}} briefly." in diff["diff"] and "+Answer {{who}} in one line." in diff["diff"]
+    assert client.get(f"/api/p/{pid}/prompts/diff", params={"name": "guard", "a": 2}).json()["same"]
+
+    moved = client.post(f"/api/p/{pid}/prompts/label", json={"name": "guard", "label": "production", "version": 2}).json()
+    assert moved["before"] == 1 and moved["prompt"]["versions"][0] == {"version": 2, "labels": ["production"], "chars": 27}
+    assert client.post(f"/api/p/{pid}/prompts/label",
+                       json={"name": "guard", "label": "production", "version": 9}).status_code == 400
+    assert client.get(f"/api/p/{pid}/prompts/text", params={"name": "guard", "version": 1}).json()["text"] == "Answer {{who}} briefly."
+
+
+def test_a_sample_says_which_named_prompt_it_used(client, project):
+    store = FilesRunStore(root=project / ".operonx" / "runs", refresh_every=0)
+    run = _run("named", 1, "Hi?", "Hello.")
+    run.nodes[0].attrs = {"prompts": [{"part": "system", "name": "guard", "version": 2, "label": "production", "hash": "ab"}]}
+    store.consume(run)
+    pid = client.post("/api/open", json={"path": str(project)}).json()["id"]
+    got = client.get(f"/api/p/{pid}/prompts/ask/samples").json()["samples"]
+    assert got[0]["run"] == "named" and got[0]["prompts"][0]["name"] == "guard" and got[1]["prompts"] == []

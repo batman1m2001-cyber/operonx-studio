@@ -563,6 +563,11 @@ def _node(op: Any, root: Path, anchors: Dict[str, int], module: str) -> Dict[str
         names = [str(n) for n in (_slot(op, extra) or ())]
         if names:
             node[extra] = names
+    # The prompts the op asked for by name (`prompt("intake.system")`, operonx ≥ 1.40):
+    # which, which version, for which part of its template.
+    named = (_slot(op, "_record_attrs") or {}).get("prompts")
+    if named:
+        node["prompts"] = _json_safe(named)
     agent = _agent_of(op)
     if agent is not None:
         node["agent"] = agent
