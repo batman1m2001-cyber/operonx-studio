@@ -2,8 +2,8 @@
  * one isometric model, behind the first row of the flows rail. Opening a flow from the rail, or from
  * its name on the picture, goes back to the 2D editor.
  *
- * The picture itself is factory3d.js, an ES module with three.js behind it; it is imported the first
- * time the picture is opened, so no other page of the studio pays for it. */
+ * The picture itself is factory2d.js, an ES module drawing on one 2D canvas; it is imported the first
+ * time the picture is opened. */
 
 window.Factory = (() => {
   const host = document.getElementById("factory");
@@ -62,7 +62,7 @@ window.Factory = (() => {
     host.textContent = "";
     host.append(el("p", "fx-note", "Building the picture…"));
     try {
-      const [mod, stats] = await Promise.all([loading || (loading = import("/static/factory3d.js")),
+      const [mod, stats] = await Promise.all([loading || (loading = import("/static/factory2d.js")),
         api(`/api/p/${PID}/flows/stats?days=7`).catch(() => null)]);
       if (!on()) { host.textContent = ""; return; }
       seen = state.ir;
@@ -115,5 +115,5 @@ window.Factory = (() => {
     if (view && on()) view.reveal(id);
   }
 
-  return {show, hide, on, placed, reveal};
+  return {show, hide, on, placed, reveal, view: () => view};   // view(): the mounted picture, for tests and the console
 })();
