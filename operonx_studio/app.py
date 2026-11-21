@@ -3993,6 +3993,107 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse({"before": before, "prompt": _prompt_card(watcher.root, name)})
 
+    @app.post("/api/p/{pid}/prompts/new")
+    def prompt_new(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        """Create ``prompts/<name>.md`` with *text* — a prompt no op asks for yet."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        from operonx import prompts as P
+
+        name, text = str(body.get("name") or "").strip(), str(body.get("text") or "")
+        if not P._NAME.match(name) or name.endswith(".md"):
+            return JSONResponse({"error": "a prompt's name is letters, digits, . _ - and / for folders "
+                                          "(intake.system, cio/analyst) — without .md"}, status_code=400)
+        if not text.strip():
+            return JSONResponse({"error": "a prompt cannot be empty"}, status_code=400)
+        path = P.prompts_dir(watcher.root) / f"{name}.md"
+        if path.exists():
+            return JSONResponse({"error": f"prompts/{name}.md is already there"}, status_code=409)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            w = safewrite.commit(watcher.root, path, text.rstrip() + "\n", safewrite.sha(""), watcher=watcher,
+                                 what=f"new prompt {name}", who=_who(request))
+        except safewrite.WriteRefused as exc:
+            return JSONResponse(exc.to_dict(), status_code=409)
+        return JSONResponse({"prompt": _prompt_card(watcher.root, name), "write": w.id})
+
+    @app.post("/api/p/{pid}/prompts/adopt")
+    def prompt_adopt(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        """Make an op's inline prompt a named one: its text becomes
+        ``prompts/<name>.md`` and the op's ``prompt=`` asks for it by name, so it
+        has versions. ``part`` is one key of a ``prompt={...}``. ``apply`` false
+        (the default) answers with the file's text and the code's diff."""
+        import difflib
+
+        from operonx import prompts as P
+
+        from operonx_studio import promptadopt
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        op, name = str(body.get("op") or ""), str(body.get("name") or "").strip()
+        part = str(body["part"]) if body.get("part") else None
+        if not P._NAME.match(name) or name.endswith(".md"):
+            return JSONResponse({"error": "a prompt's name is letters, digits, . _ - and / for folders — without .md"},
+                                status_code=400)
+        target = P.prompts_dir(watcher.root) / f"{name}.md"
+        if target.exists():
+            return JSONResponse({"error": f"prompts/{name}.md is already there — choose another name"}, status_code=409)
+        node = None
+        ir = (watcher.last.ir or watcher.refresh_swr().ir) or {}
+
+        def walk(nodes):
+            nonlocal node
+            for n in nodes or []:
+                if node is None and n.get("name") == op:
+                    node = n
+                if n.get("graph"):
+                    walk(n["graph"].get("nodes"))
+
+        for g in ir.get("graphs") or []:
+            walk(g.get("nodes"))
+        if node is None:
+            return JSONResponse({"error": f"no op named {op!r} in this project's graphs"}, status_code=404)
+        binding = next((i.get("binding") or {} for i in node.get("inputs") or [] if i.get("name") == "prompt"), {})
+        written = binding.get("value") if binding.get("kind") == "literal" else None
+        if part is not None:
+            written = written.get(part) if isinstance(written, dict) else None
+        if not isinstance(written, str) or not written.strip():
+            return JSONResponse({"error": "this op's prompt is not text the graph holds (it is built at run time, "
+                                          "or it has parts — name one)"}, status_code=409)
+        if any(r.get("part") == part or (part is None and not r.get("part")) for r in node.get("prompts") or []):
+            return JSONResponse({"error": "this prompt is already asked for by name"}, status_code=409)
+        where = (node.get("source") or {}).get("wired_at") or {}
+        src = promptadopt.find_source(watcher.root, str(where.get("file") or ""))
+        if not where.get("line") or src is None:
+            return JSONResponse({"error": "the studio does not know where this op is built in the code"}, status_code=409)
+        code = src.read_text(encoding="utf-8")
+        try:
+            text = promptadopt.to_named(written)
+            new_code = promptadopt.rewrite_call(code, int(where["line"]), name, part)
+        except promptadopt.Refused as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        rel = src.relative_to(watcher.root).as_posix()
+        diff = "".join(difflib.unified_diff(code.splitlines(True), new_code.splitlines(True), f"a/{rel}", f"b/{rel}"))
+        out = {"file": f"prompts/{name}.md", "text": text, "code": rel, "diff": diff, "applied": False,
+               "base": safewrite.sha(code), "dropped_blank_end": written != written.rstrip()}
+        if not body.get("apply"):
+            return JSONResponse(out)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:   # the file first: the code that asks for it must find it to build
+            w1 = safewrite.commit(watcher.root, target, text, safewrite.sha(""), what=f"new prompt {name}", who=_who(request))
+        except safewrite.WriteRefused as exc:
+            return JSONResponse(exc.to_dict(), status_code=409)
+        try:
+            w2 = safewrite.commit(watcher.root, src, new_code, body.get("base") or safewrite.sha(code), before=code,
+                                  watcher=watcher, what=f"{op} asks for prompt {name}", who=_who(request))
+        except safewrite.WriteRefused as exc:
+            target.unlink(missing_ok=True)   # nothing asks for it: do not leave half a change
+            return JSONResponse(exc.to_dict(), status_code=409)
+        return JSONResponse({**out, "applied": True, "writes": [w1.id, w2.id], "prompt": _prompt_card(watcher.root, name)})
+
     @app.post("/api/p/{pid}/prompts/save")
     def prompt_save(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         """Write an edited prompt back where the original text lives — found

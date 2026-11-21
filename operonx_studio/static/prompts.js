@@ -16,6 +16,7 @@ const PromptsView = (() => {
   const K = `prompts:${PID}`;
   const v = Object.assign({op: "", prompt: ""}, recall(K, {}));
   let token = 0;
+  let creating = false;   // the New prompt form is open
   const save = () => store(K, v);
 
   function llmOps() {
@@ -58,11 +59,16 @@ const PromptsView = (() => {
     box.textContent = "";
     const head = el("div", "panehead");
     head.append(el("h2", null, "Prompts"));
+    const nb = el("button", "needs-edit" + (creating ? " on" : ""), creating ? "Cancel" : "+ New prompt");
+    nb.type = "button";
+    nb.onclick = () => { creating = !creating; show(); };
+    head.append(nb);
     box.append(head);
     const ops = llmOps();
     const declared = await api(`/api/p/${PID}/prompts`).catch(() => ({prompts: []}));
     if (mine !== token) return;
     const named = declared.prompts || [];
+    if (creating && !ops.length && !named.length) { box.append(newForm()); return; }
     if (!ops.length && !named.length) {
       box.append(paneNote("No LLM ops here", "The workbench opens an LLMOp's prompt and tries edits on the inputs it really had. This project's graphs have none yet.",
         null, {ask: {label: "Add an LLM step", prompt: "Look at this project's flow and suggest one place an LLM step would "
@@ -99,6 +105,7 @@ const PromptsView = (() => {
       list.append(b);
     }
     if (!named.length) list.append(el("div", "note pwhint", "A prompt kept as prompts/<name>.md and asked for with prompt(\"name\") is listed here with its versions."));
+    if (creating) { main.append(newForm()); return; }
     if (v.prompt) { showNamed(main, named.find(p => p.name === v.prompt), ops); return; }
     const wait = el("div", "note", "Reading this op's recorded executions…");
     main.append(wait);
@@ -111,9 +118,10 @@ const PromptsView = (() => {
     clearTimeout(slow);
     if (mine !== token) return;
     main.textContent = "";
+    const o = ops.find(x => x.name === v.op) || {};
+    main.append(...adoptRows(o));
     if (!got.samples.length) {
       // no run to take the prompt from: the template as the graph wrote it, to read (it had been a blank page)
-      const o = ops.find(x => x.name === v.op) || {};
       const parts = typeof o.written === "string" ? [["Prompt — the template", o.written]]
         : o.written && typeof o.written === "object" ? Object.entries(o.written).filter(([, t]) => typeof t === "string").map(([k, t]) => [k === "system" ? "System prompt" : k === "user" ? "User message — the template" : k, t]) : [];
       if (parts.length) {
@@ -408,6 +416,87 @@ const PromptsView = (() => {
     if (p.versions.length) vs.append(el("div", "note", "A label is read when a service starts: a moved label is served after the next restart."));
     vs.append(diffAt);
     main.append(vs);
+  }
+
+  /* A prompt no op asks for yet: prompts/<name>.md, written, then opened with its versions. */
+  function newForm() {
+    const sec = el("section", "pwprompt pwnew");
+    sec.append(el("div", "stitle", "New prompt"));
+    const name = el("input", "pwname mono");
+    name.placeholder = "name — intake.system, or cio/analyst for a folder"; name.spellcheck = false; name.setAttribute("aria-label", "The prompt's name");
+    const inp = el("textarea", "pwtext pwprose");
+    inp.placeholder = "The prompt's text. {{name}} is a variable the op fills in; {{> other}} includes another prompt.";
+    inp.spellcheck = false; inp.style.height = "260px"; inp.setAttribute("aria-label", "The prompt's text");
+    const file = el("span", "note");
+    const go = el("button", "primary needs-edit", "Create");
+    go.type = "button";
+    const err = el("div", "errbox"); err.hidden = true;
+    const tell = () => { file.textContent = name.value.trim() ? `prompts/${name.value.trim()}.md — an op asks for it with prompt("${name.value.trim()}")` : ""; };
+    name.oninput = tell;
+    go.onclick = async () => {
+      err.hidden = true;
+      try {
+        const got = await api(`/api/p/${PID}/prompts/new`, {name: name.value.trim(), text: inp.value});
+        wrote(got, `Created ${got.prompt.file}`);
+        creating = false; v.prompt = got.prompt.name; save(); show();
+      } catch (e) { err.textContent = e.message; err.hidden = false; }
+    };
+    const row = el("div", "pwline");
+    row.append(go, file);
+    sec.append(name, inp, row, err);
+    setTimeout(() => name.focus(), 0);
+    return sec;
+  }
+
+  /* An op whose prompt is text in the code: one row per text that is not a named prompt yet.
+   * The text becomes prompts/<name>.md and the code asks for it by name — shown first, then written. */
+  function adoptRows(o) {
+    const w = o.written, refs = o.prompts || [];
+    const parts = typeof w === "string" ? [[null, w]] : w && typeof w === "object" ? Object.entries(w).filter(([, t]) => typeof t === "string") : [];
+    const rows = [];
+    for (const [part, val] of parts) {
+      if (!val.trim() || refs.some(r => (r.part || null) === part)) continue;
+      const slot = el("div", "pwadopt");
+      const b = el("button", "linkbtn needs-edit", part ? `Make “${part}” a named prompt` : "Make this a named prompt");
+      b.type = "button";
+      slot.append(b, el("span", "note", " — it moves to prompts/<name>.md and gets versions; the code asks for it by name."));
+      b.onclick = () => {
+        slot.textContent = "";
+        const name = el("input", "pwname mono");
+        name.value = part ? `${o.name}.${part}` : o.name; name.spellcheck = false; name.setAttribute("aria-label", "The prompt's name");
+        const see = el("button", null, "Show the change");
+        see.type = "button";
+        const out = el("div", "pwadoptout");
+        const row = el("div", "pwline");
+        row.append(el("b", null, part ? `“${part}” as` : "Name"), name, see);
+        slot.append(row, out);
+        see.onclick = async () => {
+          out.textContent = "";
+          const body = {op: o.name, name: name.value.trim(), ...(part ? {part} : {})};
+          let got;
+          try { got = await api(`/api/p/${PID}/prompts/adopt`, body); }
+          catch (e) { out.append(el("div", "errbox", e.message)); return; }
+          out.append(el("div", "note", `New file ${got.file} (${got.text.length.toLocaleString()} characters${got.dropped_blank_end ? "; the blank space at its end is not kept" : ""}), and in ${got.code}:`));
+          const diff = el("div", "diffbox");
+          for (const ln of got.diff.split("\n")) diff.append(el("span", ln.startsWith("+") && !ln.startsWith("+++") ? "add" : ln.startsWith("-") && !ln.startsWith("---") ? "del" : "", ln + "\n"));
+          const apply = el("button", "primary needs-edit", `Write ${got.file} and ${got.code}`);
+          apply.type = "button";
+          apply.onclick = async () => {
+            try {
+              const done = await api(`/api/p/${PID}/prompts/adopt`, {...body, apply: true, base: got.base});
+              toast(`${o.name} now asks for ${done.prompt.name}`);
+              v.prompt = done.prompt.name; save();
+              try { await load(); } catch (_) { /* the pulse brings the new graph */ }
+              show();
+            } catch (e) { refusal(e, diff); apply.remove(); }
+          };
+          out.append(diff, apply);
+        };
+        name.focus(); name.select();
+      };
+      rows.push(slot);
+    }
+    return rows;
   }
 
   async function saveText(slot, op, key, original, updated) {

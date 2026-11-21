@@ -3600,6 +3600,12 @@ button.chip.kbpagechip.on { background: var(--accent-soft); color: var(--accent-
 }
 
 /* ── the prompt workbench ──────────────────────────────────────────── */
+.pwname { width: min(420px, 100%); padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2, transparent); color: var(--text); font-size: var(--fs-base); }
+.pwline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+.pwline > button { flex: none; }
+.pwnew { display: flex; flex-direction: column; gap: 8px; }
+.pwadopt { margin: 0 0 12px; }
+.pwadoptout .diffbox { margin: 8px 0; }
 .pwgrid { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; align-items: start; }
 .pwlist { display: flex; flex-direction: column; gap: 6px; }
 .pwop { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; min-height: 0;

@@ -195,6 +195,8 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/review/run/{{run}}/dataset"): "edit",
     ("POST", f"{P}/prompts/save"): "edit",
     ("POST", f"{P}/prompts/write"): "edit",
+    ("POST", f"{P}/prompts/new"): "edit",
+    ("POST", f"{P}/prompts/adopt"): "edit",
     ("POST", f"{P}/prompts/publish"): "edit",
     ("POST", f"{P}/prompts/label"): "edit",
     ("POST", f"{P}/alerts"): "edit",
