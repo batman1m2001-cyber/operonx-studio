@@ -22,6 +22,10 @@ project):
 
 ![callbot](img/neural/built-callbot.png)
 
+A generated project of 2,999 flows — a platform is a domain:
+
+![2999](img/neural/built-2999.png)
+
 ## What is drawn
 
 | Thing | Shape | Rule |
@@ -58,6 +62,8 @@ flowchart LR
 | mr-finance | 15 workflows, 25 shared, 113 doors, 83 filaments, 181 pulses | 5–16 ms | 34 fps |
 | callbot | 4 platforms, 4 shared, 5 filaments | 1.4 ms | — |
 | qc-snatcher | 7 platforms, 10 shared, 15 filaments | 3 ms | — |
+| generated, 1,199 flows | 14 domains, 18 shared, 381 doors, 187 filaments | 15 ms (build 0.9 s) | 41 fps |
+| generated, 2,999 flows | 14 domains, 18 shared, 497 doors, 201 filaments | 16 ms (build 1.0 s) | 39 fps |
 
 ## Code
 
@@ -82,6 +88,8 @@ tests/js/factorylayout.test.mjs   new, 14 tests
 
 ## Not done
 
-- Not measured on the 1,199- and 2,999-flow projects in this pass (the layout is tested to 64
-  clusters; the domain level is the same code path as before).
+- At 1,199 and 2,999 flows the picture is correct and fast, but crowded: a domain with hundreds of
+  doors draws 36 and counts the rest, and those door clouds touch the neighbouring domain's name.
+- `market`'s 24 doors are all drawn, not aggregated; its arc was not widened, so it is still the
+  densest spot on mr-finance.
 - A single-flow project still opens on its Flow, as before, so it never shows this picture first.
