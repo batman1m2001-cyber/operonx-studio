@@ -45,6 +45,23 @@ its own (`flow:<graph>`), and the fields start from the job's first item. This
 needs the project's operonx to have that door; an older one plays only flows
 behind a service.
 
+## Two leftovers, closed
+
+**START's opened terminal is lavender.** Clicking START opens its input plugs on the canvas. That capsule was still the blue of a data wire while the pill it opens from is lavender. START and END terminals now take the accent colour.
+
+![START opened: the capsule is lavender](img/play/start-term.png)
+
+**A project with no graph loads.** Before: every page of such a project said "Could not load this project — Cannot read properties of undefined (reading 'nodes')", because the canvas walked the nodes of a graph that was not there. After: the canvas says so in one line and the other pages open.
+
+```mermaid
+flowchart LR
+  L[load] --> R[render]
+  R -->|graph| W[draw the flow]
+  R -->|no graph| N["'No flow yet' on the canvas"]
+```
+
+![a project with no graph](img/play/empty.png)
+
 ## How it flows
 
 ```mermaid
