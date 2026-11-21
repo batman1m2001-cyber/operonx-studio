@@ -160,7 +160,7 @@ const PlayView = (() => {
     box.textContent = "";
     ui = null;
     const head = el("div", "panehead playhead");
-    head.append(el("span", "playat", "START"));   // this is the Node tab on START: the flow's input
+    head.append(el("span", "playat", "START"));   // this is the Details tab on START: the flow's input
     box.append(head);
     // the first open starts the project's own interpreter (seconds on a big
     // project): say so, instead of a bare "loading"
