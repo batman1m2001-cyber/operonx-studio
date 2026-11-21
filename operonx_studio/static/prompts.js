@@ -204,6 +204,21 @@ const PromptsView = (() => {
       return row;
     };
     const parts = (val) => val && typeof val === "object" && !Array.isArray(val) && Object.keys(val).length && Object.values(val).every(x => typeof x === "string");
+    /* a prompt chosen in the run (an op upstream rendered it): the samples say which ones */
+    const atRun = [...new Map((got.samples || []).flatMap(x => (x.prompts || []).filter(r => r.input)).map(r => [r.name, r])).values()];
+    if (atRun.length) {
+      const row = el("div", "pwfield pwlead pwnamed");
+      const cap = el("div", "pwcap");
+      cap.append(el("b", null, "Rendered in the run from"));
+      for (const r of atRun) {
+        const b = el("button", "linkbtn mono", r.name);
+        b.type = "button"; b.title = "Open this prompt: its text, its versions";
+        b.onclick = () => { v.prompt = r.name; save(); show(); };
+        cap.append(b);
+      }
+      row.append(cap);
+      sec.append(row);
+    }
     for (const [k, val] of Object.entries(got.constant)) {
       // a {system, user} template is read part by part, not as JSON; the messages built from it are
       // the same text again and are not shown twice
@@ -335,7 +350,7 @@ const PromptsView = (() => {
     const meta = el("div", "pwnmeta");
     meta.append(el("span", "mono", p.file));
     if (p.variables && p.variables.length) meta.append(el("span", null, "fills " + p.variables.map(x => `{{${x}}}`).join(" ")));
-    meta.append(el("span", null, users.length ? "used by" : "no op asks for it yet"));
+    meta.append(el("span", null, users.length ? "used by" : "no op names it in its graph"));
     for (const o of users) {
       const b = el("button", "linkbtn mono", o.name);
       b.type = "button"; b.title = `${o.name} in ${o.graph}: its recorded runs`;
