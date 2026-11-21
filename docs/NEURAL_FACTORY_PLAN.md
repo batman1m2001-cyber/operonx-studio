@@ -9,9 +9,9 @@ every other screen stay as they are.
 
 | Today | Mock of the target (mr-finance, real data) |
 |---|---|
-| ![today](img/neural/today.png) | ![mock](img/neural/mock7-overview.png) |
+| ![today](img/neural/today.png) | ![mock](img/neural/mock8-overview.png) |
 
-Hovering a flow in the mock: ![hover](img/neural/mock7-hover.png)
+Hovering a store in the mock: ![hover](img/neural/mock8-hover.png)
 
 The mock is a standalone canvas page, not studio code. Its crystal heights come from a hash of the
 flow's name, because it was given op counts only; the real picture sizes each crystal from its op.
@@ -33,7 +33,7 @@ what says something is happening.** Mock 3 above is drawn to these numbers.
 | Layer | What | Numbers |
 |---|---|---|
 | A — the filament | one thin, continuous strand, there when nothing moves | 0.5–0.7 px, a faint violet-blue, 12–22% opacity (mock 7: 0.6 px at 17%; a call's filament 0.55 px at 16%); one stroke, nothing round it; drawn without additive blending, so a crossing is no brighter than a strand |
-| B — the energy | one small pulse with a short tail, on the filament's own path, going the way the data goes | a 1.3 px white core, a 3.2 px halo (mock 7); it lights itself, not the strand; each relationship has its own phase |
+| B — the energy | one small pulse with a short tail, on the filament's own path, going the way the data goes | a 1.3 px white core, a 3.2 px halo (mock 7); it lights itself, not the strand; each relationship has its own phase; the tail is two short steps (mock 8) |
 
 - Hovered or selected: its relationships rise to about 50%, the rest drop to under half their resting
   level and carry no pulse — dimmed, never hidden. Junctions glow when looked at, not all at once.
@@ -52,7 +52,7 @@ the whole was forced onto a ring. Mock 6 (the images above) is drawn to that.
 
 | Kind | Shape | Why it cannot be mistaken |
 |---|---|---|
-| workflow | a crystalline organism: one bright faceted nucleus, and one small capped crystal per op grown round it in a spiral, lower toward the rim, on a faint plate that is part of the structure. Size grows with √ops and stops | the only large structure, the only one with a nucleus |
+| workflow | an engineered crystalline platform (the owner's eighth brief: mock 7's spiral read as crystals grown at random): a faceted core at the centre, one flat-topped translucent block per op on the platform's own grid, filled ring by ring round the core and stepped down ring by ring, the two axes lit. 114 ops is five full rings; 3 ops is three blocks beside the core | the only large structure, the only one with a core |
 | store | a synaptic junction: a nucleus, four short terminals | compact, star-like, no platform |
 | service | a gateway on a small plinth: two posts and a lintel over a lit opening, its ports on the lintel; a WebSocket's are a joined pair | periwinkle, a frame |
 | job | an execution beacon on a small plinth: a tapered crystal; one a schedule starts carries a small clock face | lavender, a spire with a clock |
@@ -83,10 +83,14 @@ flowchart LR
   above, jobs below. Read from the outside in: a call comes in → the workflow → its data, in the
   middle. Which slot a workflow or a store takes is searched: fewest crossings, no filament over
   another workflow, then length.
-- **Entry points are not parts of a workflow.** They stand off it, in their own arc, one filament
-  each. In mr-finance every service and job runs exactly one workflow (91 of 91); the model allows
+- **Entry points are not parts of a workflow, and are plainly its own.** They stand off it on a faint
+  rail — its dock — one filament each. In mr-finance every service and job runs exactly one workflow (91 of 91); the model allows
   more, and then the entry point stands between the workflows it runs.
 - **Nothing is drawn round the centre**, and no control entity is drawn: the model has none.
+- **Hover.** A workflow: its stores and relationships, each tagged `reads` or `writes`; its entry
+  points listed. A store: the workflows that read or write it, tagged the same. A service or job: it,
+  its one filament and its workflow — no data relationship lights. Everything else dims and loses
+  its pulse; nothing is hidden. ![hover a job](img/neural/mock8-hover-job.png)
 - **Names.** A workflow: its name, then `WORKFLOW · n ops`. A store: its name. Services and jobs are
   each drawn, unnamed at rest (91 names would bury the picture); hovering a workflow lists every one
   of its services and jobs by name and kind (`HTTP`, `WEBSOCKET`, `JOB · SCHEDULED`).
@@ -99,7 +103,7 @@ flowchart LR
 | a job's schedule as text | the picture's model says only that a schedule starts it; N1 checks whether the IR carries the expression and shows it on hover if it does |
 | a service that runs no flow (mr-finance's one `asgi` mount) | it exists in the model with no link; it is drawn in the band, unattached |
 
-![close: a workflow, its gateways and beacons](img/neural/mock7-zoom.png)
+![close: a workflow, its gateways and beacons](img/neural/mock8-zoom.png)
 
 ## What exists today (read from the code)
 
