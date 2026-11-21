@@ -9,9 +9,9 @@ every other screen stay as they are.
 
 | Today | Mock of the target (mr-finance, real data) |
 |---|---|
-| ![today](img/neural/today.png) | ![mock](img/neural/mock3-overview.png) |
+| ![today](img/neural/today.png) | ![mock](img/neural/mock4-overview.png) |
 
-Hovering a flow in the mock: ![hover](img/neural/mock3-hover.png)
+Hovering a flow in the mock: ![hover](img/neural/mock4-hover.png)
 
 The mock is a standalone canvas page, not studio code. Its crystal heights come from a hash of the
 flow's name, because it was given op counts only; the real picture sizes each crystal from its op.
@@ -41,6 +41,57 @@ what says something is happening.** Mock 3 above is drawn to these numbers.
 
 ![close: filaments, pulses, junctions](img/neural/mock3-zoom.png)
 
+## A shape for each kind, three levels
+
+The owner's third brief (2026-11-21): the entities looked alike and the hierarchy could not be read.
+Mock 4 (the images above) is drawn to this.
+
+| Kind | Shape | Why it cannot be mistaken |
+|---|---|---|
+| workflow | a neural cell: a soft membrane, a bright nucleus, one small faceted crystal per op growing out from it. No platform, no towers. Its size grows with √ops and stops (114 ops is 62 px, 3 ops 24 px) | the only large, organic thing |
+| store | a synaptic junction: a nucleus, four short terminals with a bouton at each tip | compact, star-like, no crystals |
+| service | a runtime interface: a small gateway plate with its ports; a WebSocket's port is a joined pair | rectangular, periwinkle |
+| job | scheduled: a clock ring with a hand and a marker on its orbit. Started by hand: a small beacon (a diamond) | round or pointed, lavender |
+
+**The three levels are places, not labels.**
+
+```mermaid
+flowchart LR
+  subgraph centre["centre — the shared domain"]
+    S[stores]
+  end
+  subgraph band["band — execution"]
+    D[services · jobs]
+  end
+  subgraph outside["outside — workflows"]
+    W[cells]
+  end
+  D -- "invokes (periwinkle, pulse runs into the cell)" --> W
+  W -- "writes / reads (lavender, pulse runs the way the data goes)" --> S
+```
+
+- **The centre is a region, not an entity.** The model has no control or business-logic entity, so
+  none is drawn. What the workflows really share — the stores (mr-finance's are `events`, `policy`,
+  `views`, `wealth`…), and in the build also shared blocks and resources — stands inside a faint
+  membrane named "shared domain".
+- **A workflow's services and jobs stand between it and the centre**, to either side of a corridor
+  its data filaments pass through. This is the order the brief asks for (business → execution →
+  workflows). Its cost: the data filaments of a busy workflow leave the cell close together before
+  they part; in the mock `pages` and `news` show it.
+- **Names.** A workflow: its name, then `WORKFLOW · n ops`. A store: its name. Services and jobs are
+  each drawn, unnamed at rest (91 names would bury the picture); hovering a workflow lists every one
+  of its services and jobs by name and kind (`HTTP`, `WEBSOCKET`, `JOB · SCHEDULED`).
+
+**What the model does not hold, so the picture does not show:**
+
+| Asked for | In the model today |
+|---|---|
+| business relationships from the control layer to services, jobs or workflows | none. Only: a service or job runs a flow; a schedule starts a job; a flow reads or writes a store, uses a block, needs a resource |
+| a job's schedule as text | the picture's model says only that a schedule starts it; N1 checks whether the IR carries the expression and shows it on hover if it does |
+| a service that runs no flow (mr-finance's one `asgi` mount) | it exists in the model with no link; it is drawn in the band, unattached |
+
+![close: a cell, its services, junctions](img/neural/mock4-zoom.png)
+
 ## What exists today (read from the code)
 
 | | Today (`factory3d.js`, 670 lines; `factory.css`) |
@@ -67,12 +118,11 @@ what says something is happening.** Mock 3 above is drawn to these numbers.
    flow → store, a read store → flow; execution runs service/job → flow.
 3. **No core, no brain.** The centre holds what the flows really share: stores, shared blocks and
    resources, each a compact junction of its own kind. Nothing is drawn that the model does not hold.
-4. **Layout is searched, not simulated.** Flows stand on a ring whose order is chosen so flows that
-   share junctions are neighbours; junctions settle inside the ring between their flows; services and
-   jobs sit on the outside of their flow. Outside → ring → centre reads as entry point → workflow →
-   shared data. Same input, same picture.
-5. **A crystal is an op.** One crystal per op of the flow; a nested graph is one taller crystal sized
-   by its ops; an agent keeps a distinct form. Geometry stays merged into one buffer (no instancing).
+4. **Layout is searched, not simulated.** Workflows stand on the outer ring, in an order chosen so
+   the fewest filaments cross; junctions settle in the centre between their workflows; a workflow's
+   services and jobs stand in the band between it and the centre. Same input, same picture.
+5. **A crystal is an op.** One crystal per op of the flow, growing from the cell's nucleus; a nested
+   graph is one larger crystal sized by its ops; an agent keeps a distinct form. Geometry stays merged into one buffer (no instancing).
 6. **Two colours of filament, one family.** Data is muted lavender; execution is periwinkle; both dim at rest. Both are
    the studio's lavender pattern; no other hue.
 7. **Hover is added; click stays.** Hover a flow or junction: it, its filaments and their other ends
