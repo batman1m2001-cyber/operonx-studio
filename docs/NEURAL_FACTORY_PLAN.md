@@ -9,9 +9,9 @@ every other screen stay as they are.
 
 | Today | Mock of the target (mr-finance, real data) |
 |---|---|
-| ![today](img/neural/today.png) | ![mock](img/neural/mock13-overview.png) |
+| ![today](img/neural/today.png) | ![mock](img/neural/mock14-overview.png) |
 
-Hovering a workflow in the mock: ![hover](img/neural/mock13-hover.png)
+Hovering a workflow in the mock: ![hover](img/neural/mock14-hover.png)
 
 The mock is a standalone canvas page, not studio code. Its crystal heights come from a hash of the
 flow's name, because it was given op counts only; the real picture sizes each crystal from its op.
@@ -54,8 +54,8 @@ the whole was forced onto a ring. Mock 6 (the images above) is drawn to that.
 |---|---|---|
 | workflow | a glass-and-titanium platform (the owner's thirteenth brief: mocks 8–12 had grown mechanical — a motherboard, a small factory): a clean slab, one inset glass plate, a faceted core, and round it a few translucent prisms — two for 3 ops, seven for 114 (log₂ of the ops). **Not one shape per op any more**: the op count is the label's and the platform's size | the only large structure, the only one with a core |
 | store | a synaptic junction on a small pad of the platforms' own shape: a nucleus, three or four short terminals. The sixteen stand on one diamond lattice between the wings, each named under its pad; a faint registration mark stands where the lattice's cells meet — marks, not lines | compact, star-like, no structure on it |
-| service | a small interface marker at the workflow's boundary: a flat rhombus with a lit centre (a WebSocket's is a joined pair). No hardware, no strut | flat, cool blue, 13 px |
-| job | smaller and simpler than a service: a small dial; one a schedule starts has hands, one started by hand a dot | round, violet, 7 px |
+| service | a small interface marker at the workflow's boundary: a flat rhombus with a lit centre (a WebSocket's is a joined pair). No hardware, no strut | flat, cool blue, 15 px |
+| job | smaller and simpler than a service: a small dial; one a schedule starts has hands, one started by hand a dot | round, violet, 8 px |
 
 Scale: store < service, job < workflow. **Not drawn, by the owner's rule:** radial needles, spikes,
 petals, membranes, a ring round every entity, a ring or ellipse round the centre, glow that says
@@ -92,6 +92,16 @@ flowchart LR
 - **A busy workflow's filaments leave apart.** Each relationship leaves the platform at its own point
   along the two edges that face the stores, in the order of the stores it goes to (mock 11: `pages`
   and `news`). The strand, its count and its ends are unchanged.
+- **Overview shows scale; inspection shows the ops** (mock 14). A platform's prisms say how large a
+  workflow is (log₂ of its ops), never how many ops it has — the legend says so. Selecting a
+  workflow, or zooming past a threshold, opens a glass panel with its real graph: every top-level op
+  by name, branches and sub-graphs marked, the edges between them, from the project's IR
+  (`state.ir.graphs[i].nodes/edges`, which the Flow page already draws). Double click still opens
+  the flow. ![inspect news](img/neural/mock14-inspect.png)
+- **Markers and panels keep clear.** Service and job markers are 12% larger than mock 13 with a
+  firmer outline, no more glow. Jobs take a wider arc at even spacing (`market`'s 13: two ranks of
+  7 and 6). A hover panel tries ten places round its workflow and takes the one that covers the
+  least of other workflows, their markers and labels, lit stores, the legend and the canvas edge.
 - **Hover.** A workflow: its stores and relationships, each tagged `reads` or `writes`; its entry
   points listed. A store: the workflows that read or write it, tagged the same. A service or job: it,
   its one filament and its workflow — no data relationship lights. Everything else dims and loses
@@ -108,7 +118,7 @@ flowchart LR
 | a job's schedule as text | the picture's model says only that a schedule starts it; N1 checks whether the IR carries the expression and shows it on hover if it does |
 | a service that runs no flow (mr-finance's one `asgi` mount) | it exists in the model with no link; it is drawn in the band, unattached |
 
-![close: a workflow, its gateways and beacons](img/neural/mock13-zoom.png)
+![close: a workflow, its gateways and beacons](img/neural/mock14-zoom.png)
 
 **What thirteen mocks settled** (so the build does not reopen it): two wings and a store lattice, not
 a ring; one dim filament and one bright pulse per relationship; hover dims, never hides; a workflow
