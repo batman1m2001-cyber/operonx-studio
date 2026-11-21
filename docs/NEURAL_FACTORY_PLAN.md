@@ -9,9 +9,9 @@ every other screen stay as they are.
 
 | Today | Mock of the target (mr-finance, real data) |
 |---|---|
-| ![today](img/neural/today.png) | ![mock](img/neural/mock6-overview.png) |
+| ![today](img/neural/today.png) | ![mock](img/neural/mock7-overview.png) |
 
-Hovering a flow in the mock: ![hover](img/neural/mock6-hover.png)
+Hovering a flow in the mock: ![hover](img/neural/mock7-hover.png)
 
 The mock is a standalone canvas page, not studio code. Its crystal heights come from a hash of the
 flow's name, because it was given op counts only; the real picture sizes each crystal from its op.
@@ -26,16 +26,17 @@ travel the filament (1–3), never as more strands.
 ## A dim filament, a bright pulse
 
 The owner's refinement of the second mock (2026-11-21): the filaments read as bright laser cables.
+Mock 6 drew them too strongly again; mock 7 is to the numbers below, and the order of the eye is: workflows, then junctions, then gateways and beacons, then silk.
 **The network's structure is seen first; a filament is noticed when it is looked at; moving energy is
 what says something is happening.** Mock 3 above is drawn to these numbers.
 
 | Layer | What | Numbers |
 |---|---|---|
-| A — the filament | one thin, continuous strand, there when nothing moves | 0.5–0.8 px, muted lavender, 15–30% opacity (the mock: 0.65 px at 24%); no halo, only a luminosity held within 1 px of it; drawn without additive blending, so a crossing is no brighter than a strand |
-| B — the energy | one small pulse with a short tail, on the filament's own path, going the way the data goes | a 1.25 px white core, a 4 px halo; it lights itself, not the strand; each relationship has its own phase |
+| A — the filament | one thin, continuous strand, there when nothing moves | 0.5–0.7 px, a faint violet-blue, 12–22% opacity (mock 7: 0.6 px at 17%; a call's filament 0.55 px at 16%); one stroke, nothing round it; drawn without additive blending, so a crossing is no brighter than a strand |
+| B — the energy | one small pulse with a short tail, on the filament's own path, going the way the data goes | a 1.3 px white core, a 3.2 px halo (mock 7); it lights itself, not the strand; each relationship has its own phase |
 
-- Hovered or selected: its relationships rise to about 60%, the rest drop to a third of their resting
-  level and carry no pulse. Junctions glow when looked at, not all at once.
+- Hovered or selected: its relationships rise to about 50%, the rest drop to under half their resting
+  level and carry no pulse — dimmed, never hidden. Junctions glow when looked at, not all at once.
 - Fewer crossings: the ring's order is searched on the count of crossing filaments first, their
   length second.
 
@@ -64,10 +65,10 @@ nothing. The connection system (the two sections above) is settled and is not re
 
 ```mermaid
 flowchart LR
-  subgraph centre["centre — the shared domain"]
+  subgraph centre["between the wings — the shared domain"]
     S[stores]
   end
-  subgraph band["band — execution"]
+  subgraph band["outside each workflow — execution"]
     D[services · jobs]
   end
   subgraph outside["wings — workflows"]
@@ -98,7 +99,7 @@ flowchart LR
 | a job's schedule as text | the picture's model says only that a schedule starts it; N1 checks whether the IR carries the expression and shows it on hover if it does |
 | a service that runs no flow (mr-finance's one `asgi` mount) | it exists in the model with no link; it is drawn in the band, unattached |
 
-![close: a workflow, its gateways and beacons](img/neural/mock6-zoom.png)
+![close: a workflow, its gateways and beacons](img/neural/mock7-zoom.png)
 
 ## What exists today (read from the code)
 
