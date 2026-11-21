@@ -177,3 +177,8 @@ body.factory-on.fx-soft.fx-rest[data-tab="flow"]:not(.ax-focus) :is(.rail, .flow
 #factory .lb.item { background: rgba(18, 20, 33, .30); }
 #factory .fx-find, #factory .fx-reset { background: rgba(18, 20, 33, .40); border-color: rgba(255, 255, 255, .16); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .24); }
 @media (prefers-reduced-transparency: reduce) { body[data-tab="flow"] { --glass-still: rgba(16, 18, 30, .96); } }
+
+/* Play is a form and a transcript over the canvas: its panel is near-solid, so the graph
+   behind does not run through the text (the same reason as the menus above). */
+:root[data-theme="dark"]:not([data-glass="solid"]) body.floatframe:not(.ax-focus) #sidebar.playing,
+body[data-tab="flow"] #sidebar.playing { --glass-tint: rgba(14, 16, 27, .93); }

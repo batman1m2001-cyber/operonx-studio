@@ -211,7 +211,9 @@ const PlayView = (() => {
 
     const pick = el("select", "montarget");
     pick.setAttribute("aria-label", "Service");
-    for (const x of doors) {
+    // a flow served by several doors (its routes): those are the choice; a flow with none: every door
+    const choice = sameGraph.length > 1 && sameGraph.some(y => y.service === d.service) ? sameGraph : doors;
+    for (const x of choice) {
       const o = el("option", null, x.toys.length ? x.service : `${x.service} (no toy)`);
       o.value = x.service;
       o.selected = x.service === v.service;
