@@ -47,7 +47,7 @@ behind a service.
 
 ## Two leftovers, closed
 
-**START's opened terminal is lavender.** Clicking START opens its input plugs on the canvas. That capsule was still the blue of a data wire while the pill it opens from is lavender. START and END terminals now take the accent colour.
+**START's opened terminal is lavender.** Double-clicking START opens its input plugs on the canvas (a single click only opens Play — see below). That capsule was still the blue of a data wire while the pill it opens from is lavender. START and END terminals now take the accent colour.
 
 ![START opened: the capsule is lavender](img/play/start-term.png)
 
@@ -61,6 +61,19 @@ flowchart LR
 ```
 
 ![a project with no graph](img/play/empty.png)
+
+## One click plays, a double click opens the data flow
+
+A click on START used to do two things: open Play, and open START's data-flow capsule (its plugs and every op they reach). The capsule is the data-flow view — what a double click opens on an op — and has nothing to do with Play.
+
+| | Before | After |
+|---|---|---|
+| click START | Play **and** the capsule | Play |
+| double click START | the same, twice | the capsule |
+| click END | the capsule | nothing |
+| double click END | the capsule, opened and closed | the capsule |
+
+![a click on START: Play, the pill stays a pill](img/play/click-start.png)
 
 ## How it flows
 
