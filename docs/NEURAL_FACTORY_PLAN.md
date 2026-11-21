@@ -5,7 +5,10 @@ junctions, and each relationship is one fine filament that carries its own signa
 2026-11-21. A visual and interaction redesign: the model (`factorymodel.js`), what a click opens, and
 every other screen stay as they are.
 
-**Status: proposed. Nothing is built. Waiting for the owner's go.**
+**Status: built (2026-11-22).** The owner approved mock 14 as the visual baseline and chose a 2D
+renderer; what was built, with screenshots on real data and the measurements, is
+[NEURAL_FACTORY.md](NEURAL_FACTORY.md). The Decisions and Parts below are the plan as proposed;
+where the build differs, the write-up says so.
 
 | Today | Mock of the target (mr-finance, real data) |
 |---|---|
@@ -143,6 +146,9 @@ zoom, if at all.
 
 ## Decisions
 
+> Decision 1 was replaced: the owner chose one 2D canvas for the whole picture (no three.js), with
+> the pulses and names as DOM over it. Decisions 2–8 were built as written.
+
 1. **Filaments are an SVG layer over the 3D frame, not 3D geometry.** A 0.6–1 px antialiased curve
    with tapered roots is what SVG draws well and what software WebGL (no antialiasing, by the CPU
    rules) draws badly. The layer is projected with the same fixed camera the sparks layer already
@@ -168,6 +174,9 @@ zoom, if at all.
    today, and a filament is domain ↔ junction.
 
 ## Parts
+
+> Built as one part on the 2D canvas, so N0's spike and N2's "remove the tube bundles" had nothing
+> left to do. Gates as measured are in the write-up.
 
 Each part ends with screenshots (far, close, hover) on the no-GPU rig and a write-up in `docs/`.
 Branch `ui/neural-factory`; frontend only (`git diff --stat origin/main -- '*.py'` stays empty).

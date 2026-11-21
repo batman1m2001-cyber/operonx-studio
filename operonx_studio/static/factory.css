@@ -182,3 +182,51 @@ body.factory-on.fx-soft.fx-rest[data-tab="flow"]:not(.ax-focus) :is(.rail, .flow
    behind does not run through the text (the same reason as the menus above). */
 :root[data-theme="dark"]:not([data-glass="solid"]) body.floatframe:not(.ax-focus) #sidebar.playing,
 body[data-tab="flow"] #sidebar.playing { --glass-tint: rgba(14, 16, 27, .93); }
+
+/* ── the flat picture (factory2d.js; NEURAL_FACTORY_PLAN, mock 14) ──
+ * One stage holds everything that is not the frame — the pulses, the names, the door list — in the
+ * picture's own units; panning and zooming are one transform on it. */
+#factory .fx-stage { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; pointer-events: none; }
+#factory .fx-silk i { position: absolute; left: 0; top: 0; width: 2.6px; height: 2.6px; margin: -1.3px; border-radius: 50%; background: #fff;
+  box-shadow: 0 0 2.5px 1px rgba(206, 192, 255, .5); offset-rotate: 0deg; offset-distance: 0%; transform: scale(var(--s, 1)); animation: fx-run linear infinite; }
+#factory .fx-silk i.call { width: 2px; height: 2px; margin: -1px; box-shadow: 0 0 2px 1px rgba(150, 176, 255, .5); }
+#factory .fx-silk i.quiet { display: none; }
+#factory .fx-silk i.hot { box-shadow: 0 0 3.5px 1.5px rgba(214, 204, 255, .7); }
+#factory[data-far="1"] .fx-silk i.call { display: none; }
+@media (prefers-reduced-motion: reduce) { #factory .fx-silk i { animation: none; offset-distance: 55%; } }
+#factory .nf { position: absolute; transform: translate(-50%, 0) scale(var(--ls, 1)); transform-origin: 50% 0; white-space: nowrap; text-align: center; pointer-events: auto; cursor: pointer; padding: 1px 6px; border-radius: 5px;
+  background: rgba(5, 5, 12, .74); }
+#factory .nf b { display: block; font: 600 13px var(--font); color: rgba(242, 238, 255, .97); }
+#factory .nf span { display: block; font: 600 8.5px var(--mono); letter-spacing: .02em; text-transform: uppercase; color: rgba(168, 158, 214, .9); }
+#factory .nf.item { padding: 0 4px; }
+#factory .nf.item b { font: 500 10.5px var(--mono); color: rgba(206, 194, 250, .92); }
+#factory .nf.item.block b { color: rgba(214, 212, 236, .92); }
+#factory .nf.item.resource b { color: rgba(170, 200, 250, .92); }
+#factory .nf.ghost b { color: var(--fx-text-2); font-style: italic; }
+#factory .nf.quiet { opacity: .32; }
+#factory .nf.under { opacity: .12; }
+#factory .nf.bad span { color: color-mix(in srgb, var(--fx-sig-error) 80%, var(--fx-text)); }
+#factory .nf.picked b { color: #fff; text-decoration: underline; text-decoration-color: var(--fx-sig-agent); text-underline-offset: 3px; }
+#factory .nf:focus-visible { outline: 2px solid var(--fx-sig-agent); outline-offset: 1px; }
+#factory[data-far="1"] .nf.item, #factory[data-far="1"] .nf span { display: none; }
+#factory .fx-doors { position: absolute; column-gap: 14px; }
+#factory .fx-doorrow { break-inside: avoid; }
+#factory .fx-doors[hidden] { display: none; }
+#factory .fx-doorrow { height: 15px; display: flex; align-items: baseline; gap: 7px; white-space: nowrap; background: rgba(5, 5, 12, .8); padding: 0 3px; }
+#factory .fx-doors[data-side="left"] .fx-doorrow { justify-content: flex-end; }
+#factory .fx-doorrow b { font: 500 10px var(--mono); color: rgba(226, 232, 255, .96); }
+#factory .fx-doorrow span { font: 600 8px var(--mono); color: rgba(196, 182, 255, .95); }
+#factory .fx-doorrow span.service { color: rgba(150, 176, 255, .95); }
+#factory .fx-doortag { position: absolute; transform: translate(-50%, -100%); white-space: nowrap; text-align: center; background: rgba(5, 5, 12, .86); padding: 2px 6px; border-radius: 5px; }
+#factory .fx-doortag b { display: block; font: 600 11px var(--mono); color: rgba(240, 236, 255, .97); }
+#factory .fx-doortag span { display: block; font: 600 8px var(--mono); color: rgba(160, 186, 255, .95); }
+/* the legend's keys: the shapes on the picture, small */
+#factory .fx-legend i[class^="k-"] { border-radius: 0; box-shadow: none; background: none; width: 9px; height: 9px; vertical-align: -1px; }
+#factory .fx-legend i.k-wf { background: linear-gradient(135deg, #5448b0, #2c2670); border: 1px solid rgba(200, 194, 244, .7); transform: rotate(45deg) scale(.8); }
+#factory .fx-legend i.k-st { border-radius: 50%; background: radial-gradient(#fff 30%, rgba(190, 172, 255, .5) 70%, transparent); }
+#factory .fx-legend i.k-bk { background: rgba(206, 202, 236, .9); transform: rotate(45deg) scale(.6); }
+#factory .fx-legend i.k-rs { border-radius: 50%; border: 1px solid rgba(160, 196, 255, .9); transform: scale(.8); }
+#factory .fx-legend i.k-sv { border: 1px solid rgba(176, 204, 255, .95); background: rgba(24, 26, 66, .98); transform: rotate(45deg) scale(.7); }
+#factory .fx-legend i.k-jb { border-radius: 50%; border: 1px solid rgba(214, 204, 255, .92); transform: scale(.75); }
+#factory .fx-legend i.k-er { border-radius: 50%; background: var(--fx-sig-error); transform: scale(.7); }
+:is(#factory, #fx-inspect) .fx-map { display: block; margin: 2px 0 6px; border-radius: 6px; background: rgba(9, 8, 24, .6); }
