@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#0e1115" media="(prefers-color-scheme: dark)">
 <title>Team — operonx studio</title>
 <link rel="icon" type="image/png" href="/static/operonx-favicon.png">
-<script>/* the theme and the glass before the first paint (theme.js keeps them in step) */try{var t="dark";document.documentElement.dataset.theme=t;var g=localStorage.getItem("ox:glass")||"system";if(g==="system")g=matchMedia("(prefers-reduced-transparency: reduce), (prefers-contrast: more)").matches?"solid":"glass";document.documentElement.dataset.glass=g}catch(e){}</script>
+<script>/* the theme and the glass before the first paint (theme.js keeps them in step) */try{var t="dark";document.documentElement.dataset.theme=t;var g=localStorage.getItem("ox:glass")||"system";if(g==="system")g=matchMedia("(prefers-reduced-transparency: reduce), (prefers-contrast: more)").matches?"solid":"glass";document.documentElement.dataset.glass=g;/* no GPU (a software renderer): glass is not blurred live, studio-dark.css; asked once, kept */var u=localStorage.getItem("ox:gpu");if(!u){u="hard";var c=document.createElement("canvas"),l=c.getContext("webgl2")||c.getContext("webgl");if(l){var d=l.getExtension("WEBGL_debug_renderer_info"),n=String(d?l.getParameter(d.UNMASKED_RENDERER_WEBGL):l.getParameter(l.RENDERER));if(/swiftshader|llvmpipe|softpipe|software|basic render|warp/i.test(n))u="soft";var x=l.getExtension("WEBGL_lose_context");x&&x.loseContext()}else u="soft";localStorage.setItem("ox:gpu",u)}document.documentElement.dataset.gpu=u}catch(e){}</script>
 <link rel="stylesheet" href="/static/studio.css">
 </head>
 <body class="page">

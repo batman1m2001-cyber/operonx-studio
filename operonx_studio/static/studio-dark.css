@@ -469,3 +469,21 @@
 :root[data-theme="dark"]:not([data-glass="solid"]) body.page {
   background: linear-gradient(90deg, rgba(8, 8, 16, 0) 12%, rgba(8, 8, 16, .58) 32%, rgba(8, 8, 16, .58) 68%, rgba(8, 8, 16, 0) 88%) fixed,
     url("/static/backdrop-dark.webp") center / cover no-repeat fixed, var(--glass-under); }
+
+/* ── no GPU: the glass is drawn beforehand ───────────────────────────────────────────────────────
+ * A live blur (backdrop-filter) is computed again for every frame, and on a software renderer that
+ * is the whole cost of a page: home drew 19 frames a second and Services 10, against 61 without it
+ * (the fixed backdrop and the shadows cost nothing). So where there is no GPU (data-gpu="soft", set
+ * before the first paint by the page's head script) nothing is blurred live. A page of text lies on
+ * a copy of the backdrop that was blurred once, as a file (backdrop-dark-soft.webp, fixed like the
+ * backdrop, so the two line up): the same picture, only loaded. Bars and panels keep clear glass
+ * with a little more tint; menus, which open over running text, are nearly solid. */
+:root[data-gpu="soft"] *, :root[data-gpu="soft"] *::before, :root[data-gpu="soft"] *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+:root[data-gpu="soft"][data-theme="dark"]:not([data-glass="solid"]) body {
+  --glass-clear: rgba(18, 20, 33, .44); --glass-menu: rgba(17, 19, 31, .90); --glass-frost: rgba(16, 18, 30, .78); }
+:root[data-gpu="soft"][data-theme="dark"]:not([data-glass="solid"]) body.floatframe:not(.ax-focus) .main > :is(.pane, #traces, #jobs, #resources):not([hidden]),
+:root[data-gpu="soft"][data-theme="dark"]:not([data-glass="solid"]) body.page :is(.projlist, .logincard) {
+  background: linear-gradient(var(--glass-page), var(--glass-page)), url("/static/backdrop-dark-soft.webp") center / cover no-repeat fixed; }
+/* the bar and the rail lie on the same blurred copy wherever only the backdrop is under them (not over the flow canvas or the Factory) */
+:root[data-gpu="soft"][data-theme="dark"]:not([data-glass="solid"]) body.floatframe:not(.ax-focus):not([data-tab="flow"]) :is(header.bar, .rail) {
+  background: linear-gradient(var(--glass-clear), var(--glass-clear)), url("/static/backdrop-dark-soft.webp") center / cover no-repeat fixed; }
