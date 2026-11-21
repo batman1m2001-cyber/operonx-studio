@@ -23,3 +23,13 @@ def _isolated_ir_cache(tmp_path_factory, monkeypatch):
     from operonx_studio.cache import studio_cache
 
     studio_cache(refresh=True)
+
+
+@pytest.fixture(autouse=True)
+def _every_look_at_the_files_is_fresh(monkeypatch):
+    """A test edits a file and asks at once whether it changed; the studio
+    lets one look answer a burst of requests (ProjectWatcher.CHECK_EVERY).
+    tests/studio/test_daemon.py turns the burst back on to test it."""
+    from operonx_studio.daemon import ProjectWatcher
+
+    monkeypatch.setattr(ProjectWatcher, "CHECK_EVERY", 0.0)

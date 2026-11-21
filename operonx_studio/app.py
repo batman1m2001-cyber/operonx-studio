@@ -3701,7 +3701,10 @@ def build_studio_app(recents: Optional[Recents] = None):
                 continue
             if label and label not in ((rev or {}).get("labels") or []):
                 continue
-            out.append({**_row(s), "review": rev})
+            # only what the list draws: a row carried its whole input, output and metadata, and 200 of
+            # them were 0.5–1 MB before the page could show anything (the opened run comes in `detail`)
+            out.append({"run": s.trace_id, "origin": s.origin, "name": s.name, "key": getattr(s, "key", None),
+                        "status": s.status, "started_at": s.started_at, "review": rev})
         shown = out[: max(1, min(limit, 500))]
         detail = None
         first = next((r for r in shown if r["run"] == open), shown[0] if shown else None)

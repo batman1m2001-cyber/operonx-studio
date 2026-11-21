@@ -799,7 +799,9 @@ const KnowledgeView = (() => {
     return f;
   }
 
-  discover();
+  // which knowledge bases there are only decides whether a tab shows: asked after the page's own requests
+  if (document.readyState === "complete") setTimeout(discover, 600);
+  else window.addEventListener("load", () => setTimeout(discover, 600), {once: true});
   registerPane("knowledge", {el: box, show});
   return {show, discover};
 })();

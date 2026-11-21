@@ -3839,5 +3839,13 @@
     if (A.mode === "center") return;
     if (PHONE.matches) placement.openSheet(); else placement.enterFocus();
   });
-  boot();
+  /* Beside a page (Playground, Review, Jobs…) the conversation is not what was opened: its requests —
+   * the catalogue, usage, the last sessions, the suggestions — start once the page has loaded its own,
+   * so they do not queue in front of it. Where the conversation is the screen (the project's Now page,
+   * home, a link to a conversation) it starts at once, as before. */
+  const named = PROJECT && typeof Router !== "undefined" ? Router.parse(location).tab : null;
+  const beside = named && named !== "project" && !document.body.classList.contains("pmode") && !/#assistant=/.test(location.hash);
+  if (!beside) boot();
+  else if (document.readyState === "complete") setTimeout(boot, 400);
+  else W.addEventListener("load", () => setTimeout(boot, 400), {once: true});
 })();
