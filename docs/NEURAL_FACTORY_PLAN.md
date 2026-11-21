@@ -9,9 +9,9 @@ every other screen stay as they are.
 
 | Today | Mock of the target (mr-finance, real data) |
 |---|---|
-| ![today](img/neural/today.png) | ![mock](img/neural/mock11-overview.png) |
+| ![today](img/neural/today.png) | ![mock](img/neural/mock12-overview.png) |
 
-Hovering a store in the mock: ![hover](img/neural/mock11-hover.png)
+Hovering a store in the mock: ![hover](img/neural/mock12-hover.png)
 
 The mock is a standalone canvas page, not studio code. Its crystal heights come from a hash of the
 flow's name, because it was given op counts only; the real picture sizes each crystal from its op.
@@ -52,10 +52,10 @@ the whole was forced onto a ring. Mock 6 (the images above) is drawn to that.
 
 | Kind | Shape | Why it cannot be mistaken |
 |---|---|---|
-| workflow | an engineered crystalline platform (mock 11): a foundation slab; a faceted core, no taller than its tallest modules; the two axes kept clear as channels of light from the core to the edge; between them four groups, each on its own pad; one module per op, of four footprints and three heights, the tall ones with a stepped head, lower away from the core. 114 ops fills six rings of the four groups; 3 ops is three modules beside the core | the only large structure, the only one with a core |
+| workflow | an engineered crystalline platform (mock 11): a foundation slab; a faceted core, no taller than its tallest modules; the two axes kept clear as channels of light from the core to the edge; between them four groups, each on its own pad; one module per op, of four footprints and three heights, lower away from the core. 114 ops fills six rings of the four groups; 3 ops is three modules beside the core | the only large structure, the only one with a core |
 | store | a synaptic junction on a small pad of the platforms' own shape: a nucleus, three or four short terminals. The sixteen stand on one diamond lattice between the wings, each named under its pad; a faint registration mark stands where the lattice's cells meet — marks, not lines | compact, star-like, no structure on it |
 | service | a miniature interface dock (mock 11): a base plate, a low body with a seam, and at the end that faces its workflow a raised housing with one lit cool-blue port in its end face (a WebSocket's is a joined pair) and two contacts on top | horizontal, layered, blue-lit, points at its workflow |
-| job | an execution beacon: a two-step round foot with a bright rim, a slim mast, a small dim-lit tip; one a schedule starts carries a fine level ring with five ticks and a marker | vertical, round-footed, violet |
+| job | an execution beacon: a two-step round foot with a bright rim, a slim mast, a small dim-lit tip; one a schedule starts carries a ticked dial round its head with a marker on it | vertical, round-footed, violet, never attached by a strut |
 
 Scale: store < service, job < workflow. **Not drawn, by the owner's rule:** radial needles, spikes,
 petals, membranes, a ring round every entity, a ring or ellipse round the centre, glow that says
@@ -83,9 +83,13 @@ flowchart LR
   above, jobs below. Read from the outside in: a call comes in → the workflow → its data, in the
   middle. Which slot a workflow or a store takes is searched: fewest crossings, no filament over
   another workflow, then length.
-- **Entry points are not parts of a workflow, and are plainly its own.** They stand off it on a faint
-  rail — its dock — one filament each. In mr-finance every service and job runs exactly one workflow (91 of 91); the model allows
-  more, and then the entry point stands between the workflows it runs.
+- **A service is attached; a job is associated** (the owner's twelfth brief; mock 12). A workflow's
+  entry points follow its platform's outer outline, in ranks. Services stand closest, each joined to
+  the platform's edge by a short solid strut — a physical part, drawn as metal, not as silk — with
+  its port toward the workflow; the call's pulse runs along the strut. Jobs stand in the ranks
+  behind, each with one thin periwinkle filament and its pulse. In mr-finance every service and job
+  runs exactly one workflow (91 of 91); the model allows more, and then the entry point stands
+  between the workflows it runs, joined to each.
 - **Nothing is drawn round the centre**, and no control entity is drawn: the model has none.
 - **A busy workflow's filaments leave apart.** Each relationship leaves the platform at its own point
   along the two edges that face the stores, in the order of the stores it goes to (mock 11: `pages`
@@ -106,7 +110,7 @@ flowchart LR
 | a job's schedule as text | the picture's model says only that a schedule starts it; N1 checks whether the IR carries the expression and shows it on hover if it does |
 | a service that runs no flow (mr-finance's one `asgi` mount) | it exists in the model with no link; it is drawn in the band, unattached |
 
-![close: a workflow, its gateways and beacons](img/neural/mock11-zoom.png)
+![close: a workflow, its gateways and beacons](img/neural/mock12-zoom.png)
 
 ## What exists today (read from the code)
 
