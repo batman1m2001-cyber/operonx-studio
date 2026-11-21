@@ -23,7 +23,9 @@ const PromptsView = (() => {
     for (const g of (state.ir || {}).graphs || []) {
       (function walk(nodes) {
         for (const n of nodes || []) {
-          if (/llm/i.test(n.kind || "") || (n.prompts || []).length) out.push({name: n.name, graph: g.name, resource: Array.isArray(n.resource) ? n.resource.join(", ") : n.resource, prompts: n.prompts || []});
+          if (/llm/i.test(n.kind || "") || (n.prompts || []).length) out.push({name: n.name, graph: g.name, resource: Array.isArray(n.resource) ? n.resource.join(", ") : n.resource, prompts: n.prompts || [],
+            // the template as the code wrote it (a literal prompt=): what there is to read before any run
+            written: (((n.inputs || []).find(i => i.name === "prompt") || {}).binding || {}).kind === "literal" ? n.inputs.find(i => i.name === "prompt").binding.value : null});
           if (n.graph) walk(n.graph.nodes);
         }
       })(g.nodes);
@@ -110,7 +112,26 @@ const PromptsView = (() => {
     if (mine !== token) return;
     main.textContent = "";
     if (!got.samples.length) {
-      main.append(paneNote("Nothing recorded yet", `Run ${v.op} — a service call, a job, the Playground — and its inputs become the samples here.`));
+      // no run to take the prompt from: the template as the graph wrote it, to read (it had been a blank page)
+      const o = ops.find(x => x.name === v.op) || {};
+      const parts = typeof o.written === "string" ? [["Prompt — the template", o.written]]
+        : o.written && typeof o.written === "object" ? Object.entries(o.written).filter(([, t]) => typeof t === "string").map(([k, t]) => [k === "system" ? "System prompt" : k === "user" ? "User message — the template" : k, t]) : [];
+      if (parts.length) {
+        const sec = el("section", "pwprompt");
+        sec.append(el("div", "stitle", "The prompt — as the code wrote it"));
+        for (const [title, val] of parts) {
+          const f = el("div", "pwfield pwlead");
+          const cap = el("div", "pwcap");
+          cap.append(el("b", null, title), el("span", null, `${val.length.toLocaleString()} characters · {name} is filled in at run time`));
+          const inp = el("textarea", "pwtext pwprose");
+          inp.value = val; inp.readOnly = true; inp.spellcheck = false; inp.setAttribute("aria-label", title);
+          inp.style.height = `${Math.min(460, 34 + 22 * Math.max(2, val.split("\n").reduce((n, ln) => n + 1 + Math.floor(ln.length / 110), 0)))}px`;
+          f.append(cap, inp);
+          sec.append(f);
+        }
+        main.append(sec);
+      }
+      main.append(paneNote("No samples yet", `A sample is ${v.op} run by a service call, a job or the Playground: its inputs show here, and an edit can be tried on them. Runs started another way (a script, a test) are not taken as samples.`));
       return;
     }
 

@@ -160,6 +160,9 @@ body.factory-on[data-tab="flow"] #inspector:not([hidden]) + #fx-inspect { displa
 /* ── clear glass over the picture (the studio's clear glass itself: studio-dark.css, last block) ──
  * where nothing is blurred behind a pane (no GPU), a little more tint keeps its words readable */
 body[data-tab="flow"] { --glass-still: rgba(14, 16, 27, .50); }
+/* a menu is not a pane: it opens over the picture's names and buildings, and at the panes' tint they read through its
+ * rows (the project switcher over the Factory). A menu on this tab is all but solid. */
+body[data-tab="flow"] :is(.popover, .ax-pop, .ax-slash) { --glass-still: rgba(16, 18, 30, .96); }
 /* the side panel holds running text: with nothing blurred behind it, it takes more tint than the rest, and the
  * picture's names do not show through it (factory3d.js marks the ones under it) */
 body.factory-on.fx-soft[data-tab="flow"]:not(.ax-focus) #sidebar { --glass-tint: rgba(13, 15, 25, .58); }
