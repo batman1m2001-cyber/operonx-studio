@@ -9,9 +9,9 @@ every other screen stay as they are.
 
 | Today | Mock of the target (mr-finance, real data) |
 |---|---|
-| ![today](img/neural/today.png) | ![mock](img/neural/mock2-overview.png) |
+| ![today](img/neural/today.png) | ![mock](img/neural/mock3-overview.png) |
 
-Hovering a flow in the mock: ![hover](img/neural/mock2-hover.png)
+Hovering a flow in the mock: ![hover](img/neural/mock3-hover.png)
 
 The mock is a standalone canvas page, not studio code. Its crystal heights come from a hash of the
 flow's name, because it was given op counts only; the real picture sizes each crystal from its op.
@@ -22,6 +22,24 @@ flow's name, because it was given op counts only; the real picture sizes each cr
 into 3–4 short roots. A flow that both writes and reads a store has two relationships, so two
 filaments, bowed to either side. How many ops are behind a relationship shows as how many signals
 travel the filament (1–3), never as more strands.
+
+## A dim filament, a bright pulse
+
+The owner's refinement of the second mock (2026-11-21): the filaments read as bright laser cables.
+**The network's structure is seen first; a filament is noticed when it is looked at; moving energy is
+what says something is happening.** Mock 3 above is drawn to these numbers.
+
+| Layer | What | Numbers |
+|---|---|---|
+| A — the filament | one thin, continuous strand, there when nothing moves | 0.5–0.8 px, muted lavender, 15–30% opacity (the mock: 0.65 px at 24%); no halo, only a luminosity held within 1 px of it; drawn without additive blending, so a crossing is no brighter than a strand |
+| B — the energy | one small pulse with a short tail, on the filament's own path, going the way the data goes | a 1.25 px white core, a 4 px halo; it lights itself, not the strand; each relationship has its own phase |
+
+- Hovered or selected: its relationships rise to about 60%, the rest drop to a third of their resting
+  level and carry no pulse. Junctions glow when looked at, not all at once.
+- Fewer crossings: the ring's order is searched on the count of crossing filaments first, their
+  length second.
+
+![close: filaments, pulses, junctions](img/neural/mock3-zoom.png)
 
 ## What exists today (read from the code)
 
@@ -55,7 +73,7 @@ travel the filament (1–3), never as more strands.
    shared data. Same input, same picture.
 5. **A crystal is an op.** One crystal per op of the flow; a nested graph is one taller crystal sized
    by its ops; an agent keeps a distinct form. Geometry stays merged into one buffer (no instancing).
-6. **Two colours of filament, one family.** Data is violet-white; execution is periwinkle. Both are
+6. **Two colours of filament, one family.** Data is muted lavender; execution is periwinkle; both dim at rest. Both are
    the studio's lavender pattern; no other hue.
 7. **Hover is added; click stays.** Hover a flow or junction: it, its filaments and their other ends
    stay lit, the rest drops to about 15%. Hover a filament: its direction and what is behind it (the
