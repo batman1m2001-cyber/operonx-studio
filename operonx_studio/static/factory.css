@@ -243,9 +243,9 @@ body[data-tab="flow"] #sidebar.playing { --glass-tint: rgba(14, 16, 27, .93); }
 :is(#factory, #fx-inspect) .fx-job .datatable :is(th, td) { padding: 5px 6px; }
 
 /* the listeners (ONE_PICTURE_PLAN O2): a line under the counts, and the Services screen's own view in the card */
-#factory .fx-listeners { margin: 0 0 0 10px; display: inline-flex; gap: 6px; pointer-events: auto; vertical-align: middle; }
-#factory .fx-listeners button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(190, 176, 255, .16); background: rgba(12, 10, 24, .6); border-radius: 999px; padding: 0 8px; line-height: 15px; font: 500 10.5px var(--mono); color: var(--fx-text-2); cursor: pointer; }
-#factory .fx-listeners button:hover { border-color: rgba(190, 176, 255, .4); color: var(--fx-text); }
+#factory .fx-listeners { margin: 0 0 0 12px; display: inline-flex; gap: 12px; pointer-events: auto; vertical-align: middle; }
+#factory .fx-listeners button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; padding: 0; line-height: inherit; font: 500 10.5px var(--mono); color: var(--fx-text-2); cursor: pointer; }
+#factory .fx-listeners button:hover { color: var(--fx-text); text-decoration: underline; }
 #factory .fx-listeners b { font-weight: 600; color: var(--fx-text); }
 #factory .fx-listeners i { width: 6px; height: 6px; border-radius: 50%; background: rgba(160, 156, 190, .55); }
 #factory .fx-listeners .up i { background: #5fd39a; }
@@ -258,3 +258,12 @@ body[data-tab="flow"] #sidebar.playing { --glass-tint: rgba(14, 16, 27, .93); }
 :is(#factory, #fx-inspect) .fx-host .svcrow { display: block; padding: 8px 0; }
 :is(#factory, #fx-inspect) .fx-host .svcdesc { margin: 3px 0; font-size: 11.5px; }
 :is(#factory, #fx-inspect) .fx-host .svclinks { display: flex; gap: 12px; }
+
+/* one picture (ONE_PICTURE_PLAN O4, O5): Services and Jobs are opened from the picture, so their tabs are
+ * gone (the screens stay, as each one's full page); Flow is a level under the picture — its tab shows only
+ * while a flow is open, and the flow's name leaves the crumbs while the picture is the screen */
+#hubtabs [data-folded] { display: none !important; }
+body.factory-on #hubtabs [data-view="flows"] { display: none !important; }
+body.factory-on[data-tab="flow"] .crumbs #btn-project, body.factory-on[data-tab="flow"] .crumbs .sep:has(+ #btn-project) { display: none; }
+:is(#factory, #fx-inspect) .fx-full { border: 0; background: none; padding: 0; margin: 10px 0 0; font: 500 11.5px var(--font); color: var(--fx-sig-agent); cursor: pointer; }
+:is(#factory, #fx-inspect) .fx-full:hover { text-decoration: underline; }

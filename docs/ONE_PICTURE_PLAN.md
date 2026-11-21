@@ -4,7 +4,8 @@ Factory, Flow, Services and Jobs become one place: the project's picture. It is 
 a flow, a service or a job is something you open *from* it, not a tab beside it. The owner's idea,
 2026-11-22.
 
-**Status: proposed. Nothing is built. Waiting for the owner's go.**
+**Status: built (2026-11-22), O1–O5.** What was built, where it differs from this plan, and what was
+not exercised: [ONE_PICTURE.md](ONE_PICTURE.md).
 
 ## Today
 

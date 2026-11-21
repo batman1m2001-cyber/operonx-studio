@@ -70,6 +70,7 @@ window.Factory = (() => {
         if (!on()) return;
         if (id && id !== shown) { if (typeof peekSide === "function") peekSide("inspect"); } else if (!id && shown && typeof unpeek === "function") unpeek();
         shown = id || null;
+        if (window.FlowRail) FlowRail.mark(id);          // the rail marks the row of what the picture selected
       }, onOpen(name, node) {          // a flow, and (from a shared block) the op that uses it
         FlowRail.open(name);
         if (node) requestAnimationFrame(() => { if (state.sel !== node && state.cardEls && state.cardEls.has(node)) select(node); });
@@ -100,7 +101,11 @@ window.Factory = (() => {
     let got; try { got = await api(`/api/p/${PID}/services`); } catch { return; }
     if (v !== view || !got.listeners || !got.listeners.length) return;
     const line = el("span", "fx-listeners");
-    const open = () => v.panel("x:listeners", "Listeners", (box) => ServicesView.showIn(box));
+    const open = () => v.panel("x:listeners", "Listeners", (box) => {
+      const inner = el("div"), full = el("button", "fx-full", "Open as a full page");
+      full.type = "button"; full.title = "The same listeners with room for a long log: the Services screen"; full.onclick = () => switchTab("services");
+      box.append(inner, full); ServicesView.showIn(inner);
+    });
     for (const l of got.listeners) {
       const b = el("button", l.running ? "up" : l.exit_code ? "bad" : "");
       b.type = "button"; b.title = "Start or stop it, read its log";

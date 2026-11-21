@@ -6436,3 +6436,18 @@ h2 > .paneabout { margin-left: 6px; }
   gap: 6px; pointer-events: none; color: var(--text-3); font-size: var(--fs-md); text-align: center; padding: 0 24px; }
 .nograph span { max-width: 280px; }
 .nograph b { color: var(--text-2); font-size: var(--fs-lg, 15px); font-weight: 650; }
+
+/* the rail as the picture's index (ONE_PICTURE_PLAN O3): flows, services or jobs in one list. One row over
+ * it: the three as text tabs, and the flows' sort as a small select — two rows of pills read as a mess */
+.flowrail .frtop { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border); }
+.flowrail .frkind { display: flex; gap: 14px; }
+.flowrail .frkind button { border: 0; background: none; padding: 4px 0 7px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--text-3); font: 600 12px var(--font); cursor: pointer; }
+.flowrail .frkind button:hover { color: var(--text-2); }
+.flowrail .frkind button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.flowrail .frby { height: 22px; max-width: 96px; padding: 0 4px; border: 0; background: none; color: var(--text-2); font: 500 11.5px var(--font); cursor: pointer; }
+.flowrail .frby:hover { color: var(--text); }
+.flowrail .frby option { background: var(--surface); color: var(--text); }
+.flowrail .frrow.frdoor { grid-template-columns: minmax(0, 1fr) auto; }
+.flowrail .frlast { font: 600 10px var(--mono); color: var(--text-3); }
+.flowrail .frlast.bad { color: var(--danger, #f0627a); }
+.flowrail .frlast.run { color: var(--accent); }

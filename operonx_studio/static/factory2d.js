@@ -349,7 +349,8 @@ function describe() { card.textContent = ""; card.hidden = !sel && !extra && !do
   if (isJob(sel)) { const j = model.by.get(sel), o = ownerOf(sel);          // a job: the host draws it — its runs, their items, Run and Resume
     head("Job", j.name, o ? null : "not placed on the picture"); card.querySelector("h3").remove();
     if (o) { const up = mk("button", "fx-back", `‹ ${o.name}`); up.type = "button"; up.title = "The workflow this job runs"; up.onclick = () => select(o.id); card.append(up); }
-    const box = mk("div", "fx-job"); card.append(box); opts.jobCard(box, j); return; }
+    const box = mk("div", "fx-job"); card.append(box); opts.jobCard(box, j);
+    if (opts.onRuns) { const full = mk("button", "fx-full", "Open as a full page"); full.type = "button"; full.title = "The same job with room for a long run: the Jobs screen"; full.onclick = () => opts.onRuns(j); card.append(full); } return; }
   const c = spot.get(sel), e = model.by.get(sel);
   if (c.ghost) { head("Not in this project", c.name, "doors ask for this graph, and the project does not list it"); list("Asked for by", c.doors.map(doorRow)); return; }
   if (c.members) {                                                   // a platform: one flow, or a domain of flows
@@ -416,7 +417,7 @@ document.addEventListener("keydown", onKey);
 function reveal(id) { const e = model.by.get(id); let o = spot.has(id) ? id : null;
   if (!o && e) { const f = e.type === "flow" ? e.id : e.flow || (e.job && model.by.get(e.job).flow); o = f ? clusterOf.get(f) : e.type === "resource" ? boxOfRes.get(id) : e.asks || (e.job && model.by.get(e.job).asks) ? `?:${e.asks || model.by.get(e.job).asks}` : null; }
   if (!o || !spot.has(o)) return false; const t = spot.get(o);
-  view.zoom = Math.max(view.zoom, 1); view.cx = t.x - Math.max(0, hud.offsetLeft - 14) / 2 / view.zoom; view.cy = t.y; apply(); select(o); return true; }
+  view.zoom = Math.max(view.zoom, 1); view.cx = t.x - Math.max(0, hud.offsetLeft - 14) / 2 / view.zoom; view.cy = t.y; apply(); select(isJob(id) ? id : o); return true; }   // a job is revealed as itself, in the card
 const find = mk("input", "fx-find"); find.type = "search"; find.placeholder = "Find a flow, service, job, block, resource…"; find.setAttribute("aria-label", "Find on the picture"); find.autocomplete = "off";
 const found = mk("div", "fx-found"); found.hidden = true; hud.append(find, found);
 const things = [...model.flows, ...model.blocks.filter(b => b.shared), ...model.resources.filter(r => r.flows.length), ...model.stores.filter(s => s.writers.length || s.readers.length), ...model.doors];
