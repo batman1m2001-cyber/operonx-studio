@@ -98,7 +98,7 @@ function switchTab(name, opts) {
   if (name === "playground") {
     if (window.Account && Account.viewOnly) { Account.toast(Account.VIEW_ONLY, true); return; }
     if (state.tab !== "flow") switchTab("flow", opts);
-    // Play is what the Node tab shows for START: the flow's input, and the run it starts
+    // Play is what the Details tab shows for START: the flow's input, and the run it starts
     const was = applyPanels.playing;
     state.playOn = true;
     showSide("inspect");
@@ -194,7 +194,7 @@ let peek = null;
 
 function panelState() {
   let tab = peek || recall("sideTab", "assistant");
-  if (tab === "play") tab = "inspect";   // a tab of its own for a day: it is the Node tab on START
+  if (tab === "play") tab = "inspect";   // a tab of its own for a day: it is the Details tab on START
   const on = (panelWanted() || !!peek) && !(tab === "inspect" && !inspectable());
   return {on, tab};
 }
@@ -209,7 +209,7 @@ function applyPanels() {
     b.classList.toggle("active", b.dataset.side === tab);
     b.setAttribute("aria-selected", String(b.dataset.side === tab));
   }
-  // the Node tab on START is Play; on an op, its detail
+  // the Details tab on START is Play; on an op, its detail
   const playing = on && tab === "inspect" && !!state.playOn && playable();
   $("#inspector").hidden = tab !== "inspect" || playing;
   $("#playground").hidden = !playing;

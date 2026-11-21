@@ -28,7 +28,7 @@ After — a voice service, and a request–reply one run from its fields:
 The Play tab lasted a day. Play is what the side panel's **Node** tab (it was
 "Inspect") shows for **START** — the node where the flow's input comes in:
 
-| Picked on the canvas | The Node tab shows |
+| Picked on the canvas | The Details tab shows |
 |---|---|
 | START (or the ▶ Play button, which picks it) | Play: the flow's inputs, Run / message / call, the reply |
 | an op | that op's detail, as before |
@@ -37,7 +37,7 @@ START and END were blue contacts with a halo; they are the brand's lavender
 now — START a filled play button, END a quiet outline with a stop square.
 
 ![START and END](img/play/ends.png)
-![START picked: Play in the Node tab](img/play/start.png)
+![START picked: Play in the Details tab](img/play/start.png)
 
 **Every flow can be played.** A flow no service serves (a job's, or one the
 manifest only names) is run directly: the engine's bridge gives it a door of

@@ -11,7 +11,7 @@
  * code, prompts and source live in collapsed sections underneath, so
  * they are one click away but never in the way. */
 function select(key) {
-  // an op is picked: the Node tab leaves START (Play) for it
+  // an op is picked: the Details tab leaves START (Play) for it
   if (state.playOn) { state.playOn = false; applyPanels(); }
   dfPlatePin = null;
   state.route = null;
