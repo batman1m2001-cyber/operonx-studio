@@ -4925,16 +4925,11 @@ button.rl-tog:hover { color: var(--text); }
 .rt-line-t { overflow-wrap: anywhere; }
 .rt-line-m { font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
 
-/* the Prompts list: the files a project's prompts live in */
-.pwfiles { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+/* the Prompts list */
 .pwlist > .stitle { margin: 2px 0 0; }
-.pwfiles .pwop { max-width: 100%; }
-.pwfiles .pwop b, .pwfiles .pwop span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) {
-  /* one scrolling row: the files join it, the headings give way */
-  .pwlist > .stitle, .pwfiles > .stitle { display: none; }
-  .pwfiles { display: contents; }
-  .pwfiles .pwop { max-width: 70vw; }
+  /* one scrolling row: the headings give way */
+  .pwlist > .stitle { display: none; }
 }
 
 /* ── Surfaces: one card ─────────────────────────────────────────────────
