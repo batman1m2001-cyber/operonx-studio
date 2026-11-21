@@ -126,7 +126,7 @@ const RunsView = (() => {
       rail.append(el("div", "railhead", label));
       for (const it of items) {
         const sub = kind === "service" ? `${it.kind || ""} ${it.path || ""}`.trim()
-          : kind === "runbook" ? ((it.steps || []).join(" → ") || (it.schedule ? `schedule ${it.schedule}` : "")) : "";
+          : kind === "runbook" ? ((it.steps || []).join(" → ") || (scheduleText(it.schedule) ? `schedule ${scheduleText(it.schedule)}` : "")) : "";
         rail.append(railItem(it.name, it.runs, it.errors, same(v.folder, {kind, name: it.name}),
           () => pick({kind, name: it.name}), sub));
       }
@@ -170,7 +170,7 @@ const RunsView = (() => {
     const it = (list || []).find(x => x.name === f.name);
     if (it && f.kind === "service") sub += ` · ${it.kind || ""} ${it.path || ""}`;
     if (it && f.kind === "runbook" && (it.steps || []).length) sub += ` · ${it.steps.join(" → ")}`;
-    else if (it && f.kind === "runbook" && it.schedule) sub += ` · ${it.schedule}`;
+    else if (it && f.kind === "runbook" && scheduleText(it.schedule)) sub += ` · ${scheduleText(it.schedule)}`;
     if (it && f.kind === "job" && it.session) sub += ` · ${it.session}`;
     return [f.name || sub, sub];
   }

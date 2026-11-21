@@ -101,7 +101,7 @@ async function showJobs(sel, runId) {
     r.setAttribute("aria-selected", String(j.name === picked.name));
     const head = el("div", "jhead");
     head.append(el("span", "jn", j.name));
-    head.append(el("span", "jkind", jobKind(j) + (j.schedule ? ` · ${j.schedule}` : "")));
+    head.append(el("span", "jkind", jobKind(j) + (scheduleText(j.schedule) ? ` · ${scheduleText(j.schedule)}` : "")));
     r.append(head);
     if (j.description) r.append(el("div", "jdesc", j.description));
     const last = el("div", "jlast");
@@ -154,7 +154,7 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
   const facts = job.kind === "steps" ? [`Steps: ${(job.steps || []).join(" → ")}`]
     : job.kind === "runbook" ? ["Runbook"]
     : job.session ? [`${job.session} job`] : [job.kind === "eval" ? "Eval" : "Job"];
-  if (job.schedule) facts.push(`schedule ${job.schedule}`);
+  if (scheduleText(job.schedule)) facts.push(`schedule ${scheduleText(job.schedule)}`);
   if (job.kind === "steps" || job.kind === "runbook") { /* the steps say it */ }
   else if (job.source || job.sink) facts.push(`${job.source || "—"} → ${job.sink || "—"}`);
   else if (job.kind !== "eval") {
@@ -231,6 +231,17 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
 
 /* What kind of job, in a word: steps, eval, or job (operonx >= 1.17);
  * runbook, or its session, from an older operonx. */
+/* A job's schedule in words. operonx.toml gives a table — {at: "07:00"} or {every: "5m"}, with the port
+ * of the service that runs it — and older projects a plain string; printing the table gave "[object Object]". */
+function scheduleText(s) {
+  if (!s) return "";
+  if (typeof s !== "object") return String(s);
+  if (s.at) return `daily ${s.at}`;
+  if (s.every) return `every ${s.every}`;
+  if (s.cron) return `cron ${s.cron}`;
+  return Object.entries(s).filter(([k]) => k !== "port").map(([k, v]) => `${k} ${v}`).join(", ");
+}
+
 function jobKind(j) {
   if (j.kind === "steps" || j.kind === "runbook" || j.kind === "eval") return j.kind;
   return j.session || "job";
