@@ -141,7 +141,7 @@ const PromptsView = (() => {
         }
         main.append(sec);
       }
-      main.append(paneNote("No samples yet", `A sample is ${v.op} run by a service call, a job or the Playground: its inputs show here, and an edit can be tried on them. Runs started another way (a script, a test) are not taken as samples.`));
+      main.append(paneNote("No samples yet", `A sample is ${v.op} run by a service call, a job or Play (on the Flow): its inputs show here, and an edit can be tried on them. Runs started another way (a script, a test) are not taken as samples.`));
       return;
     }
 

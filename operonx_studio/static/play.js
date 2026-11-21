@@ -1,4 +1,8 @@
-/* operonx studio — the Playground: toys on a service's doors.
+/* operonx studio — Play: toys on a service's doors, in the Flow's side panel.
+ *
+ * (It was a page of its own, the Playground; it is the Play tab of the panel
+ * beside the canvas now, opened by the canvas bar's Play button — the service
+ * runs next to the graph it runs, whose ops light up as it goes.)
  *
  * A toy drives one door of a declared service the way a client would:
  * Chat holds a session open and sends text, Form sends one JSON payload
@@ -35,6 +39,7 @@ const PlayView = (() => {
   let chatSid = null;                 // the chat session on screen
   let preRecent = null;               // recent sessions that came with the doors
   let ui = null;                      // the rendered pane's live parts
+  let followGraph = false;            // the next draw picks the service of the graph on the canvas
 
   const save = () => store(K, v);
   // what a run sent: a playground session's script, or a real session's
@@ -52,6 +57,7 @@ const PlayView = (() => {
     save();
     pendingReplay = {run, service: md.service, md};
     switchTab("playground");
+    showGraphOf(md.service);
   }
   const door = () => (doors || []).find(d => d.service === v.service);
   const short = (x, n = 90) => { const s = typeof x === "string" ? x : JSON.stringify(x); return s.length > n ? s.slice(0, n) + "…" : s; };
@@ -154,12 +160,11 @@ const PlayView = (() => {
     box.textContent = "";
     ui = null;
     const head = el("div", "panehead playhead");
-    head.append(el("h2", null, "Playground"));
     box.append(head);
     // the first open starts the project's own interpreter (seconds on a big
     // project): say so, instead of a bare "loading"
     const loading = el("div", "loadnote");
-    loading.append(el("span", "spin"), el("span", null, "Starting the playground — the project's interpreter loads its services the first time…"));
+    loading.append(el("span", "spin"), el("span", null, "Starting Play — the project's interpreter loads its services the first time…"));
     box.append(loading);
     let got;
     try {
@@ -170,8 +175,8 @@ const PlayView = (() => {
       if (cursor == null && got.cursor != null) cursor = got.cursor;
       preRecent = got.recent || null;
     } catch (err) {
-      loading.replaceWith(paneNote("The playground could not start", err.message, null, {
-        ask: {label: "Ask the assistant why", prompt: `The playground could not start for this project: "${err.message}". `
+      loading.replaceWith(paneNote("Play could not start", err.message, null, {
+        ask: {label: "Ask the assistant why", prompt: `Play (the studio's bridge that runs a service's doors) could not start for this project: "${err.message}". `
           + "Find out why (the bridge runs the project's services in its own interpreter) and fix what is ours to fix."},
         actions: [{label: "Try again", icon: "refresh", run: async () => {
           try { await api(`/api/p/${PID}/play/restart`, {}); } catch { /* shown again below */ }
@@ -183,41 +188,57 @@ const PlayView = (() => {
     const usable = doors.filter(d => d.toys.length);
     if (!doors.length) {
       box.append(paneNote("No services to play with",
-        "The playground drives a service's doors. Declare one with [[serve]] in operonx.toml, or Service(...) in Python."));
+        "Play drives a service's doors. Declare one with [[serve]] in operonx.toml, or Service(...) in Python."));
       return;
+    }
+    // the service of the graph on the canvas, when the panel is opened on another one's
+    if (followGraph) {
+      followGraph = false;
+      const shown = state.graph && state.graph.name;
+      const mine = usable.find(x => graphOf(x.service) === shown);
+      if (mine && graphOf(v.service) !== shown) { v.service = mine.service; chatSid = null; }
     }
     if (!door()) v.service = (usable[0] || doors[0]).service;
     const d = door();
-    const toyList = [...d.toys, ...(d.toys.includes("chat") ? ["simulated"] : [])];
-    if (!toyList.includes(v.toy)) v.toy = toyList[0] || "";
+    // one way to play a door, taken from what it takes in: audio is a call, a session of text a chat,
+    // one payload a form. A simulated user is not another kind — it is under More.
+    const canSim = d.toys.includes("chat");
+    const toyList = [...d.toys];
+    if (!(toyList.includes(v.toy) || (v.toy === "simulated" && canSim))) v.toy = toyList[0] || "";
     save();
+    const shown = state.graph && state.graph.name;
+    const sameGraph = usable.filter(x => graphOf(x.service) === shown);
 
     const pick = el("select", "montarget");
     pick.setAttribute("aria-label", "Service");
-    for (const x of doors) {
+    // a flow served by several doors (its routes): those are the choice; a flow with none: every door
+    const choice = sameGraph.length > 1 && sameGraph.some(y => y.service === d.service) ? sameGraph : doors;
+    for (const x of choice) {
       const o = el("option", null, x.toys.length ? x.service : `${x.service} (no toy)`);
       o.value = x.service;
       o.selected = x.service === v.service;
       pick.append(o);
     }
-    pick.onchange = () => { v.service = pick.value; chatSid = null; save(); show(); };
+    pick.onchange = () => { v.service = pick.value; chatSid = null; save(); showGraphOf(v.service); show(); };
+    // the service is the one of the flow on the canvas: a picker only when that names none, or several
+    const pickNeeded = !(sameGraph.length === 1 && sameGraph[0].service === d.service);
     const toys = el("span", "tlmodes");
-    const TOY = {chat: "Chat", form: "Form", voice: "Voice", simulated: "Simulated user"};
-    for (const t of toyList) {
+    const TOY = {chat: "Chat", form: "One request", voice: "Call"};
+    if (toyList.length > 1) for (const t of toyList) {
       const b = el("button", t === v.toy ? "on" : "", TOY[t] || t);
       b.type = "button";
       b.onclick = () => { v.toy = t; save(); show(); };
       toys.append(b);
     }
     const stateEl = el("span", "playstate");
-    const restart = Icons.button("refresh", undefined, "", "Restart the playground (reloads the project's code)");
+    const restart = Icons.button("refresh", undefined, "", "Restart Play (reloads the project's code)");
     restart.onclick = async () => {
       restart.disabled = true;
-      try { await api(`/api/p/${PID}/play/restart`, {}); toast("Playground restarted"); }
+      try { await api(`/api/p/${PID}/play/restart`, {}); toast("Play restarted"); }
       catch (err) { toast(err.message, true); }
       restart.disabled = false;
     };
-    head.append(pick, toys, stateEl, restart);
+    head.append(pickNeeded ? pick : el("b", "playname", d.service), toys, stateEl, restart);
 
     const desc = el("div", "playdoor");
     desc.append(el("span", "mono", `${d.kind}${d.kind === "http" ? " POST" : ""} ${d.path || ""}`),
@@ -237,15 +258,15 @@ const PlayView = (() => {
     const grid = el("div", "playgrid");
     const main = el("div", "playmain");
     const side = el("div", "playside");
-    grid.append(main, side);
+    grid.append(main);
     box.append(grid);
 
     // the connection: the query string, which fills the graph's parameters
     // (operonx 1.20: on every door, without a hook)
     const conn = el("details", "playconn");
     conn.open = !(v.query && v.query[d.service] && Object.keys(v.query[d.service]).length) && !!d.inputs.length;
-    conn.append(el("summary", null, d.custom_hook ? "Connection — query the service's on_session hook reads"
-                                                   : "Connection — the graph's parameters, as the query string"));
+    conn.append(el("summary", null, d.custom_hook ? "Inputs — the query the service's on_session hook reads"
+                                                   : "Inputs — the flow's parameters"));
     const rows = el("div", "playrows");
     const saved = (v.query && v.query[d.service]) || {...(d.query || {})};
     const defaults = d.defaults || {};
@@ -315,7 +336,19 @@ const PlayView = (() => {
     };
     function keep() { v.conds = v.conds || {}; v.conds[d.service] = cv; save(); paintCond(); }
     paintCond();
-    main.append(cond);
+    // what is not needed to play once: closed, under the run
+    const extra = el("details", "playmore");
+    const moreSum = el("summary", null, "More — conditions, a simulated user, events, recent sessions");
+    extra.open = !!v.more;
+    extra.ontoggle = () => { v.more = extra.open; save(); };
+    extra.append(moreSum, cond);
+    if (canSim) {
+      const simOn = v.toy === "simulated";
+      const sim = el("button", "linkbtn", simOn ? "Stop the simulated user — play it yourself" : "Let a simulated user hold the conversation (an LLM persona)");
+      sim.type = "button";
+      sim.onclick = () => { v.toy = simOn ? toyList[0] : "simulated"; save(); show(); };
+      extra.append(sim);
+    }
     let remoteBox = null;
     if ((d.remote_trace || []).length) {
       const lab = el("label", "playremote");
@@ -323,7 +356,7 @@ const PlayView = (() => {
       remoteBox.checked = !!(v.remote || {})[d.service];
       remoteBox.onchange = () => { v.remote = v.remote || {}; v.remote[d.service] = remoteBox.checked; save(); };
       lab.append(remoteBox, `Also send these sessions to ${d.remote_trace.join(", ")} (off: recorded here only)`);
-      main.append(lab);
+      extra.append(lab);
     }
 
     // the events column, and recent sessions under it
@@ -332,6 +365,7 @@ const PlayView = (() => {
     evList.append(el("div", "note", "What the door sends that is not a reply, and each session's start and end."));
     const recent = el("div", "playrecent");
     side.append(evHead, evList, el("div", "stitle", "Recent sessions"), recent);
+    extra.append(side);
 
     let beats = null;
     ui = {
@@ -476,6 +510,7 @@ const PlayView = (() => {
     else if (v.toy === "voice") voiceToy(main, d);
     else if (v.toy === "simulated") simToy(main, d);
     else formView = formToy(main, d);
+    main.append(extra);
     // a run's "Replay in the Playground": this pane was opened for it
     if (pendingReplay && pendingReplay.service === d.service) {
       const p = pendingReplay;
@@ -1110,18 +1145,23 @@ const PlayView = (() => {
   function formToy(main, d) {
     const key = `${K}:form:${d.service}`;
     const card = el("div", "playform");
-    card.append(el("div", "stitle", "Payload"));
+    // a flow with parameters is filled in above (Inputs): the JSON body is for what they cannot say
+    const hasInputs = !!(d.inputs || []).length;
+    const body = el("details", "playbody");
+    body.append(el("summary", null, hasInputs ? "A JSON body as well" : "Payload — the JSON body"));
     const ta = el("textarea", "mono playjson");
     ta.spellcheck = false;
     ta.setAttribute("aria-label", "JSON payload");
     ta.value = recall(key, "{\n  \n}");
     const err = el("div", "fielderr");
     const acts = el("div", "priceacts");
-    const go = el("button", "primary", "Send");
+    const go = el("button", "primary", "Run");
     go.type = "button";
     acts.append(go);
     const reply = el("div", "playreply");
-    card.append(ta, err, acts, reply);
+    body.open = !hasInputs || !/^\s*\{\s*\}\s*$/.test(ta.value);
+    body.append(ta, err);
+    card.append(body, acts, reply);
     main.append(card);
 
     go.onclick = async () => {
@@ -1246,7 +1286,17 @@ const PlayView = (() => {
     return sec;
   }
 
-  registerPane("playground", {el: box, show});
+  /* The graph a service runs ("module:graph" or "graph"), and the canvas put on it. */
+  function graphOf(service) {
+    const sv = ((state.ir || {}).services || []).find(x => x.name === service);
+    return sv && sv.graph ? String(sv.graph).split(":").pop().replace(/\[.*$/, "") : null;
+  }
+  function showGraphOf(service) {
+    const name = graphOf(service), pick = $("#graph-pick");
+    if (!name || (state.graph && state.graph.name === name) || ![...pick.options].some(o => o.value === name)) return;
+    pick.value = name;
+    pick.dispatchEvent(new Event("change"));
+  }
 
   /* The bridge, warm before it is needed: its cold start was 0.65-2.9 s of
    * the Playground's first open (the callbot's the slowest; measured). Asked
@@ -1254,16 +1304,25 @@ const PlayView = (() => {
    * with doors has been open 3 s. The studio keeps at most two warm. */
   let warmedAt = 0;
   const warm = () => {
-    if (Date.now() - warmedAt < 60000 || state.tab === "playground") return;
+    if (Date.now() - warmedAt < 60000 || !box.hidden) return;
     warmedAt = Date.now();
     api(`/api/p/${PID}/play/warm`, {}).catch(() => { warmedAt = 0; });
   };
   const hasDoors = () => ((state.ir || {}).services || []).some(s => s.kind !== "asgi");
-  for (const b of document.querySelectorAll('#hubtabs button[data-tab="playground"]')) {
+  for (const b of [$("#btn-play"), document.querySelector('#sidetabs button[data-side="play"]')]) {
     b.addEventListener("pointerenter", warm);
     b.addEventListener("focus", warm);
   }
   setTimeout(() => { if (!document.hidden && hasDoors()) warm(); }, 3000);
 
-  return {rerun, rerunSection, show, replayFrom, sentScript};
+  /* Play this service: the panel on it, the canvas on its graph. */
+  function openOn(service) {
+    v.service = service; chatSid = null; save();
+    switchTab("playground");
+    showGraphOf(service);
+  }
+  return {rerun, rerunSection, show, replayFrom, sentScript, openOn, follow: () => { followGraph = true; }};
 })();
+// the shell draws the panels before this script is read: it asks through here
+window.oxPlay = PlayView;
+if (!$("#playground").hidden) PlayView.show();

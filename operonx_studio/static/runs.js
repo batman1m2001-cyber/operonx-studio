@@ -21,7 +21,7 @@ const RunsView = (() => {
   const ORDERS = [["started_desc", "Newest"], ["duration_desc", "Slowest"],
                   ["cost_desc", "Most expensive"], ["errors_desc", "Most errors"]];
   const SECTIONS = [["services", "Services", "service"], ["jobs", "Jobs", "job"], ["runbooks", "Steps", "runbook"],
-                    ["evals", "Evals", "eval"], ["playground", "Playground", "playground"], ["adhoc", "Ad hoc", "adhoc"]];
+                    ["evals", "Evals", "eval"], ["playground", "Play", "playground"], ["adhoc", "Ad hoc", "adhoc"]];
 
   const v = Object.assign({
     folder: {kind: "all"}, range: "7d", status: "", q: "", order: "started_desc",
@@ -163,7 +163,7 @@ const RunsView = (() => {
   function folderTitle() {
     const f = v.folder;
     if (f.kind === "all") return ["All runs", "Every run this project recorded"];
-    const kinds = {service: "Service", job: "Job", eval: "Eval", runbook: "Steps", playground: "Playground", adhoc: "Ad hoc"};
+    const kinds = {service: "Service", job: "Job", eval: "Eval", runbook: "Steps", playground: "Play", adhoc: "Ad hoc"};
     let sub = kinds[f.kind] || f.kind;
     const list = origins && (origins[{service: "services", job: "jobs", eval: "evals", runbook: "runbooks",
       playground: "playground", adhoc: "adhoc"}[f.kind]] || []);
@@ -343,7 +343,7 @@ const RunsView = (() => {
       ? [{label: "Show the last 30 days", icon: "clock", run: () => { v.range = "30d"; save(); render(); }}] : [];
     if (f.kind === "service") return paneNote("No runs in this range",
       `Every ${f.name} session is recorded here as it ends.`, null,
-      {actions: [...((window.Account && Account.viewOnly) ? [] : [{label: "Try it in the Playground", icon: "play", run: () => switchTab("playground")}]), ...wider]});
+      {actions: [...((window.Account && Account.viewOnly) ? [] : [{label: "Play it on the Flow", icon: "play", run: () => switchTab("playground")}]), ...wider]});
     if (f.kind === "job" || f.kind === "runbook") return paneNote("No runs in this range",
       `${f.name}'s runs appear here as it runs.`, null,
       {actions: [{label: `Run ${f.name}`, icon: "play", run: () => { state.jobSel = f.name; switchTab("jobs"); }}, ...wider]});

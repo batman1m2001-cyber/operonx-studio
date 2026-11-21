@@ -28,7 +28,7 @@ const ServicesView = (() => {
     box.textContent = "";
     const head = el("div", "panehead");
     head.append(el("h2", null, "Services"), paneAbout("Each listener is one process: a port and the services bound to it. "
-      + "Start one here to try it the way it runs in production; the Playground drives it without a port."));
+      + "Start one here to try it the way it runs in production; Play (on the Flow) drives it without a port."));
     const refresh = Icons.button("refresh", undefined, "", "Refresh");
     refresh.onclick = show;
     head.append(el("div", "spacer"), refresh);
@@ -108,9 +108,9 @@ const ServicesView = (() => {
           links.append(pic);
         }
         if (s.kind !== "asgi") {
-          const play = el("button", "linkbtn needs-edit", "Playground");
+          const play = el("button", "linkbtn needs-edit", "Play");
           play.type = "button";
-          play.onclick = () => { const k = `play:${PID}`; const pv = recall(k, {}); pv.service = s.name; store(k, pv); switchTab("playground"); };
+          play.onclick = () => PlayView.openOn(s.name);
           const mon = el("button", "linkbtn", "Monitor");
           mon.type = "button";
           mon.onclick = () => performUi("open_monitor", {target: `service:${s.name}`, days: 1});

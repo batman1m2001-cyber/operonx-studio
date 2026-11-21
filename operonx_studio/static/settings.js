@@ -14,7 +14,7 @@
     ["service", "Services", "Calls and requests your services answered"],
     ["job", "Jobs", "One run per item, for every job run"],
     ["eval", "Evals", "Runs made while evaluating a dataset"],
-    ["playground", "Playground", "Sessions you ran from the studio"],
+    ["playground", "Play", "Sessions you ran with Play, on the Flow"],
     ["adhoc", "Ad hoc", "Tests, scripts, anything untagged"],
   ];
 
