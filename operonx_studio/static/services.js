@@ -11,26 +11,32 @@
 "use strict";
 
 const ServicesView = (() => {
-  const box = $("#services");
+  const page = $("#services");
+  let box = page;                    // where the listeners are drawn: the Services screen, or a box handed to showIn (the picture's side panel)
+  const seen = () => (box === page ? !box.hidden : box.isConnected);
   let token = 0;
   let timer = null;
   const openLogs = new Set();
 
-  async function show() {
+  const redraw = () => show(true);               // drawn again where it stands
+  function showIn(into) { box = into || page; return show(true); }
+  async function show(keep) {
+    if (keep !== true) box = page;                 // the tab asks: the screen is the box again
     const mine = ++token;
     clearTimeout(timer);
+    const again = redraw;
     let got, env = null, queues = {queues: []};
     try {
       [got, env, queues] = await Promise.all([api(`/api/p/${PID}/services`), api(`/api/p/${PID}/env-health`).catch(() => null),
         api(`/api/p/${PID}/services/queues`).catch(() => ({queues: []}))]);
-    } catch (err) { box.textContent = ""; box.append(loadError(err, () => show())); return; }
+    } catch (err) { box.textContent = ""; box.append(loadError(err, again)); return; }
     if (mine !== token) return;
     box.textContent = "";
     const head = el("div", "panehead");
     head.append(el("h2", null, "Services"), paneAbout("Each listener is one process: a port and the services bound to it. "
       + "Start one here to try it the way it runs in production; Play (on the Flow) drives it without a port."));
     const refresh = Icons.button("refresh", undefined, "", "Refresh");
-    refresh.onclick = show;
+    refresh.onclick = again;
     head.append(el("div", "spacer"), refresh);
     box.append(head);
 
@@ -43,7 +49,7 @@ const ServicesView = (() => {
     const moving = (queues.queues || []).some((q) => q.counts && (q.counts.running || q.counts.queued));
     if (!got.listeners.length && queued) {
       box.append(queued);
-      if (moving) timer = setTimeout(() => { if (!box.hidden) show(); }, 2000);
+      if (moving) timer = setTimeout(() => { if (seen()) again(); }, 2000);
       return;
     }
     if (!got.listeners.length) {
@@ -74,7 +80,7 @@ const ServicesView = (() => {
             await api(`/api/p/${PID}/services/${l.managed ? "stop" : "start"}`, {key: l.key});
             if (!l.managed) openLogs.add(l.key);
           } catch (err) { toast(err.message, true); }
-          show();
+          redraw();
         };
         acts.append(btn);
       } else if (l.running) {
@@ -83,7 +89,7 @@ const ServicesView = (() => {
       if (l.log) {
         const lb = el("button", "linkbtn", openLogs.has(l.key) ? "Hide log" : "Log");
         lb.type = "button";
-        lb.onclick = () => { openLogs.has(l.key) ? openLogs.delete(l.key) : openLogs.add(l.key); show(); };
+        lb.onclick = () => { openLogs.has(l.key) ? openLogs.delete(l.key) : openLogs.add(l.key); redraw(); };
         acts.append(lb);
       }
       top.append(acts);
@@ -136,7 +142,7 @@ const ServicesView = (() => {
       if (moving) busy = true;
     }
     // while something is starting, a log is open or a queue moves, look again
-    if (busy) timer = setTimeout(() => { if (!box.hidden) show(); }, 2000);
+    if (busy) timer = setTimeout(() => { if (seen()) again(); }, 2000);
   }
 
   const ago = (s) => s == null ? "" : s < 60 ? `${Math.round(s)} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
@@ -182,7 +188,7 @@ const ServicesView = (() => {
               b.disabled = true;
               try { await api(`/api/p/${PID}/services/queues/requeue`, {service: q.service, id: r.id}); toast(`run ${r.id.slice(0, 12)} is queued again`); }
               catch (err) { toast(err.message, true); }
-              show();
+              redraw();
             };
             act.append(b);
           }
@@ -199,6 +205,6 @@ const ServicesView = (() => {
     return sec;
   }
 
-  registerPane("services", {el: box, show});
-  return {show};
+  registerPane("services", {el: page, show: () => show()});
+  return {show: () => show(), showIn};
 })();

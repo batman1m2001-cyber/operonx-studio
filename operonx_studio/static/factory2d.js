@@ -73,6 +73,8 @@ const spot = new Map(); for (const it of core) { Object.assign(it, L.at.get(it.i
 for (const c of clusters) { Object.assign(c, L.at.get(c.id)); spot.set(c.id, c); c.prisms = FL.prismsOf(c.size); c.more = L.more.get(c.id) || 0; }
 const doors = []; for (const c of clusters) for (const d of c.doors) { const at = L.doors.get(d.id); if (at) doors.push({id: d.id, e: d, name: d.name, type: d.type, kind: d.kind, sched: scheduled.has(d.id), owner: c, x: at.x, y: at.y}); }
 const doorAt = new Map(doors.map(d => [d.id, d]));
+const isJob = (id) => { const e = typeof id === "string" && !id.startsWith("l:") && opts.jobCard ? model.by.get(id) : null; return !!e && e.type === "job"; };   // a job opens as itself in the card, when the host can show one
+const ownerOf = (id) => (doorAt.get(id) || {}).owner || clusters.find(c => c.doors.some(d => d.id === id)) || null;
 const edgeOf = (f, tx, ty) => { const dx = tx - f.x, dy = ty - (f.y + 6), s = 1 / (Math.abs(dx) / f.a + Math.abs(dy) / (f.a / 2) || 1); return {x: f.x + dx * s, y: f.y + 6 + dy * s}; };
 /* the silk: one filament per relationship */
 const fils = pairs.map(p => { const f = spot.get(p.src), s = spot.get(p.dst), st = L.starts.get(p), twin = pairs.some(o => o !== p && o.src === p.src && o.dst === p.dst);
@@ -259,11 +261,11 @@ if (docked) for (const n of ["text", "text-2", "sig-agent", "sig-store", "sig-er
 function refocus() { const id = hover || sel; focus = null; lit = null;
   if (id) { const line = id.startsWith("l:") ? {owner: id.slice(2, id.lastIndexOf("|")), kind: id.slice(id.lastIndexOf("|") + 1)} : null, door = doorAt.get(id);
     focus = {id, line, door}; lit = new Set([line ? line.owner : id]);
-    if (door) lit.add(door.owner.id);
+    if (door || isJob(id)) { const o = ownerOf(id); if (o) lit.add(o.id); }
     else for (const p of pairs) { if (line) { if (p.src === line.owner && strandKind(p.kind) === line.kind) lit.add(p.dst); } else { if (p.src === id) lit.add(p.dst); if (p.dst === id) lit.add(p.src); } } }
   for (const l of labels) { l.el.classList.toggle("quiet", !!lit && !lit.has(l.owner)); l.el.classList.toggle("picked", !!sel && l.owner === sel); }
   paintSparks(); listDoors(); redraw(); }
-function setHover(id) { if (id && !id.startsWith("l:") && !spot.has(id) && !doorAt.has(id)) id = null;   // a name this picture does not hold lights nothing, and dims nothing
+function setHover(id) { if (id && !id.startsWith("l:") && !spot.has(id) && !doorAt.has(id) && !isJob(id)) id = null;   // a name this picture does not hold lights nothing, and dims nothing
   if (id === hover) return; hover = id; refocus(); }
 /* a lit workflow's services and jobs by name, where the list covers least: other workflows, their doors and
  * names, the lit shared items and the lit filaments are all in its way */
@@ -284,12 +286,12 @@ function listDoors() { doorList.textContent = ""; listRows = []; doorList.hidden
   rows.forEach((d, i) => { const r = mk("div", "fx-doorrow"); r.append(mk("b", null, d.name), mk("span", d.type, kindOf(d))); doorList.append(r);
     if (cols === 1) listRows.push({d, left: at.left ? d.x > at.rect[2] : d.x > at.rect[0] + pwk / 2, x: d.x > at.rect[0] + pwk / 2 ? at.rect[2] + 3 : at.rect[0] - 3, y: at.rect[1] + (i * 15 + 7) * lk}); }); }
 const kindOf = (d) => (d.type === "service" ? (d.kind || "http").toUpperCase() : d.sched ? "JOB · SCHEDULED" : "JOB");
-function select(id) { const line = typeof id === "string" && id.startsWith("l:") ? {owner: id.slice(2, id.lastIndexOf("|")), kind: id.slice(id.lastIndexOf("|") + 1)} : null;
-  if (id && doorAt.has(id)) id = doorAt.get(id).owner.id;           // a door's card is its workflow's
-  sel = line ? (spot.has(line.owner) ? id : null) : id && spot.has(id) ? id : null; selLine = sel && line ? line : null;
+function select(id) { extra = null; const line = typeof id === "string" && id.startsWith("l:") ? {owner: id.slice(2, id.lastIndexOf("|")), kind: id.slice(id.lastIndexOf("|") + 1)} : null;
+  if (id && doorAt.has(id) && !isJob(id)) id = doorAt.get(id).owner.id;           // a service's card is its workflow's; a job has its own
+  sel = line ? (spot.has(line.owner) ? id : null) : id && (spot.has(id) || isJob(id)) ? id : null; selLine = sel && line ? line : null;
   refocus(); describe(); if (sel && docked) setTimeout(() => { uncover(); listDoors(); redraw(); }, 260); }   // the list is placed again once the panel is open: it stays out from under it
 /* the side panel opens over the right of the picture: what was picked moves out from under it */
-function uncover() { if (!sel) return; const t = spot.get(selLine ? selLine.owner : sel); if (!t) return;
+function uncover() { if (!sel) return; const t = spot.get(selLine ? selLine.owner : sel) || ownerOf(sel); if (!t) return;
   const cw = covered(), sx = (t.x - view.cx) * view.zoom + vw() / 2, edge = vw() - cw - 150;
   if (cw > 0 && sx > edge) { view.cx += (sx - edge) / view.zoom; apply(); } }
 /* a workflow's real ops, as its graph holds them: a small map of the graph, then every op by name */
@@ -309,7 +311,10 @@ function opsOf(name) { const gr = (ir.graphs || []).find(x => x.name === name); 
   if (order.length > 60) ul.append(mk("div", "fx-row more", `and ${order.length - 60} more`)); card.append(ul); }
 /* the card (docs/FACTORY_PANELS.md): what the selected thing is, in its own words; what comes in; what goes out;
  * what it works with — every row goes somewhere */
-function describe() { card.textContent = ""; card.hidden = !sel && !docked; if (opts.onSelect) opts.onSelect(sel);
+let extra = null;                                                    // {id, kind, draw}: the host's own card — the listeners
+function panel(id, kind, draw) { sel = null; selLine = null; extra = {id, kind, draw}; refocus(); describe(); }
+function describe() { card.textContent = ""; card.hidden = !sel && !extra && !docked; if (opts.onSelect) opts.onSelect(sel || (extra && extra.id));
+  if (!sel && extra) { const x = mk("button", "fx-x", "×"); x.type = "button"; x.title = "Close  (Esc)"; x.onclick = () => select(null); const box = mk("div", "fx-host"); card.append(x, mk("p", "fx-kind", extra.kind), box); extra.draw(box); return; }
   if (!sel) { if (docked) card.append(mk("p", "fx-hint", "Click a workflow, a store, a shared block, a resource or a line on the picture: what it is, and what it works with, is shown here.")); return; }
   const head = (kind, name, sub, says) => { const x = mk("button", "fx-x", "×"); x.type = "button"; x.title = "Clear the selection  (Esc)"; x.onclick = () => select(null);
     card.append(x, mk("p", "fx-kind", kind), mk("h3", null, name)); if (says) card.append(mk("p", "fx-says", says)); if (sub) card.append(mk("p", "fx-sub", sub)); };
@@ -321,7 +326,7 @@ function describe() { card.textContent = ""; card.hidden = !sel && !docked; if (
     if (rows.length > max) ul.append(mk("div", "fx-row more", `and ${rows.length - max} more`)); card.append(ul); };
   const open = (name, at) => () => opts.onOpen && opts.onOpen(name, at);
   const flowRow = (f) => ({name: f.name, note: [`${f.ops} ops`, f.runs ? `${f.runs.toLocaleString()} runs` : "", f.errors ? `${f.errors} failed` : ""].filter(Boolean).join(" · "), desc: f.description, go: open(f.name)});
-  const doorRow = (d) => ({name: d.name, note: d.type === "job" ? d.kind : `${d.kind} ${d.path || ""}`.trim(), desc: d.description, go: opts.onRuns ? () => opts.onRuns(d) : null,
+  const doorRow = (d) => ({name: d.name, note: d.type === "job" ? d.kind : `${d.kind} ${d.path || ""}`.trim(), desc: d.description, go: d.type === "job" && opts.jobCard ? () => select(d.id) : opts.onRuns ? () => opts.onRuns(d) : null,
     tip: d.type === "job" ? "Open this job, with its runs" : "Open this service's runs",
     also: d.type === "service" && opts.onDoor ? {tip: "Its row on the Services screen", go: () => opts.onDoor(d)} : null});
   const toCore = (kind) => pairs.filter(p => p.src === sel && p.kind === kind).map(p => { const t = model.by.get(p.dst); return {name: spot.get(p.dst).name, note: p.count > 1 ? `×${p.count}` : "", desc: t && t.description, go: () => select(p.dst)}; });
@@ -330,7 +335,7 @@ function describe() { card.textContent = ""; card.hidden = !sel && !docked; if (
     for (const l of model.outOf(fid)) { if (l.kind !== mine) continue; const s = model.by.get(l.dst);
       for (const w of s[theirs]) { if (w.id === fid) continue; if (!per.has(w.id)) per.set(w.id, {who: w, via: []}); per.get(w.id).via.push(s.name); } }
     return [...per.values()].map(({who, via}) => { const box = who.type === "flow" ? clusterOf.get(who.id) : null, d = model.by.get(who.id);
-      return {name: who.name, note: who.type === "job" ? (who.jobs ? `${who.jobs.length} jobs` : "job") : "", desc: `through ${via.join(", ")}`, go: box ? () => select(box) : who.type === "job" && opts.onRuns ? () => opts.onRuns(d) : null}; }); };
+      return {name: who.name, note: who.type === "job" ? (who.jobs ? `${who.jobs.length} jobs` : "job") : "", desc: `through ${via.join(", ")}`, go: box ? () => select(box) : who.type === "job" && opts.jobCard ? () => select(who.id) : who.type === "job" && opts.onRuns ? () => opts.onRuns(d) : null}; }); };
   if (selLine) {                                                     // a line: what moves along it, one row per thing at its far end
     const cl = spot.get(selLine.owner), of = pairs.filter(p => p.src === selLine.owner && strandKind(p.kind) === selLine.kind);
     const row = (p) => { const t = model.by.get(p.dst), mine = t && t.type === "store" && !grouped ? (p.kind === "writes" ? t.writers : t.readers).find(w => w.id === selLine.owner) : null;
@@ -341,6 +346,10 @@ function describe() { card.textContent = ""; card.hidden = !sel && !docked; if (
     if (selLine.kind === "data") { list("Writes", of.filter(p => p.kind === "writes").map(row)); list("Reads", of.filter(p => p.kind === "reads").map(row)); }
     else list(selLine.kind === "uses" ? "Shared blocks" : "Resources", of.map(row));
     list("From", [{name: cl.name, note: cl.sub, go: () => select(selLine.owner)}]); return; }
+  if (isJob(sel)) { const j = model.by.get(sel), o = ownerOf(sel);          // a job: the host draws it — its runs, their items, Run and Resume
+    head("Job", j.name, o ? null : "not placed on the picture"); card.querySelector("h3").remove();
+    if (o) { const up = mk("button", "fx-back", `‹ ${o.name}`); up.type = "button"; up.title = "The workflow this job runs"; up.onclick = () => select(o.id); card.append(up); }
+    const box = mk("div", "fx-job"); card.append(box); opts.jobCard(box, j); return; }
   const c = spot.get(sel), e = model.by.get(sel);
   if (c.ghost) { head("Not in this project", c.name, "doors ask for this graph, and the project does not list it"); list("Asked for by", c.doors.map(doorRow)); return; }
   if (c.members) {                                                   // a platform: one flow, or a domain of flows
@@ -422,6 +431,7 @@ setStats(stats);
 resize(); fit(); paintSparks();
 kick();
 return {
+  panel, hud,
   fit, select, reveal, setStats,
   hover: setHover,
   /* what a frame costs, and what is on it: for the scale checks */

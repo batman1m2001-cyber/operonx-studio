@@ -217,7 +217,7 @@ body[data-tab="flow"] #sidebar.playing { --glass-tint: rgba(14, 16, 27, .93); }
 #factory .fx-doorrow b { font: 500 10px var(--mono); color: rgba(226, 232, 255, .96); }
 #factory .fx-doorrow span { font: 600 8px var(--mono); color: rgba(196, 182, 255, .95); }
 #factory .fx-doorrow span.service { color: rgba(150, 176, 255, .95); }
-#factory .fx-doortag { position: absolute; transform: translate(-50%, -100%); white-space: nowrap; text-align: center; background: rgba(5, 5, 12, .86); padding: 2px 6px; border-radius: 5px; }
+#factory .fx-doortag { position: absolute; transform: translate(-50%, -100%) scale(var(--ls, 1)); transform-origin: 50% 100%; white-space: nowrap; text-align: center; background: rgba(5, 5, 12, .86); padding: 2px 6px; border-radius: 5px; }
 #factory .fx-doortag b { display: block; font: 600 11px var(--mono); color: rgba(240, 236, 255, .97); }
 #factory .fx-doortag span { display: block; font: 600 8px var(--mono); color: rgba(160, 186, 255, .95); }
 /* the legend's keys: the shapes on the picture, small */
@@ -230,3 +230,31 @@ body[data-tab="flow"] #sidebar.playing { --glass-tint: rgba(14, 16, 27, .93); }
 #factory .fx-legend i.k-jb { border-radius: 50%; border: 1px solid rgba(214, 204, 255, .92); transform: scale(.75); }
 #factory .fx-legend i.k-er { border-radius: 50%; background: var(--fx-sig-error); transform: scale(.7); }
 :is(#factory, #fx-inspect) .fx-map { display: block; margin: 2px 0 6px; border-radius: 6px; background: rgba(9, 8, 24, .6); }
+
+/* a job in the card (ONE_PICTURE_PLAN O1): the Jobs screen's own view of it, fitted to the panel's width */
+:is(#factory, #fx-inspect) .fx-back { border: 0; background: none; padding: 2px 0 8px; font: 500 11.5px var(--mono); color: var(--fx-text-2); cursor: pointer; }
+:is(#factory, #fx-inspect) .fx-back:hover { color: var(--fx-text); }
+:is(#factory, #fx-inspect) .fx-job .jbar { flex-wrap: wrap; gap: 6px; }
+:is(#factory, #fx-inspect) .fx-job .jtitle { flex: 1 1 100%; font-size: 15px; margin: 0 0 2px; overflow-wrap: anywhere; }
+:is(#factory, #fx-inspect) .fx-job :is(.jmeta, .jpath) { font-size: 11.5px; overflow-wrap: anywhere; }
+:is(#factory, #fx-inspect) .fx-job .jsection { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; margin: 16px 0 6px; }
+:is(#factory, #fx-inspect) .fx-job .tablewrap { overflow-x: auto; }
+:is(#factory, #fx-inspect) .fx-job .datatable { font-size: 11.5px; }
+:is(#factory, #fx-inspect) .fx-job .datatable :is(th, td) { padding: 5px 6px; }
+
+/* the listeners (ONE_PICTURE_PLAN O2): a line under the counts, and the Services screen's own view in the card */
+#factory .fx-listeners { margin: 0 0 0 10px; display: inline-flex; gap: 6px; pointer-events: auto; vertical-align: middle; }
+#factory .fx-listeners button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(190, 176, 255, .16); background: rgba(12, 10, 24, .6); border-radius: 999px; padding: 0 8px; line-height: 15px; font: 500 10.5px var(--mono); color: var(--fx-text-2); cursor: pointer; }
+#factory .fx-listeners button:hover { border-color: rgba(190, 176, 255, .4); color: var(--fx-text); }
+#factory .fx-listeners b { font-weight: 600; color: var(--fx-text); }
+#factory .fx-listeners i { width: 6px; height: 6px; border-radius: 50%; background: rgba(160, 156, 190, .55); }
+#factory .fx-listeners .up i { background: #5fd39a; }
+#factory .fx-listeners .bad i { background: var(--fx-sig-error); }
+:is(#factory, #fx-inspect) .fx-host .panehead h2 { font-size: 15px; }
+:is(#factory, #fx-inspect) .fx-host :is(.svctop, .svcname, .svclinks) { flex-wrap: wrap; gap: 6px; }
+:is(#factory, #fx-inspect) .fx-host .svccard { padding: 10px; }
+:is(#factory, #fx-inspect) .fx-host .svckey { overflow-wrap: anywhere; }
+:is(#factory, #fx-inspect) .fx-host .svclog { max-height: 260px; overflow: auto; font-size: 10.5px; }
+:is(#factory, #fx-inspect) .fx-host .svcrow { display: block; padding: 8px 0; }
+:is(#factory, #fx-inspect) .fx-host .svcdesc { margin: 3px 0; font-size: 11.5px; }
+:is(#factory, #fx-inspect) .fx-host .svclinks { display: flex; gap: 12px; }
