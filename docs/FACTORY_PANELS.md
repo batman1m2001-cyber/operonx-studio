@@ -98,3 +98,16 @@ laid down first. Drawn by `docs/img/canvas/cosmos.html` (canvas 2D, seeded; open
 - **A page of text is darker.** `--glass-page` went from a .30 to a .50 tint: the backdrop's bright nodes no longer sit behind the words (Services, Jobs, Runs…). Bars and panels keep the clear glass.
 - **Home has a shade down the middle.** The arch and the backbone cross exactly where the column of text is. Moving the figure right was tried and was worse (a constellation landed behind the title), so the figure stays and `body.page` gets a soft dark band behind the column, clear at the sides.
 - **The Factory keeps its own ground.** A sheet of fog over the cosmos was tried (#223) and taken out again: with little blur the backdrop's fine lines fought the cables, with more it was a smear. The picture is busy enough to want a plain ground.
+
+## No GPU: the glass is drawn beforehand
+
+The owner found every page slow to come up. Server and network were not it (a project opens in 1.7 s on the box, static files under 1 s through the tunnel). Drawing was: on a software renderer a live blur (`backdrop-filter`) is recomputed every frame.
+
+| page | live blur | blur off | baked (now) |
+|---|---|---|---|
+| home | 19 fps | 61 | 60 |
+| Services | 10 | 61 | 60 |
+| Flow canvas | 29 | 56 | 56 |
+| Factory | 50 | 60 | 53 |
+
+The fixed backdrop and the shadows cost nothing. So where there is no GPU — `data-gpu="soft"` on `<html>`, asked of WebGL once by the head script and kept in `localStorage["ox:gpu"]` — nothing is blurred live. Pages of text, the bar and the rail lie on `backdrop-dark-soft.webp`, a 12 KB copy of the backdrop blurred once (`fixed`, so it lines up with the backdrop behind): the same look, only loaded. Menus are nearly solid. With a GPU nothing changes. To re-ask after a hardware change: remove `ox:gpu` from localStorage.
