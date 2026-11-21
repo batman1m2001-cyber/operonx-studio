@@ -9,9 +9,9 @@ every other screen stay as they are.
 
 | Today | Mock of the target (mr-finance, real data) |
 |---|---|
-| ![today](img/neural/today.png) | ![mock](img/neural/mock5-overview.png) |
+| ![today](img/neural/today.png) | ![mock](img/neural/mock6-overview.png) |
 
-Hovering a flow in the mock: ![hover](img/neural/mock5-hover.png)
+Hovering a flow in the mock: ![hover](img/neural/mock6-hover.png)
 
 The mock is a standalone canvas page, not studio code. Its crystal heights come from a hash of the
 flow's name, because it was given op counts only; the real picture sizes each crystal from its op.
@@ -45,14 +45,16 @@ what says something is happening.** Mock 3 above is drawn to these numbers.
 
 The owner's third brief (2026-11-21): the entities looked alike and the hierarchy could not be read.
 His fifth, on mock 4: its radial, spiky cells were **too biological and alien — not to be continued**.
-Mock 5 (the images above) returns to the Factory's own crystalline platforms.
+Mock 5 returned to the Factory's own crystalline platforms. His sixth (2026-11-22): the platforms
+read as small cities, the entry points as decoration round a workflow, the stores as a tangle, and
+the whole was forced onto a ring. Mock 6 (the images above) is drawn to that.
 
 | Kind | Shape | Why it cannot be mistaken |
 |---|---|---|
-| workflow | today's language, kept: a thin glass-and-titanium platform, one translucent block per op, taller toward the middle, lit from a core set into the platform. The platform grows with √ops and stops | the only large structure |
+| workflow | a crystalline organism: one bright faceted nucleus, and one small capped crystal per op grown round it in a spiral, lower toward the rim, on a faint plate that is part of the structure. Size grows with √ops and stops | the only large structure, the only one with a nucleus |
 | store | a synaptic junction: a nucleus, four short terminals | compact, star-like, no platform |
 | service | a gateway on a small plinth: two posts and a lintel over a lit opening, its ports on the lintel; a WebSocket's are a joined pair | periwinkle, a frame |
-| job | an execution beacon on a small plinth: a tapered crystal; one a schedule starts carries a single tilted arc with a marker | lavender, a spire |
+| job | an execution beacon on a small plinth: a tapered crystal; one a schedule starts carries a small clock face | lavender, a spire with a clock |
 
 Scale: store < service, job < workflow. **Not drawn, by the owner's rule:** radial needles, spikes,
 petals, membranes, a ring round every entity, a ring or ellipse round the centre, glow that says
@@ -68,22 +70,22 @@ flowchart LR
   subgraph band["band — execution"]
     D[services · jobs]
   end
-  subgraph outside["outside — workflows"]
+  subgraph outside["wings — workflows"]
     W[structures]
   end
   D -- "invokes (periwinkle, pulse runs into the workflow)" --> W
   W -- "writes / reads (lavender, pulse runs the way the data goes)" --> S
 ```
 
-- **The centre is a cluster, not an entity and not a region.** The model has no control or
-  business-logic entity, so none is drawn, and nothing is drawn round the centre. What the workflows
-  really share — the stores (mr-finance's are `events`, `policy`, `views`, `wealth`…), and in the
-  build also shared blocks and resources — stands together in the middle, each where its workflows
-  pull it.
-- **A workflow's services and jobs stand between it and the centre**, to either side of a corridor
-  its data filaments pass through. This is the order the brief asks for (business → execution →
-  workflows). Its cost: the data filaments of a busy workflow leave the platform close together before
-  they part; in the mock `pages` and `news` show it.
+- **Not a ring.** Workflows stand in two wings; the stores are a lattice between them, each named
+  under its junction; a workflow's entry points are an arc (two past six) on its outer side, services
+  above, jobs below. Read from the outside in: a call comes in → the workflow → its data, in the
+  middle. Which slot a workflow or a store takes is searched: fewest crossings, no filament over
+  another workflow, then length.
+- **Entry points are not parts of a workflow.** They stand off it, in their own arc, one filament
+  each. In mr-finance every service and job runs exactly one workflow (91 of 91); the model allows
+  more, and then the entry point stands between the workflows it runs.
+- **Nothing is drawn round the centre**, and no control entity is drawn: the model has none.
 - **Names.** A workflow: its name, then `WORKFLOW · n ops`. A store: its name. Services and jobs are
   each drawn, unnamed at rest (91 names would bury the picture); hovering a workflow lists every one
   of its services and jobs by name and kind (`HTTP`, `WEBSOCKET`, `JOB · SCHEDULED`).
@@ -96,7 +98,7 @@ flowchart LR
 | a job's schedule as text | the picture's model says only that a schedule starts it; N1 checks whether the IR carries the expression and shows it on hover if it does |
 | a service that runs no flow (mr-finance's one `asgi` mount) | it exists in the model with no link; it is drawn in the band, unattached |
 
-![close: a workflow, its gateways and beacons](img/neural/mock5-zoom.png)
+![close: a workflow, its gateways and beacons](img/neural/mock6-zoom.png)
 
 ## What exists today (read from the code)
 
