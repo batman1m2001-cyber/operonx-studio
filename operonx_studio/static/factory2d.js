@@ -89,7 +89,7 @@ const sidePanel = document.getElementById("sidebar");
 function covered() { const h = host.getBoundingClientRect(), r = sidePanel && sidePanel.getBoundingClientRect();
   const w = r && r.width && r.height && r.left > h.left + 200 && r.left < h.right ? Math.round(h.right - r.left) : 0; host.style.setProperty("--fx-right", `${w}px`); return w; }
 const ZMIN = 0.12, ZMAX = 6;
-function fit() { const [x0, y0, x1, y1] = [L.bounds[0] - 46, L.bounds[1], L.bounds[2] + 46, L.bounds[3] + 34], iL = Math.max(0, hud.offsetLeft - 14), iT = Math.max(0, hud.offsetTop - 10) + 70, iR = covered(), iB = 24;
+function fit() { const [x0, y0, x1, y1] = [L.bounds[0] - 46, L.bounds[1], L.bounds[2] + 46, L.bounds[3] + 34], iL = 0 /* the flows rail is glass over the picture, not a column beside it: the picture takes the whole width (the owner, 2026-11-22) */, iT = Math.max(0, hud.offsetTop - 10) + 70, iR = covered(), iB = 24;
   const fw = Math.max(200, vw() - iL - iR - 40), fh = Math.max(200, vh() - iT - iB);
   view.zoom = Math.max(ZMIN, Math.min(1.25, fw / (x1 - x0), fh / (y1 - y0)));          // a small project is not blown up to fill the screen
   view.cx = (x0 + x1) / 2 - (iL - iR) / 2 / view.zoom; view.cy = (y0 + y1) / 2 - (iT - iB) / 2 / view.zoom; apply(); }
