@@ -75,6 +75,14 @@ A click on START used to do two things: open Play, and open START's data-flow ca
 
 ![a click on START: Play, the pill stays a pill](img/play/click-start.png)
 
+## END's white dot
+
+Every card draws a 4 px stripe of its kind's colour on its left edge. START and END are cards too, and kept it: a pale stub before the glyph — a white dot on END's quiet outline. It is gone from both.
+
+| Before | After |
+|---|---|
+| ![END with the stub](img/play/end-before.png) | ![END without it](img/play/end-after.png) |
+
 ## How it flows
 
 ```mermaid
