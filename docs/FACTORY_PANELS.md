@@ -95,7 +95,7 @@ laid down first. Drawn by `docs/img/canvas/cosmos.html` (canvas 2D, seeded; open
 ## Backdrop polish (after the owner's look at the live pages)
 
 - **The three spheres are gone.** Under glass they were dim discs nobody could name. `cosmos.html` no longer draws them.
-- **A page of text is darker.** `--glass-page` went from a .30 to a .50 tint: the backdrop's bright nodes no longer sit behind the words (Services, Jobs, Runs…). Bars and panels keep the clear glass.
+- **A page of text is darker.** `--glass-page` went from a .30 to a .50 tint, then to .68 (#229): at .50 the backdrop's bright nodes still sat behind the words in the lower right of a page (the Prompts samples). Bars and panels keep the clear glass.
 - **Home has a shade down the middle.** The arch and the backbone cross exactly where the column of text is. Moving the figure right was tried and was worse (a constellation landed behind the title), so the figure stays and `body.page` gets a soft dark band behind the column, clear at the sides.
 - **The Factory keeps its own ground.** A sheet of fog over the cosmos was tried (#223) and taken out again: with little blur the backdrop's fine lines fought the cables, with more it was a smear. The picture is busy enough to want a plain ground.
 
