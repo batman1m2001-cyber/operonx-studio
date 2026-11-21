@@ -70,9 +70,11 @@ window.Factory = (() => {
         if (!on()) return;
         if (id && id !== shown) { if (typeof peekSide === "function") peekSide("inspect"); } else if (!id && shown && typeof unpeek === "function") unpeek();
         shown = id || null;
+        if (window.FlowRail) FlowRail.mark(id);          // the rail marks the row of what the picture selected
       }, onOpen(name, node) {          // a flow, and (from a shared block) the op that uses it
         FlowRail.open(name);
         if (node) requestAnimationFrame(() => { if (state.sel !== node && state.cardEls && state.cardEls.has(node)) select(node); });
+      }, jobCard(box, job) { showJobIn(box, job.name);          // a job, in the card: what the Jobs screen shows for it
       }, onRuns(door) {                                 // a job's page has its runs; a service's are in the Runs hub
         if (door.type === "job") { state.jobSel = door.name; switchTab("jobs"); }
         else RunsView.openFolder({kind: "service", name: door.name});
@@ -85,11 +87,33 @@ window.Factory = (() => {
           else if (Date.now() < until && document.body.dataset.tab === "services") requestAnimationFrame(seek);
         })();
       }});
+      listeners(view);
     } catch (err) {
       loading = null;
       host.textContent = "";
       host.append(el("p", "fx-note", "The project picture needs WebGL, and this browser did not give it one. The flows are in the list beside it."));
     }
+  }
+
+  /* the processes behind the picture, as one line under its counts: each listener up or down. A click
+   * opens them in the card — start, stop, log, the environment check, the queues (services.js). */
+  async function listeners(v) {
+    let got; try { got = await api(`/api/p/${PID}/services`); } catch { return; }
+    if (v !== view || !got.listeners || !got.listeners.length) return;
+    const line = el("span", "fx-listeners");
+    const open = () => v.panel("x:listeners", "Listeners", (box) => {
+      const inner = el("div"), full = el("button", "fx-full", "Open as a full page");
+      full.type = "button"; full.title = "The same listeners with room for a long log: the Services screen"; full.onclick = () => switchTab("services");
+      box.append(inner, full); ServicesView.showIn(inner);
+    });
+    for (const l of got.listeners) {
+      const b = el("button", l.running ? "up" : l.exit_code ? "bad" : "");
+      b.type = "button"; b.title = "Start or stop it, read its log";
+      b.append(el("i"), el("b", null, l.key), el("span", null, `${l.starting ? "starting" : l.running ? "running" : l.exit_code != null ? "exited" : "stopped"} · ${l.detail.length} service${l.detail.length === 1 ? "" : "s"}`));
+      b.onclick = open; line.append(b);
+    }
+    const old = v.hud.querySelector(".fx-listeners"); if (old) old.remove();
+    v.hud.querySelector("p").append(line);           // on the counts' own line: the header keeps its height
   }
 
   function hide() {

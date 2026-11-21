@@ -118,17 +118,34 @@ async function showJobs(sel, runId) {
     r.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); showJobs(j.name); } };
     list.append(r);
   }
-  await renderJobDetail(detail, picked, runId, mine, data.detail && data.detail.name === picked.name ? data.detail : null);
+  await renderJobDetail(detail, picked, runId, pageCtx(mine), data.detail && data.detail.name === picked.name ? data.detail : null);
   // keep the picked job in view on the phone's horizontal strip
   const on = list.querySelector(".jrow.sel");
   if (on && MOBILE.matches) on.scrollIntoView({block: "nearest", inline: "nearest"});
 }
 
-async function renderJobDetail(detail, job, runId, mine, pre) {
+/* Where a job is drawn: the Jobs screen (`pageCtx`), or a box somewhere else — the project picture's side
+ * panel (`showJobIn`). `reopen` draws it again there, `alive` says the box is still showing this job. */
+const pageCtx = (mine) => ({reopen: (name, run) => showJobs(name, run), alive: () => state.jobsView === mine, live: () => state.tab === "jobs"});
+async function showJobIn(box, name, runId) {
+  const mine = (box._job = {});
+  const ctx = {panel: true, reopen: (n, run) => showJobIn(box, n, run), alive: () => box._job === mine && box.isConnected, live: () => box._job === mine && box.isConnected};
+  if (!box.childNodes.length) box.append(el("div", "note", "Loading the job…"));
+  let data;
+  try { data = await api(`/api/p/${PID}/jobs?${new URLSearchParams({open: name, run: runId || ""})}`); }
+  catch (e) { if (ctx.alive()) { box.textContent = ""; box.append(loadError(e, () => showJobIn(box, name, runId))); } return; }
+  if (!ctx.alive()) return;
+  const job = data.jobs.find(j => j.name === name);
+  box.textContent = "";
+  if (!job) { box.append(el("div", "note", `${name} is not among this project's jobs.`)); return; }
+  await renderJobDetail(box, job, runId, ctx, data.detail && data.detail.name === name ? data.detail : null);
+}
+
+async function renderJobDetail(detail, job, runId, ctx, pre) {
   detail.textContent = "";
   const bar = el("div", "jbar");
   bar.append(el("h2", "jtitle", job.name));
-  if (window.Factory && Factory.placed(`j:${job.name}`)) {      // where it stands on the project picture (factory.js)
+  if (!ctx.panel && window.Factory && Factory.placed(`j:${job.name}`)) {      // where it stands on the project picture (factory.js)
     const pic = el("button", "linkbtn", "Picture");
     pic.type = "button";
     pic.title = "Where this job stands on the project picture";
@@ -136,17 +153,17 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
     bar.append(pic);
   }
   const refresh = Icons.button("refresh", undefined, "", "Refresh");
-  refresh.onclick = () => showJobs(job.name, state.jobRun);
+  refresh.onclick = () => ctx.reopen(job.name, ctx.run);
   bar.append(refresh);
   if (job.kind !== "runbook" && job.session !== "stream") {  // a steps job resumes every step
     const resume = Icons.button("resume", "Resume", "needs-edit");
     resume.title = "Run only the keys the last run did not finish";
-    resume.onclick = () => startJob(job.name, true);
+    resume.onclick = () => startJob(job.name, true, ctx);
     bar.append(resume);
   }
   const run = Icons.button("play", "Run", "primary needs-edit");
   run.title = `operonx-run ${job.name} — under the project's interpreter`;
-  run.onclick = () => startJob(job.name, false);
+  run.onclick = () => startJob(job.name, false, ctx);
   bar.append(run);
   detail.append(bar);
   if (job.description) detail.append(el("p", "jmeta", job.description));
@@ -168,7 +185,7 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
     try { data = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs`); }
     catch (e) { detail.append(el("div", "errbox", e.message)); return; }
   }
-  if (state.jobsView !== mine) return;
+  if (!ctx.alive()) return;
   if (!data.runs.length) {
     detail.append(paneNote("Not run yet", `Press Run to start ${job.name}; its runs and their items appear here.`));
     return;
@@ -182,7 +199,7 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
   const thead = el("thead"); thead.append(hr); table.append(thead);
   const tbody = el("tbody");
   const open = data.runs.find(r => r.run_id === runId) || data.runs[0];
-  state.jobRun = open.run_id;
+  ctx.run = open.run_id; if (!ctx.panel) state.jobRun = open.run_id;
   for (const r of data.runs) {
     const tr = el("tr", "clickable" + (r.run_id === open.run_id ? " sel" : ""));
     const when = el("td");
@@ -195,7 +212,7 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
     else ct.append(countsChips(r.counts));
     tr.append(ct);
     tr.append(el("td", "num dim", r.ended ? fmtSpan(r.started, r.ended) : (r.status === "running" ? "running…" : "")));
-    tr.onclick = () => showJobs(job.name, r.run_id);
+    tr.onclick = () => ctx.reopen(job.name, r.run_id);
     tbody.append(tr);
   }
   table.append(tbody);
@@ -207,7 +224,7 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
     try { one = await api(`/api/p/${PID}/jobs/${encodeURIComponent(job.name)}/runs/${open.run_id}`); }
     catch (e) { detail.append(el("div", "errbox", e.message)); return; }
   }
-  if (state.jobsView !== mine) return;
+  if (!ctx.alive()) return;
   if (one.run.error) detail.append(el("div", "errbox", one.run.error));
   const tree = one.run.tree || stepsTree(job.name, one.run, one.items);
   if (tree) {
@@ -224,8 +241,8 @@ async function renderJobDetail(detail, job, runId, mine, pre) {
 
   // a running run: poll until it settles
   clearTimeout(_jobsPoll);
-  if (open.status === "running" && state.tab === "jobs") {
-    _jobsPoll = setTimeout(() => { if (state.tab === "jobs") showJobs(job.name, open.run_id); }, 2500);
+  if (open.status === "running" && ctx.live()) {
+    _jobsPoll = setTimeout(() => { if (ctx.live()) ctx.reopen(job.name, open.run_id); }, 2500);
   }
 }
 
@@ -351,10 +368,10 @@ function renderItems(items, run) {
   return wrap;
 }
 
-async function startJob(name, resume) {
+async function startJob(name, resume, ctx) {
   try {
     const r = await api(`/api/p/${PID}/jobs/${encodeURIComponent(name)}/run`, {resume});
     toast(`${resume ? "Resuming" : "Running"} ${name} (pid ${r.pid})`);
-    setTimeout(() => showJobs(name), 1200);
+    setTimeout(() => { if (!ctx) showJobs(name); else if (ctx.live()) ctx.reopen(name); }, 1200);
   } catch (e) { toast(e.message, true); }
 }
