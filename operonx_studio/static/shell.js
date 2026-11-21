@@ -98,8 +98,10 @@ function switchTab(name, opts) {
   if (name === "playground") {
     if (window.Account && Account.viewOnly) { Account.toast(Account.VIEW_ONLY, true); return; }
     if (state.tab !== "flow") switchTab("flow", opts);
+    // Play is what the Node tab shows for START: the flow's input, and the run it starts
     const was = applyPanels.playing;
-    showSide("play");
+    state.playOn = true;
+    showSide("inspect");
     if (was && window.oxPlay) window.oxPlay.show();   // already open: draw what was asked for
     return;
   }
@@ -191,8 +193,9 @@ const playable = () => state.tab === "flow";
 let peek = null;
 
 function panelState() {
-  const tab = peek || recall("sideTab", "assistant");
-  const on = (panelWanted() || !!peek) && !(tab === "inspect" && !inspectable()) && !(tab === "play" && !playable());
+  let tab = peek || recall("sideTab", "assistant");
+  if (tab === "play") tab = "inspect";   // a tab of its own for a day: it is the Node tab on START
+  const on = (panelWanted() || !!peek) && !(tab === "inspect" && !inspectable());
   return {on, tab};
 }
 
@@ -206,10 +209,12 @@ function applyPanels() {
     b.classList.toggle("active", b.dataset.side === tab);
     b.setAttribute("aria-selected", String(b.dataset.side === tab));
   }
-  $("#inspector").hidden = tab !== "inspect";
-  const playing = on && tab === "play";
+  // the Node tab on START is Play; on an op, its detail
+  const playing = on && tab === "inspect" && !!state.playOn && playable();
+  $("#inspector").hidden = tab !== "inspect" || playing;
   $("#playground").hidden = !playing;
   $("#sidebar").classList.toggle("playing", playing);
+  document.body.classList.toggle("play-on", playing);   // START wears the selection while it is played
   $("#btn-play").classList.toggle("active", playing);
   $("#btn-play").setAttribute("aria-pressed", String(playing));
   // drawn when it comes on screen, not on every look at the panels
@@ -248,17 +253,17 @@ window.oxSide = {
   toggle: () => {
     const {on, tab} = panelState();
     if (on) hideSide();
-    else showSide((tab === "inspect" && !inspectable()) || (tab === "play" && !playable()) ? "assistant" : tab);
+    else showSide(tab === "inspect" && !inspectable() ? "assistant" : tab);
   },
 };
 $("#btn-right").onclick = window.oxSide.toggle;
 $("#btn-play").onclick = () => {
   const {on, tab} = panelState();
-  if (on && tab === "play") { hideSide(); return; }
+  if (applyPanels.playing) { state.playOn = false; hideSide(); return; }
   if (window.oxPlay) window.oxPlay.follow();   // the service of the graph on the canvas
   switchTab("playground");
 };
-$("#side-close").onclick = () => { hideSide(); if (state.sel) deselect(); };
+$("#side-close").onclick = () => { state.playOn = false; hideSide(); if (state.sel) deselect(); };
 for (const b of document.querySelectorAll("#sidetabs button[data-side]"))
   b.onclick = () => showSide(b.dataset.side);
 MOBILE.addEventListener("change", applyPanels);

@@ -160,6 +160,7 @@ const PlayView = (() => {
     box.textContent = "";
     ui = null;
     const head = el("div", "panehead playhead");
+    head.append(el("span", "playat", "START"));   // this is the Node tab on START: the flow's input
     box.append(head);
     // the first open starts the project's own interpreter (seconds on a big
     // project): say so, instead of a bare "loading"
@@ -187,8 +188,8 @@ const PlayView = (() => {
     loading.remove();
     const usable = doors.filter(d => d.toys.length);
     if (!doors.length) {
-      box.append(paneNote("No services to play with",
-        "Play drives a service's doors. Declare one with [[serve]] in operonx.toml, or Service(...) in Python."));
+      box.append(paneNote("Nothing to play yet",
+        "Play runs a flow: through its service when it has one, else the flow itself (that needs a newer operonx in the project than the one that answered). This project names no graph a job or a service runs."));
       return;
     }
     // the service of the graph on the canvas, when the panel is opened on another one's
@@ -214,7 +215,7 @@ const PlayView = (() => {
     // a flow served by several doors (its routes): those are the choice; a flow with none: every door
     const choice = sameGraph.length > 1 && sameGraph.some(y => y.service === d.service) ? sameGraph : doors;
     for (const x of choice) {
-      const o = el("option", null, x.toys.length ? x.service : `${x.service} (no toy)`);
+      const o = el("option", null, x.flow ? `${x.graph} — the flow itself` : x.toys.length ? x.service : `${x.service} (no toy)`);
       o.value = x.service;
       o.selected = x.service === v.service;
       pick.append(o);
@@ -238,10 +239,11 @@ const PlayView = (() => {
       catch (err) { toast(err.message, true); }
       restart.disabled = false;
     };
-    head.append(pickNeeded ? pick : el("b", "playname", d.service), toys, stateEl, restart);
+    head.append(pickNeeded ? pick : el("b", "playname", d.flow ? d.graph : d.service), toys, stateEl, restart);
 
     const desc = el("div", "playdoor");
-    desc.append(el("span", "mono", `${d.kind}${d.kind === "http" ? " POST" : ""} ${d.path || ""}`),
+    desc.append(d.flow ? el("span", null, d.job ? `no service — job ${d.job} runs it` : "no service")
+                       : el("span", "mono", `${d.kind}${d.kind === "http" ? " POST" : ""} ${d.path || ""}`),
                 el("span", "vsep", "·"),
                 el("span", null, d.session === "per_connection" ? "one run per session" : "one run per request"));
     if (d.description) desc.append(el("span", "vsep", "·"), el("span", null, d.description));
@@ -268,7 +270,10 @@ const PlayView = (() => {
     conn.append(el("summary", null, d.custom_hook ? "Inputs — the query the service's on_session hook reads"
                                                    : "Inputs — the flow's parameters"));
     const rows = el("div", "playrows");
-    const saved = (v.query && v.query[d.service]) || {...(d.query || {})};
+    // a flow played directly starts from its job's first item: something real to run at once
+    const example = Object.fromEntries(Object.entries(d.example || {}).filter(([k]) => (d.inputs || []).includes(k))
+      .map(([k, x]) => [k, typeof x === "string" ? x : JSON.stringify(x)]));
+    const saved = (v.query && v.query[d.service]) || {...example, ...(d.query || {})};
     const defaults = d.defaults || {};
     const required = new Set(d.required || []);
     const keys = [...new Set([...d.inputs, ...Object.keys(d.query || {}), ...Object.keys(saved)])];
@@ -1288,6 +1293,9 @@ const PlayView = (() => {
 
   /* The graph a service runs ("module:graph" or "graph"), and the canvas put on it. */
   function graphOf(service) {
+    // a flow's own door (no service serves it) says its graph itself
+    const own = (doors || []).find(x => x.service === service && x.flow);
+    if (own) return own.graph;
     const sv = ((state.ir || {}).services || []).find(x => x.name === service);
     return sv && sv.graph ? String(sv.graph).split(":").pop().replace(/\[.*$/, "") : null;
   }
@@ -1309,7 +1317,7 @@ const PlayView = (() => {
     api(`/api/p/${PID}/play/warm`, {}).catch(() => { warmedAt = 0; });
   };
   const hasDoors = () => ((state.ir || {}).services || []).some(s => s.kind !== "asgi");
-  for (const b of [$("#btn-play"), document.querySelector('#sidetabs button[data-side="play"]')]) {
+  for (const b of [$("#btn-play")]) {
     b.addEventListener("pointerenter", warm);
     b.addEventListener("focus", warm);
   }
