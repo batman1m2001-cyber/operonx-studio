@@ -259,7 +259,7 @@ function lastSections(n, lastP) {
     if (r) body.run = r.run;
     else {
       const t = graphTarget();
-      if (!t) { IN.err.textContent = "This graph is not behind a service or job here: run it from the Playground once."; return; }
+      if (!t) { IN.err.textContent = "This graph is not behind a service or job here: Play it once (the Play button on the canvas)."; return; }
       Object.assign(body, t);
     }
     running = true; drawIn();

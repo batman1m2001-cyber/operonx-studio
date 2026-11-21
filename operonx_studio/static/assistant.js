@@ -3558,7 +3558,7 @@
 
   /* context chips: what rides along with the next message */
   const CHIP_LABEL = {node: (v) => v, run: (v) => `run ${String(v).slice(0, 10)}`, tab: (v) => ({
-    flow: "Flow", traces: "Runs", monitor: "Monitor", playground: "Playground", evals: "Evals", jobs: "Jobs", review: "Review",
+    flow: "Flow", traces: "Runs", monitor: "Monitor", playground: "Play", evals: "Evals", jobs: "Jobs", review: "Review",
     prompts: "Prompts", services: "Services", alerts: "Alerts", resources: "Resources", settings: "Settings"}[v] || v)};
   const CHIP_ICON = {node: "graph", run: "list", tab: "right"};
   function paintChips() {

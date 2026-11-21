@@ -2997,6 +2997,23 @@ body.railslim .rail .tabs button .tabbadge:not([hidden]) { display: block; posit
 
 /* ── the playground: toys on a service's doors ─────────────────────── */
 .playhead h2 { margin-right: 4px; }
+/* Play: the Flow's side panel (it was the Playground page). One column, and the panel is wider while it shows. */
+#playground.playpanel { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 28px; }
+#sidebar.playing { width: min(540px, 46vw); }
+.playpanel .playgrid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.playpanel .playside { position: static; }
+.playpanel .playhead { gap: 8px 10px; margin-bottom: 10px; }
+.playpanel .playhead .montarget { flex: 1 1 160px; min-width: 0; }
+.playname { font-size: var(--fs-lg, 16px); font-weight: 650; }
+.playmore { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 10px; }
+.playmore > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-md); }
+.playmore[open] > summary { margin-bottom: 12px; }
+.playmore > * + * { margin-top: 12px; }
+.playbtn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 9px; border: none; border-radius: 9px;
+  background: var(--accent); color: var(--on-accent, #14121f); font-weight: 650; font-size: var(--fs-md); cursor: pointer; }
+.playbtn svg { width: 15px; height: 15px; }
+.playbtn:hover { filter: brightness(1.08); }
+.playbtn.active { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .playstate { font-size: var(--fs-sm); color: var(--text-3); display: inline-flex; align-items: center; gap: 6px; margin-right: auto; }
 .playstate::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
 .playstate.on::before { background: var(--ok); }

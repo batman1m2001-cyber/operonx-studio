@@ -77,7 +77,7 @@ function originLine(s) {
         () => RunsView.openFolder({kind: "runbook", name: s.runbook, runbook_run: s.runbook_run})));
     }
   } else if (s.origin === "service" || s.origin === "playground") {
-    line.append(s.origin === "playground" ? "Playground · " : "Service ");
+    line.append(s.origin === "playground" ? "Play · " : "Service ");
     line.append(link(s.service || s.name, "Every run of this service",
       () => RunsView.openFolder({kind: s.origin, name: s.service || s.name})));
     if (s.transport) line.append(` · ${s.transport}`);
@@ -96,7 +96,7 @@ function originLine(s) {
     const sent = (md.replay_script || md.playground_script || []).filter(m => m.kind === "text" || m.kind === "json");
     if (sent.length && typeof PlayView !== "undefined" && md.toy !== "rerun" && !(window.Account && Account.viewOnly)) {
       line.append(" · ");
-      line.append(link("Replay in the Playground", `Send its ${sent.length} message${sent.length === 1 ? "" : "s"} again, to the current code`,
+      line.append(link("Replay it on the Flow", `Send its ${sent.length} message${sent.length === 1 ? "" : "s"} again, to the current code`,
         () => PlayView.replayFrom(s.trace_id, {...md, service: s.service || s.name})));
     }
   }

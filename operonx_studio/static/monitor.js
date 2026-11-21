@@ -706,7 +706,7 @@
         {actions: [...(v.range !== "30d" ? [{label: "Show 30 days", icon: "clock",
           run: () => { v.range = "30d"; store(`monitor:${PID}`, v); show(); }}] : []),
           ...(!withPlay && m.playground_runs ? [{label: `Include ${m.playground_runs} playground sessions`, icon: "play",
-            run: togglePlay}] : (window.Account && Account.viewOnly) ? [] : [{label: "Try a service in the Playground", icon: "play", run: () => switchTab("playground")}])]}));
+            run: togglePlay}] : (window.Account && Account.viewOnly) ? [] : [{label: "Play a service on the Flow", icon: "play", run: () => switchTab("playground")}])]}));
       return;
     }
     const t = m.tiles, p = m.previous;

@@ -93,8 +93,16 @@ function switchTab(name, opts) {
   if (name === "project" && opts && (opts.page === "environments" || opts.page === "settings")) {
     switchTab(opts.page === "settings" ? "projectsettings" : "environments"); return;
   }
-  // the playground runs a service's code: not a viewer's (D11); every way in stops here
-  if (name === "playground" && window.Account && Account.viewOnly) { Account.toast(Account.VIEW_ONLY, true); return; }
+  // Play runs a service's code: not a viewer's (D11); every way in stops here. It is a panel
+  // of the Flow now (the Playground page is gone): its old name opens the Flow with it.
+  if (name === "playground") {
+    if (window.Account && Account.viewOnly) { Account.toast(Account.VIEW_ONLY, true); return; }
+    if (state.tab !== "flow") switchTab("flow", opts);
+    const was = applyPanels.playing;
+    showSide("play");
+    if (was && window.oxPlay) window.oxPlay.show();   // already open: draw what was asked for
+    return;
+  }
   // where the Flow tab was
   if (state.tab === "flow" && canvasShown()) {
     const st = $("#stage");
@@ -174,6 +182,8 @@ const WIDE = window.matchMedia("(min-width: 1100px)");
 // op (the Inspect peek) open it; a choice the user made is remembered
 const panelWanted = () => recall(panelKey(), false);
 const inspectable = () => state.tab === "flow" || state.tab === "traces";
+// Play is the Flow's: the service is run beside the graph it runs
+const playable = () => state.tab === "flow";
 
 /* A hidden panel still answers a click: picking an op shows its Inspect
  * over the canvas (a peek) until the op is let go — Esc, ✕, the empty
@@ -182,7 +192,7 @@ let peek = null;
 
 function panelState() {
   const tab = peek || recall("sideTab", "assistant");
-  const on = (panelWanted() || !!peek) && !(tab === "inspect" && !inspectable());
+  const on = (panelWanted() || !!peek) && !(tab === "inspect" && !inspectable()) && !(tab === "play" && !playable());
   return {on, tab};
 }
 
@@ -197,6 +207,14 @@ function applyPanels() {
     b.setAttribute("aria-selected", String(b.dataset.side === tab));
   }
   $("#inspector").hidden = tab !== "inspect";
+  const playing = on && tab === "play";
+  $("#playground").hidden = !playing;
+  $("#sidebar").classList.toggle("playing", playing);
+  $("#btn-play").classList.toggle("active", playing);
+  $("#btn-play").setAttribute("aria-pressed", String(playing));
+  // drawn when it comes on screen, not on every look at the panels
+  if (playing && !applyPanels.playing && window.oxPlay) window.oxPlay.show();
+  applyPanels.playing = playing;
   // `on`: the chat is showing; `panel`: the sidebar is open at all — the
   // floating bubble stays away whenever the panel is open, since the
   // Assistant tab is one click away inside it
@@ -230,10 +248,16 @@ window.oxSide = {
   toggle: () => {
     const {on, tab} = panelState();
     if (on) hideSide();
-    else showSide(tab === "inspect" && !inspectable() ? "assistant" : tab);
+    else showSide((tab === "inspect" && !inspectable()) || (tab === "play" && !playable()) ? "assistant" : tab);
   },
 };
 $("#btn-right").onclick = window.oxSide.toggle;
+$("#btn-play").onclick = () => {
+  const {on, tab} = panelState();
+  if (on && tab === "play") { hideSide(); return; }
+  if (window.oxPlay) window.oxPlay.follow();   // the service of the graph on the canvas
+  switchTab("playground");
+};
 $("#side-close").onclick = () => { hideSide(); if (state.sel) deselect(); };
 for (const b of document.querySelectorAll("#sidetabs button[data-side]"))
   b.onclick = () => showSide(b.dataset.side);
