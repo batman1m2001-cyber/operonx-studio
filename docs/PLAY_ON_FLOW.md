@@ -10,7 +10,7 @@ flow is played where it is drawn.
 |---|---|
 | A **Playground** tab beside Flow | A **▶ Play** button on the canvas bar; it opens the **Play** tab of the side panel |
 | Pick the service from every service of the project | The service is the one of the flow on the canvas; a picker only when that flow has several doors (its routes), listing only those |
-| Pick a kind: Chat / Form / Voice / Simulated user | One panel that follows what the door takes in: a payload → the inputs and **Send**; a session of text → a message box (the next message is the next turn of the same session); audio → **Start the call** |
+| Pick a kind: Chat / Form / Voice / Simulated user | One panel that follows what the door takes in: one request → the flow's parameters as fields and **Run** (a JSON body, when wanted, is folded under them); a session of text → a message box (the next message is the next turn of the same session); audio → **Start the call** |
 | Conditions, events and recent sessions always on screen | Under **More**, closed: conditions, a simulated user, events, recent sessions |
 | The run happens on another page | The canvas is beside it: its ops light up as it runs |
 
@@ -18,7 +18,7 @@ Before:
 
 ![the Playground page](img/play/before.png)
 
-After — a voice service, and a request–reply one with More open:
+After — a voice service, and a request–reply one run from its fields:
 
 ![Play on a call flow](img/play/call.png)
 ![Play on a request flow](img/play/form.png)

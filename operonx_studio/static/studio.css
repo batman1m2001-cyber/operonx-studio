@@ -3007,6 +3007,7 @@ body.railslim .rail .tabs button .tabbadge:not([hidden]) { display: block; posit
 .playpanel .playside { position: static; }
 .playpanel .playhead { gap: 8px 10px; margin-bottom: 10px; }
 .playpanel .playhead .montarget { flex: 1 1 160px; min-width: 0; }
+.playbody > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-md); margin-bottom: 8px; }
 .playname { font-size: var(--fs-lg, 16px); font-weight: 650; }
 .playmore { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 10px; }
 .playmore > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-md); }

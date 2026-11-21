@@ -1145,18 +1145,23 @@ const PlayView = (() => {
   function formToy(main, d) {
     const key = `${K}:form:${d.service}`;
     const card = el("div", "playform");
-    card.append(el("div", "stitle", "Payload"));
+    // a flow with parameters is filled in above (Inputs): the JSON body is for what they cannot say
+    const hasInputs = !!(d.inputs || []).length;
+    const body = el("details", "playbody");
+    body.append(el("summary", null, hasInputs ? "A JSON body as well" : "Payload — the JSON body"));
     const ta = el("textarea", "mono playjson");
     ta.spellcheck = false;
     ta.setAttribute("aria-label", "JSON payload");
     ta.value = recall(key, "{\n  \n}");
     const err = el("div", "fielderr");
     const acts = el("div", "priceacts");
-    const go = el("button", "primary", "Send");
+    const go = el("button", "primary", "Run");
     go.type = "button";
     acts.append(go);
     const reply = el("div", "playreply");
-    card.append(ta, err, acts, reply);
+    body.open = !hasInputs || !/^\s*\{\s*\}\s*$/.test(ta.value);
+    body.append(ta, err);
+    card.append(body, acts, reply);
     main.append(card);
 
     go.onclick = async () => {
