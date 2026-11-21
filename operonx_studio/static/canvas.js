@@ -1252,7 +1252,20 @@ function render() {
   state.partRows.clear();
   state.cardEls.clear();
   state.edgeEls = [];
-  state.dfB = g ? DataFlow.dataBindings(g, state.expanded) : [];
+  // a project that names no graph (no service, no job yet): say so where the
+  // flow would be — the walk below read g.nodes and the whole page failed to load
+  const none = $("#nograph");
+  if (none) none.remove();
+  if (!g) {
+    state.dfB = []; state.dfOpen = new Map(); state.extent = null; state.content = null;
+    const box = el("div", "nograph");
+    box.id = "nograph";
+    box.append(el("b", null, "No flow yet"),
+               el("span", null, "This project names no graph. A service or a job that runs one is drawn here."));
+    $("#stage").append(box);
+    return;
+  }
+  state.dfB = DataFlow.dataBindings(g, state.expanded);
   state.dfHover = null;
   // Workflow: a double click opens the op AND its partners — each partner showing
   // only the variables it shares with the op — so every wire runs from a
