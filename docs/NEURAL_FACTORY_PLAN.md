@@ -1,6 +1,6 @@
 # Neural Factory plan
 
-The Factory picture redrawn as a neural architecture: flows are crystalline cells, stores are luminous
+The Factory picture redrawn as a neural architecture: flows are crystalline structures on platforms, stores are luminous
 junctions, and each relationship is one fine filament that carries its own signal. The owner's brief,
 2026-11-21. A visual and interaction redesign: the model (`factorymodel.js`), what a click opens, and
 every other screen stay as they are.
@@ -9,9 +9,9 @@ every other screen stay as they are.
 
 | Today | Mock of the target (mr-finance, real data) |
 |---|---|
-| ![today](img/neural/today.png) | ![mock](img/neural/mock4-overview.png) |
+| ![today](img/neural/today.png) | ![mock](img/neural/mock5-overview.png) |
 
-Hovering a flow in the mock: ![hover](img/neural/mock4-hover.png)
+Hovering a flow in the mock: ![hover](img/neural/mock5-hover.png)
 
 The mock is a standalone canvas page, not studio code. Its crystal heights come from a hash of the
 flow's name, because it was given op counts only; the real picture sizes each crystal from its op.
@@ -44,14 +44,19 @@ what says something is happening.** Mock 3 above is drawn to these numbers.
 ## A shape for each kind, three levels
 
 The owner's third brief (2026-11-21): the entities looked alike and the hierarchy could not be read.
-Mock 4 (the images above) is drawn to this.
+His fifth, on mock 4: its radial, spiky cells were **too biological and alien — not to be continued**.
+Mock 5 (the images above) returns to the Factory's own crystalline platforms.
 
 | Kind | Shape | Why it cannot be mistaken |
 |---|---|---|
-| workflow | a neural cell: a soft membrane, a bright nucleus, one small faceted crystal per op growing out from it. No platform, no towers. Its size grows with √ops and stops (114 ops is 62 px, 3 ops 24 px) | the only large, organic thing |
-| store | a synaptic junction: a nucleus, four short terminals with a bouton at each tip | compact, star-like, no crystals |
-| service | a runtime interface: a small gateway plate with its ports; a WebSocket's port is a joined pair | rectangular, periwinkle |
-| job | scheduled: a clock ring with a hand and a marker on its orbit. Started by hand: a small beacon (a diamond) | round or pointed, lavender |
+| workflow | today's language, kept: a thin glass-and-titanium platform, one translucent block per op, taller toward the middle, lit from a core set into the platform. The platform grows with √ops and stops | the only large structure |
+| store | a synaptic junction: a nucleus, four short terminals | compact, star-like, no platform |
+| service | a gateway on a small plinth: two posts and a lintel over a lit opening, its ports on the lintel; a WebSocket's are a joined pair | periwinkle, a frame |
+| job | an execution beacon on a small plinth: a tapered crystal; one a schedule starts carries a single tilted arc with a marker | lavender, a spire |
+
+Scale: store < service, job < workflow. **Not drawn, by the owner's rule:** radial needles, spikes,
+petals, membranes, a ring round every entity, a ring or ellipse round the centre, glow that says
+nothing. The connection system (the two sections above) is settled and is not redesigned.
 
 **The three levels are places, not labels.**
 
@@ -64,19 +69,20 @@ flowchart LR
     D[services · jobs]
   end
   subgraph outside["outside — workflows"]
-    W[cells]
+    W[structures]
   end
-  D -- "invokes (periwinkle, pulse runs into the cell)" --> W
+  D -- "invokes (periwinkle, pulse runs into the workflow)" --> W
   W -- "writes / reads (lavender, pulse runs the way the data goes)" --> S
 ```
 
-- **The centre is a region, not an entity.** The model has no control or business-logic entity, so
-  none is drawn. What the workflows really share — the stores (mr-finance's are `events`, `policy`,
-  `views`, `wealth`…), and in the build also shared blocks and resources — stands inside a faint
-  membrane named "shared domain".
+- **The centre is a cluster, not an entity and not a region.** The model has no control or
+  business-logic entity, so none is drawn, and nothing is drawn round the centre. What the workflows
+  really share — the stores (mr-finance's are `events`, `policy`, `views`, `wealth`…), and in the
+  build also shared blocks and resources — stands together in the middle, each where its workflows
+  pull it.
 - **A workflow's services and jobs stand between it and the centre**, to either side of a corridor
   its data filaments pass through. This is the order the brief asks for (business → execution →
-  workflows). Its cost: the data filaments of a busy workflow leave the cell close together before
+  workflows). Its cost: the data filaments of a busy workflow leave the platform close together before
   they part; in the mock `pages` and `news` show it.
 - **Names.** A workflow: its name, then `WORKFLOW · n ops`. A store: its name. Services and jobs are
   each drawn, unnamed at rest (91 names would bury the picture); hovering a workflow lists every one
@@ -90,7 +96,7 @@ flowchart LR
 | a job's schedule as text | the picture's model says only that a schedule starts it; N1 checks whether the IR carries the expression and shows it on hover if it does |
 | a service that runs no flow (mr-finance's one `asgi` mount) | it exists in the model with no link; it is drawn in the band, unattached |
 
-![close: a cell, its services, junctions](img/neural/mock4-zoom.png)
+![close: a workflow, its gateways and beacons](img/neural/mock5-zoom.png)
 
 ## What exists today (read from the code)
 
@@ -121,7 +127,7 @@ flowchart LR
 4. **Layout is searched, not simulated.** Workflows stand on the outer ring, in an order chosen so
    the fewest filaments cross; junctions settle in the centre between their workflows; a workflow's
    services and jobs stand in the band between it and the centre. Same input, same picture.
-5. **A crystal is an op.** One crystal per op of the flow, growing from the cell's nucleus; a nested
+5. **A block is an op.** One block per op of the flow, on the flow's platform, as today's clusters are; a nested
    graph is one larger crystal sized by its ops; an agent keeps a distinct form. Geometry stays merged into one buffer (no instancing).
 6. **Two colours of filament, one family.** Data is muted lavender; execution is periwinkle; both dim at rest. Both are
    the studio's lavender pattern; no other hue.
@@ -142,8 +148,8 @@ Branch `ui/neural-factory`; frontend only (`git diff --stat origin/main -- '*.py
 | **N0** spike | The SVG filament layer and its sparks over today's picture, mr-finance and the 2,999-flow project | at rest and while dragged ≥ 55 fps on the software rig; one redraw ≤ 100 ms. If it fails: filaments on a 2D canvas drawn on change, measured the same way |
 | **N1** layout | Ring order search, junction placement, door placement — pure functions beside `factorymodel.js`, tested with `node --test` | no two cells or labels overlap on mr-finance, callbot, the 1,199- and 2,999-flow projects; same input → same output |
 | **N2** filaments | One filament per relationship, roots at both ends, signals; the tube bundles and the core are removed | the count of filaments equals the count of links in the model (asserted in a test) |
-| **N3** cells and junctions | Crystals, platform, core light, halo; the three junction kinds; names clear of filaments | the owner's look review on screenshots — restrained glow, glass kept, no bright solids |
-| **N4** entry points | Services and jobs as their own elements with one execution filament each; a scheduled job is marked | every service and job of the model is drawn once |
+| **N3** structures and junctions | Today's clusters restyled: translucent blocks, thin platform, core light; the three junction kinds; names clear of filaments | the owner's look review on screenshots — restrained glow, glass kept, no bright solids |
+| **N4** entry points | Services as gateways and jobs as beacons with one execution filament each; a scheduled job is marked | every service and job of the model is drawn once |
 | **N5** interaction | Hover dimming, filament tooltip, labels that stay legible as the zoom changes | click, double click, card, `/`, pan, zoom checked against today's behaviour |
 | **N6** scale and write-up | The domain level past 30 flows; signal budget; reduced-motion | 60 fps at rest at 2,999 flows; `docs/NEURAL_FACTORY.md` |
 
