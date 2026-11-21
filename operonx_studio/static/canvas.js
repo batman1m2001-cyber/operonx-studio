@@ -859,7 +859,7 @@ function drawDataLayer() {
         panel.append(r);
       }
       if (kind === "start") panel.append(label);
-      panel.title = kind === "scratch" ? "SCRATCH — click: every op that reads it" : `${kind.toUpperCase()} — click: every op its values reach`;
+      panel.title = kind === "scratch" ? "SCRATCH — click: every op that reads it" : `${kind.toUpperCase()} — every op its values reach. Click to close.`;
       panel.onclick = (ev) => { ev.stopPropagation(); toggleTerm(kind); };
       over.append(panel);
       panel.style.minWidth = `${pw + 24}px`;
@@ -2463,27 +2463,37 @@ function boundaryCard(it) {
   } else {
     card.append(el("span", "blabel", n.name));
     card.title = n.boundary === "start"
-      ? "START — the flow's input comes in here. Click to play the flow: give it an input and watch it run."
-      : "The flow's output boundary — results leave here.";
+      ? "START — the flow's input comes in here. Click: play the flow. Double click: its inputs and every op they reach."
+      : "END — results leave here. Double click: its outputs and the ops they come from.";
   }
+  if (n.knob) {
+    card.onclick = (ev) => { ev.stopPropagation(); select(parentKey); };
+    return card;
+  }
+  // The main flow's START / END, like an op: one click acts on it, a double click opens its
+  // data flow (the plugs, and every op their values reach). START's one click is Play — it is
+  // where the flow's input comes in, and Play is giving it one. The click waits a moment for a
+  // second press, so a double click opens the plugs and nothing else.
+  let wait = null;
   card.onclick = (ev) => {
     ev.stopPropagation();
-    if (!n.knob) {                                     // the main flow's START / END
-      toggleTerm(n.boundary);
-      // START is where the flow's input comes in — and Play is giving it one: the same place.
-      // A click opens Play beside the plugs it lights (not for a viewer; not over a session going on).
-      if (n.boundary === "start" && !state.playOn && !(window.Account && Account.viewOnly)) {
-        if (window.oxPlay) window.oxPlay.follow();
-        switchTab("playground");
-      }
-      return;
-    }
-    select(parentKey);
+    if (n.boundary !== "start" || (window.Account && Account.viewOnly)) return;
+    clearTimeout(wait);
+    wait = setTimeout(() => {
+      if (state.playOn) return;                        // not over a session going on
+      if (window.oxPlay) window.oxPlay.follow();
+      switchTab("playground");
+    }, 230);
+  };
+  card.ondblclick = (ev) => {
+    ev.stopPropagation();
+    clearTimeout(wait);
+    toggleTerm(n.boundary);
   };
   return card;
 }
 
-/* START, END and the SCRATCH pad open on a click: every op their values
+/* START and END open on a double click, the SCRATCH pad on a click: every op their values
  * reach opens with just those plugs, the wires drawn, the rest dimmed. */
 // a redraw replaces the row under the pointer, so its own leave never
 // fires: the hovered variable clears once the pointer is off every row of it
