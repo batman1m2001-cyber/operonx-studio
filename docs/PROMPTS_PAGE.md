@@ -61,6 +61,27 @@ the same from a file (`{x!r}`, `{0}`, a literal `{{…}}`), or when the project
 no longer builds with the change — a project on operonx < 1.40 has no
 `operonx.prompts`.
 
+## The prompt store (Settings → Prompts)
+
+A service runs from an image built some time ago: a version published since is
+not in it. With a store set, a publish or a moved label is also copied to
+Postgres, and running services serve what the store's label points at
+(`operonx.prompt_store`). One way — nothing is written from the store to the files.
+
+```mermaid
+flowchart LR
+  P["Publish / Serve as production<br/>(Prompts page)"] --> F["prompts/ files"]
+  F -- push --> S[("Postgres")]
+  S -- "read every 15 s" --> R["running services"]
+```
+
+![the Prompts section of Settings](img/prompts/store.png)
+
+Settings takes the address once: the value goes to the project's `.env`
+(`PROMPT_STORE_DSN`, never sent back to the page), `[prompts] store =
+"${PROMPT_STORE_DSN}"` is added to `operonx.toml`. An address that cannot be
+reached is not saved. A service needs the same variable in its environment.
+
 ## Code
 
 - `operonx_studio_toolkit/extract.py` — a node carries the `prompts` its op declared.
@@ -73,3 +94,4 @@ no longer builds with the change — a project on operonx < 1.40 has no
 - `operonx_studio/promptadopt.py` — `to_named` (the template as a file's text), `rewrite_call` (the source asking by name), `find_source`.
 - `operonx_studio/app.py` — `POST …/prompts/new`, `POST …/prompts/adopt` (a preview without `apply`); both through safewrite.
 - `tests/studio/test_prompt_adopt.py` — both endpoints and the two pure steps.
+- `operonx_studio/app.py` — `POST …/settings/prompt-store` (set), `…/settings/prompt-store/push`; `prompt_store` in `GET …/settings`; publish and label push when a store is set. `tests/studio/test_prompt_adopt.py` covers them (one against a real Postgres, `OPERONX_TEST_PG_DSN`).

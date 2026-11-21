@@ -140,6 +140,62 @@
     return row;
   }
 
+  /* Prompts: where published prompts are also copied (Postgres), so a service built before a
+   * version was published serves it. One way: the files are where a prompt is written. */
+  function promptStore(ps) {
+    const sec = el("section", "setsection");
+    sec.append(el("h3", "setsectitle", "Prompts"));
+    sec.append(el("p", "setintro",
+      "Prompts are files in the project. With a store set, every published version and label is also copied to Postgres, and running services serve what the store's label points at — no new build. Nothing is written from the store back to the files."));
+    if (ps.unsupported) { sec.append(el("p", "setintro", "This studio's operonx is from before the prompt store; update operonx to set one.")); return sec; }
+    const facts = el("div", "facts");
+    facts.append(factRow("Store", ps.configured ? ps.where : "None — services serve the prompts they were built with", ps.configured));
+    if (ps.configured) {
+      facts.append(factRow("Kept as", ps.project, true));
+      facts.append(factRow("Serving", ps.error ? "—" : `${ps.serving} label${ps.serving === 1 ? "" : "s"}`
+        + (ps.differs && ps.differs.length ? ` · ${ps.differs.length} differ from the files` : " · same as the files")));
+    }
+    sec.append(facts);
+    if (ps.error) sec.append(el("div", "errbox setstoreerr", `The store was not read: ${ps.error}`));
+    for (const d of ps.differs || [])
+      sec.append(el("div", "note", `${d.name} · ${d.label}: files ${d.files == null ? "—" : "v" + d.files}, store ${d.store == null ? "—" : "v" + d.store}`));
+    const out = el("div", "note");
+    const row = el("div", "setstorerow");
+    const dsn = el("input", "setdsn mono");
+    dsn.type = "password"; dsn.autocomplete = "off"; dsn.spellcheck = false;
+    dsn.placeholder = ps.configured ? "A new address — postgresql://user:password@host:5432/database" : "postgresql://user:password@host:5432/database";
+    dsn.setAttribute("aria-label", "The prompt store's Postgres address");
+    const save = el("button", "primary needs-edit", ps.configured ? "Change" : "Set the store");
+    save.type = "button";
+    const said = (got) => {
+      const st = got.store;
+      return got.store_error ? `Not pushed: ${got.store_error}`
+        : st ? `Pushed: ${st.versions.length} new version${st.versions.length === 1 ? "" : "s"}, ${st.labels.length} label${st.labels.length === 1 ? "" : "s"} moved.` : "";
+    };
+    const redraw = (got, text) => { const fresh = promptStore(got.prompt_store || ps); sec.replaceWith(fresh); fresh.querySelector(".setstoreout").textContent = text; };
+    save.onclick = async () => {
+      out.textContent = "Checking the address…";
+      try {
+        const got = await api(`/api/p/${PID}/settings/prompt-store`, {dsn: dsn.value.trim()});
+        redraw(got, `Saved: the address is in .env (${"PROMPT_STORE_DSN"}), operonx.toml names it. ${said(got)}`);
+      } catch (e) { out.textContent = e.message; }
+    };
+    row.append(dsn, save);
+    if (ps.configured) {
+      const push = el("button", "needs-edit", "Push now");
+      push.type = "button";
+      push.onclick = async () => {
+        out.textContent = "Pushing…";
+        try { const got = await api(`/api/p/${PID}/settings/prompt-store/push`, {}); redraw(got, said(got)); }
+        catch (e) { out.textContent = e.message; }
+      };
+      row.append(push);
+    }
+    out.className = "note setstoreout";
+    sec.append(row, out);
+    return sec;
+  }
+
   async function show() {
     box.textContent = "";
     box.append(el("div", "note", "Loading settings…"));
@@ -215,6 +271,8 @@
         "Off. An op fails on its first error unless it sets retry= itself. Add [retry] to operonx.toml (max_attempts = 3) to retry every op of the jobs and request–reply services on a timeout, 429 or 5xx."));
     }
     box.append(rty);
+
+    box.append(promptStore(current.prompt_store || {}));
 
     // how the studio looks, in this browser
     const look = el("section", "setsection");

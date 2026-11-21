@@ -16,6 +16,7 @@ const PromptsView = (() => {
   const K = `prompts:${PID}`;
   const v = Object.assign({op: "", prompt: ""}, recall(K, {}));
   let token = 0;
+  let hasStore = false;   // the project has a prompt store: a moved label reaches running services
   let creating = false;   // the New prompt form is open
   const save = () => store(K, v);
 
@@ -68,6 +69,7 @@ const PromptsView = (() => {
     const declared = await api(`/api/p/${PID}/prompts`).catch(() => ({prompts: []}));
     if (mine !== token) return;
     const named = declared.prompts || [];
+    hasStore = !!declared.store;
     if (creating && !ops.length && !named.length) { box.append(newForm()); return; }
     if (!ops.length && !named.length) {
       box.append(paneNote("No LLM ops here", "The workbench opens an LLMOp's prompt and tries edits on the inputs it really had. This project's graphs have none yet.",
@@ -370,7 +372,7 @@ const PromptsView = (() => {
       catch (err) { msg.textContent = err.message; }
     };
     const publish = (label) => async () => {
-      try { const got = await api(`/api/p/${PID}/prompts/publish`, {name: p.name, label}); again(got.prompt); }
+      try { const got = await api(`/api/p/${PID}/prompts/publish`, {name: p.name, label}); stored(got); again(got.prompt); }
       catch (err) { msg.textContent = err.message; }
     };
     pubB.onclick = publish(null);
@@ -407,13 +409,14 @@ const PromptsView = (() => {
       const w = el("button", "linkbtn", "Compare with working text"); w.type = "button"; w.onclick = () => showDiff(ver.version, null, `v${ver.version} → working text`); tools.append(w);
       if (!ver.labels.includes("production")) {
         const s = el("button", "linkbtn needs-edit", "Serve as production"); s.type = "button";
-        s.onclick = async () => { try { const got = await api(`/api/p/${PID}/prompts/label`, {name: p.name, label: "production", version: ver.version}); again(got.prompt); } catch (err) { diffAt.textContent = ""; diffAt.append(el("div", "errbox", err.message)); } };
+        s.onclick = async () => { try { const got = await api(`/api/p/${PID}/prompts/label`, {name: p.name, label: "production", version: ver.version}); stored(got); again(got.prompt); } catch (err) { diffAt.textContent = ""; diffAt.append(el("div", "errbox", err.message)); } };
         tools.append(s);
       }
       row.append(tools);
       vs.append(row);
     });
-    if (p.versions.length) vs.append(el("div", "note", "A label is read when a service starts: a moved label is served after the next restart."));
+    if (p.versions.length) vs.append(el("div", "note", hasStore ? "This project has a prompt store: a published version or a moved label is sent there, and running services serve it within seconds."
+      : "A label is read when a service starts: a moved label is served after the next restart. (A prompt store — Settings → Prompts — sends it to running services.)"));
     vs.append(diffAt);
     main.append(vs);
   }
@@ -497,6 +500,13 @@ const PromptsView = (() => {
       rows.push(slot);
     }
     return rows;
+  }
+
+  /* A publish or a moved label is also copied to the prompt store when the project has one
+   * (Settings → Prompts): say it reached the running services, or why it did not. */
+  function stored(got) {
+    if (got.store_error) toast(`Saved in the files, but not sent to the prompt store: ${got.store_error}`, true);
+    else if (got.store) toast(`Sent to the prompt store — running services pick it up within seconds`);
   }
 
   async function saveText(slot, op, key, original, updated) {

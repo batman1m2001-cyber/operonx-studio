@@ -713,6 +713,38 @@ def _cap(value: Any) -> Any:
 _COMMIT = re.compile(r"^[0-9a-f]{7,40}$")
 
 
+def _with_prompt_store(text: str, value: str) -> str:
+    """operonx.toml *text* with ``[prompts] store = "<value>"``: the line
+    replaced or added in that table, the table appended when there is none.
+    Every other line is left as it was."""
+    line = f'store = "{value}"\n'
+    lines, out, inside, done = text.splitlines(keepends=True), [], False, False
+    for ln in lines:
+        head = ln.strip()
+        if head.startswith("[") and head.endswith("]"):
+            if inside and not done:          # the table ended without a store line
+                while out and not out[-1].strip():
+                    out.pop()
+                out += [line, "\n"]
+                done = True
+            inside = head == "[prompts]"
+        elif inside and re.match(r"^\s*store\s*=", ln):
+            out.append(line)
+            done = True
+            continue
+        out.append(ln)
+    if inside and not done:
+        if out and not out[-1].endswith("\n"):
+            out.append("\n")
+        out.append(line)
+        done = True
+    if not done:
+        if out and not out[-1].endswith("\n"):
+            out.append("\n")
+        out.append(("\n" if out else "") + "# Published prompts are also copied here, for services built before them (operonx.prompt_store)\n[prompts]\n" + line)
+    return "".join(out)
+
+
 def build_studio_app(recents: Optional[Recents] = None):
     from fastapi import FastAPI, Query
     from fastapi.responses import JSONResponse
@@ -3234,7 +3266,118 @@ def build_studio_app(recents: Optional[Recents] = None):
             # [retry] in operonx.toml: the project's default op retry, shown
             # as written (it is edited in the file, like the services)
             "retry": _studio_manifest(watcher.root).get("retry") or None,
+            "prompt_store": _prompt_store_view(watcher.root),
         })
+
+    # ── settings: the prompt store ───────────────────────────────────────
+    # Published prompts copied to Postgres, one way, so a service built
+    # before a version was published serves it (operonx.prompt_store). Where
+    # the store is, is the project's setting: [prompts] store in operonx.toml
+    # names a variable, the address itself is in the project's .env.
+
+    PROMPT_STORE_VAR = "PROMPT_STORE_DSN"
+
+    def _prompt_store_view(root: Path, read: bool = True) -> Dict[str, Any]:
+        """The store as Settings shows it — never the address's credentials.
+        ``read`` false only says whether one is set (no trip to the store)."""
+        from urllib.parse import urlparse
+
+        try:
+            from operonx import prompt_store
+            from operonx import prompts as P
+        except ImportError:   # an operonx from before the prompt store
+            return {"configured": False, "unsupported": True}
+
+        written = (_studio_manifest(root).get("prompts") or {}).get("store")
+        dsn = prompt_store.dsn_of(root)
+        out: Dict[str, Any] = {"configured": bool(dsn), "setting": written if isinstance(written, str) else None,
+                               "project": prompt_store.project_key(root)}
+        if not dsn or not read:
+            return out
+        u = urlparse(dsn)
+        out["where"] = f"Postgres {u.path.lstrip('/') or 'postgres'} at {u.hostname or '?'}{':' + str(u.port) if u.port else ''}"
+        got = prompt_store.status(root)
+        mine = P.labels(root)
+        theirs = {(r["name"], r["label"]): r["version"] for r in got.get("serving") or []}
+        ours = {(n, lab): v for n, t in mine.items() for lab, v in t.items()}
+        out.update({
+            "error": got.get("error"), "read_at": got.get("read_at"), "serving": len(theirs),
+            # a label the files and the store disagree on: published here and not pushed, or pushed from elsewhere
+            "differs": [{"name": n, "label": lab, "files": ours.get((n, lab)), "store": theirs.get((n, lab))}
+                        for n, lab in sorted(set(ours) | set(theirs)) if ours.get((n, lab)) != theirs.get((n, lab))],
+        })
+        return out
+
+    def _prompt_store_push(root: Path) -> Dict[str, Any]:
+        """Copy to the store when one is set; what moved, or why it did not."""
+        try:
+            from operonx import prompt_store
+        except ImportError:
+            return {}
+
+        if not prompt_store.configured(root):
+            return {}
+        try:
+            got = prompt_store.push(root)
+            prompt_store.refresh(root)
+        except prompt_store.StoreError as exc:
+            return {"store_error": str(exc)}
+        return {"store": {"project": got["project"], "versions": [list(v) for v in got["versions"]],
+                          "labels": [list(m) for m in got["labels"]]}}
+
+    @app.post("/api/p/{pid}/settings/prompt-store")
+    def prompt_store_save(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
+        """Set the store's address: the value goes to the project's ``.env``
+        (never sent back), ``[prompts] store`` in operonx.toml names the
+        variable. An address that cannot be reached is not saved."""
+        from operonx import prompt_store
+
+        from operonx_studio_toolkit.edit import set_env_var
+
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        dsn = str(body.get("dsn") or "").strip()
+        if not re.match(r"^postgres(ql)?://\S+$", dsn):
+            return JSONResponse({"error": "a Postgres address: postgresql://user:password@host:5432/database"}, status_code=400)
+        try:
+            with prompt_store._connect(dsn) as conn:
+                conn.execute("SELECT 1")
+        except Exception as exc:  # noqa: BLE001 — said to whoever typed the address, without it
+            said = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+            return JSONResponse({"error": f"that address could not be reached: {said}"}, status_code=400)
+        env = watcher.root / ".env"
+        text = env.read_text(encoding="utf-8") if env.is_file() else ""
+        try:
+            w = safewrite.commit(watcher.root, env, set_env_var(text, PROMPT_STORE_VAR, dsn), safewrite.sha(text), before=text,
+                                 scope=safewrite.env_scope([PROMPT_STORE_VAR]), what=f"set {PROMPT_STORE_VAR} in .env", who=_who(request))
+            toml = watcher.root / MANIFEST
+            before = toml.read_text(encoding="utf-8") if toml.is_file() else ""
+            after = _with_prompt_store(before, "${" + PROMPT_STORE_VAR + "}")
+            if after != before:
+                try:
+                    safewrite.commit(watcher.root, toml, after, safewrite.sha(before), before=before, watcher=watcher,
+                                     what="[prompts] store in operonx.toml", who=_who(request))
+                except safewrite.WriteRefused:
+                    safewrite.undo(watcher.root, w.id)   # the two files land together or not at all
+                    raise
+        except safewrite.WriteRefused as exc:
+            return JSONResponse({"error": str(exc), "code": exc.code}, status_code=409)
+        prompt_store._DSN_SEEN.pop(str(watcher.root), None)
+        return JSONResponse({"prompt_store": _prompt_store_view(watcher.root), **_prompt_store_push(watcher.root)})
+
+    @app.post("/api/p/{pid}/settings/prompt-store/push")
+    def prompt_store_push(pid: str) -> JSONResponse:
+        """Copy every published version and label to the store now."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        got = _prompt_store_push(watcher.root)
+        if not got:
+            return JSONResponse({"error": "no prompt store is set for this project"}, status_code=409)
+        if got.get("store_error"):
+            return JSONResponse({"error": got["store_error"]}, status_code=409)
+        return JSONResponse({**got, "prompt_store": _prompt_store_view(watcher.root)})
 
     # ── media: a trace's blobs, by content address ──────────────────────
 
@@ -3899,7 +4042,8 @@ def build_studio_app(recents: Optional[Recents] = None):
                 out.append(_prompt_card(watcher.root, name))
             except Exception as exc:  # noqa: BLE001 — one unreadable prompt is not the page failing
                 out.append({"name": name, "file": f"prompts/{name}.md", "error": str(exc), "versions": []})
-        return JSONResponse({"prompts": out, "label": os.environ.get("OPERONX_PROMPT_LABEL") or P.DEFAULT_LABEL})
+        return JSONResponse({"prompts": out, "label": os.environ.get("OPERONX_PROMPT_LABEL") or P.DEFAULT_LABEL,
+                             "store": bool(_prompt_store_view(watcher.root, read=False).get("configured"))})
 
     @app.get("/api/p/{pid}/prompts/text")
     def prompt_text(pid: str, name: str, version: Optional[int] = None) -> JSONResponse:
@@ -3976,7 +4120,8 @@ def build_studio_app(recents: Optional[Recents] = None):
                 P.set_label(name, str(body["label"]), number, watcher.root)
         except (P.PromptNotFound, ValueError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
-        return JSONResponse({"version": number, "new": new, "prompt": _prompt_card(watcher.root, name)})
+        return JSONResponse({"version": number, "new": new, "prompt": _prompt_card(watcher.root, name),
+                             **_prompt_store_push(watcher.root)})
 
     @app.post("/api/p/{pid}/prompts/label")
     def prompt_label(pid: str, body: Dict[str, Any]) -> JSONResponse:
@@ -3991,7 +4136,7 @@ def build_studio_app(recents: Optional[Recents] = None):
             before = P.set_label(name, str(body.get("label") or ""), int(body.get("version") or 0), watcher.root)
         except (P.PromptNotFound, ValueError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
-        return JSONResponse({"before": before, "prompt": _prompt_card(watcher.root, name)})
+        return JSONResponse({"before": before, "prompt": _prompt_card(watcher.root, name), **_prompt_store_push(watcher.root)})
 
     @app.post("/api/p/{pid}/prompts/new")
     def prompt_new(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
