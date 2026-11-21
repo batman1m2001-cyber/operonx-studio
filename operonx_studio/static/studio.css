@@ -2168,6 +2168,9 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 
 .setsection { max-width: 820px; margin-bottom: 28px; }
 .setsectitle { font-size: var(--fs-lg); font-weight: 600; margin: 0 0 8px; }
+.setstorerow { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 14px 0 8px; }
+.setstorerow > button { flex: none; }
+.setdsn { flex: 1 1 320px; max-width: 520px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2, transparent); color: var(--text); font-size: var(--fs-base); }
 .setintro { color: var(--text-2); font-size: var(--fs-md); margin: 0 0 14px; max-width: 640px; }
 .facts { border-radius: var(--r-md); overflow: hidden; }
 .factrow { display: flex; gap: 16px; padding: 10px 14px;
