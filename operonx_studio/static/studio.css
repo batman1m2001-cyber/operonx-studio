@@ -3649,8 +3649,6 @@ button.chip.kbpagechip.on { background: var(--accent-soft); color: var(--accent-
 .pwline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
 .pwline > button { flex: none; }
 .pwnew { display: flex; flex-direction: column; gap: 8px; }
-.pwadopt { margin: 0 0 12px; }
-.pwadoptout .diffbox { margin: 8px 0; }
 .pwgrid { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; align-items: start; }
 .pwlist { display: flex; flex-direction: column; gap: 6px; }
 .pwop { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; min-height: 0;
@@ -3694,11 +3692,9 @@ button.chip.kbpagechip.on { background: var(--accent-soft); color: var(--accent-
 .pwchips { display: flex; gap: 6px; flex-wrap: wrap; }
 .pwvtools { display: flex; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
 .pwdiff { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.pwask { font-size: var(--fs-md); }
 .pwsamples { display: flex; flex-direction: column; border-radius: var(--r-md); }
-.pwrow { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px 10px; padding: 12px 14px; }
+.pwrow { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 8px 16px; padding: 12px 14px; }
 .pwrow:first-child { border-top: none; }
-.pwrow input[type=checkbox] { margin-top: 3px; }
 .pwdata { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .pwvar { font-size: var(--fs-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pwpair { grid-column: 2; }

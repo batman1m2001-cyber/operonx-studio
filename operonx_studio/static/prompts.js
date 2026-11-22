@@ -1,12 +1,7 @@
-/* operonx studio — Prompts: an LLM op's prompt, tried on what really came in.
+/* operonx studio — Prompts: the project's named prompts and the LLM ops that send them.
  *
- * Pick an LLM op; its recorded executions are the samples. An input with
- * the same value in every sample is the prompt — editable; one that varies
- * is each case's data. Try the edit on the samples you pick: each is the
- * op re-run in the current code with the edit (the playground bridge),
- * shown beside what it answered when recorded, with tokens and cost.
- * Save writes the text back where it lives when it lives there verbatim;
- * otherwise the assistant is asked to.
+ * A prompt's page: its text, Save, Publish, its versions. An op's page: the
+ * prompts it sends and its recent runs (what it was given, what it answered).
  */
 
 "use strict";
@@ -16,7 +11,6 @@ const PromptsView = (() => {
   const K = `prompts:${PID}`;
   const v = Object.assign({op: "", prompt: ""}, recall(K, {}));
   let token = 0;
-  let hasStore = false;   // the project has a prompt store: a moved label reaches running services
   let creating = false;   // the New prompt form is open
   const save = () => store(K, v);
 
@@ -25,9 +19,7 @@ const PromptsView = (() => {
     for (const g of (state.ir || {}).graphs || []) {
       (function walk(nodes) {
         for (const n of nodes || []) {
-          if (/llm/i.test(n.kind || "") || (n.prompts || []).length) out.push({name: n.name, graph: g.name, resource: Array.isArray(n.resource) ? n.resource.join(", ") : n.resource, prompts: n.prompts || [],
-            // the template as the code wrote it (a literal prompt=): what there is to read before any run
-            written: (((n.inputs || []).find(i => i.name === "prompt") || {}).binding || {}).kind === "literal" ? n.inputs.find(i => i.name === "prompt").binding.value : null});
+          if (/llm/i.test(n.kind || "") || (n.prompts || []).length) out.push({name: n.name, graph: g.name, resource: Array.isArray(n.resource) ? n.resource.join(", ") : n.resource, prompts: n.prompts || []});
           if (n.graph) walk(n.graph.nodes);
         }
       })(g.nodes);
@@ -37,22 +29,8 @@ const PromptsView = (() => {
   }
 
   const text = (x) => (typeof x === "string" ? x : JSON.stringify(x, null, 2));
-  const money = (x) => (x == null ? "unpriced" : `$${x < 0.01 ? x.toFixed(5) : x.toFixed(3)}`);
   const toks = (u) => (u ? `${u.prompt_tokens ?? u.input_tokens ?? "?"} → ${u.completion_tokens ?? u.output_tokens ?? "?"} tokens` : "");
 
-  /* A chat op takes one input, `messages`, and it differs in every sample — yet the prompt is in it:
-   * the messages every sample starts with (the system message, as a rule). Those are the prompt;
-   * what follows them is the case. Returns how many leading messages are shared, 0 when none. */
-  function sharedLead(samples) {
-    const lists = samples.map(s => s.inputs && s.inputs.messages);
-    if (!lists.length || !lists.every(Array.isArray)) return 0;
-    let n = 0;
-    while (lists.every(l => l.length > n) && lists.every(l => JSON.stringify(l[n]) === JSON.stringify(lists[0][n]))) n++;
-    // a lone sample shares all of itself: only its system messages are the prompt
-    if (samples.length === 1) { n = 0; while (n < lists[0].length && lists[0][n] && lists[0][n].role === "system") n++; }
-    return n;
-  }
-  const ROLE = {system: "System prompt", user: "User", assistant: "Assistant", tool: "Tool"};
   const said = (m) => (m && typeof m.content === "string" ? m.content : text(m && m.content !== undefined ? m.content : m));
 
   async function show() {
@@ -69,10 +47,9 @@ const PromptsView = (() => {
     const declared = await api(`/api/p/${PID}/prompts`).catch(() => ({prompts: []}));
     if (mine !== token) return;
     const named = declared.prompts || [];
-    hasStore = !!declared.store;
     if (creating && !ops.length && !named.length) { box.append(newForm()); return; }
     if (!ops.length && !named.length) {
-      box.append(paneNote("No LLM ops here", "The workbench opens an LLMOp's prompt and tries edits on the inputs it really had. This project's graphs have none yet.",
+      box.append(paneNote("No LLM ops here", "This project's graphs have no LLMOp yet.",
         null, {ask: {label: "Add an LLM step", prompt: "Look at this project's flow and suggest one place an LLM step would "
           + "clearly help. Describe it first; if I agree, add it with an LLMOp and a prompt I can tune here."}}));
       return;
@@ -109,213 +86,63 @@ const PromptsView = (() => {
     if (!named.length) list.append(el("div", "note pwhint", "A prompt kept as prompts/<name>.md and asked for with prompt(\"name\") is listed here with its versions."));
     if (creating) { main.append(newForm()); return; }
     if (v.prompt) { showNamed(main, named.find(p => p.name === v.prompt), ops); return; }
-    // what the project already says about the op is drawn at once; its samples (the store lists the
-    // runs this op ran in, then reads them) arrive under it
-    const o = ops.find(x => x.name === v.op) || {};
-    main.append(...adoptRows(o));
-    const wait = el("div", "note pwwait", "Loading this op's samples…");
+    // An op's page: which prompts it sends, and what it was given and answered in its recent runs.
+    // Prompt text is read and changed on the prompt's own page, not here.
+    const o = ops.find(x => x.name === v.op) || {prompts: []};
+    const ohead = el("div", "pwnhead");
+    const title = el("div", "pwntitle");
+    title.append(el("h3", "mono", o.name || v.op), el("span", "pwchip", o.graph || ""));
+    const uses = el("div", "pwnmeta");
+    ohead.append(title, uses);
+    main.append(ohead);
+    const chips = new Map();
+    uses.append(el("span", null, "sends"));
+    const none = el("span", "note", "no named prompt");
+    uses.append(none);
+    const chip = (r) => {
+      const name = typeof r === "string" ? r : r.name;
+      if (!name || chips.has(name)) return;
+      const b = el("button", "linkbtn mono", name);
+      b.type = "button"; b.title = "Open this prompt";
+      b.onclick = () => { v.prompt = name; save(); show(); };
+      chips.set(name, b);
+      uses.insertBefore(b, none);
+      none.hidden = true;
+    };
+    (o.prompts || []).forEach(chip);
+    const wait = el("div", "note pwwait", "Loading recent runs…");
     main.append(wait);
     let got;
     try { got = await api(`/api/p/${PID}/prompts/${encodeURIComponent(v.op)}/samples?limit=20`); }
     catch (err) { if (mine === token) wait.replaceWith(el("div", "errbox", err.message)); return; }
     if (mine !== token) return;
     wait.remove();
-    if (!got.samples.length) {
-      // no run to take the prompt from: the template as the graph wrote it, to read (it had been a blank page)
-      const parts = typeof o.written === "string" ? [["Prompt — the template", o.written]]
-        : o.written && typeof o.written === "object" ? Object.entries(o.written).filter(([, t]) => typeof t === "string").map(([k, t]) => [k === "system" ? "System prompt" : k === "user" ? "User message — the template" : k, t]) : [];
-      if (parts.length) {
-        const sec = el("section", "pwprompt");
-        sec.append(el("div", "stitle", "The prompt — as the code wrote it"));
-        for (const [title, val] of parts) {
-          const f = el("div", "pwfield pwlead");
-          const cap = el("div", "pwcap");
-          cap.append(el("b", null, title), el("span", null, `${val.length.toLocaleString()} characters · {name} is filled in at run time`));
-          const inp = el("textarea", "pwtext pwprose");
-          inp.value = val; inp.readOnly = true; inp.spellcheck = false; inp.setAttribute("aria-label", title);
-          inp.style.height = `${Math.min(460, 34 + 22 * Math.max(2, val.split("\n").reduce((n, ln) => n + 1 + Math.floor(ln.length / 110), 0)))}px`;
-          f.append(cap, inp);
-          sec.append(f);
-        }
-        main.append(sec);
-      }
-      main.append(paneNote("No samples yet", `A sample is ${v.op} run by a service call, a job or Play (on the Flow): its inputs show here, and an edit can be tried on them. Runs started another way (a script, a test) are not taken as samples.`));
-      return;
-    }
+    for (const smp of got.samples) (smp.prompts || []).forEach(chip);   // a prompt chosen at run time
+    if (!got.samples.length) { main.append(el("div", "note", `No runs yet: a service call, a job or Play on the Flow that runs ${v.op} shows here.`)); return; }
 
-    // the prompt: every input that is the same in every sample
-    const edits = {};
-    const sec = el("section", "pwprompt");
-    sec.append(el("div", "stitle", "The prompt — the same in every sample"));
-    /* a piece of prompt text, to be read: its name, its size, the text in a reading face */
-    const prose = (title, val, key, label, editable = true) => {
-      const f = el("div", "pwfield pwlead");
-      const cap = el("div", "pwcap");
-      cap.append(el("b", null, title), el("span", null, `${val.length.toLocaleString()} characters · the same in every sample`));
-      const inp = el("textarea", "pwtext pwprose");
-      inp.value = val; inp.spellcheck = false; inp.readOnly = !editable;
-      inp.setAttribute("aria-label", title);
-      inp.style.height = `${Math.min(460, 34 + 22 * Math.max(2, val.split("\n").reduce((n, ln) => n + 1 + Math.floor(ln.length / 110), 0)))}px`;
-      const saveRow = el("div", "pwsave");
-      saveRow.hidden = true;
-      inp.oninput = () => {
-        edits[key] = inp.value;
-        if (inp.value === val) delete edits[key];
-        f.classList.toggle("edited", key in edits);
-        saveRow.hidden = !(key in edits);
-      };
-      const sb = el("button", "linkbtn needs-edit", "Save this text where it lives…");
-      sb.type = "button";
-      sb.onclick = () => saveText(saveRow, v.op, label, val, inp.value);
-      saveRow.append(sb);
-      f.append(cap, inp, saveRow);
-      return f;
-    };
-    const PART = {system: "System prompt", user: "User message — the template"};
-    /* a part the op asks for by name is not a copy to edit here: it is that prompt, opened */
-    const mine_ = ops.find(o => o.name === v.op) || {prompts: []};
-    const byName = (part) => {
-      const r = mine_.prompts.find(x => x.part === part);
-      if (!r) return null;
-      const row = el("div", "pwfield pwlead pwnamed");
-      const cap = el("div", "pwcap");
-      cap.append(el("b", null, part ? (PART[part] || part) : "Prompt"));
-      const b = el("button", "linkbtn mono", r.name);
-      b.type = "button"; b.title = "Open this prompt: its text, its versions";
-      b.onclick = () => { v.prompt = r.name; save(); show(); };
-      cap.append(b, el("span", null, r.version != null ? `${r.label || "pinned"} → v${r.version}` : "working text"));
-      row.append(cap);
-      return row;
-    };
-    const parts = (val) => val && typeof val === "object" && !Array.isArray(val) && Object.keys(val).length && Object.values(val).every(x => typeof x === "string");
-    /* a prompt chosen in the run (an op upstream rendered it): the samples say which ones */
-    const atRun = [...new Map((got.samples || []).flatMap(x => (x.prompts || []).filter(r => r.input)).map(r => [r.name, r])).values()];
-    if (atRun.length) {
-      const row = el("div", "pwfield pwlead pwnamed");
-      const cap = el("div", "pwcap");
-      cap.append(el("b", null, "Rendered in the run from"));
-      for (const r of atRun) {
-        const b = el("button", "linkbtn mono", r.name);
-        b.type = "button"; b.title = "Open this prompt: its text, its versions";
-        b.onclick = () => { v.prompt = r.name; save(); show(); };
-        cap.append(b);
-      }
-      row.append(cap);
-      sec.append(row);
-    }
-    for (const [k, val] of Object.entries(got.constant)) {
-      // a {system, user} template is read part by part, not as JSON; the messages built from it are
-      // the same text again and are not shown twice
-      if (k === "prompt" && parts(val)) { for (const [p, x] of Object.entries(val)) sec.append(byName(p) || prose(PART[p] || p, x, `prompt.${p}`, `prompt.${p}`)); continue; }
-      if (k === "prompt" && byName(undefined)) { sec.append(byName(undefined)); continue; }
-      if (k === "messages" && parts(got.constant.prompt)) continue;
-      const f = el("label", "pwfield");
-      f.append(el("span", "mono", k));
-      // an object (a {system, user} template) always gets the room to read as JSON
-      const long = (val !== null && typeof val === "object") || (typeof val !== "number" && text(val).length > 60);
-      const inp = long ? el("textarea", "playjson pwtext") : el("input", "mono");
-      inp.value = text(val);
-      if (long) inp.style.height = `${Math.min(420, 40 + 18 * text(val).split("\n").length)}px`;
-      const saveRow = el("div", "pwsave");
-      inp.oninput = () => {
-        edits[k] = inp.value;
-        if (inp.value === text(val)) delete edits[k];
-        f.classList.toggle("edited", k in edits);
-        saveRow.hidden = !(k in edits) || typeof val !== "string";
-      };
-      saveRow.hidden = true;
-      const sb = el("button", "linkbtn needs-edit", "Save this text where it lives…");
-      sb.type = "button";
-      sb.onclick = () => saveText(saveRow, v.op, k, val, inp.value);
-      saveRow.append(sb);
-      f.append(inp, saveRow);
-      sec.append(f);
-    }
-    const lead = got.varying.includes("messages") && !parts(got.constant.prompt) ? sharedLead(got.samples) : 0;
-    const first = lead ? got.samples[0].inputs.messages : [];
-    for (let i = 0; i < lead; i++) {
-      const m = first[i];
-      sec.append(prose(ROLE[m.role] || m.role || "Message", said(m), `messages#${i}`, `messages[${i}].content`, typeof m.content === "string"));
-    }
-    if (!Object.keys(got.constant).length && !lead) sec.append(el("div", "note", "Every input differs between samples — there is no fixed prompt to edit here."));
-    main.append(sec);
-
-    // the samples, and what the edit makes of them
     const ss = el("section");
-    ss.append(el("div", "stitle", `Samples — ${got.samples.length} recorded, newest first`));
+    ss.append(el("div", "stitle", `Recent runs — ${got.samples.length}, newest first`));
     const table = el("div", "pwsamples");
-    const picks = new Set(got.samples.slice(0, 3).map((_, i) => i));
-    const resEls = [];
-    got.samples.forEach((smp, i) => {
+    const shownKeys = (got.varying || []).filter(k => k !== "prompt");
+    for (const smp of got.samples) {
       const row = el("div", "pwrow");
-      const cb = el("input"); cb.type = "checkbox"; cb.checked = picks.has(i);
-      cb.setAttribute("aria-label", "Try the edit on this sample");
-      cb.onchange = () => { cb.checked ? picks.add(i) : picks.delete(i); go.textContent = `Try it on ${picks.size}`; };
       const data = el("div", "pwdata");
-      const used = (smp.prompts || []).map(r => `${r.name} ${r.version != null ? "v" + r.version : "working"}`).join(", ");
-      data.append(el("span", "note", `${smp.origin} · ${smp.name} · ${fmtAgo(smp.started * 1000)}${used ? " · " + used : ""}`));
-      let shown = 0;
-      if (lead) {                                    // the case is the conversation after the prompt: its last turns, as said
-        const rest = smp.inputs.messages.slice(lead);
-        if (rest.length > 2) data.append(el("div", "note pwmore", `${rest.length - 2} earlier message${rest.length - 2 === 1 ? "" : "s"}`));
-        for (const m of rest.slice(-2)) {
-          const ln = el("div", "pwsaid");
-          ln.append(el("b", null, ROLE[m.role] || m.role || "message"), el("span", null, said(m).slice(0, 600)));
-          data.append(ln);
-        }
-        shown = 1;
+      data.append(el("span", "note", `${smp.name || smp.origin} · ${fmtAgo(smp.started * 1000)}`));
+      for (const k of shownKeys.slice(0, 3)) {
+        const val = (smp.inputs || {})[k];
+        const shown = k === "messages" && Array.isArray(val) && val.length ? said(val[val.length - 1]) : text(val);
+        data.append(el("div", "mono pwvar", `${k}: ${String(shown).slice(0, 220)}`));
       }
-      for (const k of got.varying.filter(k => !(k === "messages" && (lead || parts(got.constant.prompt)))).slice(0, 2 - shown)) data.append(el("div", "mono pwvar", `${k}: ${text(smp.inputs[k]).slice(0, 220)}`));
-      const pair = el("div", "rerunpair pwpair");
-      const then = el("div");
-      then.append(el("div", "stitle", `Then · ${fmtMs(smp.duration_ms || 0)} · ${toks(smp.usage)} · ${money(smp.cost_usd)}`),
-                  el("pre", "mono" + (smp.status === "error" ? " bad" : smp.content ? "" : " muted"), smp.status === "error" ? String(smp.error || "").trim().split("\n").pop() : (text(smp.content ?? "") || "(empty answer)")));
-      const now = el("div", "pwnow");
-      now.append(el("div", "stitle", "Now"), el("pre", "mono muted", "—"));
-      pair.append(then, now);
-      resEls.push(now);
-      row.append(cb, data, pair);
+      const ans = el("div", "pwans");
+      const bad = smp.status === "error";
+      const body = bad ? String(smp.error || "").trim().split("\n").pop() : (text(smp.content ?? "") || "(empty answer)");
+      ans.append(el("div", "stitle", `${fmtMs(smp.duration_ms || 0)} · ${toks(smp.usage)}`),
+                 el("pre", "mono" + (bad ? " bad" : smp.content ? "" : " muted"), body));
+      row.append(data, ans);
       table.append(row);
-    });
-    const acts = el("div", "priceacts");
-    const go = el("button", "primary needs-edit", `Try it on ${picks.size}`);
-    go.type = "button";
-    acts.append(go);
-    ss.append(acts, table);
+    }
+    ss.append(table);
     main.append(ss);
-
-    go.onclick = async () => {
-      go.disabled = true;
-      const jobs = [...picks].map(async (i) => {
-        const smp = got.samples[i];
-        const slot = resEls[i];
-        slot.textContent = "";
-        slot.append(el("div", "stitle", "Now · running…"));
-        const inputs = {...smp.inputs};
-        for (const [k, x] of Object.entries(edits)) {
-          if (k.startsWith("prompt.")) { inputs.prompt = {...inputs.prompt, [k.slice(7)]: x}; continue; }   // one part of a template
-          if (k.startsWith("messages#")) {             // an edited prompt message, put back in its place
-            const i = +k.slice(9);
-            inputs.messages = inputs.messages.map((m, j) => (j === i ? {...m, content: x} : m));
-            continue;
-          }
-          const orig = got.constant[k];
-          inputs[k] = typeof orig === "string" ? x : (() => { try { return JSON.parse(x); } catch { return x; } })();
-        }
-        try {
-          const r = await PlayView.rerun(smp.run, v.op, inputs);
-          const out = r.outputs || {};
-          slot.textContent = "";
-          slot.append(el("div", "stitle", `Now · ${fmtMs(r.ms || 0)} · ${toks(out.usage)} · ${money(out.cost_usd)}`),
-                      el("pre", "mono" + (r.status === "error" ? " bad" : ""), r.status === "error" ? r.error : text(out.content ?? "")));
-        } catch (err) {
-          slot.textContent = "";
-          slot.append(el("div", "stitle", "Now"), el("pre", "mono bad", err.message));
-        }
-      });
-      await Promise.all(jobs);
-      go.disabled = false;
-    };
   }
 
   /* A named prompt: its text, who uses it, its versions and the labels on them. */
@@ -355,13 +182,12 @@ const PromptsView = (() => {
     const acts = el("div", "pwacts");
     const saveB = el("button", "primary needs-edit", "Save");
     const pubB = el("button", "needs-edit", `Publish as v${(p.versions[0] ? p.versions[0].version : 0) + 1}`);
-    const liveB = el("button", "needs-edit", "Publish and serve as production");
     const msg = el("span", "note");
-    for (const b of [saveB, pubB, liveB]) b.type = "button";
+    for (const b of [saveB, pubB]) b.type = "button";
     const sync = () => {
       const edited = inp.value !== p.text;
       saveB.hidden = !edited;
-      pubB.hidden = liveB.hidden = edited || !p.unpublished;
+      pubB.hidden = edited || !p.unpublished;
       if (!edited && !p.unpublished) msg.textContent = p.versions.length ? `Same as v${p.versions[0].version}: nothing to publish.` : "";
     };
     inp.oninput = () => { msg.textContent = ""; sync(); };
@@ -374,15 +200,14 @@ const PromptsView = (() => {
       catch (err) { msg.textContent = err.message; }
     };
     pubB.onclick = publish(null);
-    liveB.onclick = publish("production");
-    acts.append(saveB, pubB, liveB, msg);
+    acts.append(saveB, pubB, msg);
     sec.append(cap, inp, acts);
     main.append(sec);
     sync();
 
     const vs = el("section", "pwversions");
     vs.append(el("div", "stitle", p.versions.length ? `Versions — ${p.versions.length}, newest first` : "Versions"));
-    if (!p.versions.length) vs.append(el("div", "note", "Not published yet: every run is given the working text. Publishing freezes it as v1, so a later edit can be compared and rolled back."));
+    if (!p.versions.length) vs.append(el("div", "note", "Not published yet: runs get the working text."));
     const diffAt = el("div", "pwdiff");
     const showDiff = async (a, b, label) => {
       diffAt.textContent = "";
@@ -404,7 +229,6 @@ const PromptsView = (() => {
       const tools = el("span", "pwvtools");
       const prev = p.versions[i + 1];
       if (prev) { const b = el("button", "linkbtn", `Changes from v${prev.version}`); b.type = "button"; b.onclick = () => showDiff(prev.version, ver.version, `v${prev.version} → v${ver.version}`); tools.append(b); }
-      const w = el("button", "linkbtn", "Compare with working text"); w.type = "button"; w.onclick = () => showDiff(ver.version, null, `v${ver.version} → working text`); tools.append(w);
       if (!ver.labels.includes("production")) {
         const s = el("button", "linkbtn needs-edit", "Serve as production"); s.type = "button";
         s.onclick = async () => { try { const got = await api(`/api/p/${PID}/prompts/label`, {name: p.name, label: "production", version: ver.version}); stored(got); again(got.prompt); } catch (err) { diffAt.textContent = ""; diffAt.append(el("div", "errbox", err.message)); } };
@@ -413,8 +237,6 @@ const PromptsView = (() => {
       row.append(tools);
       vs.append(row);
     });
-    if (p.versions.length) vs.append(el("div", "note", hasStore ? "This project has a prompt store: a published version or a moved label is sent there, and running services serve it within seconds."
-      : "A label is read when a service starts: a moved label is served after the next restart. (A prompt store — Settings → Prompts — sends it to running services.)"));
     vs.append(diffAt);
     main.append(vs);
   }
@@ -426,7 +248,7 @@ const PromptsView = (() => {
     const name = el("input", "pwname mono");
     name.placeholder = "name — intake.system, or cio/analyst for a folder"; name.spellcheck = false; name.setAttribute("aria-label", "The prompt's name");
     const inp = el("textarea", "pwtext pwprose");
-    inp.placeholder = "The prompt's text. {{name}} is a variable the op fills in; {{> other}} includes another prompt.";
+    inp.placeholder = "The prompt's text. {{name}} is filled in by the op.";
     inp.spellcheck = false; inp.style.height = "260px"; inp.setAttribute("aria-label", "The prompt's text");
     const file = el("span", "note");
     const go = el("button", "primary needs-edit", "Create");
@@ -449,97 +271,11 @@ const PromptsView = (() => {
     return sec;
   }
 
-  /* An op whose prompt is text in the code: one row per text that is not a named prompt yet.
-   * The text becomes prompts/<name>.md and the code asks for it by name — shown first, then written. */
-  function adoptRows(o) {
-    const w = o.written, refs = o.prompts || [];
-    const parts = typeof w === "string" ? [[null, w]] : w && typeof w === "object" ? Object.entries(w).filter(([, t]) => typeof t === "string") : [];
-    const rows = [];
-    for (const [part, val] of parts) {
-      if (!val.trim() || refs.some(r => (r.part || null) === part)) continue;
-      const slot = el("div", "pwadopt");
-      const b = el("button", "linkbtn needs-edit", part ? `Make “${part}” a named prompt` : "Make this a named prompt");
-      b.type = "button";
-      slot.append(b, el("span", "note", " — it moves to prompts/<name>.md and gets versions; the code asks for it by name."));
-      b.onclick = () => {
-        slot.textContent = "";
-        const name = el("input", "pwname mono");
-        name.value = part ? `${o.name}.${part}` : o.name; name.spellcheck = false; name.setAttribute("aria-label", "The prompt's name");
-        const see = el("button", null, "Show the change");
-        see.type = "button";
-        const out = el("div", "pwadoptout");
-        const row = el("div", "pwline");
-        row.append(el("b", null, part ? `“${part}” as` : "Name"), name, see);
-        slot.append(row, out);
-        see.onclick = async () => {
-          out.textContent = "";
-          const body = {op: o.name, name: name.value.trim(), ...(part ? {part} : {})};
-          let got;
-          try { got = await api(`/api/p/${PID}/prompts/adopt`, body); }
-          catch (e) { out.append(el("div", "errbox", e.message)); return; }
-          out.append(el("div", "note", `New file ${got.file} (${got.text.length.toLocaleString()} characters${got.dropped_blank_end ? "; the blank space at its end is not kept" : ""}), and in ${got.code}:`));
-          const diff = el("div", "diffbox");
-          for (const ln of got.diff.split("\n")) diff.append(el("span", ln.startsWith("+") && !ln.startsWith("+++") ? "add" : ln.startsWith("-") && !ln.startsWith("---") ? "del" : "", ln + "\n"));
-          const apply = el("button", "primary needs-edit", `Write ${got.file} and ${got.code}`);
-          apply.type = "button";
-          apply.onclick = async () => {
-            try {
-              const done = await api(`/api/p/${PID}/prompts/adopt`, {...body, apply: true, base: got.base});
-              toast(`${o.name} now asks for ${done.prompt.name}`);
-              v.prompt = done.prompt.name; save();
-              try { await load(); } catch (_) { /* the pulse brings the new graph */ }
-              show();
-            } catch (e) { refusal(e, diff); apply.remove(); }
-          };
-          out.append(diff, apply);
-        };
-        name.focus(); name.select();
-      };
-      rows.push(slot);
-    }
-    return rows;
-  }
-
   /* A publish or a moved label is also copied to the prompt store when the project has one
    * (Settings → Prompts): say it reached the running services, or why it did not. */
   function stored(got) {
     if (got.store_error) toast(`Saved in the files, but not sent to the prompt store: ${got.store_error}`, true);
     else if (got.store) toast(`Sent to the prompt store — running services pick it up within seconds`);
-  }
-
-  async function saveText(slot, op, key, original, updated) {
-    slot.querySelector(".diffbox")?.remove();
-    slot.querySelector(".pwask")?.remove();
-    let got;
-    try { got = await api(`/api/p/${PID}/prompts/save`, {original, updated}); }
-    catch (err) {
-      const ask = el("div", "pwask");
-      ask.append(el("span", "note", `${err.message}. `));
-      const b = el("button", "linkbtn", "Ask the assistant to make this change");
-      b.type = "button";
-      b.onclick = () => window.oxAsk && window.oxAsk(
-        `In op \`${op}\`, the prompt input \`${key}\` should change. It is built in code or YAML — find where and edit it.\n\n`
-        + `Currently:\n\`\`\`\n${original}\n\`\`\`\n\nShould become:\n\`\`\`\n${updated}\n\`\`\``);
-      ask.append(b);
-      slot.append(ask);
-      return;
-    }
-    const diff = el("div", "diffbox");
-    for (const ln of got.diff.split("\n")) diff.append(el("span", ln.startsWith("+") && !ln.startsWith("+++") ? "add" : ln.startsWith("-") && !ln.startsWith("---") ? "del" : "", ln + "\n"));
-    const apply = el("button", "primary needs-edit", `Write ${got.file}`);
-    apply.type = "button";
-    let base = got.base;
-    apply.onclick = async () => {
-      try {
-        const done = await api(`/api/p/${PID}/prompts/save`, {original, updated, apply: true, base});
-        wrote(done, `Saved to ${got.file}`);
-        show();
-      } catch (err) {
-        const fresh = refusal(err, diff);
-        if (fresh) { base = fresh; apply.textContent = `Write ${got.file} as it is now`; } else apply.remove();
-      }
-    };
-    slot.append(diff, apply);
   }
 
   /* From an op's card: straight to the prompt it names ({prompt}), or to the op's own page here ({op}). */
