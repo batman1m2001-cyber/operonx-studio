@@ -925,8 +925,9 @@
     head.append(h("span", "iorole", ROLE_LABEL[role] || role));
     const isPrompt = role === "system" || role === "developer";
     for (const r of named || []) head.append(promptChip(r, link));
-    // a prompt with a page of its own is read there: here it is one line, its text one click away
-    const tucked = isPrompt && (named || []).length > 0;
+    // a message written from a named prompt (system or user) is read in Prompts:
+    // here it is one line, its filled text one click away
+    const tucked = (named || []).length > 0;
     if (m.name) head.append(h("span", "iomsgname mono", m.name));
     if (m.tool_call_id) {
       const id = h("span", "iomsgname iomsgid mono", `↩ ${m.tool_call_id}`);
