@@ -37,11 +37,6 @@
 }
 @media (prefers-reduced-transparency: reduce) { #factory { --fx-label: var(--fx-graphite); } }
 body.factory-on[data-tab="flow"] #factory { display: block; }
-/* one tab, two views: only the view on screen reads as the open one */
-body.factory-on #hubtabs [data-view="flows"].active, body:not(.factory-on) #hubtabs [data-view="factory"].active { color: var(--text-2); font-weight: 500; }
-body.factory-on #hubtabs [data-view="flows"].active::after, body:not(.factory-on) #hubtabs [data-view="factory"].active::after { background: none; }
-body.factory-on[data-tab="flow"] #hubtabs [data-view="factory"] { color: var(--text); font-weight: 600; }
-body.factory-on[data-tab="flow"] #hubtabs [data-view="factory"]::after { background: var(--accent); }
 body.factory-on[data-tab="flow"] .main > #stage, body.factory-on[data-tab="flow"] #minimap,
 body.factory-on[data-tab="flow"] .canvasbar > :not(#btn-flowrail):not(#btn-factory) { display: none; }
 /* no GPU (factory3d.js marks it): the studio's glass rail and bar lie over the picture, and a blurred pane is blurred again on the
@@ -263,7 +258,30 @@ body[data-tab="flow"] #sidebar.playing { --glass-tint: rgba(14, 16, 27, .93); }
  * gone (the screens stay, as each one's full page); Flow is a level under the picture — its tab shows only
  * while a flow is open, and the flow's name leaves the crumbs while the picture is the screen */
 #hubtabs [data-folded] { display: none !important; }
-body.factory-on #hubtabs [data-view="flows"] { display: none !important; }
-body.factory-on[data-tab="flow"] .crumbs #btn-project, body.factory-on[data-tab="flow"] .crumbs .sep:has(+ #btn-project) { display: none; }
 :is(#factory, #fx-inspect) .fx-full { border: 0; background: none; padding: 0; margin: 10px 0 0; font: 500 11.5px var(--font); color: var(--fx-sig-agent); cursor: pointer; }
 :is(#factory, #fx-inspect) .fx-full:hover { text-decoration: underline; }
+
+/* ── a top bar that does not move (STABLE_LAYOUT) ──────────────────────────────────────────────────────
+ * Measured before: the strip was "Picture · Prompts" on the picture and "Picture · Flow · Prompts" in a
+ * flow, and it slid sideways (Picture at x=311, 419 or 437) because it stood after a flow name that came
+ * and went. Now:
+ *   - the Flow section's tabs are always Picture · Prompts. A flow, the Jobs page and the Services page are
+ *     levels under the picture: Picture stays the open tab, and a click on it leads back up;
+ *   - the strip stands in the middle of the bar, so nothing in the crumbs can push it;
+ *   - the crumbs name the level and nothing else: the flow in the editor, "Jobs" / "Services" on those
+ *     pages — and no flow name on screens that are not about one flow. */
+body:is([data-tab="flow"], [data-tab="jobs"], [data-tab="services"]) #hubtabs [data-view="factory"] { color: var(--text); font-weight: 600; }
+body:is([data-tab="flow"], [data-tab="jobs"], [data-tab="services"]) #hubtabs [data-view="factory"]::after { background: var(--accent); }
+body:not([data-tab="flow"]) .crumbs :is(#btn-project, .sep:has(+ #btn-project)),
+body.factory-on .crumbs :is(#btn-project, .sep:has(+ #btn-project)) { display: none; }
+body[data-tab="jobs"] .crumbs::after { content: "/  Jobs"; }
+body[data-tab="services"] .crumbs::after { content: "/  Services"; }
+.crumbs::after { white-space: pre; margin-left: 6px; color: var(--text-2); font: 500 13px var(--font); }
+@media (min-width: 1100px) {
+  header.bar { position: relative; }
+  header.bar > .hubtabs { position: absolute; left: 50%; top: 0; bottom: 0; transform: translateX(-50%); margin: 0; }
+  header.bar > .crumbs { max-width: calc(50% - 260px); }
+}
+/* a tab is as wide open as closed: the open one is told by its colour and its line, not by a heavier face
+ * that nudged its neighbours 7 px */
+#hubtabs button, #hubtabs button.active { font-weight: 600; }
