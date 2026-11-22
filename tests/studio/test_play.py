@@ -154,6 +154,27 @@ def test_doors_and_a_form_request(client, project):
     assert client.get(f"/api/p/{pid}/play/doors").json()["recent"]["service"] in ("score", "chat")
 
 
+def test_the_doors_do_not_wait_for_a_slow_run_store(client, project, monkeypatch):
+    """A project with hundreds of thousands of runs: listing them waits for a walk of minutes. Play's
+    doors answer without their recent sessions (the screen asks for them afterwards)."""
+    from operonx.telemetry.runs import files
+
+    pid = _open(client, project)
+    assert client.get(f"/api/p/{pid}/play/doors").status_code == 200      # the bridge is up
+    real = files.FilesRunStore.list_runs
+
+    def slow(self, *a, **k):
+        time.sleep(3)
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(files.FilesRunStore, "list_runs", slow)
+    t0 = time.monotonic()
+    got = client.get(f"/api/p/{pid}/play/doors", params={"service": "score"})
+    took = time.monotonic() - t0
+    assert got.status_code == 200 and got.json()["doors"] and got.json()["recent"] is None
+    assert took < 2, f"the doors waited {took:.1f} s for the run store"
+
+
 def test_a_chat_session_polled_like_the_page(client, project):
     pid = _open(client, project)
     cursor = client.get(f"/api/p/{pid}/play/events").json()["cursor"]

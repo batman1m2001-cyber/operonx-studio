@@ -5037,9 +5037,17 @@ def build_studio_app(recents: Optional[Recents] = None):
         if shown is not None:
             pr = _runs(pid)
             if pr is not None:
-                page = await asyncio.to_thread(pr.store.list_runs, RunFilter(origin="playground", name=shown["service"]),
-                                               "started_desc", 8)
-                recent = {"service": shown["service"], "runs": [_row(r) for r in page.items]}
+                # The doors do not wait for the run store. Listing runs refreshes the store first, and on a
+                # project whose scheduled jobs left hundreds of thousands of runs that refresh is a walk of
+                # minutes (mr-finance: 776,071 run directories, 17 GB) — Play said "Starting…" for all of it.
+                # Past half a second the doors go without their recent sessions; the screen asks for them.
+                try:
+                    page = await asyncio.wait_for(
+                        asyncio.to_thread(pr.store.list_runs, RunFilter(origin="playground", name=shown["service"]),
+                                          "started_desc", 8), timeout=0.5)
+                    recent = {"service": shown["service"], "runs": [_row(r) for r in page.items]}
+                except asyncio.TimeoutError:
+                    recent = None
         return JSONResponse({"doors": doors, "bridge": bridge.status(), "cursor": cursor, "recent": recent})
 
     @app.get("/api/p/{pid}/play/events")
