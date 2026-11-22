@@ -64,7 +64,7 @@ const hubOf = (name) => {
   return b ? b.dataset.in : null;
 };
 const hubTabs = (hub) => [...document.querySelectorAll(`#hubtabs [data-in="${CSS.escape(hub)}"]`)]
-  .filter(b => !b.hidden && !(b.classList.contains("needs-edit") && document.body.dataset.role === "viewer"));
+  .filter(b => !b.hidden && !("folded" in b.dataset && b.dataset.view !== "flows") && !(b.classList.contains("needs-edit") && document.body.dataset.role === "viewer"));
 function hubLast(hub) {
   const tabs = hubTabs(hub).map(b => b.dataset.tab);
   const last = recall(`hub:${PID}:${hub}`, null);
