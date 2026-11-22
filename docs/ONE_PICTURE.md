@@ -79,12 +79,22 @@ their own page. No Python changed.
   the only place it can be read.
 - **Past 30 flows the rail still lists flows, not domains.** Finding one flow among thousands is what
   the rail's filter is for; a click reveals its domain on the picture.
-- **No Esc and no `Picture / flow` crumb**: the Picture tab is the way back.
+- **Esc** in a flow, with nothing selected, goes back to the picture; so does the Picture tab.
 - **A single-flow project** still opens on its flow; its Picture tab is there.
 
 A job with real runs, on the callbot (306 items; the item table scrolls sideways in the 420 px panel):
 
 ![job runs](img/onepicture/job-runs.png)
+
+## Play that does not wait for the run store
+
+"Starting Play…" stayed for minutes on mr-finance. Measured: the bridge itself starts in 2.8 s and the
+doors answer in 0.13 s once it is up — but the doors call also listed recent runs, which first
+refreshes the run store, and mr-finance's store holds 776,071 run directories (17 GB; `agent_worker`,
+every 5 s, wrote 528,615 of them). That refresh is a walk of minutes, and it was running continuously
+in the studio (two threads at 64% CPU, `FilesRunStore.refresh → os.walk`). Now the doors give the run
+store half a second and go without recent sessions if it is not back; the screen asks for them after.
+The store's size itself is not fixed here — see the open points.
 
 ## Not exercised
 

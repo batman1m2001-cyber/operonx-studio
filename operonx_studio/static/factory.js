@@ -122,6 +122,16 @@ window.Factory = (() => {
     v.hud.querySelector("p").append(line);           // on the counts' own line: the header keeps its height
   }
 
+  /* Esc in a flow, with nothing selected and nothing open, goes back up to the picture. What was selected
+   * is read before the editor's own Esc clears it, so one press does one thing. */
+  let escFree = false;
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") escFree = !state.sel && !document.querySelector(".popover:not([hidden]), dialog[open], .modal:not([hidden])"); }, true);
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || !escFree || ev.defaultPrevented || on() || document.body.dataset.tab !== "flow") return;
+    const t = ev.target; if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if ((state.ir.graphs || []).length > 1) show();
+  });
+
   function hide() {
     if (!on()) return;
     document.body.classList.remove("factory-on"); mark();
