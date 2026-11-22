@@ -68,6 +68,8 @@ window.Factory = (() => {
       seen = state.ir;
       view = mod.mount(host, state.ir, stats, {cardHost: dock(), onSelect(id) {         // the card is the side panel's Inspect tab: a selection brings it forward
         if (!on()) return;
+        // a pick on the picture is what the Details tab shows: it leaves START (Play), as a pick on the canvas does
+        if (id && state.playOn) { state.playOn = false; if (typeof applyPanels === "function") applyPanels(); }
         if (id && id !== shown) { if (typeof peekSide === "function") peekSide("inspect"); } else if (!id && shown && typeof unpeek === "function") unpeek();
         shown = id || null;
         if (window.FlowRail) FlowRail.mark(id);          // the rail marks the row of what the picture selected
