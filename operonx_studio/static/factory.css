@@ -285,3 +285,10 @@ body[data-tab="services"] .crumbs::after { content: "/  Services"; }
 /* a tab is as wide open as closed: the open one is told by its colour and its line, not by a heavier face
  * that nudged its neighbours 7 px */
 #hubtabs button, #hubtabs button.active { font-weight: 600; }
+
+/* a calm hover: the held frame over the new one, and names and the door list that fade, not snap */
+#factory .fx-ghost { position: absolute; left: 0; top: 0; pointer-events: none; opacity: 0; }
+#factory .nf { transition: opacity .22s ease-out; }
+#factory .fx-doors:not([hidden]) { animation: fx-in .2s ease-out; }
+@keyframes fx-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #factory .nf { transition: none; } #factory .fx-doors:not([hidden]) { animation: none; } }

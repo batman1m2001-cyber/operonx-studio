@@ -41,7 +41,7 @@ panel. Double-click the `news` platform → its flow editor, with `Picture / new
 | is the server up, start it, read its log | Services tab | a listener line on the picture (`:8030 ● up · 90 services`) → side panel |
 | find one route among 90 | Services tab, read cards | the picture's find box (`/`), or the left rail — one filterable list of flows, services and jobs |
 | edit / play a flow | Flow tab | double-click its platform; `Picture / flow` crumb or Esc to come back |
-| what failed last night | Jobs tab + Runs | failed jobs and workflows are already red on the picture; List sorts failed first |
+| what failed last night | Jobs tab + Runs | failed jobs and workflows are already red on the picture; the rail's Jobs list puts failed ones first |
 
 ## Decisions
 

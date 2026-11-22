@@ -86,6 +86,14 @@ tests/js/factorylayout.test.mjs   new, 14 tests
 - Inspect is the side panel, not an overlay in the middle of the picture.
 - Names, markers and filaments keep a readable size on screen when a large project is fitted small.
 
+## A calm hover (added the same day)
+
+The first cut lit whatever the pointer crossed, at once, so moving the mouse over the picture made it
+flash. Now a thing lights when the pointer rests on it for 130 ms and goes dark 190 ms after it leaves,
+and the picture cross-fades between the two (the last frame is held over the new one for 240 ms; names
+and the door list fade). Measured: a fast sweep across the whole picture changes the dimming 0 times;
+resting on `news` lights it between 60 and 260 ms.
+
 ## Not done
 
 - At 1,199 and 2,999 flows the picture is correct and fast, but crowded: a domain with hundreds of

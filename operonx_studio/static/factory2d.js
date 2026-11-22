@@ -234,7 +234,7 @@ for (const l of labels) { const d = mk("div", `nf ${l.cls}`); d.append(mk("b", n
   d.style.left = `${l.x.toFixed(1)}px`; d.style.top = `${l.y.toFixed(1)}px`; d.tabIndex = 0; d.setAttribute("role", "button");       // Tab reaches every name; Enter selects it and moves on into its card
   d.onkeydown = (e) => { if (e.key !== "Enter" && e.key !== " ") return; e.preventDefault(); e.stopPropagation(); select(l.owner); const b = card.querySelector(".fx-go, button.fx-row"); if (b) b.focus(); };
   d.onclick = () => select(l.owner); d.ondblclick = () => { if (/^f:/.test(l.owner) && opts.onOpen) opts.onOpen(l.full); };
-  d.onpointerenter = () => setHover(l.owner); d.onpointerleave = () => setHover(null);
+  d.onpointerenter = () => aim(l.owner); d.onpointerleave = () => aim(null);
   names.append(d); l.el = d; }
 /* a name under the studio's side panel steps back */
 function under() { const edge = vw() - covered(), left = Math.max(0, hud.offsetLeft - 14), z = view.zoom;
@@ -265,8 +265,20 @@ function refocus() { const id = hover || sel; focus = null; lit = null;
     else for (const p of pairs) { if (line) { if (p.src === line.owner && strandKind(p.kind) === line.kind) lit.add(p.dst); } else { if (p.src === id) lit.add(p.dst); if (p.dst === id) lit.add(p.src); } } }
   for (const l of labels) { l.el.classList.toggle("quiet", !!lit && !lit.has(l.owner)); l.el.classList.toggle("picked", !!sel && l.owner === sel); }
   paintSparks(); listDoors(); redraw(); }
+/* The pointer crossing the picture is not a question about everything under it. A thing lights when the
+ * pointer rests on it (AIM ms), goes dark a moment after it leaves (REST ms), and the picture cross-fades
+ * between the two instead of snapping: the last frame is held over the new one and let go (the owner,
+ * 2026-11-22: "it jumps, it hurts the eyes"). */
+const AIM = 130, REST = 190; let aimT = 0, aimed;
+function aim(id) { id = id || null; if (id === aimed) return; aimed = id; clearTimeout(aimT);
+  if (id === hover) return; aimT = setTimeout(() => setHover(aimed), id ? AIM : REST); }
+const ghost = document.createElement("canvas"); ghost.className = "fx-gl fx-ghost"; ghost.setAttribute("aria-hidden", "true"); canvas.after(ghost);
+function hold() { if (!canvas.width || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  ghost.width = canvas.width; ghost.height = canvas.height; ghost.style.cssText = canvas.style.cssText; ghost.getContext("2d").drawImage(canvas, 0, 0);
+  ghost.style.transition = "none"; ghost.style.opacity = "1";
+  requestAnimationFrame(() => requestAnimationFrame(() => { ghost.style.transition = "opacity .24s ease-out"; ghost.style.opacity = "0"; })); }
 function setHover(id) { if (id && !id.startsWith("l:") && !spot.has(id) && !doorAt.has(id) && !isJob(id)) id = null;   // a name this picture does not hold lights nothing, and dims nothing
-  if (id === hover) return; hover = id; refocus(); }
+  if (id === hover) return; hold(); hover = id; refocus(); }
 /* a lit workflow's services and jobs by name, where the list covers least: other workflows, their doors and
  * names, the lit shared items and the lit filaments are all in its way */
 function listDoors() { doorList.textContent = ""; listRows = []; doorList.hidden = true; doorList.style.transform = ""; doorList.style.width = ""; doorList.style.columnCount = "";
@@ -395,10 +407,10 @@ const apart = () => { const [a, b] = [...fingers.values()]; return Math.hypot(a[
 canvas.addEventListener("pointerdown", (e) => { drag = [e.clientX, e.clientY]; moved = 0; canvas.setPointerCapture(e.pointerId); fingers.set(e.pointerId, [e.clientX, e.clientY]); if (fingers.size === 2) { spread = apart(); moved = 99; } });
 canvas.addEventListener("pointermove", (e) => { if (fingers.has(e.pointerId)) fingers.set(e.pointerId, [e.clientX, e.clientY]);
   if (fingers.size === 2) { const d = apart(); view.zoom = Math.max(ZMIN, Math.min(ZMAX, view.zoom * d / spread)); spread = d; apply(); return; }
-  if (!drag) { const w = toWorld(e); setHover(pick(w) || pickLine(w)); return; }
+  if (!drag) { const w = toWorld(e); aim(pick(w) || pickLine(w)); return; }
   moved += Math.abs(e.clientX - drag[0]) + Math.abs(e.clientY - drag[1]); view.cx -= (e.clientX - drag[0]) / view.zoom; view.cy -= (e.clientY - drag[1]) / view.zoom; drag = [e.clientX, e.clientY]; apply(); });
 const lift = (e) => { const click = e.type === "pointerup" && drag && moved < 5 && fingers.size <= 1; fingers.delete(e.pointerId); drag = null; if (click) { const w = toWorld(e); select(pick(w) || pickLine(w)); } };
-canvas.addEventListener("pointerup", lift); canvas.addEventListener("pointercancel", lift); canvas.addEventListener("pointerleave", () => { if (!drag) setHover(null); });
+canvas.addEventListener("pointerup", lift); canvas.addEventListener("pointercancel", lift); canvas.addEventListener("pointerleave", () => { if (!drag) aim(null); });
 canvas.tabIndex = 0;
 canvas.addEventListener("dblclick", (e) => { let id = pick(toWorld(e)); if (id && doorAt.has(id)) id = doorAt.get(id).owner.id; if (id && /^f:/.test(id) && opts.onOpen) opts.onOpen(model.by.get(id).name); });
 resetBtn.onclick = fit;
@@ -434,7 +446,7 @@ kick();
 return {
   panel, hud,
   fit, select, reveal, setStats,
-  hover: setHover,
+  hover: aim,
   /* what a frame costs, and what is on it: for the scale checks */
   cost: () => ({software: true, drawMs: +spent.toFixed(1), frames, pixelRatio: dpr, platforms: clusters.length, shared: core.length, doors: doors.length, filaments: fils.length, relationships: pairs.length, pulses: silk.childElementCount, names: labels.length}),
   pause() { live = false; if (raf) cancelAnimationFrame(raf); raf = 0; },
