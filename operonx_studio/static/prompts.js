@@ -1,7 +1,10 @@
-/* operonx studio — Prompts: the project's named prompts and the LLM ops that send them.
+/* operonx studio — Prompts: the project's prompt objects and the LLM ops that send them.
  *
- * A prompt's page: its text, Save, Publish, its versions. An op's page: the
- * prompts it sends and its recent runs (what it was given, what it answered).
+ * A prompt is an object: a text (prompts/<name>.md) or a composite of links
+ * (prompts/<name>.yaml). The Map draws every object and its links; a prompt's
+ * page draws its own links, the variables it needs, who uses it, its text,
+ * Save, Publish and versions. An op's page: the prompts it sends and its
+ * recent runs (what it was given, what it answered).
  */
 
 "use strict";
@@ -13,6 +16,8 @@ const PromptsView = (() => {
   let token = 0;
   let creating = false;   // the New prompt form is open
   const save = () => store(K, v);
+  const MAP = "\0map";   // v.prompt for the Map: no prompt can be named that
+  const goTo = (name) => { v.prompt = name; save(); show(); };
 
   function llmOps() {
     const out = [];
@@ -54,7 +59,7 @@ const PromptsView = (() => {
           + "clearly help. Describe it first; if I agree, add it with an LLMOp and a prompt I can tune here."}}));
       return;
     }
-    if (v.prompt && !named.find(p => p.name === v.prompt)) v.prompt = "";
+    if (v.prompt && v.prompt !== MAP && !named.find(p => p.name === v.prompt)) v.prompt = "";
     if (!v.prompt && !ops.find(o => o.name === v.op)) { v.op = ops.length ? ops[0].name : ""; if (!v.op && named.length) v.prompt = named[0].name; }
     save();
     const grid = el("div", "pwgrid");
@@ -65,11 +70,17 @@ const PromptsView = (() => {
     // the project's named prompts (prompts/<name>.md): what is declared, before what is guessed from runs
     if (named.length) {
       list.append(el("div", "stitle", "Prompts"));
+      const mb = el("button", "pwop" + (v.prompt === MAP ? " sel" : ""));
+      mb.type = "button";
+      mb.append(el("b", null, "Map"), el("span", null, `${named.length} object${named.length === 1 ? "" : "s"} and their links`));
+      mb.onclick = () => { v.prompt = MAP; save(); show(); };
+      list.append(mb);
       for (const p of named) {
         const b = el("button", "pwop" + (p.name === v.prompt ? " sel" : ""));
         b.type = "button";
         const sv = p.serving || {};
-        b.append(el("b", "mono", p.name), el("span", null, p.error ? "cannot be read" : sv.version != null ? `${sv.label} → v${sv.version}${p.unpublished ? " · edited since" : ""}` : (p.versions.length ? "working text served" : "not published yet")));
+        const kind = p.kind && p.kind !== "text" ? `${p.kind} · ` : "";
+        b.append(el("b", "mono", p.name), el("span", null, p.error ? "cannot be read" : kind + (sv.version != null ? `${sv.label} → v${sv.version}${p.unpublished ? " · edited since" : ""}` : (p.versions.length ? "working text served" : "not published yet"))));
         b.onclick = () => { v.prompt = p.name; save(); show(); };
         list.append(b);
       }
@@ -85,7 +96,8 @@ const PromptsView = (() => {
     }
     if (!named.length) list.append(el("div", "note pwhint", "A prompt kept as prompts/<name>.md and asked for with prompt(\"name\") is listed here with its versions."));
     if (creating) { main.append(newForm()); return; }
-    if (v.prompt) { showNamed(main, named.find(p => p.name === v.prompt), ops); return; }
+    if (v.prompt === MAP) { showMap(main, named); return; }
+    if (v.prompt) { showNamed(main, named.find(p => p.name === v.prompt), ops, named); return; }
     // An op's page: which prompts it sends, and what it was given and answered in its recent runs.
     // Prompt text is read and changed on the prompt's own page, not here.
     const o = ops.find(x => x.name === v.op) || {prompts: []};
@@ -145,37 +157,87 @@ const PromptsView = (() => {
     main.append(ss);
   }
 
-  /* A named prompt: its text, who uses it, its versions and the labels on them. */
-  function showNamed(main, p, ops) {
-    if (!p) return;
-    const again = () => show();                    // the list says what is served too: draw the page again
+  /* Every prompt object and its links. */
+  function showMap(main, named) {
     const head = el("div", "pwnhead");
     const title = el("div", "pwntitle");
-    title.append(el("h3", "mono", p.name));
+    title.append(el("h3", null, "Prompt map"));
+    head.append(title, el("div", "pwnmeta", "A wire is a link: a use, a pick (its case) or a when (its variable). Click an object to open it."));
+    main.append(head, graphBox(named, ""));
+  }
+
+  function graphBox(named, focus) {
+    const wrap = el("div", "pgwrap");
+    wrap.append(PromptGraph.draw(PromptGraph.layout(named, focus), (name) => { if (name !== focus) goTo(name); }));
+    return wrap;
+  }
+
+  /* Each variable the object needs: where it comes from, and what it does there. */
+  function variablesBox(p) {
+    const sec = el("section", "pwvars");
+    sec.append(el("div", "stitle", `Variables — ${p.variables.length}`));
+    const how = {pick: "chooses a link (pick)", when: "turns a link on (when)", data: "data, as it is (var)"};
+    for (const name of p.variables) {
+      const from = p.needs[name];
+      const row = el("div", "pwvrow");
+      row.append(el("b", "mono", name));
+      if (how[from]) row.append(el("span", null, how[from]));
+      else {
+        const cell = el("span", null, "data in ");
+        const b = el("button", "linkbtn mono", from);
+        b.type = "button"; b.title = "Open this prompt";
+        b.onclick = () => goTo(from);
+        cell.append(b);
+        row.append(cell);
+      }
+      sec.append(row);
+    }
+    return sec;
+  }
+
+  /* A prompt object: its links, the variables it needs, who uses it, its text, its versions and the labels on them. */
+  function showNamed(main, p, ops, named) {
+    if (!p) return;
+    const again = () => show();                    // the list says what is served too: draw the page again
+    const composite = p.kind && p.kind !== "text";
+    const head = el("div", "pwnhead");
+    const title = el("div", "pwntitle");
+    title.append(el("h3", "mono", p.name), el("span", "pwchip", composite ? `${p.kind} composite` : "text"));
+    if (p.id) title.append(el("span", "pwchip mono", p.id));
     const sv = p.serving || {};
     title.append(el("span", "pwchip" + (sv.version != null ? " live" : ""), sv.version != null ? `${sv.label} → v${sv.version}` : "working text is served"));
     if (p.unpublished && p.versions.length) title.append(el("span", "pwchip warn", "edited since v" + p.versions[0].version));
     head.append(title);
     if (p.description) head.append(el("p", "pwndesc", p.description));
     const users = ops.filter(o => o.prompts.some(r => r.name === p.name));
+    const linkers = PromptGraph.linkedBy(named, p.name);
     const meta = el("div", "pwnmeta");
     meta.append(el("span", "mono", p.file));
-    if (p.variables && p.variables.length) meta.append(el("span", null, "fills " + p.variables.map(x => `{{${x}}}`).join(" ")));
-    meta.append(el("span", null, users.length ? "used by" : "no op names it in its graph"));
+    if (!composite && p.variables && p.variables.length) meta.append(el("span", null, "fills " + p.variables.map(x => `{{${x}}}`).join(" ")));
+    meta.append(el("span", null, users.length || linkers.length ? "used by" : "nothing uses it yet"));
     for (const o of users) {
       const b = el("button", "linkbtn mono", o.name);
-      b.type = "button"; b.title = `${o.name} in ${o.graph}: its recorded runs`;
+      b.type = "button"; b.title = `the op ${o.name} in ${o.graph}: its recorded runs`;
       b.onclick = () => { v.op = o.name; v.prompt = ""; save(); show(); };
+      meta.append(b);
+    }
+    for (const l of linkers) {
+      const b = el("button", "linkbtn mono", l.name);
+      b.type = "button"; b.title = `the composite ${l.name} links it: ${l.how}`;
+      b.onclick = () => goTo(l.name);
       meta.append(b);
     }
     head.append(meta);
     main.append(head);
     if (p.error) { main.append(el("div", "errbox", p.error)); return; }
+    if ((p.links || []).some(l => l.name) || linkers.length) main.append(graphBox(named, p.name));
+    if (composite && p.variables.length) main.append(variablesBox(p));
 
     const sec = el("section", "pwprompt");
     const cap = el("div", "pwcap");
-    cap.append(el("b", null, "Working text"), el("span", null, `${p.text.length.toLocaleString()} characters`));
-    const inp = el("textarea", "pwtext pwprose");
+    cap.append(el("b", null, composite ? "Links — the working file" : "Working text"),
+               el("span", null, composite ? p.file : `${p.text.length.toLocaleString()} characters`));
+    const inp = el("textarea", "pwtext " + (composite ? "pwyaml mono" : "pwprose"));
     inp.value = p.text; inp.spellcheck = false;
     inp.setAttribute("aria-label", `${p.name}: working text`);
     inp.style.height = `${Math.min(520, 34 + 22 * Math.max(4, p.text.split("\n").reduce((n, ln) => n + 1 + Math.floor(ln.length / 110), 0)))}px`;
