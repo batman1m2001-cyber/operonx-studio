@@ -3692,6 +3692,23 @@ button.chip.kbpagechip.on { background: var(--accent-soft); color: var(--accent-
 .pwchips { display: flex; gap: 6px; flex-wrap: wrap; }
 .pwvtools { display: flex; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
 .pwdiff { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+/* the prompt graph (promptgraph.js): objects as boxes, links as plain wires */
+.pgwrap { overflow: auto; max-height: 560px; padding: 4px; border-radius: var(--r-md); background: var(--surface); }
+.pgraph { display: block; }
+.pgwire { fill: none; stroke: var(--wire); stroke-width: 2; stroke-linecap: round; }
+.pgwire.when { stroke-dasharray: 6 5; }
+.pglabels text { font-size: 11px; fill: var(--text-2); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; pointer-events: auto; }
+.pgnode { cursor: pointer; outline: none; }
+.pgnode rect { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+.pgnode.composite rect { stroke: var(--accent); }
+.pgnode.focus rect { stroke: var(--accent); stroke-width: 2.5; fill: var(--accent-soft); }
+.pgnode.bad rect { stroke: var(--err); stroke-dasharray: 4 3; }
+.pgnode:hover rect, .pgnode:focus-visible rect { stroke: var(--accent-hover); stroke-width: 2.5; }
+.pgname { font-family: var(--mono); font-size: 12.5px; font-weight: 600; fill: var(--text); }
+.pgkind { font-size: 11px; fill: var(--text-3); }
+.pwvars { display: flex; flex-direction: column; gap: 4px; }
+.pwvrow { display: grid; grid-template-columns: minmax(120px, 220px) minmax(0, 1fr); align-items: baseline; gap: 12px; padding: 7px 12px; border-radius: var(--r-md); background: var(--surface); font-size: var(--fs-sm); color: var(--text-2); }
+.pwyaml { font-size: 13px; line-height: 1.55; padding: 12px 14px; white-space: pre; resize: vertical; }
 .pwsamples { display: flex; flex-direction: column; border-radius: var(--r-md); }
 .pwrow { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 8px 16px; padding: 12px 14px; }
 .pwrow:first-child { border-top: none; }

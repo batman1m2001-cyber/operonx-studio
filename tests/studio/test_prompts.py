@@ -115,7 +115,10 @@ def test_named_prompts_are_listed_with_their_versions_and_labels(client, project
     # an edit is saved to the working text, the front matter kept; production still serves v1
     edited = client.post(f"/api/p/{pid}/prompts/write",
                          json={"name": "guard", "text": "Answer {{who}} in one line.", "base": got["prompt"]["base"]}).json()
-    assert (project / "prompts" / "guard.md").read_text() == "---\ndescription: the rule\n---\nAnswer {{who}} in one line.\n"
+    # (operonx >= 1.44 gives the prompt its id on the first publish: the front matter has it too)
+    pid_line = f"id: {got['prompt']['id']}\n" if got["prompt"].get("id") else ""
+    assert (project / "prompts" / "guard.md").read_text() == (
+        f"---\n{pid_line}description: the rule\n---\nAnswer {{{{who}}}} in one line.\n")
     assert edited["prompt"]["unpublished"] and edited["prompt"]["serving"]["version"] == 1
     # the file as the editor read it has moved on: a stale write is refused
     assert client.post(f"/api/p/{pid}/prompts/write",

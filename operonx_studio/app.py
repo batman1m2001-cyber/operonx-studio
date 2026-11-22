@@ -4034,6 +4034,12 @@ def build_studio_app(recents: Optional[Recents] = None):
     # published versions and the labels that point at them. The page lists what
     # is declared; which op uses which is in the IR (node.prompts).
 
+    def _prompt_file(root: Path, name: str) -> Path:
+        from operonx import prompts as P
+
+        # prompt_path knows .yaml (a composite, operonx >= 1.44); an older one has .md only
+        return P.prompt_path(name, root) if hasattr(P, "prompt_path") else P.prompts_dir(root) / f"{name}.md"
+
     def _prompt_card(root: Path, name: str) -> Dict[str, Any]:
         from operonx import prompts as P
 
@@ -4041,13 +4047,19 @@ def build_studio_app(recents: Optional[Recents] = None):
         for label, version in P.labels(root).get(name, {}).items():
             on.setdefault(version, []).append(label)
         raw = P._read(P.prompts_dir(root), name, None)
-        meta, _ = P._split(raw)
         served = P.prompt(name, root=root)
         working = P.prompt(name, version=None, label="\0none", root=root)
+        composite = isinstance(working, getattr(P, "CompositePrompt", ()))
+        meta = working.meta if composite else P._split(raw)[0]
         have = P.versions(name, root)
+        # a composite: what it links (the graph's edges) and where each variable comes from
+        links = working.links() if composite else []
+        needs = dict(working.variables) if composite else {v: name for v in working.variables}
         return {
-            "name": name, "file": f"prompts/{name}.md", "description": meta.get("description"),
-            "text": working.text, "raw": raw, "base": safewrite.sha(raw), "variables": list(working.variables),
+            "name": name, "file": _prompt_file(root, name).relative_to(root).as_posix(),
+            "description": meta.get("description"), "id": meta.get("id") if isinstance(meta.get("id"), str) else None,
+            "kind": working.kind if composite else "text", "links": links, "needs": needs,
+            "text": working.text, "raw": raw, "base": safewrite.sha(raw), "variables": list(needs),
             "versions": [{"version": v, "labels": sorted(on.get(v, [])),
                           "chars": len(P.prompt(name, version=v, root=root).text)} for v in reversed(have)],
             "serving": {"version": served.version, "label": served.label},
@@ -4069,7 +4081,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             try:
                 out.append(_prompt_card(watcher.root, name))
             except Exception as exc:  # noqa: BLE001 — one unreadable prompt is not the page failing
-                out.append({"name": name, "file": f"prompts/{name}.md", "error": str(exc), "versions": []})
+                out.append({"name": name, "file": f"prompts/{name}", "error": str(exc), "versions": [],
+                            "kind": "text", "links": [], "needs": {}})
         return JSONResponse({"prompts": out, "label": os.environ.get("OPERONX_PROMPT_LABEL") or P.DEFAULT_LABEL,
                              "store": bool(_prompt_store_view(watcher.root, read=False).get("configured"))})
 
@@ -4123,10 +4136,20 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": str(exc)}, status_code=404)
         if not text.strip():
             return JSONResponse({"error": "a prompt cannot be empty"}, status_code=400)
-        _, old_body = P._split(raw)
-        new = raw[: len(raw) - len(old_body)] + text.rstrip("\n") + "\n"
+        path = _prompt_file(watcher.root, name)
+        if path.suffix == ".yaml":
+            # a composite is its whole file, and must still load: a link to a prompt
+            # that is not there is refused here, not on the next call
+            new = text.rstrip("\n") + "\n"
+            try:
+                P._composite(P.prompts_dir(watcher.root), name, new, None, None, "\0none", (name,))
+            except (P.PromptNotFound, P.PromptFormatError) as exc:
+                return JSONResponse({"error": str(exc)}, status_code=400)
+        else:
+            _, old_body = P._split(raw)
+            new = raw[: len(raw) - len(old_body)] + text.rstrip("\n") + "\n"
         try:
-            w = safewrite.commit(watcher.root, P.prompts_dir(watcher.root) / f"{name}.md", new,
+            w = safewrite.commit(watcher.root, path, new,
                                  body.get("base") or safewrite.sha(raw), before=raw, watcher=watcher,
                                  what=f"prompt {name}", who=_who(request))
         except safewrite.WriteRefused as exc:
