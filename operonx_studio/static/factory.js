@@ -106,6 +106,12 @@ window.Factory = (() => {
       full.type = "button"; full.title = "The same listeners with room for a long log: the Services screen"; full.onclick = () => switchTab("services");
       box.append(inner, full); ServicesView.showIn(inner);
     });
+    if (got.listeners.length > 1) {               // several: one short line, so the counts line keeps its length
+      const up = got.listeners.filter(l => l.running).length, b = el("button", up === got.listeners.length ? "up" : up ? "" : "bad");
+      b.type = "button"; b.title = got.listeners.map(l => `${l.key}  ${l.running ? "running" : "stopped"}`).join("\n");
+      b.append(el("i"), el("b", null, `${got.listeners.length} listeners`), el("span", null, `${up} running`));
+      b.onclick = open; line.append(b);
+    } else
     for (const l of got.listeners) {
       const b = el("button", l.running ? "up" : l.exit_code ? "bad" : "");
       b.type = "button"; b.title = "Start or stop it, read its log";

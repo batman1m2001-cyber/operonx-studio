@@ -27,7 +27,7 @@ The listeners, in the card:
 
 ![listeners](img/onepicture/listeners.png)
 
-Inside a flow (this shot is from before the top bar was fixed; the tabs are `Picture · Prompts` now) — the rail is the flow switcher it was:
+Inside a flow — the crumbs name it, Picture stays the open tab, the rail is the flow switcher it was:
 
 ![flow](img/onepicture/flow.png)
 
@@ -82,12 +82,15 @@ their own page. No Python changed.
 - **No Esc and no `Picture / flow` crumb**: the Picture tab is the way back.
 - **A single-flow project** still opens on its flow; its Picture tab is there.
 
+A job with real runs, on the callbot (306 items; the item table scrolls sideways in the 420 px panel):
+
+![job runs](img/onepicture/job-runs.png)
+
 ## Not exercised
 
-- Run, Resume, Start, Stop and Requeue were not pressed from the card: the test project is a copy of
-  mr-finance with no job runs, and its listener is the live server. They are the same handlers the
-  full pages use.
-- A job with a long run (many items) in the 400 px panel was not seen for the same reason.
+- Run, Resume, Start, Stop and Requeue were not pressed from the card: they would start real work on
+  the owner's projects and live servers. They are the same handlers the full pages use.
+- Several listeners are one line (`2 listeners · 2 running`), so the counts line keeps its length.
 
 ## Checked
 
