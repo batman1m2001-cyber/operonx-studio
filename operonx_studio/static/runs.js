@@ -31,7 +31,8 @@ const RunsView = (() => {
   let cursor = null;
   const picked = new Set();   // runs ticked for "Compare"
 
-  const save = () => store(`runsView:${PID}`, {folder: v.folder, range: v.range, status: v.status, order: v.order});
+  // rangeSet: the person picked the range. Until then it is ours to widen (see render).
+  const save = () => store(`runsView:${PID}`, {folder: v.folder, range: v.range, rangeSet: !!v.rangeSet, status: v.status, order: v.order});
   const since = () => {
     const r = RANGES.find(x => x[0] === v.range);
     // to the minute: a range of hours or days needs no finer edge, and a
@@ -340,7 +341,7 @@ const RunsView = (() => {
   function emptyFor(folder) {
     const f = folder;
     const wider = v.range !== "all" && v.range !== "30d"
-      ? [{label: "Show the last 30 days", icon: "clock", run: () => { v.range = "30d"; save(); render(); }}] : [];
+      ? [{label: "Show the last 30 days", icon: "clock", run: () => { v.range = "30d"; v.rangeSet = true; save(); render(); }}] : [];
     if (f.kind === "service") return paneNote("No runs in this range",
       `Every ${f.name} session is recorded here as it ends.`, null,
       {actions: [...((window.Account && Account.viewOnly) ? [] : [{label: "Play it on the Flow", icon: "play", run: () => switchTab("playground")}]), ...wider]});
@@ -400,7 +401,23 @@ const RunsView = (() => {
     early.got = api(`${early.url}&with_origins=1`);
     early.got.catch(() => {});      // awaited below, or dropped
     let first = null;
-    try { first = await early.got; origins = first.origins || null; }
+    try {
+      first = await early.got;
+      // A project that last ran a month ago is not a project without runs. A range nobody picked
+      // widens to the first one that holds a run, and the range control says which that is.
+      const plain = !v.rangeSet && v.folder.kind === "all" && !v.status && !v.q.trim();
+      const at = RANGES.findIndex(x => x[0] === v.range);
+      for (const [wider] of plain ? RANGES.slice(at + 1).filter(x => x[0] === "30d" || x[0] === "all") : []) {
+        if (mine !== token || (first.runs || []).length) break;
+        const was = {range: v.range, url: early.url, got: early.got};
+        v.range = wider;
+        early.url = firstPage();
+        early.got = api(`${early.url}&with_origins=1`);   // the table reads this page too
+        try { first = await early.got; }
+        catch { v.range = was.range; early.url = was.url; early.got = was.got; break; }
+      }
+      origins = first.origins || null;
+    }
     catch (e) {
       origins = null;
       if (mine !== token) return;
@@ -437,7 +454,7 @@ const RunsView = (() => {
     const range = el("select");
     range.setAttribute("aria-label", "Time range");
     for (const [k, label] of RANGES) { const o = el("option", null, label); o.value = k; o.selected = k === v.range; range.append(o); }
-    range.onchange = () => { v.range = range.value; save(); render(); };
+    range.onchange = () => { v.range = range.value; v.rangeSet = true; save(); render(); };
     const status = el("select");
     status.setAttribute("aria-label", "Status");
     for (const [k, label] of [["", "Any status"], ["ok", "Succeeded"], ["error", "Failed"], ["running", "Running"],
