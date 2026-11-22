@@ -469,7 +469,8 @@ async function renderExecPanel(run, e, execs, target) {
     const priced = "cost_usd" in outs || "usage" in outs;
     valueZones(vbox, match.inputs, match.outputs, scratchKeyOf,
                {hide: priced ? ["usage", "cost_usd", "model_used"] : [],
-                focus: (node && node.show_keys) || []});
+                focus: (node && node.show_keys) || [],
+                link: promptLink(node && node.name, (match.attrs || {}).prompts)});
     // calls this step sent again (operonx retry_call): "3 calls, 2 retried (429)"
     const resent = callRetries(match.attrs);
     if (resent) vbox.prepend(resent);

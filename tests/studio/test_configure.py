@@ -170,3 +170,15 @@ def test_a_yaml_file_is_read_and_edited_through_safewrite(client, project):
     assert done["applied"] and "- giá" in (project / "prompts.yaml").read_text()
     outside = client.get(f"/api/p/{pid}/yaml", params={"file": "../../etc/passwd.yaml"})
     assert outside.status_code == 400
+
+
+def test_an_execution_says_which_named_prompts_it_was_given():
+    """The op's card links a named prompt instead of printing its text: the
+    execution carries what the run row recorded (attrs.prompts)."""
+    from operonx_studio.app import _op_executions
+
+    ref = {"input": "rules", "name": "classifier/system", "version": 3}
+    rows = [{"op_name": "classify", "inputs": {}, "outputs": {}, "attrs": {"prompts": [ref]}},
+            {"op_name": "classify", "inputs": {}, "outputs": {}}]
+    got = _op_executions(rows, "run-1", "classify")["executions"]
+    assert [x["prompts"] for x in got] == [[ref], []]

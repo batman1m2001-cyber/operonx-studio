@@ -544,6 +544,14 @@ const PromptsView = (() => {
     slot.append(diff, apply);
   }
 
+  /* From an op's card: straight to the prompt it names ({prompt}), or to the op's own page here ({op}). */
+  function open(to) {
+    v.prompt = (to && to.prompt) || "";
+    if (to && to.op) v.op = to.op;
+    save();
+    if (state.tab === "prompts") show(); else switchTab("prompts");
+  }
+
   registerPane("prompts", {el: box, show});
-  return {show};
+  return {show, open};
 })();

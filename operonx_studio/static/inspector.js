@@ -118,6 +118,43 @@ function select(key) {
   if (n.graph) panel.append(membersSection(it));
 }
 
+/* What a recorded conversation needs to name its prompts instead of printing them: the prompts the
+ * execution was given, and the way to each one's page (Prompts). */
+function promptLink(op, prompts) {
+  return {prompts: prompts || [],
+    onPrompt: (name) => PromptsView.open({prompt: name}),
+    onOp: op ? () => PromptsView.open({op}) : null};
+}
+
+/* A named prompt on an op's card: its name, a click from its page. */
+function promptRow(refs, lead) {
+  const row = el("div", "promptrefs");
+  if (lead) row.append(el("span", "plabel", lead));
+  for (const r of refs) {
+    const b = el("button", "iopchip");
+    b.type = "button";
+    b.title = `Open ${r.name} in Prompts`;
+    b.append(el("span", "iopname mono", r.name));
+    if (r.version != null) b.append(el("span", "iopver", `v${r.version}`));
+    b.onclick = () => PromptsView.open({prompt: r.name});
+    row.append(b);
+  }
+  return row;
+}
+
+/* A long text on a card is four lines and a way to the rest. */
+function clampedBlock(text) {
+  const pre = el("pre", "promptblock mono", text);
+  if (text.length < 320 && text.split("\n").length <= 5) return pre;
+  const wrap = el("div", "promptclamp");
+  pre.classList.add("clamped");
+  const more = el("button", "iopshow", "Show all");
+  more.type = "button";
+  more.onclick = () => { const on = pre.classList.toggle("clamped"); more.textContent = on ? "Show all" : "Show less"; };
+  wrap.append(pre, more);
+  return wrap;
+}
+
 /* An agent's instructions, edited where they live: the text is found in
  * the one project file that holds it (a .prompt, .md, .yaml or a literal in
  * the code) and saved there, the diff first (/prompts/save). Instructions a
@@ -126,6 +163,9 @@ function instructionsSection(n) {
   const ins = (n.agent || {}).instructions || {};
   const sec = el("section", "agentins");
   sec.append(el("div", "stitle", "Instructions"));
+  // instructions kept as a named prompt are read and edited on its page, with its versions
+  const named = (n.prompts || []).filter(r => r && r.name);
+  if (named.length) { sec.append(promptRow(named)); return sec; }
   if (!ins.text) {
     sec.append(el("div", "note", ins.dynamic
       ? `Written by code at run time: ${ins.from || "a function"}. Edit it there.`
@@ -229,7 +269,8 @@ function lastSections(n, lastP) {
       IN.body.append(ta);
     } else {
       const x = recent[pick].execution;
-      IN.body.append(IO.panel(x.inputs, x.outputs, {only: "in", mode: recall("ioMode", "pretty"), onMode: (m) => store("ioMode", m)}));
+      IN.body.append(IO.panel(x.inputs, x.outputs, {only: "in", mode: recall("ioMode", "pretty"), onMode: (m) => store("ioMode", m),
+        link: promptLink(n.name, x.prompts)}));
     }
     const acts = el("div", "lastacts");
     if (!editing && recent.length) {
@@ -454,8 +495,10 @@ function llmSection(n) {
     if (prompt && prompt.kind === "literal" && prompt.value && typeof prompt.value === "object") {
       for (const part of ["system", "user"]) {
         if (prompt.value[part] === undefined) continue;
+        const named = (n.prompts || []).filter(r => r && r.name && r.part === part);
+        if (named.length) { box.append(promptRow(named, part)); continue; }
         box.append(el("div", "plabel", part + " (template)"));
-        box.append(el("pre", "promptblock mono", String(prompt.value[part])));
+        box.append(clampedBlock(String(prompt.value[part])));
       }
     } else if (byName.messages) {
       const b = byName.messages;
