@@ -881,11 +881,52 @@
     return card;
   }
 
-  function messageView(m, i) {
+  /* Which named prompts (prompts/<name>.md) each message was written from:
+   * {role: [ref]}. A run row says it per template part (`part`) or per
+   * variable (`input`, a prompt rendered upstream); the template says which
+   * part reads that variable. What neither places goes to the system
+   * message, where a prompt is. */
+  function promptsByRole(chat, refs) {
+    const by = {};
+    if (!Array.isArray(refs) || !refs.length) return by;
+    const tpl = typeof chat.template === "string" ? { user: chat.template } : chat.template || {};
+    const reads = {};
+    for (const [role, s] of Object.entries(tpl)) {
+      if (typeof s !== "string") continue;
+      // formatted with nothing: every field it reads comes back as missing, by name
+      for (const name of pyFormat(s, {}).missing) if (!(name in reads)) reads[name] = role;
+    }
+    for (const r of refs) {
+      if (!r || !r.name) continue;
+      const role = r.part || reads[r.input] || "system";
+      if (!(by[role] || (by[role] = [])).some((x) => x.name === r.name)) by[role].push(r);
+    }
+    return by;
+  }
+
+  /* A named prompt, as the thing it is: its name and version, one click
+   * from its page (Prompts) — not its text again. */
+  function promptChip(r, link) {
+    const go = link && link.onPrompt;
+    const c = h(go ? "button" : "span", "iopchip");
+    c.append(h("span", "iopname mono", r.name), h("span", "iopver", r.version != null ? `v${r.version}` : "working"));
+    if (go) {
+      c.type = "button";
+      c.title = `Open ${r.name} in Prompts`;
+      c.onclick = (ev) => { ev.stopPropagation(); link.onPrompt(r.name); };
+    }
+    return c;
+  }
+
+  function messageView(m, i, named, link) {
     const role = m.role || "message";
     const box = h("div", `iomsg role-${ROLE.has(role) ? role : "other"}`);
     const head = h("div", "iomsghead");
     head.append(h("span", "iorole", ROLE_LABEL[role] || role));
+    const isPrompt = role === "system" || role === "developer";
+    for (const r of named || []) head.append(promptChip(r, link));
+    // a prompt with a page of its own is read there: here it is one line, its text one click away
+    const tucked = isPrompt && (named || []).length > 0;
     if (m.name) head.append(h("span", "iomsgname mono", m.name));
     if (m.tool_call_id) {
       const id = h("span", "iomsgname iomsgid mono", `↩ ${m.tool_call_id}`);
@@ -897,7 +938,26 @@
     head.append(copyBtn(() => m.content));
     box.append(head);
     const body = h("div", "iomsgbody");
-    const lines = role === "system" ? 8 : 18;
+    if (tucked) {
+      const show = h("button", "iopshow", "Show text");
+      show.type = "button";
+      body.hidden = true;
+      show.setAttribute("aria-expanded", "false");
+      show.onclick = () => {
+        body.hidden = !body.hidden;
+        show.textContent = body.hidden ? "Show text" : "Hide text";
+        show.setAttribute("aria-expanded", String(!body.hidden));
+      };
+      head.insertBefore(show, head.lastChild);
+      box.classList.add("tucked");
+    } else if (isPrompt && link && link.onOp && text && text.length > 400) {
+      // written in the code or built at run time: the op's page in Prompts is where it is read and tried
+      const open = h("button", "iopshow", "Open in Prompts");
+      open.type = "button";
+      open.onclick = () => link.onOp();
+      head.insertBefore(open, head.lastChild);
+    }
+    const lines = isPrompt ? 4 : 18;
     if (m.parts && text !== null && m.parts.some((p) => p.t !== "text")) body.append(partsView(m.parts, text, lines));
     else {
       const parts = messageParts(m);
@@ -923,9 +983,15 @@
   }
   const ROLE = new Set(Object.keys(ROLE_LABEL));
 
-  function chatList(messages) {
+  function chatList(messages, by, link) {
     const list = h("div", "iochat");
-    messages.forEach((m, i) => list.append(messageView(m, i)));
+    const left = { ...(by || {}) };
+    messages.forEach((m, i) => {
+      // the first message of a role is the one its template part wrote
+      const named = left[m.role];
+      delete left[m.role];
+      list.append(messageView(m, i, named, link));
+    });
     return list;
   }
 
@@ -987,7 +1053,7 @@
     return c;
   }
 
-  function inputBody(inputs, mode, badges) {
+  function inputBody(inputs, mode, badges, link) {
     if (mode === "json") return jsonView(inputs, 2);
     const chat = chatOf(inputs);
     const side = { side: "in", path: "", depth: 0, badges };
@@ -1006,7 +1072,7 @@
       if (chat.approx.length) note.title = `May differ from what was sent: ${chat.approx.join("; ")}`;
       box.append(note);
     }
-    box.append(chatList(chat.messages));
+    box.append(chatList(chat.messages, promptsByRole(chat, link && link.prompts), link));
     const knobs = Object.entries(chat.knobs);
     if (knobs.length) {
       const line = h("div", "iofacts");
@@ -1090,7 +1156,7 @@
     const draw = () => {
       cards.textContent = "";
       const isChat = !!chatOf(inputs);
-      const inCard = card("Input", "ioin", inputs, inputBody(inputs || {}, mode, opts.badges),
+      const inCard = card("Input", "ioin", inputs, inputBody(inputs || {}, mode, opts.badges, opts.link),
         inputs ? `${Object.keys(inputs).length} fields · ${fmtSize(sizeOf(inputs))}` : null);
       const outCard = card("Output", "ioout", outputs, outputBody((mode === "json" ? outputs : outs) || {}, mode,
         { focus: opts.focus, before: inputs }),
@@ -1152,7 +1218,7 @@
     };
   }
 
-  const api = { KNOBS, pyRepr, pyStr, pyFormat, chatOf, replyOf, toolCallOf, messageParts, jsonish, segments, contentParts,
+  const api = { KNOBS, pyRepr, pyStr, pyFormat, chatOf, promptsByRole, replyOf, toolCallOf, messageParts, jsonish, segments, contentParts,
                 lineCount, panel, valueView, jsonView, textView, tableOf,
                 isEmpty, isSimple, changes, repeats, brief, preview, changeSummary, retrySummary };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

@@ -285,6 +285,8 @@ def _op_executions(records, run_name: str, op_name: str, limit: int = 50) -> Dic
             "wall_start": rec.get("wall_start"),
             "inputs": rec.get("inputs"),
             "outputs": rec.get("outputs"),
+            # the named prompts this execution was given (operonx >= 1.40): the page links them, it does not print them
+            "prompts": (rec.get("attrs") or {}).get("prompts") or [],
         })
     return {"run": run_name, "op": op_name, "total": total,
             "showing": len(keep), "executions": list(keep)}
@@ -2303,7 +2305,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             except (OSError, pyedit.PyEditError, SyntaxError):
                 pass
         res = node.get("resource")
-        if res:
+        # an op that names several (an agent's model and its fallback) has no one resource to set here
+        if res and isinstance(res, str):
             details = ((watcher.last.ir or {}).get("resources") or {}).get("details") or {}
             category = (details.get(res) or {}).get("category")
             literal = False

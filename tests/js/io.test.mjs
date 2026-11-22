@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { pyRepr, pyFormat, chatOf, replyOf, jsonish, segments, contentParts, toolCallOf, messageParts } =
+const { pyRepr, pyFormat, chatOf, promptsByRole, replyOf, jsonish, segments, contentParts, toolCallOf, messageParts } =
   require("../../operonx_studio/static/io.js");
 
 test("repr matches Python for JSON values", () => {
@@ -206,4 +206,23 @@ test("a step's calls sent again read as one line per call", () => {
   ]});
   assert.equal(s.line, "llm:assistant: 3 calls, 2 retried (429) · crm: 2 calls, 1 retried (ConnectError) · waited 3.5 s");
   assert.deepEqual(s.rows[1], ["llm:assistant #2", "RateLimitError 429 · waited 2.04 s"]);
+});
+
+test("a named prompt goes to the message its template part wrote", () => {
+  const chat = chatOf({
+    prompt: { system: "{rules}", user: "{case}" }, rules: "be brief", case: "hello",
+    messages: [{ role: "system", content: "be brief" }, { role: "user", content: "hello" }],
+  });
+  const by = promptsByRole(chat, [
+    { input: "rules", name: "classifier/system", version: 3 },
+    { input: "rules", name: "educa/analyzer", version: null },
+    { input: "case", name: "classifier/user", version: null },
+    { input: "rules", name: "classifier/system", version: 3 },   // said twice, shown once
+    { input: "elsewhere", name: "loose", version: 1 },            // read by no part: a prompt is the system's
+  ]);
+  assert.deepEqual(by.system.map((r) => r.name), ["classifier/system", "educa/analyzer", "loose"]);
+  assert.deepEqual(by.user.map((r) => r.name), ["classifier/user"]);
+  // a prompt= given by part says its part itself
+  assert.deepEqual(Object.keys(promptsByRole(chat, [{ part: "user", name: "q", version: 1 }])), ["user"]);
+  assert.deepEqual(promptsByRole(chat, []), {});
 });
