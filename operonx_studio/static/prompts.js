@@ -109,19 +109,17 @@ const PromptsView = (() => {
     if (!named.length) list.append(el("div", "note pwhint", "A prompt kept as prompts/<name>.md and asked for with prompt(\"name\") is listed here with its versions."));
     if (creating) { main.append(newForm()); return; }
     if (v.prompt) { showNamed(main, named.find(p => p.name === v.prompt), ops); return; }
-    const wait = el("div", "note", "Reading this op's recorded executions…");
-    main.append(wait);
-    // the search opens up to 2,000 recorded runs to find this op's inputs: on a project with many
-    // runs and none of this op that is most of a minute, so say it is still working
-    const slow = setTimeout(() => { wait.textContent = "Still reading: looking through the recorded runs for this op. With many runs this can take a minute."; }, 4000);
-    let got;
-    try { got = await api(`/api/p/${PID}/prompts/${encodeURIComponent(v.op)}/samples?limit=20`); }
-    catch (err) { clearTimeout(slow); main.textContent = ""; main.append(el("div", "errbox", err.message)); return; }
-    clearTimeout(slow);
-    if (mine !== token) return;
-    main.textContent = "";
+    // what the project already says about the op is drawn at once; its samples (the store lists the
+    // runs this op ran in, then reads them) arrive under it
     const o = ops.find(x => x.name === v.op) || {};
     main.append(...adoptRows(o));
+    const wait = el("div", "note pwwait", "Loading this op's samples…");
+    main.append(wait);
+    let got;
+    try { got = await api(`/api/p/${PID}/prompts/${encodeURIComponent(v.op)}/samples?limit=20`); }
+    catch (err) { if (mine === token) wait.replaceWith(el("div", "errbox", err.message)); return; }
+    if (mine !== token) return;
+    wait.remove();
     if (!got.samples.length) {
       // no run to take the prompt from: the template as the graph wrote it, to read (it had been a blank page)
       const parts = typeof o.written === "string" ? [["Prompt — the template", o.written]]

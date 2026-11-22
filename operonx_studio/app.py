@@ -33,6 +33,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -3944,45 +3945,69 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": "unknown project"}, status_code=404)
         pr = project_runs(watcher.root)
         samples: List[Dict[str, Any]] = []
-        # Service by service, not the newest 2,000 runs of everything: one busy service (a summary called
-        # after every call) fills those 2,000 and the service that runs this op is never reached. A
-        # service whose newest 500 runs never ran the op is taken not to have it in its flow, and is left.
-        try:
-            names = [(g.get("origin"), g.get("name")) for g in pr.store.groups(None, by=["origin", "name"])]
-        except Exception:  # noqa: BLE001 — a store that cannot group: every run, as before
-            names = [(None, None)]
-        for origin, name in names:
-            if origin is not None and origin not in ("service", "job", "playground", "eval"):
+        real = ("service", "job", "playground", "eval")
+
+        def wanted(s: Any) -> bool:
+            # a real input: a service call, a job or Play — the workbench's own tries are not samples
+            return s.origin in real and bool(s.service or s.job) and (s.metadata or {}).get("toy") != "rerun"
+
+        def sample_of(s: Any) -> Optional[Dict[str, Any]]:
+            rec = pr.store.get_run(s.trace_id)
+            for row in (rec.nodes if rec else []):
+                if row.get("op_name") != op:
+                    continue
+                outs = row.get("outputs") or {}
+                return {"run": s.trace_id, "origin": s.origin, "name": s.name, "started": s.started_at,
+                        # the named prompts the op used, and their versions (operonx ≥ 1.40)
+                        "prompts": (row.get("attrs") or {}).get("prompts") or [],
+                        "inputs": row.get("inputs") or {}, "status": row.get("status") or "ok",
+                        "error": row.get("error"),
+                        "content": outs.get("content"), "usage": outs.get("usage"),
+                        "cost_usd": outs.get("cost_usd"), "duration_ms": row.get("duration_ms")}
+            return None
+
+        if "op" in getattr(RunFilter, "__dataclass_fields__", {}):
+            # The store answers "the runs in which this op ran" itself (operonx ≥ 1.44): only those are
+            # listed and opened. Paging every run to find them read 2,000 callbot runs (44 queries, ~5 s)
+            # for the 7 that called llm_classify.
+            # Each record is one read (~200 ms on ClickHouse); they are read side by side — every store
+            # is safe across threads (SQL connects per call, ClickHouse has no session, Mongo pools).
+            cursor = None
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                for _ in range(10):
+                    page = pr.store.list_runs(RunFilter(op=op), "started_desc", 50, cursor)
+                    cand = [s for s in page.items if wanted(s)]
+                    while cand and len(samples) < limit:  # as many as still needed, until the page is used up
+                        take, cand = cand[: limit - len(samples)], cand[limit - len(samples):]
+                        samples.extend(got for got in pool.map(sample_of, take) if got)
+                    cursor = page.next_cursor
+                    if len(samples) >= limit or not cursor:
+                        break
+            groups: List[Tuple[Optional[str], Optional[str]]] = []
+        else:
+            # An older operonx: service by service, not the newest 2,000 runs of everything — one busy
+            # service fills those 2,000 and the service that runs this op is never reached. A service
+            # whose newest 500 runs never ran the op is taken not to have it in its flow, and is left.
+            try:
+                groups = [(g.get("origin"), g.get("name")) for g in pr.store.groups(None, by=["origin", "name"])]
+            except Exception:  # noqa: BLE001 — a store that cannot group: every run, as before
+                groups = [(None, None)]
+        for origin, name in groups:
+            if origin is not None and origin not in real:
                 continue
             where = RunFilter(origin=origin, name=name) if origin is not None else None
             cursor, found = None, 0
             for depth in range(20):  # pages of this service's runs, newest first, until enough samples
                 page = pr.store.list_runs(where, "started_desc", 100, cursor)
-                cand = [s for s in page.items
-                        if s.origin in ("service", "job", "playground", "eval") and (s.service or s.job)
-                        # the workbench's own tries are not samples of real inputs
-                        and (s.metadata or {}).get("toy") != "rerun"]
-                # which of this page's runs ran the op: asked once for the page, not once a run (2,000 runs
-                # were 2,000 questions — 56 s on a project with 9,000 runs)
+                cand = [s for s in page.items if wanted(s)]
+                # which of this page's runs ran the op: asked once for the page, not once a run
                 ran = ({r.trace_id for r in pr.store.rollups(RunFilter(trace_ids=[s.trace_id for s in cand]))
                         if r.op == op} if cand else set())
                 for s in cand:
-                    if s.trace_id not in ran:
-                        continue
-                    rec = pr.store.get_run(s.trace_id)
-                    for row in (rec.nodes if rec else []):
-                        if row.get("op_name") != op:
-                            continue
-                        outs = row.get("outputs") or {}
-                        samples.append({"run": s.trace_id, "origin": s.origin, "name": s.name, "started": s.started_at,
-                                        # the named prompts the op used, and their versions (operonx ≥ 1.40)
-                                        "prompts": (row.get("attrs") or {}).get("prompts") or [],
-                                        "inputs": row.get("inputs") or {}, "status": row.get("status") or "ok",
-                                        "error": row.get("error"),
-                                        "content": outs.get("content"), "usage": outs.get("usage"),
-                                        "cost_usd": outs.get("cost_usd"), "duration_ms": row.get("duration_ms")})
+                    got = sample_of(s) if s.trace_id in ran else None
+                    if got:
+                        samples.append(got)
                         found += 1
-                        break
                     if found >= limit:
                         break
                 cursor = page.next_cursor
