@@ -162,17 +162,7 @@ const ReviewView = (() => {
       }
       if (next) open(next.run); else show();
     };
-    ds.onclick = async () => {
-      let names = [];
-      try { names = (await api(`/api/p/${PID}/evals`)).datasets.map(x => x.name); } catch { /* a new one */ }
-      const name = prompt(`Add this run to which dataset?${names.length ? `\n(existing: ${names.join(", ")})` : ""}`, names[0] || "reviewed");
-      if (!name) return;
-      try {
-        await persist();
-        const got2 = await api(`/api/p/${PID}/review/run/${encodeURIComponent(run)}/dataset`, {dataset: name.trim()});
-        toast(got2.added.length ? `Added a case to ${name}` : `${name} already has this case`);
-      } catch (err) { toast(err.message, true); }
-    };
+    ds.onclick = () => addToDataset(run, persist);
     current.mark = (x) => { verdict = x; paint(); };
     current.focus = () => labels.focus();
   }
@@ -358,5 +348,19 @@ const ReviewView = (() => {
   }
 
   registerPane("review", {el: box, show});
-  return {show};
+  /* a run becomes a case of a dataset (an eval's): Review's Add to dataset, and Add to eval on a run's
+   * page. *before* runs first (Review saves the verdict, so its labels ride along) */
+  async function addToDataset(run, before) {
+    let names = [];
+    try { names = (await api(`/api/p/${PID}/evals`)).datasets.map(x => x.name); } catch { /* a new one */ }
+    const name = prompt(`Add this run to which dataset?${names.length ? `\n(existing: ${names.join(", ")})` : ""}`, names[0] || "reviewed");
+    if (!name) return;
+    try {
+      if (before) await before();
+      const got = await api(`/api/p/${PID}/review/run/${encodeURIComponent(run)}/dataset`, {dataset: name.trim()});
+      toast(got.added.length ? `Added a case to ${name}` : `${name} already has this case`);
+    } catch (err) { toast(err.message, true); }
+  }
+
+  return {show, addToDataset};
 })();

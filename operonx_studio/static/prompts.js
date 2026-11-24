@@ -282,15 +282,61 @@ const PromptsView = (() => {
       for (const ln of got.diff.split("\n")) d.append(el("span", ln.startsWith("+") && !ln.startsWith("+++") ? "add" : ln.startsWith("-") && !ln.startsWith("---") ? "del" : "", ln + "\n"));
       diffAt.append(d);
     };
+    /* Run eval on one version: the eval runs with that version pinned (OPERONX_PROMPT_PINS) and its
+     * result comes back beside it, so Serve as production is pressed knowing it */
+    const evals = ((state.ir && state.ir.jobs) || []).filter(j => j.kind === "eval").map(j => j.name);
+    let evalName = ""; try { evalName = recall(`prompts:eval:${PID}`, ""); } catch { /* a convenience */ }
+    if (!evals.includes(evalName)) evalName = evals[0] || "";
+    const rates = new Map();                         // version → its result cell
+    const pick = el("select", "pwevalpick"); pick.setAttribute("aria-label", "The eval Run eval runs");
+    for (const n of evals) { const o = el("option", null, n); o.value = n; pick.append(o); }
+    if (!evals.length) pick.append(el("option", null, "no eval in this project"));
+    pick.value = evalName; pick.disabled = evals.length < 2;
+    let seenIds = null;
+    const readRates = async () => {
+      if (!evalName) return null;
+      let rows; try { rows = (await api(`/api/p/${PID}/experiments?eval=${encodeURIComponent(evalName)}`)).experiments || []; } catch { return null; }
+      const got = XP.byPromptVersion(p.name, rows);
+      for (const [v, cell] of rates) {
+        if (cell.dataset.running) continue;
+        const r = got[v];
+        cell.textContent = XP.passOf(r);
+        cell.title = r ? `${evalName} · ${r.id}${r.started ? " · " + r.started : ""}` : `not run on ${evalName} yet`;
+      }
+      return {got, ids: new Set(rows.map(r => r.id))};
+    };
+    pick.onchange = () => { evalName = pick.value; try { store(`prompts:eval:${PID}`, evalName); } catch { /* a convenience */ } readRates(); };
+    if (p.versions.length) { const line = el("div", "pwevalline note"); line.append("Run eval with ", pick); vs.append(line); }
+    const runEval = async (ver, cell) => {
+      diffAt.textContent = "";
+      let got;
+      try { got = await api(`/api/p/${PID}/evals/${encodeURIComponent(evalName)}/run`, {prompts: {[p.name]: ver.version}}); }
+      catch (err) { diffAt.append(el("div", "errbox", err.message)); return; }
+      cell.dataset.running = "1"; cell.textContent = "running…"; cell.title = got.log || "";
+      const before = seenIds || new Set();
+      const until = Date.now() + 30 * 60e3;
+      (async function wait() {                         // the experiment is listed when it finishes
+        if (!cell.isConnected || Date.now() > until) return;
+        const r = await readRates();
+        const mine = r && r.got[ver.version];
+        if (mine && !before.has(mine.id)) { delete cell.dataset.running; cell.textContent = XP.passOf(mine); cell.title = `${evalName} · ${mine.id}`; return; }
+        setTimeout(wait, 5000);
+      })();
+    };
     p.versions.forEach((ver, i) => {
       const row = el("div", "pwver");
-      row.append(el("b", "mono", "v" + ver.version), el("span", "note", `${ver.chars.toLocaleString()} chars`));
+      const rate = el("span", "pwrate mono", "—"); rates.set(String(ver.version), rate);
+      row.append(el("b", "mono", "v" + ver.version), el("span", "note", `${ver.chars.toLocaleString()} chars`), rate);
       const chips = el("span", "pwchips");
       for (const l of ver.labels) chips.append(el("span", "pwchip live", l));
       row.append(chips);
       const tools = el("span", "pwvtools");
       const prev = p.versions[i + 1];
       if (prev) { const b = el("button", "linkbtn", `Changes from v${prev.version}`); b.type = "button"; b.onclick = () => showDiff(prev.version, ver.version, `v${prev.version} → v${ver.version}`); tools.append(b); }
+      const ev = el("button", "linkbtn needs-edit", "Run eval on this version"); ev.type = "button";
+      ev.disabled = !evalName; ev.title = evalName ? `Run ${evalName} with ${p.name} pinned to v${ver.version}` : "No eval in this project: an Eval job in app.py";
+      ev.onclick = () => runEval(ver, rate);
+      tools.append(ev);
       if (!ver.labels.includes("production")) {
         const s = el("button", "linkbtn needs-edit", "Serve as production"); s.type = "button";
         s.onclick = async () => { try { const got = await api(`/api/p/${PID}/prompts/label`, {name: p.name, label: "production", version: ver.version}); stored(got); again(got.prompt); } catch (err) { diffAt.textContent = ""; diffAt.append(el("div", "errbox", err.message)); } };
@@ -301,6 +347,7 @@ const PromptsView = (() => {
     });
     vs.append(diffAt);
     main.append(vs);
+    if (p.versions.length) readRates().then(r => { if (r) seenIds = r.ids; });
   }
 
   /* A prompt no op asks for yet: prompts/<name>.md, written, then opened with its versions. */

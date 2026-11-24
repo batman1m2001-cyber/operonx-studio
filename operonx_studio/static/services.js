@@ -208,3 +208,26 @@ const ServicesView = (() => {
   registerPane("services", {el: page, show: () => show()});
   return {show: () => show(), showIn};
 })();
+
+/* Open app ↗ in the top bar (LEAN_PRODUCT_PLAN P3): the project's running `operonx serve` at /, in a new
+ * tab — never an iframe. It is always there; greyed with why when there is nothing to open. */
+(function appButton() {
+  const a = document.getElementById("btn-app");
+  if (!a || typeof PID === "undefined") return;
+  const local = (h) => !h || ["0.0.0.0", "::", "127.0.0.1", "localhost"].includes(h);
+  async function refresh() {
+    let app = null;
+    try { app = (await api(`/api/p/${PID}/services`)).app; } catch { /* said below */ }
+    const why = !app ? "The studio could not ask for the project's services"
+      : !app.web ? "No web/ in this project"
+      : !app.port ? "No service of this project listens on a port"
+      : !app.running ? `Not running: start ${app.key} from the Picture's listeners line` : "";
+    if (why) { a.removeAttribute("href"); a.setAttribute("aria-disabled", "true"); a.title = why; return; }
+    a.href = `http://${local(app.host) ? location.hostname : app.host}:${app.port}/`;
+    a.removeAttribute("aria-disabled"); a.title = `The project's app, ${app.key}, in a new tab`;
+  }
+  a.addEventListener("click", (ev) => { if (a.getAttribute("aria-disabled") === "true") ev.preventDefault(); });
+  a.addEventListener("mouseenter", refresh);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+  refresh();
+})();

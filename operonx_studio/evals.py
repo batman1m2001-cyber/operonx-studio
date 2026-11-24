@@ -328,6 +328,27 @@ def dataset_info(path: Path) -> Dict[str, Any]:
             "splits": splits, "problems": [{"line": n, "why": why} for n, why in ds.problems()]}
 
 
+def prompt_pins(root: Path, asked: Any) -> Tuple[Dict[str, int], str]:
+    """``{"<name>": <version>}`` checked against the project's prompt files
+    (what ``OPERONX_PROMPT_PINS`` reads): the pins, or an error to say."""
+    if not asked:
+        return {}, ""
+    if not isinstance(asked, dict):
+        return {}, 'prompts is {"<name>": <version>}'
+    from operonx import prompts as P
+
+    names = set(P.prompt_names(root))
+    pins: Dict[str, int] = {}
+    for name, ver in asked.items():
+        name = str(name)
+        if name not in names:
+            return {}, f"{name!r} is not a prompt of this project"
+        if isinstance(ver, bool) or not isinstance(ver, int) or ver not in P.versions(name, root):
+            return {}, f"{name} has no published version {ver!r}"
+        pins[name] = ver
+    return pins, ""
+
+
 # ── routes ───────────────────────────────────────────────────────────────
 
 
@@ -435,6 +456,11 @@ def register(app: Any, *, watcher_of: Callable[[str], Any], evals_of: Callable[[
             if bad:
                 return JSONResponse({"error": f"not cases of {name}'s dataset: {bad}"}, status_code=400)
             cmd += ["--cases", ",".join(cases)]
+        pins, err = prompt_pins(watcher.root, body.get("prompts"))
+        if err:
+            return JSONResponse({"error": err}, status_code=400)
+        if pins and not body.get("variant"):  # what the Prompts page reads the result back by: "<name>@v<N>"
+            body = {**body, "variant": " ".join(f"{n}@v{v}" for n, v in pins.items())}
         for key in ("split", "baseline", "variant"):
             if body.get(key):
                 cmd += [f"--{key}", str(body[key])]
@@ -452,6 +478,13 @@ def register(app: Any, *, watcher_of: Callable[[str], Any], evals_of: Callable[[
         log = logs / f"{time.strftime('%Y%m%dT%H%M%S')}.log"
         env = dict(os.environ)
         env.setdefault("PYTHONUNBUFFERED", "1")
+        if pins:  # an operonx without pins() would run the production text and call it this version
+            if subprocess.run([watcher.interpreter(), "-c", "from operonx.prompts import pins"], cwd=str(watcher.root),
+                              env=env, capture_output=True, timeout=60).returncode:
+                return JSONResponse({"error": "the project's operonx does not read OPERONX_PROMPT_PINS (operonx >= 1.47.0 "
+                                              "does): upgrade it, or the eval runs the production text"},
+                                    status_code=409)
+            env["OPERONX_PROMPT_PINS"] = ",".join(f"{n}={v}" for n, v in pins.items())
         with log.open("ab") as fh:
             proc = subprocess.Popen(cmd, cwd=str(watcher.root), stdout=fh, stderr=subprocess.STDOUT,
                                     env=env, start_new_session=True)
