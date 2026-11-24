@@ -258,6 +258,20 @@ def test_a_case_drills_down_to_its_runs_and_its_history(client, project, three):
     assert client.get(f"/api/p/{pid}/experiments/nope/cases/a").status_code == 404
 
 
+
+def test_a_runs_trace_that_is_not_a_conversation_is_added_to_an_eval_with_its_own_input(client, project, three):
+    """Add to eval on a Runs trace (LEAN_PRODUCT_PLAN P3): an eval's run has no user turns; its case
+    input is what the graph was called with, read off its edges, so the new case runs the same way."""
+    pid, ids = three
+    trace = client.get(f"/api/p/{pid}/experiments/{ids[2]}/cases/a").json()["runs"][0]["trace_id"]
+    added = client.post(f"/api/p/{pid}/review/run/{trace}/dataset", json={"dataset": "picked"}).json()
+    (case_id,) = added["added"]
+    (row,) = client.get(f"/api/p/{pid}/datasets/picked").json()["rows"]
+    assert row["id"] == case_id and row["input"] == "I want my money back" and "expected" not in row
+    assert row["from"]["run"] == trace and row["from"]["origin"] == "eval"
+    again = client.post(f"/api/p/{pid}/review/run/{trace}/dataset", json={"dataset": "picked"}).json()
+    assert again["added"] == []
+
 # ── compare ──────────────────────────────────────────────────────────────
 
 
@@ -349,3 +363,43 @@ def test_a_run_from_the_studio_is_an_experiment_in_the_store(client, project):
     (project / "operonx.toml").write_text(MANIFEST + '\n[evals]\nscores = "score_store:shared"\n')
     refused = client.post(f"/api/p/{pid}/evals/labels/run", json={})
     assert refused.status_code == 400 and "score store" in refused.json()["error"]
+
+
+# ── an eval on one prompt version (LEAN_PRODUCT_PLAN P3) ─────────────────
+
+
+PINNED_MAIN = MAIN.replace("import itertools\n", "import itertools\n\nfrom operonx.prompts import prompt\n").replace(
+    '"money back" in t', 'str(prompt("rule")).strip() in t')
+
+
+def test_run_eval_on_one_prompt_version_pins_it_and_names_it(client, project):
+    """``prompts: {name: version}`` runs the eval with OPERONX_PROMPT_PINS, so the
+    version's text is the one used, and the experiment's variant is ``name@vN``."""
+    from operonx import prompts as P
+
+    if not hasattr(P, "pins"):
+        pytest.skip("OPERONX_PROMPT_PINS is operonx >= 1.47.0")
+    (project / "main.py").write_text(PINNED_MAIN, encoding="utf-8")
+    (project / "prompts").mkdir()
+    rule = project / "prompts" / "rule.md"
+    rule.write_text("money back\n", encoding="utf-8")
+    assert P.publish("rule", project)[0] == 1
+    rule.write_text("refund\n", encoding="utf-8")
+    assert P.publish("rule", project)[0] == 2
+    rule.write_text("nothing matches this\n", encoding="utf-8")   # the working text: neither version
+    pid = _open(client, project)
+    cases = ["a", "c"]                                            # a says "money back", c says "refund"
+    got = {}
+    for v in (1, 2):
+        eid = _experiment(client, pid, repeats=1, cases=cases, prompts={"rule": v})
+        row = next(r for r in client.get(f"/api/p/{pid}/experiments?eval=labels").json()["experiments"] if r["id"] == eid)
+        assert row["variant"] == f"rule@v{v}"
+        got[v] = {c["case"]: c for c in client.get(f"/api/p/{pid}/experiments/{eid}").json()["cases"]}
+    passed = {v: sorted(k for k, c in cases_.items() if c["passes"]) for v, cases_ in got.items()}
+    assert passed == {1: ["a"], 2: ["c"]}, passed          # v1's rule matches a's text only, v2's c's only
+
+    bad = [({"rule": 9}, "no published version"), ({"nope": 1}, "not a prompt"), ({"rule": "1"}, "no published version"),
+           (["rule"], "prompts is")]
+    for asked, said in bad:
+        res = client.post(f"/api/p/{pid}/evals/labels/run", json={"prompts": asked})
+        assert res.status_code == 400 and said in res.json()["error"], res.text

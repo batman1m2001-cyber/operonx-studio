@@ -243,7 +243,26 @@
     return {changes: out};
   }
 
-  const api = {pct, pts, ciText, diffCi, money, VERDICTS, verdictOf, codeOf, caseRank, sortCases, FILTERS,
+  /* the Prompts page: each version of prompt *name* with its newest experiment, read back by the
+   * variant Run eval gives it ("name@v3", several pins space-joined); rows come newest first */
+  function byPromptVersion(name, rows) {
+    const out = {};
+    for (const r of rows || []) {
+      for (const tok of String(r.variant || "").split(/\s+/)) {
+        const at = tok.lastIndexOf("@v");
+        if (at > 0 && tok.slice(0, at) === name && /^\d+$/.test(tok.slice(at + 2)) && !(tok.slice(at + 2) in out)) out[tok.slice(at + 2)] = r;
+      }
+    }
+    return out;
+  }
+
+  /* a pass rate as the page says it beside a version: "47/50" of the trials, else a share */
+  function passOf(r) {
+    if (!r || !r.pass || r.pass.mean == null) return "—";
+    return r.trials ? `${Math.round(r.pass.mean * r.trials)}/${r.trials}` : pct(r.pass.mean);
+  }
+
+  const api = {byPromptVersion, passOf, pct, pts, ciText, diffCi, money, VERDICTS, verdictOf, codeOf, caseRank, sortCases, FILTERS,
                filterCases, filterCounts, repeatMarks, cellOf, historyRow, CLASSES, groupByClass, trend,
                opNameOf, deepLink, parseExpected, expectedText, parseTags, changesOf};
   if (typeof module !== "undefined" && module.exports) module.exports = api;

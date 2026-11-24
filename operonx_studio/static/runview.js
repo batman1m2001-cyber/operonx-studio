@@ -192,6 +192,11 @@ const RunView = (() => {
     const statusSlot = el("span", "runhead-status");
     top.append(statusSlot);
     top.append(viewSwitch(run, mode));
+    // what the user said in this run, as a case of an eval's dataset (Review's Add to dataset)
+    const toEval = el("button", "small needs-edit", "Add to eval…");
+    toEval.type = "button"; toEval.title = "What the user said in this run becomes a case of a dataset";
+    toEval.onclick = () => ReviewView.addToDataset(run);
+    top.append(toEval);
     for (const x of extras || []) top.append(x);
     head.append(top);
 

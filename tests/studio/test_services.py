@@ -97,6 +97,11 @@ def test_start_answer_stop(client, project):
     key = lst["key"]
     assert key == f"127.0.0.1:{port}" and lst["services"] == ["double"] and not lst["running"]
     assert client.post(f"/api/p/{pid}/services/stop", json={"key": key}).status_code == 409
+    # Open app ↗ (LEAN_PRODUCT_PLAN P3): where the project's app is, and whether it has a web/
+    app = client.get(f"/api/p/{pid}/services").json()["app"]
+    assert app == {"web": False, "key": key, "host": "127.0.0.1", "port": port, "running": False}
+    (root / "web").mkdir()
+    assert client.get(f"/api/p/{pid}/services").json()["app"]["web"] is True
 
     started = client.post(f"/api/p/{pid}/services/start", json={"key": key}).json()
     assert started["cmd"][-2:] == ["--only", "double"]
@@ -107,6 +112,7 @@ def test_start_answer_stop(client, project):
         state = client.get(f"/api/p/{pid}/services").json()["listeners"][0]
         assert state["running"] and state["managed"], client.get(f"/api/p/{pid}/services/log",
                                                                 params={"key": key}).json()["log"]
+        assert client.get(f"/api/p/{pid}/services").json()["app"]["running"] is True
         req = urllib.request.Request(f"http://127.0.0.1:{port}/double", data=json.dumps({"n": 21}).encode(),
                                      headers={"content-type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=10) as res:

@@ -690,6 +690,13 @@ header.bar {
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f1b13' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat center / contain;
 }
 .crumbbtn:hover { background: var(--surface-2); border-color: transparent; }
+/* Open app ↗: always in the bar; greyed, with the reason as its title, when there is nothing to open */
+.appbtn { display: inline-flex; align-items: center; flex: none; min-height: 30px; padding: 0 10px; margin-right: 6px;
+  border: 1px solid var(--border); border-radius: var(--r-md); color: var(--text); font-weight: 600; font-size: var(--fs-sm);
+  text-decoration: none; white-space: nowrap; }
+.appbtn:hover { background: var(--surface-2); }
+.appbtn[aria-disabled="true"] { color: var(--text-3); border-style: dashed; cursor: not-allowed; }
+.appbtn[aria-disabled="true"]:hover { background: none; }
 .crumbbtn[aria-expanded="true"] { background: var(--surface-3); }
 .crumbbtn.graphname { font-weight: 500; color: var(--text-2); }
 .crumbbtn.graphname span { font-family: var(--mono); font-size: var(--fs-md);
@@ -3676,9 +3683,11 @@ button.chip.kbpagechip.on { background: var(--accent-soft); color: var(--accent-
 .pwchip.warn { background: var(--warn-soft); color: var(--warn); }
 .pwacts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 34px; }
 .pwversions { display: flex; flex-direction: column; gap: 4px; }
-.pwver { display: grid; grid-template-columns: 52px 96px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 9px 12px; border-radius: var(--r-md); background: var(--surface); }
+.pwver { display: grid; grid-template-columns: 52px 96px 64px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 9px 12px; border-radius: var(--r-md); background: var(--surface); }
 .pwver b { font-size: var(--fs-md); color: var(--text); }
 .pwchips { display: flex; gap: 6px; flex-wrap: wrap; }
+.pwrate { color: var(--text); font-size: var(--fs-sm); }
+.pwevalline { display: flex; align-items: center; gap: 8px; margin: 2px 0 4px; }
 .pwvtools { display: flex; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
 .pwdiff { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 /* the prompt graph (promptgraph.js): objects as boxes, links as plain wires */

@@ -115,3 +115,19 @@ test("an edit: expected as JSON or text, tags, what changed", () => {
     { expected: { intent: "cancel" }, tags: null, split: null, note: "why" });
   assert.match(X.changesOf(row, { expected: "{bad", tags: "", split: "" }).error, /JSON/);
 });
+
+test("a prompt version's newest experiment, read back by its name@vN variant", () => {
+  const rows = [
+    {id: "e4", variant: "classifier@v4", trials: 50, pass: {mean: 0.94}},
+    {id: "e3", variant: "classifier/user@v2 classifier@v3", trials: 50, pass: {mean: 0.82}},
+    {id: "e2", variant: "classifier@v4", trials: 50, pass: {mean: 0.5}},   // older run of v4: not shown
+    {id: "e1", variant: "rerun x2", pass: {mean: 1}},
+  ];
+  const got = X.byPromptVersion("classifier", rows);
+  assert.deepEqual(Object.fromEntries(Object.entries(got).map(([v, r]) => [v, r.id])), {4: "e4", 3: "e3"});
+  assert.deepEqual(Object.keys(X.byPromptVersion("classifier/user", rows)), ["2"]);
+  assert.equal(X.passOf(got[4]), "47/50");
+  assert.equal(X.passOf(got[3]), "41/50");
+  assert.equal(X.passOf({pass: {mean: 0.5}}), "50.0%");
+  assert.equal(X.passOf(null), "—");
+});

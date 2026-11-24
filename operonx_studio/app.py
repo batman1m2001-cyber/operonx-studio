@@ -3735,6 +3735,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         if watcher is None:
             return JSONResponse({"error": "unknown project"}, status_code=404)
         out = []
+        app_at = None   # where Open app ↗ goes: the listener serving web/ at /, else the first with a route
         for lst in _listeners(watcher):
             st = procs.state(pid, lst)
             st["detail"] = lst.services
@@ -3743,7 +3744,14 @@ def build_studio_app(recents: Optional[Recents] = None):
             health = _health(lst.host, lst.port) if st["running"] and web else None
             st["health"] = health if health and health.get("status") != 404 else None
             out.append(st)
-        return JSONResponse({"listeners": out})
+            root = any(x.get("kind") == "asgi" and str(x.get("path") or x.get("route") or "/") == "/"
+                       for x in lst.services)
+            if root and (app_at is None or not app_at[0]) or web and app_at is None:
+                app_at = (root, st)
+        app = {"web": (watcher.root / "web").is_dir(), "key": None, "host": None, "port": None, "running": False}
+        if app_at is not None:
+            app.update({k: app_at[1][k] for k in ("key", "host", "port", "running")})
+        return JSONResponse({"listeners": out, "app": app})
 
     def _listener(pid: str, key: str):
         watcher = _watcher(pid)
@@ -3874,6 +3882,26 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse(rec)
 
+    def _run_inputs(rows: Any, rec: Any) -> Any:
+        """What a run was called with, read off the edges its ops take from the
+        graph itself (exact), else its input preview when that is whole JSON.
+        One input is the case's input as it is — what ``bind_item`` hands back
+        to the graph's one parameter; several are the mapping."""
+        root = f"{rec.summary.workflow}#main"
+        got: Dict[str, Any] = {}
+        for r in rows or []:
+            for u in r.get("upstreams") or []:
+                if u.get("from_op_id") == root and u.get("from_key") not in got and u.get("to_key") in (r.get("inputs") or {}):
+                    got[u["from_key"]] = r["inputs"][u["to_key"]]
+        if not got:
+            try:
+                got = json.loads(rec.summary.input or "")
+            except ValueError:
+                return None
+            if not isinstance(got, dict) or not got:
+                return None
+        return next(iter(got.values())) if len(got) == 1 else got
+
     @app.post("/api/p/{pid}/review/run/{run}/dataset")
     def review_to_dataset(pid: str, run: str, body: Dict[str, Any]) -> JSONResponse:
         """A reviewed run becomes a case: what the user said is the input;
@@ -3891,10 +3919,13 @@ def build_studio_app(recents: Optional[Recents] = None):
         rows, rec = got
         said = [t["text"] for t in _turns(watcher, rows, rec.summary.metadata)
                 if t["who"] == "user"]
-        if not said:
-            return JSONResponse({"error": "nothing the user said was recorded in this run"}, status_code=400)
+        asked = said[0] if len(said) == 1 else said
+        if not said:                      # a run that is not a conversation: its own inputs (LEAN_PRODUCT_PLAN P3)
+            asked = _run_inputs(rows, rec)
+            if asked is None:
+                return JSONResponse({"error": "nothing the user said was recorded in this run"}, status_code=400)
         review = ReviewLog(watcher.root).get(run) or {}
-        row: Dict[str, Any] = {"input": said[0] if len(said) == 1 else said,
+        row: Dict[str, Any] = {"input": asked,
                                "tags": sorted(set((review.get("labels") or []) + ([f"review:{review['verdict']}"]
                                                                                    if review.get("verdict") else []))),
                                "from": {"run": run, "origin": rec.summary.origin, "name": rec.summary.name}}
