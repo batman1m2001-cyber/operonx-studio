@@ -51,7 +51,7 @@ class Studio:
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method="POST" if data is not None else "GET")
         req.add_header("content-type", "application/json")
-        req.add_header("x-operonx-via", "assistant")  # the Board's actor: who did it, through what
+        req.add_header("x-operonx-via", "assistant")  # who did it, through what (the run's actor)
         if self.token:
             req.add_header("cookie", f"oxsession={self.token}")
         try:
@@ -173,15 +173,14 @@ def t_select_op(s: Studio, a: Dict[str, Any]) -> str:
     return f"{a['op']} is selected on the user's Flow canvas."
 
 
-_POINTABLE = re.compile(r"^(?:status|q|qopt|row|commit|setting|page|tab|op|run|job|eval|card|field):\S")
+_POINTABLE = re.compile(r"^(?:setting|page|tab|op|run|job|eval|field):\S")
 
 
 def t_point(s: Studio, a: Dict[str, Any]) -> str:
     """Point at one thing on the owner's screen (docs/ALIVE_ASSISTANT_PLAN.md D5): the screen goes there and rings it."""
     target = str(a.get("target") or "").strip()
     if not _POINTABLE.match(target):
-        return (f"not a target: {target!r}. Use card:<id>, row:<id>, q:<id>, commit:<sha>, setting:<name>, "
-                "status:<needs|working>, op:<name>, run:<id>, field:<op>/<param>")
+        return (f"not a target: {target!r}. Use setting:<name>, op:<name>, run:<id>, field:<op>/<param>")
     s.show("point", target=target, words=str(a.get("words") or a.get("label") or "")[:40])
     return f"pointed at {target} on the owner's screen"
 
@@ -250,147 +249,6 @@ def step_line(steps: List[Dict[str, Any]]) -> str:
 def t_steps(s: Studio, a: Dict[str, Any]) -> str:
     """The plan, on the owner's screen as a progress card; the turn keeps it (assistant.Relay)."""
     return step_line(check_steps(a))
-
-
-def t_failing_on_base(s: Studio, a: Dict[str, Any]) -> str:
-    """docs/TURN_HONESTY_PLAN.md S2: the failing tests, run on the base branch's merge-base."""
-    from operonx_studio import basecheck
-    tests = a.get("tests")
-    if isinstance(tests, str):
-        tests = tests.split()
-    return basecheck.report(basecheck.check(str(a.get("cwd") or os.getcwd()), list(tests or []),
-                                            str(a.get("base") or "") or None))
-
-
-def t_on_base(s: Studio, a: Dict[str, Any]) -> str:
-    """docs/WORKSPACE_PLAN.md T3: any check, run here and on the base branch's merge-base."""
-    from operonx_studio import basecheck
-    return basecheck.on_base_report(basecheck.on_base(str(a.get("cwd") or os.getcwd()), str(a.get("command") or ""),
-                                                      str(a.get("base") or "") or None))
-
-
-def _term_line(t: Dict[str, Any]) -> str:
-    state = f"working: {t['running']}" if t["state"] == "working" else \
-        f"ended, exit {t['exit_code']}" if t["state"] == "ended" else "idle"
-    return f"{t['id']} {t['title']} · {state} · {t['cwd']}" + (f" · card {t['card']}" if t.get("card") else "")
-
-
-def _term_out(s: Studio, tid: str, since: int, wait: float) -> str:
-    """The terminal's output since *since*, after waiting up to *wait* s for its command to finish."""
-    q = urllib.parse.quote(tid, safe="")
-    end = time.time() + max(0.0, min(float(wait), 120.0))
-    time.sleep(0.3)
-    while True:
-        got = s.call(f"/terminals/{q}/output", since=since)
-        if got["state"] != "working" or time.time() >= end:
-            break
-        time.sleep(0.4)
-    text = got["text"]
-    cut = len(text) > 12000
-    text = text[-12000:]
-    return (f"{_term_line(got)} · next since={got['bytes']}" + (" · (output cut to its last 12000 characters)" if cut else "")
-            + f"\n{text}")
-
-
-def t_env_list(s: Studio, a: Dict[str, Any]) -> str:
-    lines = []
-    for e in s.call("/environments")["environments"]:
-        flags = [w for w, on in (("production", e["production"]), ("host key trusted", bool(e["trusted"])),
-                                 ("key set", e["key_set"])) if on]
-        lines.append(f"{e['id']} · {e['name']} · {e['where']} · you may {e['assistant']}"
-                     + (f" · {', '.join(flags)}" if flags else "") + (f" · vars {', '.join(e['vars'])}" if e["vars"] else ""))
-    return "\n".join(lines)
-
-
-def t_env_check(s: Studio, a: Dict[str, Any]) -> str:
-    what = str(a.get("what") or "status")
-    env = str(a.get("env") or "local")
-    got = s.call("/environments", {"op": what, "env": env} | ({"path": a["path"]} if a.get("path") else {}))
-    return f"{what} on {env} (exit {got.get('exit_code')}):\n{got.get('said', '')}"
-
-
-def t_env_run(s: Studio, a: Dict[str, Any]) -> str:
-    got = s.call("/environments", {"op": "run", "env": str(a.get("env") or "local"), "command": str(a["command"]),
-                                   "timeout": a.get("timeout") or 300})
-    if got.get("needs_confirm"):
-        return f"Not run: {got['needs_confirm']} The owner runs it from the Environments page."
-    return f"exit {got.get('exit_code')}\n{got.get('said', '')}"
-
-
-def t_env_services(s: Studio, a: Dict[str, Any]) -> str:
-    what = str(a.get("what") or "list")
-    got = s.call("/env-services", {"op": what, "env": str(a.get("env") or "local")} | ({"key": a["key"]} if a.get("key") else {}))
-    if got.get("needs_confirm"):
-        return f"Not done: {got['needs_confirm']} The owner does it from the Environments page."
-    lines = [got["said"]] if got.get("said") else []
-    for x in got.get("listeners") or []:
-        lines.append(f"{x['key']} ({', '.join(x['services'])}): {'running' if x['running'] else 'stopped'}"
-                     f", /healthz {x['health'] or 'no answer'}" + (f", pid {x['pid']}" if x["pid"] else "")
-                     + (f", open at {x['url']}" if x["url"] else ""))
-    if "release" in got:
-        lines.append(f"release: {got['release'] or 'none recorded'}")
-    return "\n".join(lines) or "No services in the project."
-
-
-def _deploy_text(r: Dict[str, Any]) -> str:
-    lines = [f"{r['kind']} {r['id']} of {r['ref']} to {r['env']}: {r['state']}" + (f" ({r['sha'][:12]})" if r["sha"] else "")]
-    for st in r["stages"]:
-        lines.append(f"  {st['name']}: {st['state']}" + (f" in {st['ms'] / 1000:.1f}s" if st["ms"] is not None else ""))
-        if st["state"] == "failed" and st["said"]:
-            lines += [f"    {x}" for x in st["said"].splitlines()[-15:]]
-    return "\n".join(lines)
-
-
-def t_deploy(s: Studio, a: Dict[str, Any]) -> str:
-    what, wait = str(a.get("what") or "deploy"), min(float(a.get("wait") if a.get("wait") is not None else 120), 600)
-    if what == "status":
-        runs = s.call("/deploys", env=a.get("env") or "")["deploys"]
-        run = next((r for r in runs if r["id"] == a.get("id")), None) if a.get("id") else (runs[0] if runs else None)
-        if run is None:
-            return "No deploy yet."
-    else:
-        body = {"op": what, "env": str(a.get("env") or "local")} | {k: a[k] for k in ("ref", "card") if a.get(k)}
-        got = s.call("/deploys", body)
-        if got.get("needs_confirm") or got.get("waiting"):
-            return f"Not started: {got.get('needs_confirm') or got.get('said')}. The owner approves it on the Environments page."
-        run = got["deploy"]
-    end = time.monotonic() + wait
-    while run["state"] in ("queued", "running") and time.monotonic() < end:
-        time.sleep(2)
-        run = next(r for r in s.call("/deploys", env=run["env"])["deploys"] if r["id"] == run["id"])
-    return _deploy_text(run) + ("\nStill running: deploy what=status id=… to follow it." if run["state"] == "running" else "")
-
-
-def t_terminal_open(s: Studio, a: Dict[str, Any]) -> str:
-    body = {k: a[k] for k in ("cwd", "command", "title", "card", "env") if a.get(k)}
-    t = s.call("/terminals", body)
-    s.show("open_terminal", id=t["id"], title=t["title"])
-    out = _term_out(s, t["id"], 0, float(a.get("wait") or (5 if a.get("command") else 1)))
-    return f"Opened {out}\nIt is on the owner's Terminal page. Type with terminal_send, read with terminal_read."
-
-
-def t_terminal_send(s: Studio, a: Dict[str, Any]) -> str:
-    tid = str(a["id"])
-    text = str(a.get("text") or "")
-    if a.get("enter", True) and not text.endswith(("\n", "\r")):
-        text += "\n"
-    t = s.call(f"/terminals/{urllib.parse.quote(tid, safe='')}", {"input": text})
-    return _term_out(s, tid, int(t["bytes"]), float(a.get("wait") if a.get("wait") is not None else 10))
-
-
-def t_terminal_read(s: Studio, a: Dict[str, Any]) -> str:
-    return _term_out(s, str(a["id"]), int(a.get("since") or 0), float(a.get("wait") or 0))
-
-
-def t_terminal_list(s: Studio, a: Dict[str, Any]) -> str:
-    got = s.call("/terminals")
-    lines = [_term_line(t) + f" · by {t['by']}" for t in got["terminals"]]
-    return "\n".join(lines or ["No terminal open."]) + "\nPlaces (cwd): " + ", ".join(got["places"])
-
-
-def t_terminal_close(s: Studio, a: Dict[str, Any]) -> str:
-    got = s.call(f"/terminals/{urllib.parse.quote(str(a['id']), safe='')}", {"close": True})
-    return "Closed." if got.get("ok") else "No such terminal."
 
 
 def t_run_job(s: Studio, a: Dict[str, Any]) -> str:
@@ -506,128 +364,6 @@ def t_run_eval(s: Studio, a: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-# ── the Board: docs/brd/board.md, one card per task ─────────────────────
-
-
-def t_project_status(s: Studio, a: Dict[str, Any]) -> str:
-    """The engine's one status document as plain lines (PROJECT_MODE_PLAN D2): what the owner's screen shows."""
-    try:
-        got = s.call("/project/status", changes=int(a.get("changes") or 15))
-    except RuntimeError as exc:
-        return f"unavailable: {exc}"
-    try:  # what the assistant may do with git, from the studio (PROJECT_STANDARD_PLAN D6)
-        git_line = "\n" + str(s.call("/git").get("line") or "")
-    except RuntimeError:
-        git_line = ""
-    if got.get("text"):
-        return got["text"] + git_line
-    doc = got.get("project") or {}  # an engine that sends only the document
-    c = doc.get("checklist") or {}
-    return json.dumps({"checklist": {"verified": c.get("verified"), "total": c.get("total"), "open": c.get("open")},
-                       "working_on": doc.get("working_on"), "needs_you": doc.get("needs_you"),
-                       "changes": (doc.get("changes") or [])[:5]},
-                      ensure_ascii=False, indent=1)  # fmt: skip
-
-
-def _card_line(c: Dict[str, Any]) -> str:
-    extra = [f"after {', '.join(c['waits'])}" if c.get("waits") else "", c.get("now") or "",
-             c["note"] if c["state"] == "needs you" else ""]  # fmt: skip
-    return f"  {c['id']} · {c['title']} [{c['lane']}, {c['kind']}]" + "".join(f" — {x}" for x in extra if x)
-
-
-def t_board_status(s: Studio, a: Dict[str, Any]) -> str:
-    got = s.call("/board")
-    if not got.get("file"):
-        return ("No board yet: docs/brd/board.md is written by board_card (one card per task). "
-                + ("" if got.get("available") else "This project has no docs/brd/ either."))
-    s.show("open_board")
-    by = {c["id"]: c for c in got["cards"]}
-    lines = [f"Board ({got['file']}): " + ", ".join(f"{len(ids)} {st}" for st, ids in got["columns"].items() if ids)]
-    cycles = got.get("cycles") or []
-    shut = [y["id"] for y in cycles if y["state"] == "closed"]
-    lines += [f"cycle {y['id']} · {y['title']} · {y['done']}/{len(y['cards'])} done: {', '.join(y['cards'])}"
-              + (f" ({y['plan']})" if y.get("plan") else "") for y in cycles if y["state"] == "open"]  # fmt: skip
-    backlog = [c["id"] for c in got["cards"] if not c.get("cycle")]
-    if cycles:
-        lines.append(f"Backlog: {', '.join(backlog) or 'empty'}" + (f"; closed cycles: {', '.join(shut)}" if shut else ""))
-    for st, ids in got["columns"].items():
-        if ids and st != "done":
-            lines.append(f"{st}:")
-            lines += [_card_line(by[i]) for i in ids]
-    done = got["columns"].get("done") or []
-    if done:
-        lines.append(f"done: {', '.join(done)}")
-    return "\n".join(lines)
-
-
-def t_project_search(s: Studio, a: Dict[str, Any]) -> str:
-    try:
-        got = s.call("/project/search", q=str(a.get("query") or ""), limit=a.get("limit"))
-    except RuntimeError as exc:
-        return f"refused: {exc}"
-    return got.get("text") or "nothing matched"
-
-
-def t_project_read(s: Studio, a: Dict[str, Any]) -> str:
-    try:
-        return s.call("/project/read", path=str(a.get("path") or ""), heading=str(a.get("heading") or ""))["text"]
-    except RuntimeError as exc:
-        return f"refused: {exc}"
-
-
-def t_board_card(s: Studio, a: Dict[str, Any]) -> str:
-    cid = str(a.get("card") or "")
-    fields = {k: [str(x) for x in a[k]] for k in ("req", "after", "files", "done") if isinstance(a.get(k), list)}
-    if isinstance(a.get("cycle"), str):
-        fields["cycle"] = a["cycle"]
-    try:
-        if a.get("title") or fields or not cid:
-            got = s.call("/board/card", {"card": cid, "title": str(a.get("title") or ""), **fields})
-            cid = got["card"]
-        got = s.call(f"/board/card/{urllib.parse.quote(cid)}")
-    except RuntimeError as exc:
-        return f"refused: {exc}"
-    s.show("open_board", card=cid)
-    c = got["card"]
-    lines = [f"{c['id']} · {c['title']} [{c['state']}] {c['lane']}, {c['kind']}" + (f" · cycle {c['cycle']}" if c.get("cycle") else "")]
-    for k in ("req", "after", "files", "done"):
-        if c[k]:
-            lines.append(f"{k}: {', '.join(c[k])}")
-    if c.get("waits"):
-        lines.append(f"waits on: {', '.join(c['waits'])}")
-    if c.get("note"):
-        lines.append(f"note: {c['note']}")
-    for t in (got.get("turns") or [])[:5]:
-        lines.append(f"  turn {t['state']}: {str(t.get('message') or '')[:80]}")
-    return "\n".join(lines)
-
-
-def t_board_move(s: Studio, a: Dict[str, Any]) -> str:
-    body = {"card": str(a["card"]), "to": str(a["to"])}
-    if isinstance(a.get("note"), str):
-        body["note"] = a["note"]
-    try:
-        got = s.call("/board/card", body)
-    except RuntimeError as exc:
-        return f"refused: {exc}"
-    s.show("open_board", card=got["card"])
-    return f"{got['card']} is {got['state']}" + (f" — {got['note']}" if got.get("note") else "")
-
-
-def t_board_cycle(s: Studio, a: Dict[str, Any]) -> str:
-    body = ({"close": str(a["cycle"])} if a.get("close") else
-            {"open": str(a["cycle"]), "title": str(a.get("title") or ""), "plan": str(a.get("plan") or "")})  # fmt: skip
-    try:
-        got = s.call("/board/cycle", body)
-    except RuntimeError as exc:
-        return f"refused: {exc}"
-    s.show("open_board")
-    return f"cycle {got['cycle']} is {got['state']}"
-
-
-# ── with no project open (the home page's assistant) ─────────────────────
-
-
 def t_list_projects(s: Studio, a: Dict[str, Any]) -> str:
     got = s.root("/projects")
     rows = [f"- {p['name']} — {p['root']} (studio:project/{p['id']})" + ("" if p.get("exists") else " [missing]")
@@ -686,9 +422,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     "point": {"fn": t_point,
               "description": "Point at the one thing your answer is about, on the owner's screen: it goes to that page "
                              "and rings it with your two or three words. Targets: "
-                             "row:<requirement id>, q:<question id>, commit:<sha>, "
-                             "setting:<name>, status:<needs|working>, op:<op name>, run:<run id>, "
-                             "card:<card id> (on the board), field:<op name>/<param> (a setting in the op's inspector). "
+                             "setting:<name>, op:<op name>, run:<run id>, "
+                             "field:<op name>/<param> (a setting in the op's inspector). "
                              "Once per answer at most; never as decoration. It only shows where: the answer "
                              "still says everything in words.",
               "schema": _schema({"target": _S, "words": _S}, ["target"])},
@@ -701,86 +436,13 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                              "does in words; result what a done step left; error why one failed; target the part of "
                              "the screen it works on (the point tool's names). Optional, only when they help: sub, one "
                              "level of subtasks (the step's progress is how many are done); after, the earlier steps "
-                             "(by number, from 1) a step waits on — the card then draws the plan as a structure. "
-                             "card: the board card this work is, when there is one (C4); the Board lights that card while you work and lists this turn on it, "
-                             "with your test runs, base checks and commits as its evidence.",
-              "schema": _schema({"title": _S, "card": _S, "steps": {"type": "array", "items": _schema(
+                             "(by number, from 1) a step waits on — the card then draws the plan as a structure.",
+              "schema": _schema({"title": _S, "steps": {"type": "array", "items": _schema(
                   {"title": _S, "state": {"type": "string", "enum": list(STEP_STATES)}, "detail": _S,
                    "target": _S, "result": _S, "error": _S,
                    "sub": {"type": "array", "items": _schema(
                        {"title": _S, "state": {"type": "string", "enum": list(SUB_STATES)}}, ["title"])},
                    "after": {"type": "array", "items": {"type": "integer"}}}, ["title", "state"])}}, ["steps"])},
-    "terminal_open": {"fn": t_terminal_open,
-                      "description": "Open a real terminal (a login shell on a PTY) in the checkout or one of its "
-                                     "worktrees (cwd), shown live on the owner's Terminal page. Use it for what runs "
-                                     "long or the owner should watch: a dev server, a watcher, an interactive tool. "
-                                     "command: run that instead of an interactive shell (the terminal ends with it). "
-                                     "card: the board card it works for (C4). Returns the "
-                                     "first output after up to wait seconds. env: an environment's id (env_list) "
-                                     "to open it there instead, over SSH (cwd is then its folder).",
-                      "schema": _schema({"cwd": _S, "command": _S, "title": _S, "card": _S, "env": _S, "wait": _N})},
-    "env_list": {"fn": t_env_list,
-                 "description": "The project's environments: local (this machine) and the hosts the owner added, "
-                                "where each runs, whether it is production, and what you may do there (none, read, "
-                                "run). Their keys and variable values are never shown to you.",
-                 "schema": _schema({})},
-    "env_check": {"fn": t_env_check,
-                  "description": "Read an environment (env, else local): what=status (branch, last commit, changes in its folder), "
-                                 "processes, resources (load, memory, disk), logs (path: the file's last lines), "
-                                 "files (path: a folder's listing), test (connect and say who and where).",
-                  "schema": _schema({"env": _S, "what": {"type": "string", "enum": [
-                      "status", "processes", "resources", "logs", "files", "test"]}, "path": _S})},
-    "env_run": {"fn": t_env_run,
-                "description": "Run one command in an environment's folder (env, else local), with its variables, to its end (timeout "
-                               "seconds, default 300), and return its exit code and output (secret values shown as "
-                               "•••). Production is the owner's: you read there, you do not run.",
-                "schema": _schema({"env": _S, "command": _S, "timeout": _N}, ["command"])},
-    "env_services": {"fn": t_env_services,
-                     "description": "The project's services in an environment (env, else local: this machine): "
-                                    "what=list (each listener running or not, its /healthz, pid, preview URL, the "
-                                    "release recorded), log (key: a "
-                                    "listener's last lines), start, stop, restart (key). Production is the owner's.",
-                     "schema": _schema({"env": _S, "what": {"type": "string", "enum": [
-                         "list", "log", "start", "stop", "restart"]}, "key": _S})},
-    "deploy": {"fn": t_deploy,
-               "description": "Deploy to an environment (env, else local: this machine, which runs its checkout as "
-                              "it is — ref defaults to it): git (ref: a branch or commit) → build → test → run "
-                              "(services restarted) → validate (each up and healthy) → deploy (recorded as the "
-                              "release). what=deploy (ref), rollback (to the last good release before the current "
-                              "one), status (id, or the newest). Waits up to wait seconds (default 120) and returns "
-                              "each stage, a failed one with its output. card: the board card it is for (C4; "
-                              "listed on that card). On production it waits for the owner's approval.",
-               "schema": _schema({"env": _S, "what": {"type": "string", "enum": ["deploy", "rollback", "status"]},
-                                  "ref": _S, "card": _S, "id": _S, "wait": _N})},
-    "terminal_send": {"fn": t_terminal_send,
-                      "description": "Type into a terminal (Enter added unless enter=false; \\u0003 is Ctrl-C) and "
-                                     "return what it printed, waiting up to wait seconds (default 10) for the "
-                                     "command to finish.",
-                      "schema": _schema({"id": _S, "text": _S, "enter": {"type": "boolean"}, "wait": _N},
-                                        ["id", "text"])},
-    "terminal_read": {"fn": t_terminal_read,
-                      "description": "A terminal's output since an offset (the last call's next since; 0 = all it "
-                                     "kept), its state (idle, working: what runs, ended with its exit code).",
-                      "schema": _schema({"id": _S, "since": _N, "wait": _N}, ["id"])},
-    "terminal_list": {"fn": t_terminal_list,
-                      "description": "The project's terminals (yours and the owner's) and the places one can open in.",
-                      "schema": _schema({})},
-    "terminal_close": {"fn": t_terminal_close,
-                       "description": "Close a terminal you opened: what runs in it stops.",
-                       "schema": _schema({"id": _S}, ["id"])},
-    "failing_on_base": {"fn": t_failing_on_base,
-                        "description": "Run failing tests on the base branch (the merge-base with origin's default "
-                                       "branch, or base) and say for each: fails on base too, or new to this branch. "
-                                       "Call it before you call a failure pre-existing. tests: the ids pytest printed "
-                                       "(path::name); cwd: the checkout or worktree you ran them in.",
-                        "schema": _schema({"tests": {"type": "array", "items": _S}, "cwd": _S, "base": _S},
-                                          ["tests", "cwd"])},
-    "on_base": {"fn": t_on_base,
-                "description": "Run a shell command here and on the base branch (the merge-base with origin's "
-                               "default branch, or base), and show both exit statuses and outputs: is this error "
-                               "new to the branch? For any check that is not a failing test (brd check, a lint, a "
-                               "script). cwd: the checkout or worktree; the project's .venv/bin is first on PATH.",
-                "schema": _schema({"command": _S, "cwd": _S, "base": _S}, ["command", "cwd"])},
     "run_job": {"fn": t_run_job,
                 "description": "Start one of the application's jobs (or a job of steps); resume=true reruns only "
                                "what the last run did not finish.",
@@ -810,54 +472,6 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                      "(in-house) model; leave a model unpriced rather than guessing.",
                       "schema": _schema({"resource": _S, "input_per_1m": _N, "output_per_1m": _N,
                                          "apply": {"type": "boolean"}}, ["resource", "input_per_1m", "output_per_1m"])},
-    "project_status": {"fn": t_project_status,
-                       "description": "Where the project stands, as the owner's screen shows it: the checklist (verified "
-                                      "of total, the open rows), the board's cycles and cards, what waits for the "
-                                      "owner (cards in needs you), what is in progress (cards in doing), the last "
-                                      "commits and the setup. Answer \"where are we\", \"what's next\", "
-                                      "\"what needs me\" from it, never from memory; call it again after a change.",
-                       "schema": _schema({"changes": _N})},
-    "project_search": {"fn": t_project_search,
-                       "description": "Search what the project knows before reading a whole document: its board, "
-                                      "BRD and requirements, plans (docs/*.md), knowledge.md (patterns, pitfalls, "
-                                      "decisions) and the operonx guide. Answers the best sections, each as its "
-                                      "heading, three lines and path:line; project_read gives one whole.",
-                       "schema": _schema({"query": _S, "limit": _N}, ["query"])},
-    "project_read": {"fn": t_project_read,
-                     "description": "One section of a project document (path relative to the project, heading as "
-                                    "project_search shows it, or its start, like C3 or K2), its sub-sections with "
-                                    "it; the whole file without heading.",
-                     "schema": _schema({"path": _S, "heading": _S}, ["path"])},
-    "board_status": {"fn": t_board_status,
-                     "description": "The project's board (docs/brd/board.md): its open cycles (a plan's round of "
-                                    "work, its phases as cards), the Backlog, and the cards by state (todo, doing, "
-                                    "needs you, done), each with its lane, what it waits on and, for needs you, the "
-                                    "question. Opens the Board on the user's screen.",
-                     "schema": _schema({})},
-    "board_card": {"fn": t_board_card,
-                   "description": "Add a card to docs/brd/board.md (no card: title, and req, after, files, done; "
-                                  "never write the file by hand), read one (card) or change one's title and "
-                                  "fields. One card per task: req the checklist rows it "
-                                  "serves, after the cards it waits on, files what it touches, done the tests "
-                                  "(tests/x.py::test_y) that pass when it is done. A card whose files go outside a "
-                                  "feature's fixed names lands in needs you until the owner says go. cycle: the open "
-                                  "cycle it belongs to, or Backlog (a new card goes to the Backlog unless given).",
-                   "schema": _schema({"card": _S, "title": _S, "cycle": _S, "req": {"type": "array", "items": _S},
-                                      "after": {"type": "array", "items": _S}, "files": {"type": "array", "items": _S},
-                                      "done": {"type": "array", "items": _S}})},
-    "board_move": {"fn": t_board_move,
-                   "description": "Move a card: to doing when you start it (refused while an after card is not "
-                                  "done), needs you with a note (the question) when you need the owner, done when "
-                                  "its done tests pass (the studio runs them first and refuses on a red one).",
-                   "schema": _schema({"card": _S, "to": {"type": "string", "enum": ["todo", "doing", "needs you", "done"]},
-                                      "note": _S}, ["card", "to"])},
-    "board_cycle": {"fn": t_board_cycle,
-                    "description": "Open a cycle (cycle: an id in capitals like FF, title, plan: the plan doc it "
-                                   "works) when a plan starts its round of work; its phases are then cards "
-                                   "(board_card with cycle). close: true closes it, refused while a card in it is "
-                                   "not done: move each open card to the Backlog (board_card cycle: Backlog) or "
-                                   "finish it first.",
-                    "schema": _schema({"cycle": _S, "title": _S, "plan": _S, "close": {"type": "boolean"}}, ["cycle"])},
 }
 
 HOME_TOOLS.update({

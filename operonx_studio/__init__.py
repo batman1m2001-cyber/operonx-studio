@@ -1,6 +1,6 @@
 """Visual workspace for operonx projects.
 
-Reads the Project IR produced by ``operonx-project`` and renders it. The
+Reads a project's IR (``operonx_studio_toolkit``) and renders it. The
 toolkit stays headless so projects and CI can depend on it without a web
 stack; everything visual lives here.
 """

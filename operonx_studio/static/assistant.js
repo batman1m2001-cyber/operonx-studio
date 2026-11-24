@@ -15,7 +15,6 @@
  *   focus  the whole stage, with the session list beside (Ctrl/⌘ J)
  *   sheet  full screen on a phone, opened from the Ask bar
  *   hero   the home page: a composer first, a conversation once started
- *   center Project mode's centre, beside the project's state (projectmode.js)
  *
  * Nothing the model writes is ever parsed as HTML: markdown is rendered
  * with textContent and a small block/inline tokenizer.
@@ -148,7 +147,7 @@
   };
 
   const LINK_ICON = {run: "list", op: "graph", tab: "right", monitor: "chart", eval: "evals", project: "folder", file: "file",
-                     point: "target", board: "roadmap"};
+                     point: "target"};
 
   function studioLink(label, href) {
     const kind = href.slice(7).split("/")[0];
@@ -169,32 +168,9 @@
   /* ── references (D4): inline code resolved against the project ───── */
 
   const RF = W.oxRefs;
-  // the project's tree and points, read once per conversation and again when a turn ends
-  const refState = {files: null, root: "", points: new Map(), at: 0};
+  // inline code names ops (the IR) and the files a turn touched (its own items)
+  const refState = {files: null, root: "", points: new Map()};
   let refWorld = null;       // the world the text being drawn resolves in (its turn's)
-  async function loadRefs() {
-    if (!PROJECT || !RF) return;
-    const at = ++refState.at;
-    const [tree, status] = await Promise.all([
-      call(`/api/p/${PROJECT}/project/files`).catch(() => null),
-      call(`/api/p/${PROJECT}/project/status`).catch(() => null),
-    ]);
-    if (at !== refState.at) return;
-    if (tree && tree.ok) { refState.files = RF.index(tree.files); refState.root = tree.root || ""; }
-    const pts = new Map();
-    const doc = status && status.project;
-    if (doc) {
-      for (const r of (doc.checklist && doc.checklist.open) || []) pts.set(r.id, `row:${r.id}`);
-      for (const c of (doc.board && doc.board.cards) || []) pts.set(c.id, `card:${c.id}`);
-    }
-    refState.points = pts;
-    // what was drawn before the tree came: draw again where the text names code
-    for (const it of A.items) {
-      const n = it.kind === "text" && it.text && it.text.includes("`") ? A.nodes.get(it.seq) : null;
-      if (n) { refWorld = worldFor(it); md(n, it.text); }
-    }
-    refWorld = null;
-  }
   function opNames() {
     const out = new Set();
     const ir = typeof state !== "undefined" && state && state.ir;
@@ -212,11 +188,10 @@
   }
   const TOUCH = {read: ["·", "read this turn"], modified: ["●", "modified this turn"], created: ["+", "created this turn"],
                  deleted: ["−", "deleted this turn"]};
+  // a file is the owner's editor's: its chip copies the path
   function openFile(path, line) {
-    if (W.oxStudioLink) {
-      W.oxStudioLink(`studio:file/${encodeURIComponent(path)}${line ? `#L${line}` : ""}`);
-      if (A.mode === "sheet" || A.mode === "focus") placement.leave();
-    } else if (PROJECT) location.href = `/p/${PROJECT}/project`;
+    copyText(line ? `${path}:${line}` : path);
+    toast(`Copied ${path}`);
   }
   function refCode(code, sentence) {
     const r = refWorld ? RF.classify(code, refWorld, sentence) : {kind: "code"};
@@ -895,7 +870,6 @@
      doing, how long, whether it is still alive, its stages, and Stop for this call alone */
   const CR = W.oxCallRow;
   const callOpen = new Set();
-  const callStopping = new Set();
   function callBlock(item) {
     const v = CR.view(item, Date.now() / 1000);
     const box = el("div", "ax-call");
@@ -917,14 +891,6 @@
     line.append(el("span", "ax-spacer"));
     if (v.bar && v.bar.kind === "estimated") line.append(refs.last = el("span", "ax-call-last", ""));
     if (v.elapsed != null) line.append(refs.time = el("span", "ax-call-time", CR.secs(v.elapsed)));
-    if (item.id && A.running) {
-      const stop = el("button", "ax-call-stop", callStopping.has(item.seq) ? "Stopping…" : "Stop");
-      stop.type = "button";
-      stop.title = "Stop this command only — the assistant carries on";
-      stop.disabled = callStopping.has(item.seq);
-      stop.onclick = (e) => { e.stopPropagation(); stopCall(item); };
-      line.append(stop);
-    }
     box.append(line);
     refs.chip = el("div", "ax-call-chip");
     refs.chip.hidden = true;
@@ -970,14 +936,6 @@
     if (refs.last && v.bar) refs.last.textContent = v.bar.over ? `longer than last run (${v.bar.last})` : `last run ${v.bar.last}`;
     refs.chip.hidden = !v.chip;
     if (v.chip) { refs.chip.className = "ax-call-chip " + v.chip.tone; refs.chip.textContent = v.chip.text; }
-  }
-  async function stopCall(item) {
-    const r = A.running;
-    if (!r || callStopping.has(item.seq)) return;
-    callStopping.add(item.seq);
-    repaint(item.seq);
-    try { await call(`/api/assistant/turns/${r.id}/calls/${encodeURIComponent(item.id)}/stop`, {}); }
-    catch (err) { callStopping.delete(item.seq); repaint(item.seq); toast(err.status === 409 ? "It had already finished." : err.message, true); }
   }
   function toolDetails(item, step) {
     const io = el("div", "ax-step-io");
@@ -1566,54 +1524,6 @@
     return card;
   }
 
-  // TURN_HONESTY S3: the worktrees a turn made and left; Remove keeps git's own checks (a dirty
-  // worktree and an unmerged branch are kept, and the card says why)
-  function renderWorktrees(item) {
-    const card = el("div", "ax-card ax-worktrees");
-    const trees = item.trees || [];
-    const gone = new Set(item.removed || []);
-    const top = el("div", "ax-card-head ax-act-strip");
-    top.append(icon("folder"), el("span", null,
-      `${trees.length} worktree${trees.length === 1 ? "" : "s"} left behind`));
-    const list = el("div", "ax-files");
-    for (const t of trees) {
-      const row = el("div", "ax-file ax-tree");
-      const head = el("div", "ax-file-head");
-      const note = el("span", "ax-card-note");
-      const rm = tbtn("Remove", "ax-btn ax-btn-quiet needs-edit");
-      rm.title = "git worktree remove (kept if it has changes), then its branch if merged";
-      const paint = () => {
-        row.dataset.state = gone.has(t.path) ? "removed" : "";
-        rm.hidden = gone.has(t.path) || !PROJECT;
-        if (gone.has(t.path) && !note.textContent) note.textContent = "Removed";
-      };
-      rm.onclick = async () => {
-        rm.disabled = true;
-        try {
-          const got = await call(`/api/p/${PROJECT}/chat/worktree/remove`, {path: t.path});
-          gone.add(t.path);
-          note.textContent = !got.branch ? "Removed" : got.branch_deleted
-            ? `Removed, branch ${got.branch} deleted` : `Removed; branch ${got.branch} kept (not merged)`;
-          item.removed = [...gone];
-          if (A.session) call(`/api/assistant/sessions/${A.session.id}/items/${item.seq}`,
-            {removed: item.removed}).catch(() => {});
-        } catch (err) {
-          note.textContent = `Kept: ${err.message}`;
-          rm.disabled = false;
-        }
-        paint();
-      };
-      head.append(el("code", "ax-tree-path", t.path), t.branch ? el("span", "ax-tree-branch", t.branch) : "",
-                  el("span", "ax-spacer"), note, rm);
-      row.append(head);
-      list.append(row);
-      paint();
-    }
-    card.append(top, list);
-    A.nodes.set(item.seq, card);
-    return card;
-  }
-
   function renderError(item) {
     const card = el("div", "ax-card ax-error st-err");
     const top = el("div", "ax-card-head");
@@ -1770,7 +1680,6 @@
     if (node) A.nodes.set(item.seq, node);
     else if (item.kind === "text") node = renderText(item);
     else if (item.kind === "changes") node = renderChanges(item);
-    else if (item.kind === "worktrees") node = renderWorktrees(item);
     else if (item.kind === "error") node = renderError(item);
     else if (item.kind === "compact") {
       node = el("div", "ax-divider");
@@ -1796,7 +1705,6 @@
     // a call's end drops its live counts and progress: what the old row had must not outlive them
     if (item.kind === "tool") for (const k of ["tests", "progress"]) if (!(k in item)) delete old[k];
     Object.assign(old, CR.bridge(item));
-    if (item.status !== "running") callStopping.delete(item.seq);
     repaint(item.seq);
   }
 
@@ -1875,11 +1783,11 @@
     {kind: "failure", label: "Which of my projects had failures today?",
      prompt: "Go through my projects and tell me which had failing runs in the last day, and why."},
   ];
-  // Project mode: building the project by its conventions (docs/PROJECT_MODE_PLAN.md D5)
+  // a project's own: how the product is doing, and why
   const PROJECT_STARTS = [
-    {kind: "learn", label: "Where are we?", prompt: "Where does the project stand? What needs me, what is in progress, and what should come next?"},
-    {kind: "setup", label: "Build the next thing", prompt: "What should we build next? Look at the open checklist rows and the board's cards, propose the next step, and wait for my go."},
-    {kind: "setup", label: "Plan something new", prompt: "I want to build something new. Ask me what it is, then write a plan doc and open its cycle on the board, its phases as cards, before changing any code."},
+    {kind: "failure", label: "How is it doing?", prompt: "Look at the last day's runs and the Monitor: what is failing or getting slower, and why?"},
+    {kind: "eval", label: "Is it getting better?", prompt: "Compare the latest eval runs: what changed, and why?"},
+    {kind: "setup", label: "Plan something new", prompt: "I want to build something new. Ask me what it is, then write a plan doc before changing any code."},
   ];
   const START_ICON = {failure: "alert", eval: "evals", setup: "wand", try: "play", learn: "book", op: "graph"};
 
@@ -2662,7 +2570,6 @@
     paintEditing();
     loadDraft();
     renderAll();
-    loadRefs();
     paintList();
     if (got.running) follow(got.running.id, got.running.cursor, got.running);
     else paintBusy();
@@ -2772,7 +2679,6 @@
   function finished(ev) {
     const r = A.running;
     A.running = null;
-    loadRefs();
     if (ev.state === "lost") toast("That task is no longer running — the studio restarted", true);
     if (ev.usage && A.session) A.session.usage = ev.usage;
     paintBusy();
@@ -2991,8 +2897,8 @@
     queued.append(x);
   }
 
-  /* Save & start fresh (ENGINEERING_ENV_PLAN E6): the conversation writes its open work to the board and
-   * its decisions to the BRD, leaves a handoff, and the next turn starts a fresh session from them. */
+  /* Save & start fresh (ENGINEERING_ENV_PLAN E6): the conversation writes its decisions to the BRD,
+   * leaves a handoff, and the next turn starts a fresh session from them. */
   async function doSave() {
     if (!A.session || !A.session.claude_session || A.running) return;
     try {
@@ -3814,8 +3720,6 @@
   if (PROJECT) {
     if (dock) dock.append(root);
     placement.set("dock");
-    // the page opened in Project mode (its address) before this file ran
-    if (document.body.classList.contains("pmode")) placement.center(document.getElementById("pmchat"));
     document.body.append(askbar);
     // the side panel's Assistant tab: the dock on a desktop, the full sheet on a phone
     const sync = (detail) => {
@@ -3844,7 +3748,7 @@
    * so they do not queue in front of it. Where the conversation is the screen (the project's Now page,
    * home, a link to a conversation) it starts at once, as before. */
   const named = PROJECT && typeof Router !== "undefined" ? Router.parse(location).tab : null;
-  const beside = named && named !== "project" && !document.body.classList.contains("pmode") && !/#assistant=/.test(location.hash);
+  const beside = named && !/#assistant=/.test(location.hash);
   if (!beside) boot();
   else if (document.readyState === "complete") setTimeout(boot, 400);
   else W.addEventListener("load", () => setTimeout(boot, 400), {once: true});

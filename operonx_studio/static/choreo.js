@@ -2,37 +2,27 @@
  * (docs/ALIVE_ASSISTANT_PLAN.md D3).
  *
  * The assistant's tool calls reach the page live (an item with `name` and
- * `input` when it starts, its `status` when it ends). `steps(item, phase,
- * where)` turns one into gestures for the hand (hand.js): go to a page, point
- * at a target with two or three words, press a button the action stands
- * for. Pure: no DOM, so it is tested on its own.
+ * `input` when it starts, its `status` when it ends). `opSteps(item, phase,
+ * ops)` turns an edit into gestures for the hand (hand.js), and `focus`
+ * turns the steps plan into them. Pure: no DOM, so it is tested on its own.
  *
- *   {go: {tab, page}}                      switch the screen
+ *   {go: {tab}}                            switch the screen
  *   {point: target, words}                 ring an element (data-ox-target)
  *   {press: target, words}                 the same, with the cursor's click
- *   {refresh: true}                        read the project's status again first
  *
  * A point may carry `or` (the target to ring when its own is not drawn) and
  * `soft` (skip it when that element was just ringed by something fresher).
- *
- * `where` is what is on screen: {tab, page}. Reading moves nothing (an
- * assistant reads many files); writing goes where the change is.
+ * Reading moves nothing (an assistant reads many files); writing goes where
+ * the change is.
  */
 
 "use strict";
 
 const Choreo = (() => {
   const EDITS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-  // the files the page reads: an edit to one reads the project's status again
-  const READ_BY_PAGE = /docs\/brd\/(?:board\.md|requirements\/(?:requirements_traceability|open_questions)\.md)/;
-
-  const COLUMN = {needs: "now", working: "board"};
-  // the shell: what writes a file, a commit (`git -c user.email=… commit`)
-  const WRITES = /(?:^|[^<>&2])>>?\s*(?!\/dev\/null)[^\s&|;>]|\btee\b|\bsed\s+(?:-\w*\s+)*-i|\bperl\s+-\w*i|\bpython3?\b[^|;&]*(?:<<|-c\b)|\bmv\b|\bcp\b/;
-  const COMMIT = /\bgit\b(?:\s+-[cC]\s+\S+)*\s+commit\b/;
   /* A tool's input reaches the page as the server clipped it: JSON text, cut off when long (a heredoc). The
    * fields that matter are read from the text when it no longer parses. */
-  const FIELDS = ["file_path", "notebook_path", "command", "old_string", "new_string", "content", "op", "ref", "card", "to"];
+  const FIELDS = ["file_path", "notebook_path", "command", "old_string", "new_string", "content", "op", "ref"];
   function inputOf(item) {
     const raw = item && item.input;
     if (raw && typeof raw === "object") return raw;
@@ -50,59 +40,6 @@ const Choreo = (() => {
   }
 
   const tool = (name) => String(name || "").replace(/^mcp__studio__/, "studio:");
-
-  function steps(item, phase, where) {
-    const name = tool(item && item.name);
-    const input = inputOf(item);
-    const ok = phase === "end" && item.status !== "error";
-    const pm = where && where.tab === "project";
-    // the status column shows on Now only; elsewhere the Project bar's icon stands for its section
-    const col = (sec) => (pm && where.page === "now" ? `status:${sec}` : `page:${COLUMN[sec]}`);
-    const out = [];
-    const goPage = (page) => { if (!pm || where.page !== page) out.push({go: {tab: "project", page}}); };
-
-    if (EDITS.has(name)) {
-      if (ok && READ_BY_PAGE.test(input.file_path || "")) out.push({refresh: true});
-      return out;
-    }
-    if (name === "Bash") {
-      const cmd = String(input.command || "");
-      // an assistant often writes with the shell: a heredoc, sed -i, a python script; a commit is a commit
-      const commit = COMMIT.test(cmd);
-      if (!commit && ok && WRITES.test(cmd) && READ_BY_PAGE.test(cmd)) out.push({refresh: true});
-      if (commit) {
-        if (phase === "start") out.push({point: "page:changes", words: "committing"});
-        else if (ok) out.push({refresh: true}, {point: "commit:new", words: "committed", soft: true, or: "page:changes"});
-      }
-      return out;
-    }
-    if (name === "studio:project_status" && phase === "start") {
-      const secs = Object.keys(COLUMN);
-      for (const s of secs) out.push({point: col(s), words: "reading", quick: true});
-      return out;
-    }
-    // a card read or moved rings the card (D6)
-    if ((name === "studio:board_card" || name === "studio:board_move") && input.card && phase === "start") {
-      goPage("board");
-      out.push({point: `card:${input.card}`, words: name === "studio:board_move" ? `to ${input.to || ""}` : "reading", or: "page:board"});
-      return out;
-    }
-    if ((name === "studio:board_status" || name === "studio:board_cycle") && phase === "start") goPage("board");
-    return out;
-  }
-
-  /* What changed between two status documents: the targets to light once, newest first. */
-  function changed(before, after) {
-    if (!before || !after) return [];
-    const cards = (doc) => new Map(((doc.board || {}).cards || []).map((c) => [c.id, c.state]));
-    const was = cards(before);
-    const out = [];
-    for (const [id, state] of cards(after)) {
-      if (!was.has(id)) out.push({point: `card:${id}`, words: "new"});
-      else if (was.get(id) !== state) out.push({point: `card:${id}`, words: state});
-    }
-    return out.slice(0, 4);
-  }
 
   /* On Flow: an edit to the file an op is defined in rings that op. `ops`: [{name, file, code}], the canvas's.
    * The op is the one whose `def` the edit touches, or the file's only op. */
@@ -142,8 +79,6 @@ const Choreo = (() => {
   }
 
   /* where a target lives: the screen to go to before pointing at it (null: anywhere, as it is) */
-  const PAGE_OF = {status: "now", q: "now", row: "now",
-                   commit: "changes", card: "board"};
   const TAB_OF = {op: "flow", field: "flow", run: "traces", job: "jobs", eval: "evals", setting: "projectsettings"};
   // setting:<section>/<name> on a settings screen of its own; a bare setting:<name> is the project's settings
   const SECTION_TAB = {retention: "settings"};
@@ -151,7 +86,6 @@ const Choreo = (() => {
     const kind = String(target || "").split(":")[0];
     const section = /^setting:([\w-]+)\//.exec(String(target || ""));
     if (section && SECTION_TAB[section[1]]) return {tab: SECTION_TAB[section[1]]};
-    if (PAGE_OF[kind]) return {tab: "project", page: PAGE_OF[kind]};
     if (TAB_OF[kind]) return {tab: TAB_OF[kind]};
     return null;
   }
@@ -171,7 +105,7 @@ const Choreo = (() => {
     const now = ((after && after.steps) || []).find((s) => s.state === "active" || s.state === "waiting");
     if (now && now.target && was.get(now.title) !== now.state) {
       const there = where(now.target);
-      if (there && !(here && here.tab === there.tab && (!there.page || here.page === there.page))) out.push({go: there});
+      if (there && !(here && here.tab === there.tab)) out.push({go: there});
       const field = /^field:([^/]+)\//.exec(now.target);
       if (field) out.push({select: field[1]});
       out.push({point: now.target, words: short(now.title), ...(field ? {or: `op:${field[1]}`} : {})});
@@ -179,7 +113,7 @@ const Choreo = (() => {
     return out;
   }
 
-  const api = {steps, changed, where, opSteps, inputOf, focus, changedParams};
+  const api = {where, opSteps, inputOf, focus, changedParams};
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   return api;
 })();

@@ -3,9 +3,8 @@
    calls when the assistant posted none. No DOM: assistant.js draws it, and
    tests/js/progress.test.mjs checks it. */
 const oxProgress = (() => {
-  const TARGET_KIND = {op: "op", row: "requirement", q: "question", qopt: "question",
-    run: "run", commit: "commit", setting: "setting", card: "card", field: "field", job: "job", eval: "eval",
-    page: "", tab: "", status: ""};
+  const TARGET_KIND = {op: "op", run: "run", setting: "setting", field: "field", job: "job", eval: "eval",
+    page: "", tab: ""};
 
   /* a target in words: op:score_news → "op score_news" */
   function targetWords(t) {
@@ -76,23 +75,15 @@ const oxProgress = (() => {
   }
 
   const base = (p) => String(p || "").split("/").pop();
-  // an item's input is clipped JSON text (assistant.py _clip): a clipped one reads as nothing
-  function inputOf(item) {
-    if (item.input && typeof item.input === "object") return item.input;
-    try { return JSON.parse(item.input || "{}"); } catch { return {}; }
-  }
-
   // the tool classes (VISUAL_CHAT_PLAN D5): a global in the page, required in node
   const T = typeof oxTools !== "undefined" ? oxTools : require("./tools.js");
 
   /* what one tool call did, as the step it belongs to: {kind, words} */
   function kindOf(item) {
     const n = item.name || "";
-    const inp = inputOf(item);
     const studio = /^mcp__studio__(.+)$/.exec(n);
     if (studio) {
       const tool = studio[1];
-      if (tool === "board_card" && inp.card) return {kind: "card:" + inp.card, words: `Read ${inp.card}`};
       const words = tool.replace(/_/g, " ");
       return {kind: "studio:" + tool, words: words[0].toUpperCase() + words.slice(1)};
     }

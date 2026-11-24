@@ -92,16 +92,9 @@ def test_initialize_and_list_tools():
     assert init["protocolVersion"] == mcp.PROTOCOL and "tools" in init["capabilities"]
     tools = {t["name"]: t for t in _rpc(s, "tools/list")["result"]["tools"]}
     assert set(tools) == {"list_runs", "open_run", "op_values", "monitor", "compare_runs",
-                          "select_op", "point", "steps", "run_job", "rerun_op", "play", "run_eval", "set_llm_price",
-                          "project_status", "board_status", "board_card", "board_move", "board_cycle", "failing_on_base", "on_base",
-                          "project_search", "project_read",
-                          "terminal_open", "terminal_send", "terminal_read", "terminal_list", "terminal_close",
-                          "env_list", "env_check", "env_run", "env_services", "deploy"}
+                          "select_op", "point", "steps", "run_job", "rerun_op", "play", "run_eval", "set_llm_price"}
     # tools that run the project's code are not read tools
-    assert not {"mcp__studio__rerun_op", "mcp__studio__play", "mcp__studio__run_job",
-                "mcp__studio__failing_on_base", "mcp__studio__on_base", "mcp__studio__terminal_open",
-                "mcp__studio__terminal_send", "mcp__studio__terminal_read", "mcp__studio__env_run", "mcp__studio__env_services",
-                "mcp__studio__deploy"} & set(chat.STUDIO_READ_TOOLS)
+    assert not {"mcp__studio__rerun_op", "mcp__studio__play", "mcp__studio__run_job"} & set(chat.STUDIO_READ_TOOLS)
     assert tools["open_run"]["inputSchema"]["required"] == ["run"]
     # every read tool the read-only chat mode allows is a real tool
     assert {n.split("__")[-1] for n in chat.STUDIO_READ_TOOLS} <= set(tools)
@@ -143,19 +136,20 @@ def test_select_op_only_points():
 
 def test_point_queues_the_gesture_and_refuses_what_is_not_a_target():
     s = FakeStudio({})
-    got = _rpc(s, "tools/call", {"name": "point", "arguments": {"target": "q:Q-16", "words": "blocks BRIEF-RISK-04"}})
-    assert "pointed at q:Q-16" in got["result"]["content"][0]["text"]
-    assert s.shown == [{"kind": "point", "args": {"target": "q:Q-16", "words": "blocks BRIEF-RISK-04"}}]
+    got = _rpc(s, "tools/call", {"name": "point", "arguments": {"target": "run:r1", "words": "failed here"}})
+    assert "pointed at run:r1" in got["result"]["content"][0]["text"]
+    assert s.shown == [{"kind": "point", "args": {"target": "run:r1", "words": "failed here"}}]
     # the words under another name the model may guess
-    _rpc(s, "tools/call", {"name": "point", "arguments": {"target": "row:R-1", "label": "next"}})
+    _rpc(s, "tools/call", {"name": "point", "arguments": {"target": "op:score", "label": "next"}})
     assert s.shown[-1]["args"]["words"] == "next"
     s.shown.pop()
     bad = _rpc(s, "tools/call", {"name": "point", "arguments": {"target": "the plans page"}})
     assert "not a target" in bad["result"]["content"][0]["text"] and len(s.shown) == 1
-    # a board card, an op's setting (docs/ASSISTANT_PROGRESS_PLAN.md D6)
-    for target in ("card:F1", "field:score/threshold"):
-        got = _rpc(s, "tools/call", {"name": "point", "arguments": {"target": target}})
-        assert f"pointed at {target}" in got["result"]["content"][0]["text"]
+    # an op's setting (docs/ASSISTANT_PROGRESS_PLAN.md D6); board cards are gone (LEAN_PRODUCT_PLAN P1)
+    got = _rpc(s, "tools/call", {"name": "point", "arguments": {"target": "field:score/threshold"}})
+    assert "pointed at field:score/threshold" in got["result"]["content"][0]["text"]
+    got = _rpc(s, "tools/call", {"name": "point", "arguments": {"target": "card:F1"}})
+    assert "not a target" in got["result"]["content"][0]["text"]
 
 
 # ── the tools against the real studio API ────────────────────────────────

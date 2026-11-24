@@ -66,10 +66,9 @@ def test_every_route_is_classified_and_nothing_is_stale(app):
     assert unclassified(app.routes) == []
     assert stale(app.routes) == []
     assert sorted(ACCESS) == sorted(_routes(app))
-    # the only other routes: a terminal's socket, which checks who opened it itself (WORKSPACE_PLAN W2;
-    # test_terminals.py), and the static mount, which the wall lets through
+    # the only other route: the static mount, which the wall lets through
     others = [r for r in app.routes if not isinstance(r, APIRoute)]
-    assert [getattr(r, "path", None) for r in others] == ["/api/p/{pid}/terminals/{tid}/ws", "/static"]
+    assert [getattr(r, "path", None) for r in others] == ["/static"]
 
 
 def test_only_read_level_non_gets_are_in_read_posts(app):
@@ -142,7 +141,7 @@ def test_anonymous_gets_401_or_the_login_page_everywhere_but_open(people):
 def test_admin_routes_refuse_editors_and_viewers(people):
     team = people["team"]
     admin_routes = _by_level(team, "admin")
-    assert len(admin_routes) == 8   # /team, the five /api/admin/users routes, the activity log, a project's git policy
+    assert len(admin_routes) == 7   # /team, the five /api/admin/users routes, the activity log
     for who in ("editor", "viewer"):
         team.use(people[who]["token"])
         for method, path in admin_routes:
@@ -160,7 +159,7 @@ def test_admin_routes_refuse_editors_and_viewers(people):
 def test_edit_routes_refuse_viewers_before_the_handler_runs(people):
     team = people["team"]
     edit_routes = _by_level(team, "edit")
-    assert len(edit_routes) == 61   # + the prompt store set and pushed to, + a prompt created, + a named prompt saved, published, labelled (PROMPTS_PLAN P3), + a cycle opened or closed (CYCLES_PLAN K2), + deploys and a host's services (W4), the environments (W3: list, act),  Git acts (W2), the terminals (W2: list, open, type, read, close), a worktree the turn left removed (TURN_HONESTY S3), POST a run forked from a step (GAP S3), a failed run retried (GAP S2), a parked run answered (GAP S1), POST a knowledge-base query or eval case (K3), a run requeued (S3), a queue review (S1), GET /open (a launch ticket), undo a write (P3), an @op keyword and a YAML edit (P4), a resource added or deleted and a .env variable (P5)
+    assert len(edit_routes) == 47   # the process routes (board, git, terminals, environments, deploys, worktrees) left in LEAN_PRODUCT_PLAN P1
     team.use(people["viewer"]["token"])
     # the real project id: a handler that ran would act on it
     for method, path in edit_routes:

@@ -57,11 +57,9 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import shutil
 import signal
 import sqlite3
-import sys
 import threading
 import time
 import uuid
@@ -70,8 +68,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import chat as _chat
-from . import progress as _progress
-from . import testreport
 from .mcp import check_steps, step_line
 
 __all__ = ["ChatStore", "EFFORTS", "parse_rate", "IMAGE_TYPES", "MAX_ATTACHMENTS", "MAX_ATTACHMENT_BYTES", "MODELS", "MODEL_INFO",
@@ -145,10 +141,6 @@ _MODEL_ERROR = re.compile(r"issue with the selected model|unrecognized_model|mod
 # the agent did, never a whole file.
 _TOOL_IO_LIMIT = 4000
 _FLUSH_EVERY = 0.25
-_LIVE_MAX = 8 * 1024 * 1024      # a running call's output past this is read from its tail only
-_LIVE_TAIL = 256 * 1024
-_EST_MIN_MS = 10_000             # a call shorter than this never gets an estimate (D2)
-_EST_KEEP = 400                  # past call times kept in the store's meta
 
 
 #: A turn that starts with more context than this saves to the project first and goes on in a fresh
@@ -158,17 +150,14 @@ HANDOFF_MAX = 1024
 SAVE_PROMPT = (
     "This conversation is about to start fresh: only what you save to the project now, and a short handoff, "
     "carry over. Do it now, without asking anyone:\n"
-    "1. Open work: every task not finished is a board card (board_card; board_move it to `needs you` with the "
-    "question when it waits on the owner). Update the cards you worked on.\n"
-    "2. What the owner decided or asked for that the code does not show: the requirement it changes in "
+    "1. What the owner decided or asked for that the code does not show: the requirement it changes in "
     "docs/brd/requirements/, or one entry in docs/brd/knowledge.md: `### K<n> · title · decision` (or "
     "pattern, pitfall, replaced), then `where:` the files and the why in a line or two.\n"
-    "3. Then reply with the handoff only, at most 1000 characters, no preamble: the active card, the files "
+    "2. Then reply with the handoff only, at most 1000 characters, no preamble: the task, the files "
     "touched, the open question.\n"
-    "Save nothing the code, the board or git already hold. Without a project (no docs/brd), only the handoff."
+    "Save nothing the code or git already hold. Without a project (no docs/brd), only the handoff."
 )
 _SAVE_WRITES = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
-_SAVE_CARDS = {"mcp__studio__board_card", "mcp__studio__board_move", "mcp__studio__board_cycle"}
 
 
 def save_at() -> int:
@@ -263,36 +252,6 @@ def _looks_like_title(text: str) -> bool:
     return not (low.startswith(("i ", "i'", "sorry", "here", "title")) or "can't" in low or "cannot" in low)
 
 
-# "[feat/x 1a2b3c4] subject", "[main (root-commit) 1a2b3c4] subject": what git commit prints first
-_COMMIT = re.compile(r"^\[([^\]\s]+)(?: \([^)]*\))? ([0-9a-f]{7,40})\] (.+)$", re.M)
-
-
-def evidence(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """What a turn's tool calls left that says something was checked (WORKSPACE_PLAN W1.4): its test runs (the
-    counts testreport read), its runs on the base branch, its commits. Words in the chat are not evidence."""
-    out: List[Dict[str, Any]] = []
-    for it in items:
-        name, output = str(it.get("name") or ""), str(it.get("output") or "")
-        inp = it.get("input")
-        if isinstance(inp, str):  # a stored item keeps its input as JSON text
-            try:
-                inp = json.loads(inp)
-            except ValueError:
-                inp = None
-        command = str(inp.get("command") or "") if isinstance(inp, dict) else ""
-        if isinstance(it.get("tests"), dict) and it.get("status") != "running":
-            t = it["tests"]
-            out.append({"kind": "tests", "passed": int(t.get("passed") or 0), "skipped": int(t.get("skipped") or 0),
-                        "failed": int(t.get("failed") or 0) + int(t.get("errors") or 0),
-                        "command": command[:200]})
-        elif name.endswith(("__failing_on_base", "__on_base")) and it.get("status") == "ok":
-            out.append({"kind": "base", "text": output.strip().splitlines()[0][:240] if output.strip() else ""})
-        elif name == "Bash" and "commit" in command:
-            out += [{"kind": "commit", "branch": m.group(1), "sha": m.group(2), "subject": m.group(3)[:160]}
-                    for m in _COMMIT.finditer(output)]
-    return out
-
-
 # ── the store ──────────────────────────────────────────────────────────
 
 _SCHEMA = """
@@ -327,8 +286,7 @@ CREATE TABLE IF NOT EXISTS turns (
     usage         TEXT NOT NULL DEFAULT '{}',
     cost          REAL,
     hidden        INTEGER NOT NULL DEFAULT 0,
-    attachments   TEXT NOT NULL DEFAULT '[]',
-    card          TEXT NOT NULL DEFAULT ''
+    attachments   TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS turns_by_session ON turns (session, started);
 CREATE TABLE IF NOT EXISTS meta (
@@ -361,7 +319,7 @@ CREATE TABLE IF NOT EXISTS items (
 
 _SESSION_FIELDS = ("title", "title_source", "updated", "archived", "model", "claude_session", "usage",
                    "running_turn", "preview", "effort", "claude_home", "handoff")
-_TURN_FIELDS = ("claude_after", "state", "ended", "usage", "cost", "hidden", "card")
+_TURN_FIELDS = ("claude_after", "state", "ended", "usage", "cost", "hidden")
 
 
 class ChatStore:
@@ -382,8 +340,6 @@ class ChatStore:
             cols = {r[1] for r in self._db.execute("PRAGMA table_info(turns)")}
             if "attachments" not in cols:
                 self._db.execute("ALTER TABLE turns ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'")
-            if "card" not in cols:  # the board card a turn works (WORKSPACE_PLAN W1.3)
-                self._db.execute("ALTER TABLE turns ADD COLUMN card TEXT NOT NULL DEFAULT ''")
             cols = {r[1] for r in self._db.execute("PRAGMA table_info(sessions)")}
             if "effort" not in cols:
                 self._db.execute("ALTER TABLE sessions ADD COLUMN effort TEXT")
@@ -557,65 +513,6 @@ class ChatStore:
         return [dict(r, usage=json.loads(r["usage"] or "{}"), attachments=json.loads(r["attachments"] or "[]"))
                 for r in rows]
 
-    def card_turns(self, scope: str, limit: int = 300) -> List[Dict[str, Any]]:
-        """WORKSPACE_PLAN W1.3–W1.4: the scope's turns that named a board card (a ``steps`` call's ``card``, or
-        a ``board_move`` to doing), newest first, each with the evidence it left (:func:`evidence`) and, while it
-        runs, the step it is on (its last tool when it shows no steps)."""
-        rows = self._q("SELECT t.id, t.session, t.card, t.state, t.started, t.ended, t.cost, t.message FROM turns t"
-                       " JOIN sessions s ON s.id = t.session WHERE s.scope = ? AND t.card != '' AND t.hidden = 0"
-                       " ORDER BY t.started DESC LIMIT ?", (scope, limit))
-        out = []
-        for r in rows:
-            items = self._q("SELECT payload FROM items WHERE session = ? AND turn = ? AND kind = 'tool' AND hidden = 0"
-                            " ORDER BY seq", (r["session"], r["id"]))
-            calls = [json.loads(i["payload"]) for i in items]
-            plan = next((c["plan"] for c in reversed(calls) if c.get("plan")), None) or {}
-            step = next((s for s in plan.get("steps") or [] if s.get("state") == "active"), None)
-            now = (step or {}).get("title") or (calls[-1].get("label") if calls else "")  # no steps: the last tool
-            out.append({**dict(r), "message": str(r["message"])[:200], "evidence": evidence(calls),
-                        "now": str(now or "")[:160] if r["state"] == "running" else "",
-                        "asks": self._ask(r["session"], r["id"]) if r["state"] == "done" else ""})
-        return out
-
-    def asks(self, scope: str, days: float = 7.0) -> List[Dict[str, Any]]:
-        """WORKSPACE_PLAN W1.5: the scope's sessions whose last turn, ended in the last *days*, waits on the owner
-        (:meth:`_ask`), as entries of the studio's waiting list (``source: assistant``)."""
-        rows = self._q("SELECT t.id, t.session, t.card, t.ended, s.title FROM turns t JOIN sessions s"
-                       " ON s.id = t.session WHERE s.scope = ? AND s.archived = 0 AND t.hidden = 0"
-                       " AND t.state = 'done' AND t.ended > ? AND NOT EXISTS (SELECT 1 FROM turns u WHERE"
-                       " u.session = t.session AND u.hidden = 0 AND u.started > t.started) ORDER BY t.ended",
-                       (scope, time.time() - days * 86400))
-        out = []
-        for r in rows:
-            ask = self._ask(r["session"], r["id"])
-            if ask:
-                out.append({"id": f"turn:{r['id']}", "qid": "", "kind": "assistant",
-                            "card": r["card"], "problem": ask, "created": r["ended"], "session": r["session"],
-                            "title": r["title"], "source": "assistant"})  # fmt: skip
-        return out
-
-    def _ask(self, sid: str, tid: str) -> str:
-        """What turn *tid* left waiting on the owner, when it is its session's last: its last ``steps`` list's
-        waiting step, or its last reply's closing question; ``""`` when nothing waits."""
-        later = self._q("SELECT 1 FROM turns WHERE session = ? AND hidden = 0 AND started >"
-                        " (SELECT started FROM turns WHERE id = ?) LIMIT 1", (sid, tid))
-        if later:
-            return ""
-        rows = self._q("SELECT kind, payload FROM items WHERE session = ? AND turn = ? AND hidden = 0"
-                       " AND kind IN ('text', 'tool') ORDER BY seq DESC", (sid, tid))
-        text, plan = "", None
-        for r in rows:
-            got = json.loads(r["payload"])
-            if r["kind"] == "text" and not text:
-                text = str(got.get("text") or "").strip()
-            elif r["kind"] == "tool" and plan is None and got.get("plan"):
-                plan = got["plan"]
-        step = next((s for s in (plan or {}).get("steps") or [] if s.get("state") == "waiting"), None)
-        if step:
-            return str(step.get("detail") or step.get("title") or "")[:300]
-        last = text.splitlines()[-1].strip(" *_>") if text else ""
-        return last[:300] if last.endswith("?") else ""
-
     def hide_from(self, sid: str, tid: str) -> None:
         """A regenerate or an edit: turn *tid* and every later turn leave
         the transcript (kept, hidden — never silently destroyed)."""
@@ -702,9 +599,6 @@ class Turn:
     text_seq: Optional[int] = None       # the answer block being streamed
     think_seq: Optional[int] = None      # the thinking block being streamed
     tools: Dict[str, int] = field(default_factory=dict)   # tool_use_id → item seq
-    tests: Dict[str, str] = field(default_factory=dict)   # tool_use_id → the test command it runs, whole (D6)
-    live: Optional[Path] = None           # where runhook.py copies each shell call's output (EXECUTION_PROGRESS D1)
-    calls: Dict[str, Dict[str, Any]] = field(default_factory=dict)   # tool_use_id → a running shell call's watch
     claude_after: Optional[str] = None
     model: Optional[str] = None           # asked for (an alias), then what the CLI resolved it to
     requested: Optional[str] = None       # the model asked for, as asked
@@ -713,12 +607,10 @@ class Turn:
     account: str = "machine"              # the sign-in this turn runs under (chat.account_key)
     reseed: bool = False                  # a fresh Claude session after a sign-in switch
     save_first: bool = False              # past SAVE_AT: save to the project, then go on fresh (E6)
-    seed: str = ""                        # where the project is, for a fresh session (projectboard.seed)
     save_cost: float = 0.0
     resumed: Optional[str] = None         # the Claude session the running CLI call resumed (None: a fresh one)
     spent: Optional[float] = None         # that call's own cost, from the CLI's running total
     cwd: Optional[str] = None
-    card: str = ""                        # the board card this turn works, from its steps call (WORKSPACE_PLAN W1.3)
     kill_timer: Optional[asyncio.TimerHandle] = None
     heard: float = field(default_factory=time.monotonic)   # the CLI's last line
     background: List[str] = field(default_factory=list)   # the background tasks it waits on (descriptions)
@@ -736,7 +628,7 @@ class Turn:
 
 
 def _saved_write(name: str, inputs: Dict[str, Any], cwd: Optional[Path]) -> Optional[Dict[str, str]]:
-    """What one call of a save wrote: a file (relative to the project) or a board card."""
+    """What one call of a save wrote: a file (relative to the project)."""
     if name in _SAVE_WRITES and inputs.get("file_path"):
         path = Path(str(inputs["file_path"]))
         if cwd is not None:
@@ -745,9 +637,6 @@ def _saved_write(name: str, inputs: Dict[str, Any], cwd: Optional[Path]) -> Opti
             except ValueError:
                 pass
         return {"kind": "file", "path": path.as_posix()}
-    if name in _SAVE_CARDS:
-        what = str(inputs.get("card") or inputs.get("cycle") or inputs.get("title") or "").strip()
-        return {"kind": "card", "card": what} if what else None
     return None
 
 
@@ -846,13 +735,6 @@ class Relay:
         turn.state = state
         self._emit(turn, {"t": "state", "state": state, "detail": detail, **({"step": turn.step} if turn.step else {})})
 
-    def _take(self, turn: Turn, card: Any) -> None:
-        """The board card this turn works: a ``steps`` call's ``card``, or the card it moves to doing."""
-        card = str(card or "").strip()
-        if card and card != turn.card:
-            turn.card = card
-            self.store.update_turn(turn.id, card=card)
-
     def _plan(self, turn: Turn, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """A ``steps`` call's list, stamped (docs/ASSISTANT_PROGRESS_PLAN.md D1):
         a step starts the first time it is seen active and ends the first time
@@ -871,7 +753,6 @@ class Relay:
             step.update(stamp)
             if "started" in stamp and "ended" in stamp:
                 step["ms"] = round((stamp["ended"] - stamp["started"]) * 1000)
-        self._take(turn, inputs.get("card"))
         line = step_line(steps)
         turn.step = line[0].upper() + line[1:].replace(": ", " · ", 1) if line.startswith("step ") else ""
         return {"title": str(inputs.get("title") or ""), "steps": steps}
@@ -938,8 +819,7 @@ class Relay:
               view: Optional[Dict[str, Any]] = None, attachments: Optional[List[Dict[str, Any]]] = None,
               extra_mcp: Optional[Dict[str, Any]] = None, owner: Optional[str] = None,
               on_end: Optional[List[Any]] = None, claude: Optional[Dict[str, Any]] = None,
-              reach: Optional[str] = None, deny: Optional[List[str]] = None,
-              wrap_env: Optional[Any] = None, seed: str = "") -> Turn:
+              reach: Optional[str] = None, deny: Optional[List[str]] = None) -> Turn:
         """Begin a turn in session *sid*; returns at once (call from a loop).
 
         ``fork_from`` is the Claude session to continue: ``""`` means the
@@ -951,7 +831,7 @@ class Relay:
         ``kind="save"`` saves the conversation to the project and ends it:
         the next turn starts fresh. A message past :func:`save_at` does the
         same first, then goes on fresh; a fresh session is seeded with
-        ``seed`` (where the project is) and the newest handoff."""
+        the newest handoff."""
         sess = self.store.session(sid)
         if sess is None:
             raise KeyError(sid)
@@ -964,8 +844,6 @@ class Relay:
         # switch, a fresh one, seeded with what was said (the transcript stays)
         claude = dict(claude or {"home": _chat.claude_home(), "machine": True})
         env = _chat._spawn_env(**claude)
-        if env is not None and wrap_env is not None:
-            env = wrap_env(env)   # the project's git policy, enforced (gitpolicy.assistant_env)
         account = _chat.account_key(**claude) or "none"
         reseed = bool(before) and (sess.get("claude_home") or "machine") != account and kind == "message"
         if reseed:
@@ -977,7 +855,7 @@ class Relay:
                     requested=sess.get("model"), effort=sess.get("effort"), extra_mcp=dict(extra_mcp or {}),
                     account=account, reseed=reseed, cwd=str(cwd) if cwd else None, owner=owner,
                     on_end=list(on_end or []), claude=claude, env=env, reach=reach, deny=list(deny or []),
-                    save_first=save_first, seed=seed)
+                    save_first=save_first)
         self.turns[turn.id] = turn
         refs = list(attachments or [])
         self.store.add_turn(turn.id, sid, message=message, kind=kind, claude_before=before, attachments=refs)
@@ -1017,7 +895,6 @@ class Relay:
         binary = _chat.find_claude()
         final = "failed"
         config: Optional[Path] = None
-        hooks: Optional[Path] = None
         try:
             if binary is None:
                 self._item(turn, "error", text="No claude binary found on this machine — set "
@@ -1070,15 +947,6 @@ class Relay:
                     cmd.append("--strict-mcp-config")
             if turn.deny:
                 cmd += ["--disallowedTools", *turn.deny]
-            hooks = self._live_calls(turn)
-            if hooks is not None:
-                cmd += ["--settings", str(hooks)]
-            if mode != "read":
-                # a card the assistant takes is worked in its worktree, outside the project: without
-                # this its Read and Edit are refused there (tipcalc m1/C6 fell back to the shell)
-                trees = _chat.card_worktrees()
-                if trees is not None:
-                    cmd += ["--add-dir", str(trees)]
             # the guide knowledge.md points at lives in the studio package, outside the project: without
             # this its pages are refused (E6 gate 1, run 1: "file access to them wasn't granted")
             cmd += ["--add-dir", str(_chat.GUIDE)]
@@ -1110,14 +978,11 @@ class Relay:
             self._item(turn, "error", text=f"The relay failed: {exc}", retry=True)
             final = "failed"
         finally:
-            for path in (config, hooks):
-                if path is not None:
-                    try:
-                        path.unlink()
-                    except OSError:
-                        pass
-            if turn.live is not None:
-                shutil.rmtree(turn.live, ignore_errors=True)
+            if config is not None:
+                try:
+                    config.unlink()
+                except OSError:
+                    pass
             await self._finish(turn, final)
 
     def _mcp_file(self, turn: Turn, config: Dict[str, Any]) -> Path:
@@ -1129,168 +994,6 @@ class Relay:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(config, fh)
         return path
-
-    def _live_calls(self, turn: Turn) -> Optional[Path]:
-        """The turn's hook settings, given to the CLI as --settings. EXECUTION_PROGRESS D1: runhook.py, and the
-        folder it copies each shell call's output into (the stream never carries a running call's output;
-        tool_progress is a heartbeat). TURN_HONESTY S1–S3: stophook.py, which sends the model back once when the
-        turn marked plan phases done, ended on failing tests it never checked, or left its steps open."""
-        off = ("off", "0", "false")
-        hooks: Dict[str, Any] = {}
-        if os.environ.get("OPERONX_STUDIO_LIVE_TESTS", "on").lower() not in off:
-            self.run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-            turn.live = self.run_dir / f"live-{turn.id}"
-            turn.live.mkdir(exist_ok=True, mode=0o700)
-            hook = " ".join(shlex.quote(str(a)) for a in (sys.executable, "-I",
-                                                          Path(__file__).with_name("runhook.py"), turn.live))
-            hooks["PreToolUse"] = [{"matcher": "Bash|Read|Grep|Glob|Edit|Write", "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]
-        if os.environ.get("OPERONX_STUDIO_TURN_CHECKS", "on").lower() not in off:
-            hook = " ".join(shlex.quote(str(a)) for a in (sys.executable, "-I", Path(__file__).with_name("stophook.py")))
-            hooks["Stop"] = [{"hooks": [{"type": "command", "command": hook, "timeout": 30}]}]  # L1 runs lint
-        if not hooks:
-            return None
-        self.run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        path = self.run_dir / f"live-{turn.id}.json"
-        path.write_text(json.dumps({"hooks": hooks}))
-        return path
-
-    async def _watch_calls(self, turn: Turn) -> None:
-        """Each second, every running shell call's progress from its live file (D2–D5): a ``progress`` event
-        when what the row shows has changed, the call's previous one turned into a skip."""
-        while turn.live is not None:
-            await asyncio.sleep(1.0)
-            for call in list(turn.calls):
-                try:
-                    self._watch_call(turn, call)
-                except Exception:  # noqa: BLE001 — a row's progress never breaks a turn
-                    continue
-
-    def _watch_call(self, turn: Turn, call: str) -> None:
-        watch, seq = turn.calls.get(call), turn.tools.get(call)
-        if watch is None or seq is None or turn.live is None:
-            return
-        item = turn.items[seq]
-        if item.get("status") != "running":
-            return
-        now = _now()
-        path = turn.live / f"{call}.out"
-        try:
-            size = path.stat().st_size
-        except OSError:
-            size = -1
-        grew = size > watch["size"]
-        if grew:
-            watch["size"] = size
-            if not watch.get("parts_read"):
-                try:
-                    meta = json.loads(path.with_suffix(".json").read_text())
-                    watch["parts"], watch["parts_read"] = list(meta.get("parts") or []), True
-                except (OSError, ValueError):
-                    pass
-            try:
-                with path.open("rb") as fh:
-                    if size > _LIVE_MAX:
-                        head = fh.read(_LIVE_TAIL)
-                        fh.seek(size - _LIVE_TAIL)
-                        raw = (head + b"\n" + fh.read()).decode("utf-8", "replace")
-                    else:
-                        raw = fh.read().decode("utf-8", "replace")
-            except OSError:
-                raw = None
-            if raw is not None:
-                got = _progress.read(watch["command"], raw, watch.get("parts") or None)
-                if size > _LIVE_MAX:          # the middle is not read: no counts from it
-                    got = {k: v for k, v in got.items() if k not in ("current", "pct", "tests", "stages")}
-                    got["mode"] = "indeterminate"
-                    got["bytes"] = size
-                watch["read"] = got
-        got = dict(watch.get("read") or {})
-        live = watch["liveness"].see(now, grew, got.get("pid"), "ended" in got)
-        if live is not None:
-            got["live"] = live
-        est = watch.get("est_ms")
-        if est and got.get("mode", "indeterminate") == "indeterminate":
-            got.update(mode="estimated", est_ms=est)
-        if not got or got == watch.get("sent"):
-            return
-        self._progress_event(turn, item, watch, got, now)
-
-    def _progress_event(self, turn: Turn, item: Dict[str, Any], watch: Dict[str, Any], got: Dict[str, Any],
-                        now: float) -> None:
-        """D5: one small event for the row, the call's previous one turned into a skip, so a reader from any
-        cursor gets the newest state and nothing older."""
-        if watch.get("last_i") is not None:
-            turn.events[watch["last_i"]] = {"t": "skip", "i": watch["last_i"]}
-        watch["rev"] += 1
-        watch["events"] += 1
-        watch["max_gap"] = max(watch["max_gap"], now - watch["emitted"])
-        watch["emitted"] = now
-        watch["sent"] = got
-        item["progress"] = {**got, "rev": watch["rev"]}
-        turn.dirty.add(item["seq"])
-        watch["last_i"] = len(turn.events)
-        self._emit(turn, {"t": "progress", "seq": item["seq"], "rev": watch["rev"], "progress": item["progress"]})
-        self._flush(turn)
-
-    def _call_ended(self, turn: Turn, call: str, item: Dict[str, Any]) -> None:
-        """A shell call's result is in: its watch closes with its numbers (D5, measured), and how long it took
-        is kept for the next run's estimate (D2)."""
-        watch = turn.calls.pop(call, None)
-        if watch is None:
-            return
-        now = _now()
-        gap = max(watch["max_gap"], now - watch["emitted"])
-        item["stats"] = {"events": watch["events"], "max_gap_ms": round(gap * 1000)}
-        if item.get("progress"):
-            item["progress"] = {k: v for k, v in item["progress"].items() if k != "live"}
-        if item.get("status") == "ok" and not item.get("stopped_by_owner") and (item.get("ms") or 0) >= _EST_MIN_MS:
-            try:
-                past = dict(self.store.get_meta("call_ms", {}) or {})
-                past.pop(watch["key"], None)
-                past[watch["key"]] = item["ms"]
-                self.store.set_meta("call_ms", dict(list(past.items())[-_EST_KEEP:]))
-            except Exception:  # noqa: BLE001 — an estimate is a courtesy
-                pass
-
-    def _watch_start(self, turn: Turn, call: str, command: str) -> None:
-        key = re.sub(r"\s+", " ", command).strip()[:300]
-        try:
-            est = (self.store.get_meta("call_ms", {}) or {}).get(key)
-        except Exception:  # noqa: BLE001
-            est = None
-        now = _now()
-        turn.calls[call] = {"command": command, "key": key, "size": 0, "rev": 0, "events": 0, "max_gap": 0.0,
-                            "emitted": now, "last_i": None, "sent": None, "read": None,
-                            "liveness": _progress.Liveness(now), "est_ms": est if (est or 0) >= _EST_MIN_MS else None}
-
-    def stop_call(self, tid: str, call: str) -> Optional[bool]:
-        """D7: stop one shell call, not the turn — SIGINT to its process group, SIGTERM 5 s later. The CLI and
-        the model carry on with its result (130). None: no such call; False: it is not running any more."""
-        turn = self.turns.get(tid)
-        if turn is None or turn.done or call not in turn.tools:
-            return None
-        watch, item = turn.calls.get(call), turn.items[turn.tools[call]]
-        pid = ((watch or {}).get("read") or {}).get("pid")
-        if watch is None or item.get("status") != "running" or not pid or "ended" in (watch.get("read") or {}):
-            return False
-        try:
-            if os.getpgid(pid) != pid:          # the call's shell leads its own group; anything else is not it
-                return False
-            os.killpg(pid, signal.SIGINT)
-        except (ProcessLookupError, PermissionError, OSError):
-            return False
-
-        def term() -> None:
-            try:
-                if os.getpgid(pid) == pid:
-                    os.killpg(pid, signal.SIGTERM)
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
-
-        asyncio.get_running_loop().call_later(5.0, term)
-        item["stopped_by_owner"] = True
-        self._replace(turn, item)
-        return True
 
     async def _relay(self, turn: Turn, cwd: Optional[Path], snap: Optional[Dict[str, Any]]) -> str:
         proc = turn.proc
@@ -1313,7 +1016,6 @@ class Relay:
 
         if idle:
             timers.append(loop.call_later(idle, quiet))
-        watch = loop.create_task(self._watch_calls(turn)) if turn.live is not None else None
         try:
             async for raw in proc.stdout:
                 turn.heard = time.monotonic()
@@ -1329,12 +1031,6 @@ class Relay:
                             changed = _chat.changes_since(cwd, snap)
                         except Exception:  # noqa: BLE001 — the answer still stands
                             changed = None
-                        try:
-                            left = _chat.worktrees_since(cwd, snap)
-                        except Exception:  # noqa: BLE001 — the answer still stands
-                            left = []
-                        if left:
-                            self._item(turn, "worktrees", trees=left)
                         if changed and changed["files"]:
                             others = self._overlapping(turn)
                             self._item(turn, "changes", **changed, **({"overlap": others} if others else {}))
@@ -1348,8 +1044,6 @@ class Relay:
         finally:
             for timer in timers:
                 timer.cancel()
-            if watch is not None:
-                watch.cancel()
         if turn.stopping:
             return "stopped"
         if not got_result:
@@ -1457,18 +1151,12 @@ class Relay:
                     label = _tool_label(name, inputs, turn.cwd)
                     if name in ("Edit", "Write", "MultiEdit") and isinstance(inputs.get("file_path"), str):
                         turn.edited.append(str(Path(turn.cwd or ".", inputs["file_path"])))
-                    if name == "mcp__studio__board_move" and inputs.get("to") == "doing":
-                        self._take(turn, inputs.get("card"))
                     plan = self._plan(turn, inputs) if name == "mcp__studio__steps" else None
                     item = self._item(turn, "tool", id=block.get("id"), name=name, label=label,
                                       input=_clip(inputs), status="running", t0=_now(),
                                       **({"plan": plan} if plan else {}))
                     if block.get("id"):
                         turn.tools[block["id"]] = item["seq"]
-                        if name == "Bash" and testreport.is_test(str(inputs.get("command") or "")):
-                            turn.tests[block["id"]] = str(inputs["command"])
-                        if name == "Bash" and turn.live is not None and inputs.get("command"):
-                            self._watch_start(turn, block["id"], str(inputs["command"]))
                     turn.text_seq = None
                     self._state(turn, "tool", turn.step if plan else label)
             usage = message.get("usage") or {}
@@ -1480,12 +1168,6 @@ class Relay:
             return False
         if kind == "user":
             for block in (event.get("message") or {}).get("content") or []:
-                said = str(block.get("text") or "") if isinstance(block, dict) and block.get("type") == "text" else ""
-                if said.startswith("Stop hook feedback:"):
-                    # TURN_HONESTY: stophook.py sent the turn back; the owner sees what it was asked
-                    self._item(turn, "note", text="The studio sent this turn back once: "
-                               + said.split("\n", 2)[-1].strip().replace("\n- ", " · ").lstrip("- "))
-                    continue
                 if not isinstance(block, dict) or block.get("type") != "tool_result":
                     continue
                 seq = turn.tools.get(block.get("tool_use_id") or "")
@@ -1503,16 +1185,9 @@ class Relay:
                     item["task"] = task.group(1)
                     self._replace(turn, item)
                     continue
-                # a test run is read whole, before the clip: its summary line sits at the end (D6)
-                report = testreport.parse(turn.tests.pop(block.get("tool_use_id") or "", ""), str(content or ""))
-                if report:
-                    item["tests"] = report
-                else:
-                    item.pop("tests", None)     # the counts so far were a guess the end did not confirm
-                ended = "stopped" if item.get("stopped_by_owner") else "error" if block.get("is_error") else "ok"
+                ended = "error" if block.get("is_error") else "ok"
                 item.update(status=ended, output=_clip(content or ""),
                             ms=round((_now() - float(item.get("t0") or _now())) * 1000))
-                self._call_ended(turn, block.get("tool_use_id") or "", item)
                 self._replace(turn, item)
             self._state(turn, "thinking", turn.step)
             return False
@@ -1548,8 +1223,7 @@ class Relay:
         return False
 
     def _task_ended(self, turn: Turn, event: Dict[str, Any]) -> None:
-        """D6: a background call's task ended — its row gets the result its foreground twin would have had,
-        read from the live file (the CLI's own output file is its business)."""
+        """D6: a background call's task ended — its row gets the task's status and summary."""
         call = str(event.get("tool_use_id") or "")
         seq = turn.tools.get(call)
         if seq is None:
@@ -1557,32 +1231,16 @@ class Relay:
         item = turn.items[seq]
         if item.get("status") != "running":
             return
-        text = ""
-        if turn.live is not None:
-            try:
-                raw = (turn.live / f"{call}.out").read_bytes()[-_LIVE_MAX:].decode("utf-8", "replace")
-                head, parts, before = _progress.marks(raw)
-                text = before + "".join(seg for *_, seg in parts)
-            except OSError:
-                pass
         status = str(event.get("status") or "")
-        report = testreport.parse(turn.tests.pop(call, ""), text)
-        if report:
-            item["tests"] = report
-        else:
-            item.pop("tests", None)
-        item.update(status="stopped" if item.get("stopped_by_owner") else {"completed": "ok", "failed": "error"}.get(status, "stopped"),
-                    output=_clip(text or str(event.get("summary") or "")), summary=str(event.get("summary") or ""),
+        item.update(status={"completed": "ok", "failed": "error"}.get(status, "stopped"),
+                    output=_clip(str(event.get("summary") or "")), summary=str(event.get("summary") or ""),
                     ms=round((_now() - float(item.get("t0") or _now())) * 1000))
-        self._call_ended(turn, call, item)
         self._replace(turn, item)
 
     def _seed(self, turn: Turn) -> str:
-        """What a fresh Claude session starts from (E6): where the project is, the newest handoff and,
+        """What a fresh Claude session starts from (E6): the newest handoff and,
         after a sign-in switch, this conversation's last exchange. Pointers, never the whole transcript."""
         parts = []
-        if turn.seed:
-            parts.append("# Where the project is\n" + turn.seed)
         handoff = self.store.last_handoff(turn.scope)
         if handoff:
             parts.append("# Handoff from the last conversation\n" + handoff)
@@ -1600,8 +1258,8 @@ class Relay:
 
     async def _save(self, turn: Turn, binary: str, before: str, cwd: Optional[Path], prompt: str,
                     config: Optional[Path], mode: str) -> Optional[str]:
-        """Save the conversation to the project (E6): the old session, forked, writes open work to the
-        board, decisions to the BRD and knowledge.md, and answers a handoff (at most 1 KB). The chat shows
+        """Save the conversation to the project (E6): the old session, forked, writes decisions to the
+        BRD and knowledge.md, and answers a handoff (at most 1 KB). The chat shows
         one ``saved`` item with what it wrote; its steps are not relayed. None when it failed."""
         self._state(turn, "saving")
         self._flush(turn, force=True)

@@ -1528,30 +1528,6 @@ def build_studio_app(recents: Optional[Recents] = None):
     def projects() -> JSONResponse:
         return JSONResponse({"projects": [r.as_dict() for r in recents.ordered()]})
 
-    @app.get("/api/boards/waiting")
-    def boards_waiting() -> JSONResponse:
-        """Every known project's board at a glance, and what waits on the owner
-        (plan D18; the BRD's open questions and the assistant's, W1.5): the home's Boards list, the title count,
-        the notifications.
-        One read of each project's store; a broken one is skipped, not fatal."""
-        from operonx_studio import projectboard as _pb
-
-        boards, count = [], 0
-        for ref in recents.ordered():
-            if not ref.exists:
-                continue
-            asks = chat_store.asks(ref.id)  # turns that ended on a question to the owner (WORKSPACE_PLAN W1.5)
-            if not asks and not _pb.available(ref.root):
-                continue
-            try:
-                got = _pb.overview(ref.root)
-            except Exception as exc:  # noqa: BLE001 — one project's store must not hide the others
-                got = {"counts": {}, "waiting": [], "error": str(exc)[:200]}
-            got["waiting"] += asks
-            count += len(got["waiting"])
-            boards.append({"pid": ref.id, "name": ref.name, **got})
-        return JSONResponse({"count": count, "boards": boards})
-
     @app.get("/api/projects/health")
     def projects_health() -> JSONResponse:
         return JSONResponse({"health": _projects_health()})
@@ -4685,123 +4661,6 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     _knowledge.register(app, watcher_of=_watcher)
 
-    # the project's board, docs/brd/board.md: operonx_studio/projectboard.py
-    from operonx_studio import projectboard as _projectboard
-
-    _projectboard.register(app, watcher_of=_watcher, turns_of=lambda pid: chat_store.card_turns(pid),
-                           asks_of=lambda pid: chat_store.asks(pid),
-                           terminals_of=lambda pid: [t.as_dict() for t in app.state.terminals.of(pid)],
-                           deploys_of=lambda pid: app.state.deploys.all(pid))
-
-    # what the assistant may do with git, per project: operonx_studio/gitpolicy.py
-    from operonx_studio import gitpolicy as _gitpolicy
-
-    def _git_root(pid: str) -> Optional[Path]:
-        w = _watcher(pid)
-        return Path(w.root) if w is not None else None
-
-    @app.get("/api/p/{pid}/git")
-    async def git_policy(pid: str) -> JSONResponse:
-        root = _git_root(pid)
-        if root is None:
-            return JSONResponse({"error": "unknown project"}, status_code=404)
-        policy = await asyncio.to_thread(_gitpolicy.load, recents.state_file.parent, pid, root)
-        return JSONResponse(await asyncio.to_thread(_gitpolicy.routes, policy, root))
-
-    @app.post("/api/p/{pid}/git")
-    async def git_policy_set(pid: str, body: Dict[str, Any]) -> JSONResponse:
-        root = _git_root(pid)
-        if root is None:
-            return JSONResponse({"error": "unknown project"}, status_code=404)
-        try:
-            policy = _gitpolicy.save(recents.state_file.parent, pid, root, body if isinstance(body, dict) else {})
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        return JSONResponse(await asyncio.to_thread(_gitpolicy.routes, policy, root))
-
-    # Project mode › Git: the repo as the owner works it (WORKSPACE_PLAN W2): operonx_studio/gitview.py
-    from operonx_studio import gitview as _gitview
-
-    _gitview.register(app, watcher_of=_watcher, state_dir=lambda: recents.state_file.parent,
-                      turns_of=lambda pid: chat_store.card_turns(pid))
-
-    # terminals: real shells on a PTY in the checkout or a worktree (WORKSPACE_PLAN W2): operonx_studio/terminals.py
-    from operonx_studio import terminals as _terminals
-
-    from .access import allows as _allows
-
-    terms = _terminals.Terminals()
-    app.state.terminals = terms
-
-    def _terminal_env(pid: str, root: Path, by: str) -> Dict[str, str]:
-        from . import chat as _chat_mod
-
-        env = _chat_mod.base_env()
-        # the assistant's terminal is the assistant's process: the git guard on its PATH, as in its turns
-        return _gitpolicy.assistant_env(recents.state_file.parent, pid, root, env) if by == "assistant" else env
-
-    def _ws_user(ws: Any) -> Optional[Dict[str, Any]]:
-        """Who opened a websocket, when they may type into a shell: an editor, from this site's own page."""
-        if not _same_origin(ws):
-            return None
-        if not auth_on:
-            admin = users.first_admin()
-            return _person(admin, "web") if admin else dict(LOCAL, via="web")
-        token = ws.cookies.get("oxsession") or ""
-        user = None
-        if token:
-            uid = agents.resolve(token)
-            if uid is not None:
-                got = users.cached_user(uid)
-                user = _person(got, "assistant") if got is not None and not got["disabled"] else None
-            else:
-                got, _session, _touched = users.resolve(token)
-                user = _person(got, "web") if got is not None else None
-        if user is None or user["must_change"] or not _allows(user.get("role"), "edit"):
-            return None
-        return user
-
-    # where a project's commands run, this machine or a host over SSH: operonx_studio/environments.py
-    from operonx_studio import environments as _environments
-
-    def _origin(root: Path) -> str:
-        got = subprocess.run(["git", "remote", "get-url", "origin"], cwd=root, capture_output=True, text=True)
-        return got.stdout.strip() if got.returncode == 0 else ""
-
-    def _base_env() -> Dict[str, str]:
-        from . import chat as _chat_mod
-
-        return _chat_mod.base_env()
-
-    envs = _environments.register(app, watcher_of=_watcher, state_dir=lambda: recents.state_file.parent,
-                                  base_env=_base_env, remote_url=_origin)
-
-    def _remote_terminal(pid: str, root: Path, eid: str, by: str, command: str) -> Dict[str, Any]:
-        try:
-            env = envs.get(pid, root, eid)
-            why = _environments.may(env, by, "run")
-            if why:
-                return {"error": why}
-            p = envs.provider(pid, root, eid, _base_env())
-            return {"argv": p.argv(command, tty=True), "env": p.environ(), "cwd": p.cwd(),
-                    "where": env.public(envs.secrets(pid))["where"], "hide": p.clean,
-                    "secrets": lambda: list(envs.secrets(pid).vars(eid).values())}
-        except _environments.EnvError as exc:
-            return {"error": str(exc)}
-
-    _terminals.register(app, terms=terms, watcher_of=_watcher, env_of=_terminal_env, ws_user=_ws_user,
-                        remote_of=_remote_terminal)
-
-    # an environment's services and the pipeline to it: operonx_studio/deploy.py
-    from operonx_studio import deploy as _deploy
-
-    def _env_listeners(pid: str):
-        watcher = _watcher(pid)
-        return _listeners(watcher) if watcher is not None else []
-
-    _deploy.register(app, envs=envs, watcher_of=_watcher, listeners=_env_listeners, base_env=_base_env,
-                     remote_url=_origin, state_dir=lambda: recents.state_file.parent, local_procs=procs)
-
     # the run queue of a durable service: operonx_studio/runqueue.py
     from operonx_studio import runqueue as _runqueue
 
@@ -4825,7 +4684,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     async def ui_action(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         kind = str(body.get("kind") or "")
         if kind not in ("open_run", "open_monitor", "compare", "select_op", "open_jobs", "open_tab", "open_eval",
-                        "open_board", "point"):
+                        "point"):
             return JSONResponse({"error": f"unknown action {kind!r}"}, status_code=400)
         queue = ui_actions.setdefault((pid, request.state.user["id"]), [])
         seq = (queue[-1]["seq"] + 1) if queue else 1
@@ -4930,17 +4789,6 @@ def build_studio_app(recents: Optional[Recents] = None):
         new_files = [str(f) for f in body.get("new_files") or [] if ".." not in str(f)]
         done = _chat.undo(watcher.root, sha, files, new_files)
         return JSONResponse({"restored": done})
-
-    @app.post("/api/p/{pid}/chat/worktree/remove")
-    def chat_worktree_remove(pid: str, body: Dict[str, Any]) -> JSONResponse:
-        """TURN_HONESTY S3: remove a worktree a turn left behind, and its branch when it is merged."""
-        from . import chat as _chat
-
-        watcher = _watcher(pid)
-        if watcher is None:
-            return JSONResponse({"error": "unknown project"}, status_code=404)
-        got = _chat.remove_worktree(watcher.root, str(body.get("path") or ""))
-        return JSONResponse(got, status_code=200 if got["removed"] else 409)
 
     # ── the playground: toys on a service's doors ───────────────────────
     # A bridge process per project (operonx.app.play, in the project's own
@@ -5463,13 +5311,6 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": "unknown project"}, status_code=404)
         return cwd, context + _view_lines(view or {}), _studio_mcp(scope, request)
 
-    def _git_env(scope: str) -> Any:
-        """The project's git policy around the assistant's processes (PROJECT_STANDARD_PLAN D6)."""
-        root = _git_root(scope) if scope != "home" else None
-        if root is None:
-            return None
-        return lambda env: _gitpolicy.assistant_env(recents.state_file.parent, scope, root, env)
-
     def _project_mcp(scope: str) -> Dict[str, Any]:
         """A project's own tool servers, from its ``.mcp.json``: they join the
         studio's in a turn. The host's personal connectors never do
@@ -5968,22 +5809,16 @@ def build_studio_app(recents: Optional[Recents] = None):
                                view=body.get("view") if isinstance(body.get("view"), dict) else None,
                                attachments=refs, extra_mcp={} if _viewer(request) else _project_mcp(sess["scope"]),
                                owner=request.state.user["id"], on_end=[_revoker(mcp)],
-                               claude=_claude_of(request.state.user["id"]), wrap_env=_git_env(sess["scope"]),
-                               seed=_project_seed(sess["scope"]), **_limits(request))
+                               claude=_claude_of(request.state.user["id"]), **_limits(request))
         except RuntimeError as exc:
             _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse({"turn": turn.id, "cursor": 0})
 
-    def _project_seed(scope: str) -> str:
-        """Where the project is, for a session that starts fresh (ENGINEERING_ENV_PLAN E6)."""
-        owner = _watcher(scope) if scope != "home" else None
-        return _projectboard.seed(Path(owner.root)) if owner is not None else ""
-
     @app.post("/api/assistant/sessions/{sid}/save")
     async def assistant_save(sid: str, request: Request) -> JSONResponse:
         """Save the conversation to the project and start the next turn fresh (ENGINEERING_ENV_PLAN E6):
-        open work to the board, decisions to the BRD and knowledge.md, a handoff the next session starts from."""
+        decisions to the BRD and knowledge.md, a handoff the next session starts from."""
         sess = _session_or_404(sid, request)
         if isinstance(sess, JSONResponse):
             return sess
@@ -6000,8 +5835,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         try:
             turn = relay.start(sid, "Save to the project", cwd=cwd, context=context, mcp=mcp, kind="save",
                                owner=request.state.user["id"], on_end=[_revoker(mcp)],
-                               claude=_claude_of(request.state.user["id"]), wrap_env=_git_env(sess["scope"]),
-                               **_limits(request))
+                               claude=_claude_of(request.state.user["id"]), **_limits(request))
         except RuntimeError as exc:
             _revoker(mcp)()
             return JSONResponse({"error": str(exc)}, status_code=409)
@@ -6009,15 +5843,9 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     @app.post("/api/assistant/sessions/{sid}/items/{seq}")
     def assistant_item(sid: str, seq: int, body: Dict[str, Any], request: Request) -> JSONResponse:
-        """Record what the user did with a changes card (kept, or undone), or which worktrees of a worktrees
-        card they removed."""
+        """Record what the user did with a changes card: kept, or undone."""
         if isinstance(_session_or_404(sid, request), JSONResponse):
             return JSONResponse({"error": "no such item"}, status_code=404)
-        removed = body.get("removed")
-        if isinstance(removed, list):
-            item = chat_store.patch_item(sid, seq, removed=[str(p) for p in removed][:50])
-            return JSONResponse({"item": item}) if item is not None else \
-                JSONResponse({"error": "no such item"}, status_code=404)
         state = body.get("state")
         if state not in ("kept", "undone"):
             return JSONResponse({"error": "state is kept or undone"}, status_code=400)
@@ -6150,16 +5978,6 @@ def build_studio_app(recents: Optional[Recents] = None):
         if isinstance(_turn_or_404(tid, request), JSONResponse) or not relay.stop(tid):
             return JSONResponse({"error": "unknown turn"}, status_code=404)
         return JSONResponse({"ok": True})
-
-    @app.post("/api/assistant/turns/{tid}/calls/{call}/stop")
-    async def assistant_stop_call(tid: str, call: str, request: Request) -> JSONResponse:
-        # one shell call, not the turn (EXECUTION_PROGRESS D7): the model carries on with its result
-        if isinstance(_turn_or_404(tid, request), JSONResponse):
-            return JSONResponse({"error": "unknown turn"}, status_code=404)
-        got = relay.stop_call(tid, call)
-        if got is None:
-            return JSONResponse({"error": "unknown call"}, status_code=404)
-        return JSONResponse({"ok": got}, status_code=200 if got else 409)
 
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
     # closed by default: a route the table has no rule for answers 403

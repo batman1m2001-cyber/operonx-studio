@@ -30,11 +30,6 @@
     </nav>
     <!-- the open rail item's screens (shell.js HUBS) -->
     <nav class="tabs hubtabs" id="hubtabs" role="tablist" aria-label="Screens of this section" hidden>
-      <button data-tab="project" data-ppage="now" data-in="project" role="tab">Now</button>
-      <button data-tab="project" data-ppage="board" data-in="project" role="tab">Board</button>
-      <button data-tab="project" data-ppage="changes" data-in="project" role="tab">Git</button>
-      <button data-tab="project" data-ppage="files" data-in="project" role="tab">Files</button>
-      <button data-tab="project" data-ppage="terminal" data-in="project" role="tab">Terminal</button>
       <button data-tab="flow" data-view="factory" data-in="flow" role="tab" title="The whole project as one picture: its flows, services and jobs, what they share, the data they pass on">Picture</button>
       <button data-tab="flow" data-view="flows" data-in="flow" class="active" role="tab" aria-selected="true" data-folded title="A flow is opened from the picture; the Picture tab leads back">Flow</button>
       <button data-tab="prompts" data-in="flow" role="tab">Prompts</button>
@@ -47,7 +42,6 @@
       <button data-tab="monitor" data-in="monitor" role="tab">Monitor</button>
       <button data-tab="alerts" data-in="monitor" role="tab">Alerts</button>
       <button data-tab="resources" data-in="settings" role="tab">Resources</button>
-      <button data-tab="environments" data-in="settings" role="tab">Environments</button>
       <button data-tab="settings" data-in="settings" role="tab">Storage</button>
       <button data-tab="projectsettings" data-in="settings" role="tab">Project</button>
     </nav>
@@ -62,11 +56,10 @@
     <!-- the screens, by what they are for: slim on a tablet, a drawer on a phone -->
     <aside class="rail" id="rail" aria-label="Screens">
       <nav class="tabs" role="tablist" aria-label="Views">
-        <button data-tab="project" data-hub="project" role="tab" title="Project — the conversation, the board, git, files, terminal"><i data-icon="target"></i><span>Project</span></button>
         <button data-tab="flow" data-hub="flow" class="active" role="tab" title="Flow — the flows, prompts, services, jobs"><i data-icon="graph"></i><span>Flow</span></button>
         <button data-tab="traces" data-hub="runs" role="tab" title="Runs — every run, reviewing them, evals"><i data-icon="list"></i><span>Runs</span></button>
         <button data-tab="monitor" data-hub="monitor" role="tab" title="Monitor — health over time, and alerts"><i data-icon="chart"></i><span>Monitor</span></button>
-        <button data-tab="resources" data-hub="settings" role="tab" title="Settings — resources, environments, run storage, the project"><i data-icon="settings"></i><span>Settings</span></button>
+        <button data-tab="resources" data-hub="settings" role="tab" title="Settings — resources, run storage, the project"><i data-icon="settings"></i><span>Settings</span></button>
       </nav>
       <button id="rail-slim" class="railtoggle" type="button" title="Collapse the menu" aria-label="Collapse the menu"><i data-icon="collapse"></i><span>Collapse</span></button>
     </aside>
@@ -101,9 +94,6 @@
     <div id="prompts" class="pane" hidden></div>
     <div id="yaml" class="pane" hidden></div>
     <div id="alerts" class="pane" hidden></div>
-    <div id="board" class="pane" hidden></div>
-    <div id="project" class="pane" hidden></div>
-    <div id="environments" class="pane" hidden></div>
     <div id="projectsettings" class="pane" hidden></div>
     <div id="monitor" class="pane" hidden></div>
     <div id="settings" class="pane" hidden></div>
@@ -156,7 +146,6 @@
 <script src="/static/icons.js"></script>
 <script src="/static/theme.js"></script>
 <script src="/static/account.js"></script>
-<script src="/static/waiting.js"></script>
 <script src="/static/values.js"></script>
 <script src="/static/io.js"></script>
 <script src="/static/providers.js"></script>
@@ -197,14 +186,9 @@
 <script src="/static/prompts.js"></script>
 <script src="/static/yamlview.js"></script>
 <script src="/static/alerts.js"></script>
-<script src="/static/board.js"></script>
 <script src="/static/settings.js"></script>
 <script src="/static/choreo.js"></script>
 <script src="/static/hand.js"></script>
-<script src="/static/terminal.js"></script>
-<script src="/static/gitview.js"></script>
-<script src="/static/environments.js"></script>
-<script src="/static/projectmode.js"></script>
 <script src="/static/paste.js"></script>
 <script src="/static/tools.js"></script>
 <script src="/static/callrow.js"></script>

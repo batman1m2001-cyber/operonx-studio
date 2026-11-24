@@ -62,24 +62,24 @@ test("the chip: failed, then needs you, then completed, then stopped", () => {
 
 test("targets read as words", () => {
   assert.equal(P.targetWords("op:score_news"), "op score_news");
-  assert.equal(P.targetWords("row:OWN-EX-01"), "requirement OWN-EX-01");
-  assert.equal(P.targetWords("status:needs"), "needs");
+  assert.equal(P.targetWords("run:r1"), "run r1");
+  assert.equal(P.targetWords("tab:monitor"), "monitor");
   assert.equal(P.targetWords(""), "");
 });
 
 test("without a plan, tool calls group into steps by what they did", () => {
   const steps = P.fallback([
-    tool("ToolSearch", {query: "select:mcp__studio__board_card"}),           // plumbing: no step
+    tool("ToolSearch", {query: "select:mcp__studio__list_runs"}),           // plumbing: no step
     tool("Read", {file_path: "/p/app/ops.py"}),
     tool("Grep", {path: "/p/app/ops.py"}),
     tool("Read", {file_path: "/p/app/flow.py"}),
     tool("Edit", {file_path: "/p/app/ops.py"}),
     tool("Edit", {file_path: "/p/app/ops.py"}),
     tool("Bash", {command: "pytest -q"}, "error"),
-    tool("mcp__studio__board_card", {card: "F1"}, "running"),
+    tool("mcp__studio__list_runs", {}, "running"),
   ]);
   assert.deepEqual(steps.map((s) => [s.title, s.state]), [
-    ["Read 2 files", "done"], ["Edited ops.py", "done"], ["Ran the tests", "failed"], ["Read F1", "active"]]);
+    ["Read 2 files", "done"], ["Edited ops.py", "done"], ["Ran the tests", "failed"], ["List runs", "active"]]);
   assert.equal(steps[0].seqs.length, 3);
   assert.equal(steps[1].ms, 200);
 });
