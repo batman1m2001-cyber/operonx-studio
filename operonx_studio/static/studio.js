@@ -161,6 +161,8 @@ function pushView() {
     file: state.tab === "yaml" ? (state.yamlFile || null) : null,
     runs_filter: state.tab === "traces" ? (recall(`runsView:${PID}`, null) ? JSON.stringify(recall(`runsView:${PID}`, null)) : null) : null,
     monitor: state.tab === "monitor" ? JSON.stringify(recall(`monitor:${PID}`, {})) : null,
+    prompt: state.tab === "prompts" && typeof PromptsView !== "undefined" ? PromptsView.current() : null,
+    eval: state.tab === "evals" && typeof EvalsView !== "undefined" ? EvalsView.current() : null,
   };
   document.dispatchEvent(new CustomEvent("oxview"));
   if (typeof Router !== "undefined") Router.follow(window.__oxview);

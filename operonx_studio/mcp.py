@@ -364,6 +364,37 @@ def t_run_eval(s: Studio, a: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def t_prompt_draft(s: Studio, a: Dict[str, Any]) -> str:
+    """The next version of a prompt, saved and NOT served (LEAN_PRODUCT_PLAN P4). A prompt served from
+    its working text is first pinned: its text as it is now becomes the production version, so the
+    draft changes nothing until the owner serves it."""
+    name, text = str(a["name"]), str(a["text"])
+    card = next((p for p in s.call("/prompts")["prompts"] if p["name"] == name), None)
+    if card is None:
+        return f"no prompt named {name!r}"
+    pinned = ""
+    if (card.get("serving") or {}).get("version") is None:
+        got = s.call("/prompts/publish", {"name": name, "label": "production"})
+        pinned = f" Its text as it was is now v{got['version']}, labelled production, so what is served is unchanged."
+    s.call("/prompts/write", {"name": name, "text": text})
+    got = s.call("/prompts/publish", {"name": name})
+    s.show("open_prompt", name=name)
+    if not got.get("new"):
+        return f"{name}: that text is already v{got['version']}; nothing new was saved.{pinned}"
+    return (f"{name} v{got['version']} is saved and not served.{pinned} End your answer with its buttons: "
+            f"[Run eval on v{got['version']}](studio:runeval/<eval>/{got['version']}/{name}) and "
+            f"[Open {name}](studio:prompt/{name}).")
+
+
+def t_turn_to_case(s: Studio, a: Dict[str, Any]) -> str:
+    """A run becomes a dataset case: the row Add to eval writes (the user's words, or the run's input)."""
+    run, dataset = str(a["run"]), str(a["dataset"])
+    got = s.call(f"/review/run/{urllib.parse.quote(run, safe='')}/dataset", {"dataset": dataset})
+    if not got.get("added"):
+        return f"{dataset} already has run {run} as a case ({got['path']})"
+    return f"added case {got['added'][0]} to {got['path']} (run {run}); its expected output is left for the owner"
+
+
 def t_list_projects(s: Studio, a: Dict[str, Any]) -> str:
     got = s.root("/projects")
     rows = [f"- {p['name']} — {p['root']} (studio:project/{p['id']})" + ("" if p.get("exists") else " [missing]")
@@ -466,6 +497,16 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                                 "the end and report the pass rate against the run before it, with every case that "
                                 "flipped (fixed / regressed). The way to verify a change end to end.",
                  "schema": _schema({"name": _S, "timeout": _N}, ["name"])},
+    "prompt_draft": {"fn": t_prompt_draft,
+                     "description": "Save `text` as the next version of the named prompt (prompts/<name>.md, or a "
+                                    "composite's whole YAML) WITHOUT serving it: production keeps its version. The "
+                                    "owner runs the eval on it and serves it from the Prompts page.",
+                     "schema": _schema({"name": _S, "text": _S}, ["name", "text"])},
+    "turn_to_case": {"fn": t_turn_to_case,
+                     "description": "Add a recorded run to a dataset as a case: the user's words (or the run's own "
+                                    "input) as the input, the review's labels as tags; no expected output. A run "
+                                    "already there is not added twice.",
+                     "schema": _schema({"run": _S, "dataset": _S}, ["run", "dataset"])},
     "set_llm_price": {"fn": t_price,
                       "description": "Preview (apply=false) or write (apply=true) an LLM resource's prices in "
                                      "USD per 1M tokens, in the project's resources file. 0 declares a free "

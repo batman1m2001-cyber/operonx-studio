@@ -2463,6 +2463,12 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .ax-code-flip { min-height: 0; height: 22px; padding: 0 8px; border: none; border-radius: var(--r-xs); background: none;
   color: inherit; font: 11px var(--mono); }
 .ax-json { background: var(--well); }
+/* a prompt for Claude Code (LEAN_PRODUCT_PLAN P4): the copy is the block's one action */
+.ax-cc .ax-code-head { gap: 6px; }
+.ax-cc .ax-code-lang { flex: 1; }
+.ax-cc-copy { min-height: 0; height: 22px; padding: 0 10px; border: none; border-radius: var(--r-xs);
+  background: var(--accent); color: var(--on-accent); font-size: var(--fs-xs); font-weight: 600; }
+.ax-cc-copy:hover { background: var(--accent-hover); }
 .ax-json .ax-code-head { background: var(--surface-3); color: var(--text-3); }
 .ax-json .ax-ib, .ax-json .ax-code-flip { color: var(--text-3); }
 .ax-json .ax-ib:hover, .ax-json .ax-code-flip:hover { background: var(--surface-3); color: var(--text); border: none; }

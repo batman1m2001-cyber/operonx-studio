@@ -3527,7 +3527,8 @@ def build_studio_app(recents: Optional[Recents] = None):
         lines.append(
             "\n## Working in the studio\n"
             "You have studio tools (mcp__studio__*): list_runs, open_run, op_values, monitor, "
-            "compare_runs, select_op, run_job, rerun_op, play, run_eval, set_llm_price. Prefer them to reading "
+            "compare_runs, select_op, run_job, rerun_op, play, run_eval, prompt_draft, turn_to_case, set_llm_price. "
+            "Prefer them to reading "
             "run files: they answer from the run store, and what you open appears on the user's screen.\n"
             "To check a change: rerun_op re-runs the op a recorded run failed or was slow in, in the "
             "current code; play drives a service through its real door like a client would; run_eval runs an "
@@ -3539,9 +3540,13 @@ def build_studio_app(recents: Optional[Recents] = None):
             "monitor|jobs|resources|settings>), [text](studio:monitor/<service|job>/<name>), "
             "[text](studio:eval/<eval name>). "
             "Name runs and ops by link rather than pasting ids.\n"
-            "Code edits you make are shown to the user as a diff with Keep / Undo; keep each turn's "
-            "change focused. After changing code, check it (tests, a job run, or the relevant run) and "
-            "report the numbers before and after.")
+            "Your two jobs: say why a run went wrong, and draft the next prompt version. End an answer with "
+            "the buttons that act on it, not with steps in words: [Add to eval](studio:addcase/<run id>), "
+            "[Open <prompt>](studio:prompt/<prompt name>), [Run eval on v<N>](studio:runeval/<eval>/<N>/<prompt "
+            "name>). prompt_draft saves a version without serving it; the owner runs the eval and serves it.\n"
+            "You do not edit the product's code: src/ is closed to your file tools. When a fix needs code, end with "
+            "one fenced block of language claude-code: a self-contained prompt for Claude Code (the files, the "
+            "change, the check that proves it), which the owner copies into their editor.")
         result = watcher.refresh_swr()
         if result.ok and result.ir:
             import tempfile
@@ -5213,6 +5218,14 @@ def build_studio_app(recents: Optional[Recents] = None):
             lines.append(f"- Runs screen filter: {str(view['runs_filter'])[:200]}")
         if view.get("monitor"):
             lines.append(f"- Monitor showing: {str(view['monitor'])[:120]}")
+        if isinstance(view.get("prompt"), dict) and view["prompt"].get("name"):
+            p = view["prompt"]
+            lines.append(f"- open prompt: `{str(p['name'])[:120]}`"
+                         + (f", newest version v{int(p['version'])}" if isinstance(p.get("version"), int) else ", no version yet")
+                         + (f", served: v{int(p['served'])}" if isinstance(p.get("served"), int) else ", served: its working text")
+                         + (", edited since its newest version" if p.get("edited") else ""))
+        if view.get("eval"):
+            lines.append(f"- open eval: `{str(view['eval'])[:120]}`")
         return ("\n\n## What the user is looking at right now\n" + "\n".join(lines)) if lines else ""
 
     def _studio_mcp(pid: str, request: Request) -> Dict[str, Any]:

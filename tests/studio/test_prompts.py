@@ -144,3 +144,27 @@ def test_a_sample_says_which_named_prompt_it_used(client, project):
     pid = client.post("/api/open", json={"path": str(project)}).json()["id"]
     got = client.get(f"/api/p/{pid}/prompts/ask/samples").json()["samples"]
     assert got[0]["run"] == "named" and got[0]["prompts"][0]["name"] == "guard" and got[1]["prompts"] == []
+
+
+def test_the_assistant_drafts_a_prompt_version_that_is_not_served(client, project, studio_tool):
+    """LEAN_PRODUCT_PLAN P4: prompt_draft saves the next version and serves nothing new. A prompt
+    served from its working text is pinned first, so the draft does not go live on the next restart."""
+    pytest.importorskip("operonx.prompts")
+    (project / "prompts" / "guard.md").write_text("Answer {{who}} briefly.\n")
+    pid = client.post("/api/open", json={"path": str(project)}).json()["id"]
+
+    text, bad, shown = studio_tool(client, pid, "prompt_draft", name="guard", text="Answer {{who}} in one line.")
+    assert not bad and text.startswith("guard v2 is saved and not served.") and "now v1, labelled production" in text
+    assert "(studio:runeval/<eval>/2/guard)" in text and "(studio:prompt/guard)" in text
+    assert shown == [("open_prompt", {"name": "guard"})]
+    (card,) = [p for p in client.get(f"/api/p/{pid}/prompts").json()["prompts"] if p["name"] == "guard"]
+    assert card["serving"] == {"version": 1, "label": "production"} and card["versions"][0]["version"] == 2
+    diff = client.get(f"/api/p/{pid}/prompts/diff", params={"name": "guard", "a": 1, "b": 2}).json()
+    assert "-Answer {{who}} briefly." in diff["diff"] and "+Answer {{who}} in one line." in diff["diff"]
+
+    # the same text again: nothing new, and no second pin
+    text, _, _ = studio_tool(client, pid, "prompt_draft", name="guard", text="Answer {{who}} in one line.")
+    assert text == "guard: that text is already v2; nothing new was saved."
+    text, _, _ = studio_tool(client, pid, "prompt_draft", name="nope", text="x")
+    assert text == "no prompt named 'nope'"
+
