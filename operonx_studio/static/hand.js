@@ -61,11 +61,9 @@ const Hand = (() => {
     // a screen is its tab in the top bar's strip, or its hub's rail item when the strip is not showing
     if (kind === "tab") all = [...document.querySelectorAll(`#hubtabs [data-tab="${name}"], #rail [data-tab="${name}"]`),
       ...document.querySelectorAll(`#rail [data-hub="${CSS.escape(typeof hubOf === "function" ? hubOf(rest.join(":")) || "" : "")}"]`)];
-    else if (kind === "page") all = [...document.querySelectorAll(`#hubtabs [data-ppage="${name}"]`)];
-    else if (target === "commit:new") all = [...document.querySelectorAll('[data-ox-target^="commit:"]')];
     else all = [...document.querySelectorAll(`[data-ox-target="${CSS.escape(target)}"]`)];
     all = all.filter(visible);
-    return all.find((n) => n.closest(".pm-page")) || all[0] || null;
+    return all[0] || null;
   }
   async function wait(target, ms) {
     const t0 = Date.now();
@@ -147,15 +145,7 @@ const Hand = (() => {
 
   async function go(where) {
     if (typing()) return;
-    if (where.tab === "project") {
-      if (state.tab !== "project") {
-        await point("tab:project", null, {press: true, quick: true});
-        switchTab("project", {page: where.page || "now"});
-      } else if (where.page && typeof ProjectMode !== "undefined" && ProjectMode.page() !== where.page) {
-        await point(`page:${where.page}`, null, {press: true, quick: true});
-        ProjectMode.go(where.page);
-      }
-    } else if (where.tab && where.tab !== state.tab) {
+    if (where.tab && where.tab !== state.tab) {
       await point(`tab:${where.tab}`, null, {press: true, quick: true});
       switchTab(where.tab, where.opts);
     }
@@ -172,7 +162,6 @@ const Hand = (() => {
         const s = queue.shift();
         // the user's own click (a link that points) plays though following is off
         if (!active() && !s.force) { queue = queue.filter((x) => x.force); continue; }
-        if (s.refresh && typeof ProjectMode !== "undefined") { await ProjectMode.refresh(); continue; }
         if (s.go) { await go(s.go); continue; }
         if (s.run) { try { await s.run(); } catch { /* the action's own error shows where it ran */ } continue; }
         const done = await point(s.point || s.press, s.words, {press: !!s.press, quick: s.quick, or: s.or, soft: s.soft, asked: s.asked, force: s.force});

@@ -77,7 +77,6 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", "/"): "read",
     ("GET", "/api/projects"): "read",
     ("GET", "/api/projects/health"): "read",
-    ("GET", "/api/boards/waiting"): "read",
     ("POST", "/api/open"): "edit",           # the shared recents
     ("GET", "/open"): "edit",                # a launch ticket from `operonx studio`: open its project
     ("POST", "/api/forget"): "edit",
@@ -99,32 +98,6 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/media/{{sha}}"): "read",
     ("GET", f"{P}/monitor"): "read",
     ("GET", f"{P}/monitor/scores"): "read",
-    ("GET", f"{P}/board"): "read",                                 # docs/brd/board.md, its cards
-    ("GET", f"{P}/brd"): "read",                                   # the project checklist from the checkout
-    ("GET", f"{P}/board/card/{{cid}}"): "read",
-    ("GET", f"{P}/board/cycle/{{cid}}"): "read",                  # a cycle as a report: dates, cards, commits
-    ("GET", f"{P}/project/status"): "read",                        # Project mode: the engine's status document
-    ("GET", f"{P}/project/files"): "read",                         # Project mode › Files: what git tracks
-    ("GET", f"{P}/project/search"): "read",                        # E6: one search over what the project knows
-    ("GET", f"{P}/project/read"): "read",                          # E6: one section of a project doc
-    ("GET", f"{P}/project/file"): "read",
-    ("GET", f"{P}/git"): "read",                                   # what the assistant may do with git
-    ("POST", f"{P}/git"): "admin",                                 # it reaches the machine's push credentials
-    ("GET", f"{P}/terminals"): "edit",                             # a terminal is a shell on the machine
-    ("POST", f"{P}/terminals"): "edit",
-    ("POST", f"{P}/terminals/{{tid}}"): "edit",
-    ("GET", f"{P}/terminals/{{tid}}/output"): "edit",
-    ("DELETE", f"{P}/terminals/{{tid}}"): "edit",
-    ("GET", f"{P}/environments"): "edit",                          # W3: hosts and users are not for viewers
-    ("POST", f"{P}/environments"): "edit",                         # the owner-only ops are refused to the assistant
-    ("POST", f"{P}/env-services"): "edit",                         # W4: a host's listeners, started and read
-    ("GET", f"{P}/deploys"): "edit",                               # W4: the pipeline and its history
-    ("POST", f"{P}/deploys"): "edit",                              # production waits for the owner's approval
-    ("GET", f"{P}/repo"): "read",                                  # Project mode › Git
-    ("GET", f"{P}/repo/log"): "read",
-    ("GET", f"{P}/repo/diff"): "read",
-    ("GET", f"{P}/repo/prs"): "read",
-    ("POST", f"{P}/repo"): "edit",                                 # stage, commit, push… as a terminal could
     ("GET", f"{P}/trace/{{run}}"): "read",
     ("GET", f"{P}/trace/{{run}}/flow"): "read",
     ("GET", f"{P}/trace/{{run}}/tree"): "read",
@@ -208,7 +181,6 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("PATCH", f"{P}/datasets/{{name}}/rows/{{case}}"): "edit",       # operonx Dataset.update: one line of the JSONL
     ("POST", f"{P}/evals/{{name}}/run"): "edit",                     # operonx eval run: runs code, writes the score store
     ("POST", f"{P}/chat/undo"): "edit",                  # git checkout / unlink of project files
-    ("POST", f"{P}/chat/worktree/remove"): "edit",       # git worktree remove + branch -d (git's own checks)
     ("POST", f"{P}/play/open"): "edit",
     ("POST", f"{P}/play/simulate"): "edit",              # spends LLM money
     ("POST", f"{P}/play/send"): "edit",
@@ -219,8 +191,6 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/runs/fork"): "edit",         # a new run from one step, its output changed
     ("POST", f"{P}/play/restart"): "edit",
     ("POST", f"{P}/kb/{{service}}/{{path:path}}"): "edit",     # a query runs the project's code and its answer model
-    ("POST", f"{P}/board/card"): "edit",                         # add, change or move a card in board.md
-    ("POST", f"{P}/board/cycle"): "edit",                        # open or close a cycle in board.md
 
     # ── the assistant's hands on your own screen ──
     ("POST", f"{P}/ui/action"): "self",
@@ -249,7 +219,6 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{A}/turns/{{tid}}"): "self",
     ("GET", f"{A}/turns/{{tid}}/stream"): "self",
     ("POST", f"{A}/turns/{{tid}}/stop"): "self",
-    ("POST", f"{A}/turns/{{tid}}/calls/{{call}}/stop"): "self",
 
     **{key: "read" for key in READ_POSTS},
 }

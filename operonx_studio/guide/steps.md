@@ -1,6 +1,6 @@
 # Steps: the owner sees your plan
 
-Any task of several steps that acts (edits, runs, moves a card, answers a
+Any task of several steps that acts (edits, runs, answers a
 question for the owner) starts with `steps`: the whole plan, three to seven
 steps, the first one `active`. Then call it again, with the whole list, whenever a
 step starts, ends, fails, is skipped, or needs the owner — before the
@@ -13,7 +13,7 @@ work, not after it. The owner reads it as a progress card, so:
 - `waiting` is a step that needs the owner (a question, a sign-in), with
   `detail` saying what they must do;
 - a step that works on one thing on screen names it as `target`, with the
-  `point` names (`op:score_news`, `card:C3`, `row:<id>`,
+  `point` names (`op:score_news`, `run:<id>`,
   `field:score_news/threshold` for one setting of an op);
 - `blocked` is a step stopped by something other than the owner (a failed
   dependency, a service down), `detail` saying why;

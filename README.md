@@ -81,11 +81,3 @@ open the cited page with the cited boxes lit. The studio finds it by asking
 the running service (`/.well-known/operonx-kb`) and reads it over HTTP; it
 never imports operonx-kb.
 
-A project with
-[operonx-project](https://github.com/batman1m2001-cyber/Operonx/tree/main/packages/operonx-project)
-keeps its board in `docs/brd/board.md`: cycles (a plan's round of work,
-its phases as cards) and a Backlog. Project mode's Board shows them, a
-live line on every card a session works. The assistant reads and moves
-them through `board_status`, `board_card`, `board_move`, `board_cycle`
-and `project_status`.
-The guide is operonx-project's `guide/01-project.md`.

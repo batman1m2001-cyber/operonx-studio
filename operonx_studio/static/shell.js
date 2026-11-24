@@ -87,12 +87,9 @@ function syncHub() {
 
 function switchTab(name, opts) {
   if (typeof unpeek === "function") unpeek();
-  // the Board lives in Project mode: its Board page (docs/brd/board.md)
-  if (name === "board") { switchTab("project", {page: "board"}); return; }
-  // Project mode's old Environments and Settings pages are the Settings hub's (ENGINEERING_ENV_PLAN E2)
-  if (name === "project" && opts && (opts.page === "environments" || opts.page === "settings")) {
-    switchTab(opts.page === "settings" ? "projectsettings" : "environments"); return;
-  }
+  // an old address of a screen that left (LEAN_PRODUCT_PLAN P1): Project mode and its Board, Environments
+  if (name === "board" || name === "project") { switchTab(opts && opts.page === "settings" ? "projectsettings" : "flow"); return; }
+  if (name === "environments") { switchTab("resources"); return; }
   // Play runs a service's code: not a viewer's (D11); every way in stops here. It is a panel
   // of the Flow now (the Playground page is gone): its old name opens the Flow with it.
   if (name === "playground") {
@@ -378,8 +375,7 @@ document.addEventListener("click", (ev) => {
   }
 });
 for (const b of document.querySelectorAll(".tabs button[data-tab]"))
-  b.onclick = () => b.dataset.ppage ? switchTab("project", {page: b.dataset.ppage})
-    : switchTab(b.dataset.hub ? hubLast(b.dataset.hub) : b.dataset.tab);
+  b.onclick = () => switchTab(b.dataset.hub ? hubLast(b.dataset.hub) : b.dataset.tab);
 syncHub();
 
 /* The rail: the screens grouped by what they are for. Slim (icons, the
@@ -427,7 +423,7 @@ syncHub();
     b.addEventListener("click", () => { tip.hidden = true; });
   }
   window.oxRailLabel = (name) => {
-    const b = name === "project" ? null : document.querySelector(`#hubtabs [data-tab="${name}"]`) || r.querySelector(`.tabs button[data-tab="${name}"] span`);
+    const b = document.querySelector(`#hubtabs [data-tab="${name}"]`) || r.querySelector(`.tabs button[data-tab="${name}"] span`);
     $("#screen-label").textContent = b ? b.textContent : name ? name[0].toUpperCase() + name.slice(1) : "";
   };
 })();
@@ -868,8 +864,7 @@ function handSteps(steps) {
 /* The screen follows the assistant's plan: the active step's target (choreo.js focus) */
 document.addEventListener("oxplan", (ev) => {
   if (typeof Hand === "undefined" || typeof Choreo === "undefined") return;
-  const page = typeof ProjectMode !== "undefined" && ProjectMode.page ? ProjectMode.page() : null;
-  Hand.play(handSteps(Choreo.focus(ev.detail.before, ev.detail.after, {tab: state.tab, page})));
+  Hand.play(handSteps(Choreo.focus(ev.detail.before, ev.detail.after, {tab: state.tab})));
 });
 
 /* The assistant's own actions, through its hand when the screen follows it
@@ -881,12 +876,10 @@ function assistantUi(kind, args) {
   const TAB = {open_run: "traces", compare: "traces", open_monitor: "monitor", select_op: "flow", open_jobs: "jobs",
                open_eval: "evals", open_tab: args.tab};
   const steps = [];
-  // the board's overview is Plans: reading the project's state is no reason to leave the conversation for it
-  if (kind === "open_board") steps.push({go: {tab: "project", page: "board"}});
-  else if (TAB[kind]) steps.push({go: {tab: TAB[kind], opts: {quiet: true}}});
+  if (TAB[kind]) steps.push({go: {tab: TAB[kind], opts: {quiet: true}}});
   steps.push({run: () => performUi(kind, args)});
   const what = kind === "select_op" ? `op:${args.op}` : kind === "open_jobs" ? `job:${args.job}`
-    : kind === "open_eval" && args.name ? `eval:${args.name}` : kind === "open_board" && args.card ? `card:${args.card}` : null;
+    : kind === "open_eval" && args.name ? `eval:${args.name}` : null;
   if (what) steps.push({point: what, words: args.words || ""});
   Hand.play(steps);
   return Promise.resolve();
@@ -924,12 +917,6 @@ async function performUi(kind, args) {
     else toast(`No op named ${args.op} in this graph`);
   } else if (kind === "open_jobs") {
     state.jobSel = args.job; switchTab("jobs");
-  } else if (kind === "open_board") {
-    BoardView.open(args);
-  } else if (kind === "open_terminal") {
-    // a terminal the assistant opened: shown at once in Project mode, a word elsewhere (it waits on the Terminal page)
-    if (state.tab === "project" && typeof TerminalPage !== "undefined") { TerminalPage.show(args.id); ProjectMode.go("terminal"); }
-    else if (!args.quiet) toast(`Assistant opened a terminal: ${args.title || args.id}`);
   } else if (kind === "open_tab") {
     switchTab(args.tab);
   } else if (kind === "open_eval") {
@@ -944,7 +931,7 @@ async function performUi(kind, args) {
 
 /* `studio:` links in the assistant's replies (chat.js turns them into
  * buttons): studio:run/<id>, studio:op/<name>, studio:tab/<name>, studio:point/<target>,
- * studio:monitor/<origin>/<name>, studio:board[/<card>], studio:file/<path>#L<n>. */
+ * studio:monitor/<origin>/<name>, studio:file/<path>#L<n> (copies the path: the file is the editor's). */
 window.oxStudioLink = (href) => {
   const path = String(href).replace(/^studio:/, "");
   const [kind, ...rest] = path.split("/");
@@ -952,14 +939,17 @@ window.oxStudioLink = (href) => {
   if (kind === "run") return performUi("open_run", {run: arg});
   if (kind === "op") return performUi("select_op", {op: arg});
   if (kind === "tab") return performUi("open_tab", {tab: arg === "runs" ? "traces" : arg});
-  if (kind === "board") return performUi("open_board", {card: rest[0] || ""});
   if (kind === "eval") return performUi("open_eval", {name: rest[0], run: rest[1] || ""});
   // studio:point/q:Q-16 — the hand goes to it and rings it, as when the assistant points
   if (kind === "point") return performUi("point", {target: arg, byUser: true});
-  // studio:file/src/app.py#L42 — Project mode's Files page, at the line
+  // studio:file/src/app.py#L42 — the path, copied for the owner's editor
   if (kind === "file") {
     const f = window.oxRefs && window.oxRefs.fileHref(href.replace(/^studio:/, ""));
-    return f ? switchTab("project", {page: "files", file: f.path, line: f.line, end: f.end}) : null;
+    if (!f) return null;
+    const at = f.line ? `${f.path}:${f.line}` : f.path;
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(at).catch(() => {});
+    toast(`Copied ${at}`);
+    return null;
   }
   if (kind === "monitor") return performUi("open_monitor", {target: rest.length > 1 ? `${rest[0]}:${decodeURIComponent(rest.slice(1).join("/"))}` : ""});
   return null;

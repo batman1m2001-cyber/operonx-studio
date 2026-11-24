@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List
 
 __all__ = ["TEMPLATES", "TemplateError", "create", "describe"]
 
-OPERONX_PIN = "1.17.1"
+OPERONX_PIN = "1.31.0"
 
 
 class TemplateError(Exception):

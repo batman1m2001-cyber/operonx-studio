@@ -13,19 +13,14 @@
 - Callouts: a blockquote starting `> [!NOTE]`, `[!WARNING]`, `[!ERROR]`,
   `[!SUCCESS]` or `[!FINDING]`, for the one thing the owner must not miss.
 
-**Running commands.** Each shell call is a row with its own progress,
-time and Stop:
+**Running commands.** Each shell call is a row with its own time:
 - Run independent stages as separate calls: install, then build, then
   test. A long chain of `&&` is one row.
 - Anything likely to take more than two minutes runs with
   `run_in_background`.
-- Never poll with `sleep`, `until` or `pgrep` loops. The page shows the
-  run's progress, and the turn wakes you when it ends.
-- The studio refuses a test, build or install left running with `&` or
-  nohup, and any wait by `sleep`. Run it with `run_in_background` instead.
-- Keep the progress a tool already prints: `pytest` without `-q` shows
-  files, uv and npm show their default progress. Never pass flags that
-  silence it just to shorten the output.
+- Never poll with `sleep`, `until` or `pgrep` loops, and never leave a
+  test, build or install running with `&` or nohup: the turn wakes you
+  when a `run_in_background` call ends.
 
 **References.** Write paths, ops and ids as inline code (`src/a.py:12`,
 `score_news`): the page makes them clickable.
