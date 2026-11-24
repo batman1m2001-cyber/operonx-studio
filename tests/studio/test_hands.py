@@ -92,9 +92,11 @@ def test_initialize_and_list_tools():
     assert init["protocolVersion"] == mcp.PROTOCOL and "tools" in init["capabilities"]
     tools = {t["name"]: t for t in _rpc(s, "tools/list")["result"]["tools"]}
     assert set(tools) == {"list_runs", "open_run", "op_values", "monitor", "compare_runs",
-                          "select_op", "point", "steps", "run_job", "rerun_op", "play", "run_eval", "set_llm_price"}
-    # tools that run the project's code are not read tools
-    assert not {"mcp__studio__rerun_op", "mcp__studio__play", "mcp__studio__run_job"} & set(chat.STUDIO_READ_TOOLS)
+                          "select_op", "point", "steps", "run_job", "rerun_op", "play", "run_eval", "set_llm_price",
+                          "prompt_draft", "turn_to_case"}
+    # tools that run the project's code, or write to it, are not read tools
+    assert not {"mcp__studio__rerun_op", "mcp__studio__play", "mcp__studio__run_job",
+                "mcp__studio__prompt_draft", "mcp__studio__turn_to_case"} & set(chat.STUDIO_READ_TOOLS)
     assert tools["open_run"]["inputSchema"]["required"] == ["run"]
     # every read tool the read-only chat mode allows is a real tool
     assert {n.split("__")[-1] for n in chat.STUDIO_READ_TOOLS} <= set(tools)

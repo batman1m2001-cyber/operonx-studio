@@ -71,3 +71,30 @@ def team(tmp_path: Path, auth_on):
     state = tmp_path / "state"
     with TestClient(build_studio_app(Recents(state_file=state / "studio.json"))) as client:
         yield Team(client, state)
+
+
+@pytest.fixture()
+def studio_tool():
+    """Calls one of the assistant's tools (mcp.py) with its HTTP calls routed into a TestClient:
+    ``tool(client, pid, name, **args) -> (text, is_error, shown)``; *shown* lists the screens it opened."""
+    from operonx_studio import mcp
+
+    def tool(client, pid, tool_name, /, **args):
+        shown = []
+
+        class S(mcp.Studio):
+            def call(self, path, body=None, **params):
+                url = f"/api/p/{pid}{path}"
+                res = client.post(url, json=body) if body is not None else client.get(url, params=params)
+                if res.status_code >= 400:
+                    raise RuntimeError(res.json().get("error") or f"HTTP {res.status_code}")
+                return res.json()
+
+            def show(self, kind, **a):
+                shown.append((kind, a))
+
+        got = mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                          "params": {"name": tool_name, "arguments": args}}, S("http://testserver", pid))["result"]
+        return got["content"][0]["text"], bool(got.get("isError")), shown
+
+    return tool

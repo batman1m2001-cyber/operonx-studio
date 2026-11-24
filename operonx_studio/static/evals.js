@@ -124,6 +124,7 @@ const EvalsView = (() => {
     }
     if (!data.evals.find(e => e.name === v.name) && !v.dataset) v.name = (data.evals[0] || {}).name || "";
     const ev = data.evals.find(e => e.name === v.name);
+    if (typeof pushView === "function") pushView();      // the open eval rides along to the assistant
     const runBtn = el("button", "primary needs-edit", "Run eval");
     runBtn.type = "button";
     runBtn.disabled = !ev || !!v.dataset;
@@ -881,5 +882,5 @@ const EvalsView = (() => {
   }
 
   registerPane("evals", {el: box, show});
-  return {show};
+  return {show, current: () => v.name || null};
 })();

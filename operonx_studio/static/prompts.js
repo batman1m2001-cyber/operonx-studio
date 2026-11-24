@@ -15,6 +15,7 @@ const PromptsView = (() => {
   const v = Object.assign({op: "", prompt: ""}, recall(K, {}));
   let token = 0;
   let creating = false;   // the New prompt form is open
+  let shown = null;       // the prompt on the page, for the assistant's briefing
   const save = () => store(K, v);
   const MAP = "\0map";   // v.prompt for the Map: no prompt can be named that
   const goTo = (name) => { v.prompt = name; save(); show(); };
@@ -198,6 +199,9 @@ const PromptsView = (() => {
   /* A prompt object: its links, the variables it needs, who uses it, its text, its versions and the labels on them. */
   function showNamed(main, p, ops, named) {
     if (!p) return;
+    const newest = p.versions.length ? p.versions[0].version : null;
+    shown = {name: p.name, version: newest, served: (p.serving || {}).version ?? null, edited: !!p.unpublished};
+    if (typeof pushView === "function") pushView();
     const again = () => show();                    // the list says what is served too: draw the page again
     const composite = p.kind && p.kind !== "text";
     const head = el("div", "pwnhead");
@@ -396,5 +400,6 @@ const PromptsView = (() => {
   }
 
   registerPane("prompts", {el: box, show});
-  return {show, open};
+  const current = () => (shown && shown.name === v.prompt ? shown : null);
+  return {show, open, current};
 })();

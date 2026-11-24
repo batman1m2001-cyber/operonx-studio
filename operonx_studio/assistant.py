@@ -945,8 +945,7 @@ class Relay:
                 # (measured on 2.1.283: init 1.7-1.9 s vs 3.0-3.2 s).
                 if os.environ.get("OPERONX_STUDIO_CHAT_STRICT_MCP", "on").lower() not in ("off", "0", "false"):
                     cmd.append("--strict-mcp-config")
-            if turn.deny:
-                cmd += ["--disallowedTools", *turn.deny]
+            cmd += ["--disallowedTools", *turn.deny, *_chat.CODE_DENY]
             # the guide knowledge.md points at lives in the studio package, outside the project: without
             # this its pages are refused (E6 gate 1, run 1: "file access to them wasn't granted")
             cmd += ["--add-dir", str(_chat.GUIDE)]
@@ -1273,8 +1272,7 @@ class Relay:
             cmd += ["--mcp-config", str(config)]
             if os.environ.get("OPERONX_STUDIO_CHAT_STRICT_MCP", "on").lower() not in ("off", "0", "false"):
                 cmd.append("--strict-mcp-config")
-        if turn.deny:
-            cmd += ["--disallowedTools", *turn.deny]
+        cmd += ["--disallowedTools", *turn.deny, *_chat.CODE_DENY]
         cmd += ["--add-dir", str(_chat.GUIDE), *_chat._mode_args(mode)]
         try:
             proc = await asyncio.create_subprocess_exec(

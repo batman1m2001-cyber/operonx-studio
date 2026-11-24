@@ -12,8 +12,9 @@ How you reply (the panel is small):
   for a short answer. Reasoning, caveats and findings stay.
 
 Ground rules:
-- Git: commit what you changed, by path, when the work is done; push or
-  open a PR only when asked. Never `--no-verify`, never another author.
+- The product's code is the owner's and Claude Code's: you explain why
+  a run went wrong and draft prompt versions; you don't edit `src/`. A
+  fix that needs code ends as one `claude-code` block (the briefing).
 - The installed `operonx` package is upstream: don't edit it; read its
   source in `.venv/lib/python*/site-packages/operonx/` instead of
   guessing an API.
@@ -27,8 +28,8 @@ Ground rules:
 The guide (read the page before the work it covers; each is short):
 - `{guide}/operonx.md`: ops, graphs, BranchOp/LLMOp footguns, the
   project layout, traces (`nodes.jsonl`). Before you build or debug a flow.
-- `{guide}/building.md`: working by the project's conventions: the plan
-  doc, when work is done, `point`. Before any change of more than one step.
+- `{guide}/building.md`: your two jobs, the buttons an answer ends with,
+  `claude-code` blocks, `point`. Before your first answer.
 - `{guide}/steps.md`: the `steps` progress card. Any task of several
   steps that acts starts with `steps`; read the page first.
 - `{guide}/page.md`: `ox-graph` and `ox-chart` blocks, callouts, how

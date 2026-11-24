@@ -874,7 +874,7 @@ document.addEventListener("oxplan", (ev) => {
 function assistantUi(kind, args) {
   if (kind === "point" || typeof Hand === "undefined" || !Hand.active()) return performUi(kind, args);
   const TAB = {open_run: "traces", compare: "traces", open_monitor: "monitor", select_op: "flow", open_jobs: "jobs",
-               open_eval: "evals", open_tab: args.tab};
+               open_eval: "evals", open_prompt: "prompts", open_tab: args.tab};
   const steps = [];
   if (TAB[kind]) steps.push({go: {tab: TAB[kind], opts: {quiet: true}}});
   steps.push({run: () => performUi(kind, args)});
@@ -921,6 +921,8 @@ async function performUi(kind, args) {
     switchTab(args.tab);
   } else if (kind === "open_eval") {
     switchTab("evals", {name: args.name, run: args.run, exp: args.exp});
+  } else if (kind === "open_prompt") {
+    PromptsView.open({prompt: args.name});
   } else if (kind === "point") {
     // the assistant points on purpose (docs/ALIVE_ASSISTANT_PLAN.md D5): the hand goes there and rings it
     if (typeof Hand === "undefined" || typeof Choreo === "undefined") return;
@@ -931,7 +933,8 @@ async function performUi(kind, args) {
 
 /* `studio:` links in the assistant's replies (chat.js turns them into
  * buttons): studio:run/<id>, studio:op/<name>, studio:tab/<name>, studio:point/<target>,
- * studio:monitor/<origin>/<name>, studio:file/<path>#L<n> (copies the path: the file is the editor's). */
+ * studio:monitor/<origin>/<name>, studio:file/<path>#L<n> (copies the path: the file is the editor's),
+ * studio:prompt/<name>, studio:addcase/<run>, studio:runeval/<eval>/<version>/<prompt name>. */
 window.oxStudioLink = (href) => {
   const path = String(href).replace(/^studio:/, "");
   const [kind, ...rest] = path.split("/");
@@ -950,6 +953,16 @@ window.oxStudioLink = (href) => {
     if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(at).catch(() => {});
     toast(`Copied ${at}`);
     return null;
+  }
+  // the loop's buttons at the end of an answer (LEAN_PRODUCT_PLAN P4): the same actions as P3's
+  if (kind === "prompt") return performUi("open_prompt", {name: arg});
+  if (kind === "addcase") return ReviewView.addToDataset(arg);
+  if (kind === "runeval") {                 // studio:runeval/<eval>/<version>/<prompt name>: the eval is the owner's to start
+    const [ev, ver] = rest.map(decodeURIComponent), name = decodeURIComponent(rest.slice(2).join("/"));
+    if (!confirm(`Run the eval ${ev} with ${name} pinned to v${ver}?`)) return null;
+    return api(`/api/p/${PID}/evals/${encodeURIComponent(ev)}/run`, {prompts: {[name]: Number(ver)}})
+      .then(() => { toast(`${ev} is running on ${name} v${ver}: its pass rate lands beside the version`); performUi("open_prompt", {name}); })
+      .catch((err) => toast(err.message, true));
   }
   if (kind === "monitor") return performUi("open_monitor", {target: rest.length > 1 ? `${rest[0]}:${decodeURIComponent(rest.slice(1).join("/"))}` : ""});
   return null;

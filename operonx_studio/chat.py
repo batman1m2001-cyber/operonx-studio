@@ -84,6 +84,11 @@ STUDIO_READ_TOOLS = ["mcp__studio__list_runs", "mcp__studio__open_run", "mcp__st
                      "mcp__studio__point", "mcp__studio__steps"]
 
 
+#: The assistant explains and drafts; a change to the product's code is Claude Code's, from the prompt the
+#: assistant writes (LEAN_PRODUCT_PLAN P4). Its file tools never write src/ (relative to the project).
+CODE_DENY = [f"{tool}(./src/**)" for tool in ("Edit", "Write", "MultiEdit", "NotebookEdit")]
+
+
 def viewer_deny(state: Path) -> List[str]:
     """What a viewer's assistant may never read (docs/TEAM_PLAN.md §2.5):
     the studio's own state (accounts, conversations, everyone's Claude

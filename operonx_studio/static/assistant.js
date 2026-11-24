@@ -147,7 +147,7 @@
   };
 
   const LINK_ICON = {run: "list", op: "graph", tab: "right", monitor: "chart", eval: "evals", project: "folder", file: "file",
-                     point: "target"};
+                     point: "target", prompt: "prompt", runeval: "play", addcase: "plus"};
 
   function studioLink(label, href) {
     const kind = href.slice(7).split("/")[0];
@@ -261,6 +261,12 @@
     head.append(el("span", "ax-code-lang", [opts.name, lang || (opts.name ? "" : "code")].filter(Boolean).join(" · ")));
     const copy = ibtn("copy", "Copy", "ax-copy");
     copy.onclick = () => copyText(body, copy);
+    if (lang === "claude-code") {          // a code fix is Claude Code's (LEAN_PRODUCT_PLAN P4): the prompt, ready to paste
+      box.classList.add("ax-cc");
+      const cc = el("button", "ax-cc-copy", "Copy for Claude Code"); cc.type = "button";
+      cc.onclick = () => { copyText(body); toast("Copied: paste it into Claude Code"); };
+      head.append(cc);
+    }
     head.append(copy);
     const pre = el("pre");
     pre.append(el("code", null, body));

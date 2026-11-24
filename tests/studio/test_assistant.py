@@ -350,6 +350,12 @@ def test_a_turn_becomes_items_that_persist_and_restore(client, project, fake):
     assert call["cwd"] == str(project) and "--resume" not in call["argv"]
     prompt = call["argv"][call["argv"].index("--append-system-prompt") + 1]
     assert "Project briefing: chatty-demo" in prompt and "selected op: `shout`" in prompt
+    # the open prompt and eval ride along too (LEAN_PRODUCT_PLAN P4)
+    _say(client, _session(client, pid)["id"], "and this one?", view={"tab": "prompts", "eval": "smoke",
+                                                     "prompt": {"name": "rule", "version": 3, "served": 2, "edited": True}})
+    seen = _prompt(fake()[-1])
+    assert "- open prompt: `rule`, newest version v3, served: v2, edited since its newest version" in seen
+    assert "- open eval: `smoke`" in seen
     mcp = call["mcp"]
     assert mcp["mcpServers"]["studio"]["env"]["OPERONX_STUDIO_PID"] == pid
     assert "--strict-mcp-config" in call["argv"]       # the studio's tools, not the host's connectors
@@ -1347,7 +1353,11 @@ def test_a_viewers_turn_reads_with_deny_rules_and_no_project_servers(team, proje
     sid2 = _session(c, pid)["id"]
     _say(c, sid2, "and you?")
     argv = _calls(fake)[-1]["argv"]
-    assert "--disallowedTools" not in argv and "Bash" in argv and "notes" in _calls(fake)[-1]["mcp"]["mcpServers"]
+    assert "Bash" in argv and "notes" in _calls(fake)[-1]["mcp"]["mcpServers"]
+    # …but never src/ through its file tools (LEAN_PRODUCT_PLAN P4): code is the owner's and Claude Code's
+    at = argv.index("--disallowedTools") + 1
+    denied = argv[at: next(i for i in range(at, len(argv)) if argv[i].startswith("--"))]
+    assert denied == ["Edit(./src/**)", "Write(./src/**)", "MultiEdit(./src/**)", "NotebookEdit(./src/**)"]
 
 
 def test_a_viewer_is_never_offered_a_starter_it_cannot_act_on(team, tmp_path, fake):

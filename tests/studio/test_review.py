@@ -181,3 +181,14 @@ def test_a_recorded_service_run_reads_as_a_conversation_too():
     turns = conversation([], {"replay_script": [{"kind": "json", "value": {"q": 1}, "at": 2.0},
                                                 {"kind": "bytes", "size": 9}]})
     assert turns == [{"who": "user", "text": '{"q": 1}', "op": "client", "at": 2.0}]
+
+
+def test_the_assistant_turns_a_run_into_a_case(client, project, studio_tool):
+    """LEAN_PRODUCT_PLAN P4: turn_to_case writes the row Add to eval writes; twice adds nothing."""
+    pid = client.post("/api/open", json={"path": str(project)}).json()["id"]
+    text, bad, _ = studio_tool(client, pid, "turn_to_case", run="c2", dataset="reviewed")
+    assert not bad and text.startswith("added case ") and "(run c2)" in text
+    (row,) = client.get(f"/api/p/{pid}/datasets/reviewed").json()["rows"]
+    assert row["input"] == "cancel it" and text.split()[2] == row["id"]
+    text, _, _ = studio_tool(client, pid, "turn_to_case", run="c2", dataset="reviewed")
+    assert text.startswith("reviewed already has run c2 as a case")
