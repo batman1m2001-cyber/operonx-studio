@@ -2485,7 +2485,14 @@ def build_studio_app(recents: Optional[Recents] = None):
 
     from operonx.telemetry.runs import RunFilter
 
-    from operonx_studio.runs import LF_PREFIX, project_runs, read_retention, write_retention
+    from operonx_studio.runs import (
+        LF_PREFIX,
+        project_runs,
+        read_retention,
+        read_trace_sink,
+        write_retention,
+        write_trace_sink,
+    )
 
     def _runs(pid: str):
         watcher = _watcher(pid)
@@ -3247,6 +3254,9 @@ def build_studio_app(recents: Optional[Recents] = None):
             # as written (it is edited in the file, like the services)
             "retry": _studio_manifest(watcher.root).get("retry") or None,
             "prompt_store": _prompt_store_view(watcher.root),
+            # where runs are written: [tracing] sinks in operonx.toml, the
+            # picker's choices, and an OPERONX_TRACE overriding it here
+            "tracing": read_trace_sink(watcher.root),
         })
 
     # ── settings: the prompt store ───────────────────────────────────────
@@ -3507,6 +3517,26 @@ def build_studio_app(recents: Optional[Recents] = None):
         pr = project_runs(watcher.root, sweep=False)
         deleted = pr.sweep(force=True)
         return JSONResponse({"retention": read_retention(watcher.root), "deleted": deleted})
+
+    @app.post("/api/p/{pid}/settings/tracing")
+    def tracing_save(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Make one store the one ``[tracing] sinks`` writes runs to. The
+        file is the setting: the studio reads the new store at once, the
+        project's services when they next start."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        try:
+            write_trace_sink(watcher.root, str(body.get("sink") or ""))
+        except safewrite.WriteRefused as exc:
+            return JSONResponse(exc.to_dict(), status_code=409)
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except OSError as exc:
+            return JSONResponse({"error": f"could not write operonx.toml: {exc}"}, status_code=500)
+        pr = project_runs(watcher.root, sweep=False)
+        return JSONResponse({"tracing": read_trace_sink(watcher.root), "store": pr.source,
+                             "store_info": pr.info})
 
     # ── the assistant ───────────────────────────────────────────────────
     # The ✦ panel is a real Claude Code session on this machine (chat.py

@@ -64,7 +64,9 @@ __all__ = [
     "StoreUnreachable",
     "project_runs",
     "read_retention",
+    "read_trace_sink",
     "write_retention",
+    "write_trace_sink",
 ]
 
 LF_PREFIX = "lf:"
@@ -305,6 +307,122 @@ def _langfuse_spec(root: Path) -> Optional[Dict[str, Any]]:
     if not (host and public and secret):
         return None
     return {"backend": "langfuse", "host": host, "public_key": public, "secret_key": secret}
+
+
+# ── where runs go: [tracing] sinks ───────────────────────────────────────
+
+#: The resource categories a run can be stored in (a store the studio reads
+#: back), beside the built-in "local"; other sinks (Langfuse, ...) are kept
+#: as they are when the store is changed.
+STORE_CATEGORIES = ("run_store", "trace_clickhouse")
+TRACE_ENV = "OPERONX_TRACE"
+_SINKS_LINE = re.compile(r"^\s*sinks\s*=")
+
+
+def _is_store(sink: str) -> bool:
+    return sink == "local" or sink.split(":", 1)[0] in STORE_CATEGORIES
+
+
+def _store_label(category: str, spec: Dict[str, Any]) -> Tuple[str, str]:
+    backend = str(spec.get("backend") or ("clickhouse" if category == "trace_clickhouse" else "files"))
+    name = {"clickhouse": "ClickHouse", "postgres": "Postgres", "mongo": "MongoDB",
+            "sqlite": "SQLite", "files": "Files"}.get(backend, backend)
+    where = spec.get("database") or spec.get("path") or spec.get("root") or ""
+    return name, str(where)
+
+
+def read_trace_sink(root: Path) -> Dict[str, Any]:
+    """What Settings' "Runs go to" shows: the store ``[tracing] sinks``
+    names, the stores the project's resources offer, the other sinks kept
+    beside it, and an ``OPERONX_TRACE`` that overrides the file here."""
+    manifest = _manifest(root)
+    table = manifest.get("tracing")
+    sinks = table.get("sinks") if isinstance(table, dict) else None
+    sinks = [str(x) for x in sinks] if isinstance(sinks, list) else None
+    options = [{"sink": "local", "label": "Local files", "detail": ".operonx/runs on this machine"}]
+    res = _resources(root, manifest)
+    for category in STORE_CATEGORIES:
+        for name, spec in sorted((res.get(category) or {}).items()):
+            if isinstance(spec, dict):
+                label, where = _store_label(category, spec)
+                options.append({"sink": f"{category}:{name}", "label": label, "detail": where})
+    stores = [x for x in sinks or [] if _is_store(x)]
+    if sinks is None:
+        current = "local"   # nothing set: a job records locally
+    else:
+        current = stores[0] if stores else None
+    env = os.environ.get(TRACE_ENV)
+    if env is None:
+        try:
+            from operonx.telemetry.runs.project import read_dotenv
+
+            env = read_dotenv(root / ".env").get(TRACE_ENV)
+        except Exception:  # noqa: BLE001 — an older operonx: no override shown
+            env = None
+    return {
+        "sinks": sinks,
+        "current": current,
+        "options": options,
+        "others": [x for x in sinks or [] if not _is_store(x)],
+        "extra_stores": stores[1:],
+        "env": (env or "").strip() or None,
+    }
+
+
+def write_trace_sink(root: Path, sink: str) -> List[str]:
+    """Make *sink* the store ``[tracing] sinks`` names in ``operonx.toml``,
+    keeping its other sinks (Langfuse, ...) after it. Only that one line
+    changes (``[tracing.services.*]`` and every comment stay); a file with
+    no ``[tracing]`` gets the table at its end. Returns the new list."""
+    now = read_trace_sink(root)
+    if sink not in {o["sink"] for o in now["options"]}:
+        raise ValueError(f"{sink!r} is not a store this project has (local, or one in its resources)")
+    sinks = [sink] + now["others"]
+    line = "sinks = [" + ", ".join(f'"{x}"' for x in sinks) + "]\n"
+    path = root / MANIFEST
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    lines = text.splitlines(keepends=True)
+    out: List[str] = []
+    in_table = found = written = False
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        head = raw.split("#", 1)[0].strip()
+        if head.startswith("[") and head.endswith("]"):
+            if in_table and not written:   # [tracing] had no sinks: first line of the table
+                out.append(line)
+                written = True
+            in_table = head == "[tracing]"
+            found = found or in_table
+        elif in_table and not written and _SINKS_LINE.match(raw):
+            # the old value, a multi-line array included
+            depth = raw.count("[") - raw.count("]")
+            while depth > 0 and i + 1 < len(lines):
+                i += 1
+                depth += lines[i].count("[") - lines[i].count("]")
+            out.append(line)
+            written = True
+            i += 1
+            continue
+        out.append(raw)
+        i += 1
+    if in_table and not written:
+        if out and not out[-1].endswith("\n"):
+            out.append("\n")
+        out.append(line)
+        written = True
+    if not found:
+        if out and not out[-1].endswith("\n"):
+            out.append("\n")
+        out.append(("\n" if out else "") + "[tracing]\n" + line)
+    after = "".join(out)
+    if after != text:
+        from operonx_studio import safewrite
+
+        scope = [("tracing", "sinks")] if found else [("tracing",)]
+        safewrite.commit(root, path, after, safewrite.sha(text), before=text,
+                         scope=safewrite.toml_scope(scope), what="where runs go")
+    return sinks
 
 
 # ── retention ────────────────────────────────────────────────────────────

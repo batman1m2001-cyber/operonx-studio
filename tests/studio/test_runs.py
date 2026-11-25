@@ -28,7 +28,9 @@ from operonx_studio.runs import (
     _store_spec,
     project_runs,
     read_retention,
+    read_trace_sink,
     write_retention,
+    write_trace_sink,
 )
 
 pytestmark = pytest.mark.unit
@@ -667,3 +669,52 @@ def test_flow_stats_count_runs_errors_and_days_per_flow(client, project):
     wide = client.get(f"/api/p/{pid}/flows/stats", params={"days": 30}).json()["flows"]["flow"]
     assert wide["runs"] == 3 and wide["errors"] == 1
     assert client.get("/api/p/nope/flows/stats").status_code == 404
+
+
+# -- where runs go: [tracing] sinks ----------------------------------------------------
+
+RESOURCES = "run_store:default:\n  backend: sqlite\n  path: runs.sqlite\n"
+
+
+def test_write_trace_sink_changes_only_the_sinks_line(project):
+    (project / "resources.yaml").write_text(RESOURCES)
+    body = (MANIFEST + '\n[tracing]\n# where every run goes\nsinks = [\n  "local",\n  "trace_langfuse:team",\n]\n'
+            '\n# the page reads are not traced\n[tracing.services.dashboard]\nsinks = []\n')
+    (project / "operonx.toml").write_text(body)
+    got = read_trace_sink(project)
+    assert got["current"] == "local" and got["others"] == ["trace_langfuse:team"]
+    assert [o["sink"] for o in got["options"]] == ["local", "run_store:default"]
+    assert got["options"][1]["label"] == "SQLite"
+    assert write_trace_sink(project, "run_store:default") == ["run_store:default", "trace_langfuse:team"]
+    text = (project / "operonx.toml").read_text()
+    assert text == body.replace('sinks = [\n  "local",\n  "trace_langfuse:team",\n]\n',
+                                'sinks = ["run_store:default", "trace_langfuse:team"]\n')
+    assert read_trace_sink(project)["current"] == "run_store:default"
+    with pytest.raises(ValueError, match="not a store this project has"):
+        write_trace_sink(project, "run_store:nope")
+
+
+def test_write_trace_sink_adds_the_line_or_the_table(project):
+    (project / "operonx.toml").write_text(MANIFEST + "\n[tracing.services.x]\nsinks = []\n")
+    assert read_trace_sink(project)["current"] == "local"  # nothing set: a job records locally
+    write_trace_sink(project, "local")
+    assert (project / "operonx.toml").read_text().endswith('[tracing.services.x]\nsinks = []\n\n[tracing]\nsinks = ["local"]\n')
+    (project / "operonx.toml").write_text(MANIFEST + "\n[tracing]\n\n[tracing.services.x]\nsinks = []\n")
+    write_trace_sink(project, "local")
+    assert '[tracing]\n\nsinks = ["local"]\n[tracing.services.x]' in (project / "operonx.toml").read_text()
+
+
+def test_settings_picks_where_runs_go_and_the_studio_reads_it(client, project, monkeypatch):
+    monkeypatch.delenv("OPERONX_TRACE", raising=False)
+    (project / "resources.yaml").write_text(RESOURCES)
+    (project / "operonx.toml").write_text(MANIFEST + '\n[tracing]\nsinks = ["local"]\n')
+    pid = _open(client, project)
+    tr = client.get(f"/api/p/{pid}/settings").json()["tracing"]
+    assert tr["current"] == "local" and tr["env"] is None
+    saved = client.post(f"/api/p/{pid}/settings/tracing", json={"sink": "run_store:default"}).json()
+    assert saved["tracing"]["current"] == "run_store:default"
+    assert saved["store_info"]["backend"] == "sqlite"  # the studio reads the new store at once
+    assert 'sinks = ["run_store:default"]' in (project / "operonx.toml").read_text()
+    assert client.post(f"/api/p/{pid}/settings/tracing", json={"sink": "x:y"}).status_code == 400
+    (project / ".env").write_text("OPERONX_TRACE=local\n")
+    assert client.get(f"/api/p/{pid}/settings").json()["tracing"]["env"] == "local"
