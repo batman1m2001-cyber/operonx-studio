@@ -159,6 +159,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", f"{P}/trace/{{run}}/delete"): "edit",
     ("POST", f"{P}/resources/price"): "edit",
     ("POST", f"{P}/settings/retention"): "edit",
+    ("POST", f"{P}/settings/tracing"): "edit",
     ("POST", f"{P}/jobs/{{name}}/run"): "edit",
     ("POST", f"{P}/services/start"): "edit",
     ("POST", f"{P}/services/queues/requeue"): "edit",

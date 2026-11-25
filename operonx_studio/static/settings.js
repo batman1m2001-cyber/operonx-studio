@@ -196,6 +196,52 @@
     return sec;
   }
 
+  /* Runs go to: the store [tracing] sinks in operonx.toml writes runs to. The file is the
+   * setting — this writes that one line; the studio reads the new store at once, the
+   * project's services when they next start. */
+  function sinkPicker(tr) {
+    const wrap = el("div");
+    wrap.dataset.oxTarget = "setting:tracing";
+    const row = el("div", "setstorerow");
+    const pick = el("select", "setdsn setsink");
+    pick.setAttribute("aria-label", "Where runs are written");
+    for (const o of tr.options || []) {
+      const opt = el("option", null, o.detail ? `${o.label} · ${o.detail}` : o.label);
+      opt.value = o.sink;
+      pick.append(opt);
+    }
+    if (tr.current == null) {
+      const off = el("option", null, "Not traced ([tracing] sinks = [])");
+      off.value = ""; off.disabled = true;
+      pick.prepend(off);
+    }
+    pick.value = tr.current == null ? "" : tr.current;
+    const save = el("button", "primary needs-edit", "Save");
+    save.type = "button";
+    save.disabled = true;
+    pick.onchange = () => { save.disabled = pick.value === (tr.current || ""); };
+    const out = el("div", "note setstoreout");
+    save.onclick = async () => {
+      save.disabled = true;
+      out.textContent = "Saving…";
+      try {
+        await api(`/api/p/${PID}/settings/tracing`, {sink: pick.value});
+        toast("Saved to operonx.toml — restart the services to use it");
+        await show();
+      } catch (e) { out.textContent = e.message; save.disabled = false; }
+    };
+    row.append(pick, save);
+    if (window.Account && Account.viewOnly) Account.readonly(pick);
+    wrap.append(row);
+    const notes = [];
+    if (tr.env) notes.push(`OPERONX_TRACE=${tr.env} on this machine overrides it.`);
+    if ((tr.others || []).length) notes.push(`Also sent to ${tr.others.join(", ")}.`);
+    notes.push("[tracing] sinks in operonx.toml — services use it from their next start.");
+    for (const n of notes) wrap.append(el("div", "note", n));
+    wrap.append(out);
+    return wrap;
+  }
+
   async function show() {
     box.textContent = "";
     box.append(el("div", "note", "Loading settings…"));
@@ -208,6 +254,7 @@
 
     const runs = el("section", "setsection");
     runs.append(el("h3", "setsectitle", "Runs"));
+    if (current.tracing) runs.append(el("div", "setname", "Runs go to"), sinkPicker(current.tracing));
     const facts = el("div", "facts");
     const info = current.store_info || {};
     facts.append(factRow("Stored in", info.label || current.store, true));
