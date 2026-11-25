@@ -419,6 +419,9 @@
 :root[data-theme="dark"]:not([data-glass="solid"]) body.page {
   --surface: rgba(255, 255, 255, .035); --surface-2: rgba(255, 255, 255, .05);
   --surface-3: rgba(255, 255, 255, .09); }
+/* a sticky table head is solid: on the clear glass the rows scrolled
+   visibly through it (the Runs table) */
+:root[data-theme="dark"]:not([data-glass="solid"]) .datatable th { background: #17151f; }
 
 /* ── clear glass, on every page ──────────────────────────────────────────────────────────────────
  * The panes were frosted: a heavy blur under a nearly opaque tint, so what lies behind was a smear.
