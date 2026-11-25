@@ -116,13 +116,17 @@ const RunsView = (() => {
 
   function same(a, b) { return a.kind === b.kind && (a.name || "") === (b.name || ""); }
 
+  // a section's folders, busiest first: the ones with runs lead, idle ones sink (ties by name)
+  const byRuns = (items) => [...(items || [])].sort((a, b) =>
+    (b.runs || 0) - (a.runs || 0) || String(a.name).localeCompare(String(b.name)));
+
   function renderRail(rail) {
     rail.textContent = "";
     if (!origins) return;
     rail.append(railItem("All runs", origins.total, origins.errors, v.folder.kind === "all",
       () => pick({kind: "all"})));
     for (const [key, label, kind] of SECTIONS) {
-      const items = origins[key] || [];
+      const items = byRuns(origins[key]);
       if (!items.length) continue;
       rail.append(el("div", "railhead", label));
       for (const it of items) {
@@ -145,7 +149,7 @@ const RunsView = (() => {
     };
     add(`All runs · ${origins ? origins.total : ""}`, {kind: "all"});
     for (const [key, label, kind] of SECTIONS) {
-      const items = (origins && origins[key]) || [];
+      const items = byRuns(origins && origins[key]);
       if (!items.length) continue;
       const g = el("optgroup");
       g.label = label;
