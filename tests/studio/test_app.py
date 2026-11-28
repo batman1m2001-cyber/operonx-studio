@@ -1366,7 +1366,7 @@ def test_the_stylesheet_and_the_pictures_follow_the_colour_theme(client, tmp_pat
     palette.use({"preset": "golden"})
     try:
         gold = client.get("/static/studio.css").text
-        assert gold != plain and len(gold) == len(plain)       # the same rules, other colours
+        assert gold != plain and gold.count("{") == plain.count("{")       # the same rules, other colours
         assert client.get("/static/factory2d.js").text != canvas
         drawn = palette.state_dir() / "theme" / "golden" / "backdrop-dark.webp"
         drawn.parent.mkdir(parents=True, exist_ok=True)

@@ -22,8 +22,13 @@ flowchart LR
 ```
 
 Nothing in `static/` changes. A colour is turned when its hue is 226–295° (lavender): the new hue
-is the preset's, and the small differences between the lavenders are kept at half size. Type
-colours (blue calls, red errors, green status) stay.
+is the preset's, and the small differences between the lavenders are kept at half size.
+
+The studio's second colour, the blue of selections, links, wires and code ops (hue 200–226°),
+follows too, with less than half the colour, so brand and second colour still differ. A theme that
+is itself blue leaves it. Red, green, amber and greys stay.
+
+![Jobs, flow canvas and Monitor in golden](golden-second-colour.png)
 
 ## Files
 

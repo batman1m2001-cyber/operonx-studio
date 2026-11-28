@@ -810,7 +810,8 @@ def build_studio_app(recents: Optional[Recents] = None):
             digest.update(f"{f.name}:{stat.st_mtime_ns}:{stat.st_size};".encode())
         # what is served is also what these make of the files: a new
         # minifier or dark-theme rule is a new version too
-        for f in (Path(__file__).parent / "minify.py", Path(__file__).parent / "theme.py"):
+        for f in (Path(__file__).parent / "minify.py", Path(__file__).parent / "theme.py",
+                  Path(__file__).parent / "palette.py"):
             if f.is_file():
                 digest.update(f"{f.name}:{f.stat().st_mtime_ns};".encode())
         digest.update(palette.stamp().encode())     # another colour theme is another version

@@ -13,8 +13,9 @@ scripts are served, lightness kept, and the pictures are drawn again once
                                    or a hue of its own: {"hue": 160, "sat": 0.8}
     <state>/theme/<name>/          the pictures, drawn for that preset
 
-What is not lavender is left alone: greys, and the colours that mean
-something (ok green, warning amber, error red, the kinds of op).
+The studio's second colour, the blue of selections, links, wires and code
+ops, follows too, muted (``SECOND``). The rest is left alone: greys, and
+the colours that mean something (ok green, warning amber, error red).
 """
 
 from __future__ import annotations
@@ -33,6 +34,10 @@ __all__ = ["BAND", "active", "picture", "presets", "recolor", "render", "stamp",
 BAND = (226.0, 295.0)
 #: The brand's own hue; a preset keeps a part of each colour's distance to it, so a glow still has depth.
 HOME, SPREAD = 262.0, 0.5
+#: The studio's second colour, the blue of what is selected, of links, wires and code ops. Under another
+#: hue it would stand beside the brand as a stranger, so it follows the theme too, muted: the two stay
+#: apart by how much colour they have, as they were by hue. A theme that is itself blue leaves it.
+SECOND, SECOND_HOME, MUTE, NEAR = (200.0, 226.0), 215.0, 0.45, 25.0
 STATIC = Path(__file__).parent / "static"
 
 _HEX = re.compile(r"(#|%23)([0-9a-fA-F]{6})([0-9a-fA-F]{2})?(?![0-9a-fA-F])")
@@ -75,9 +80,16 @@ def stamp() -> str:
 def _turn(r: int, g: int, b: int, hue: float, sat: float) -> Optional[Tuple[int, int, int]]:
     h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
     deg = h * 360
-    if not (BAND[0] <= deg <= BAND[1]) or s < 0.18 or not (0.06 < l < 0.975):
+    if s < 0.18 or not (0.06 < l < 0.975):
         return None
-    new = ((hue + (deg - HOME) * SPREAD) % 360) / 360
+    home = HOME
+    if SECOND[0] <= deg < SECOND[1]:
+        if abs((hue - SECOND_HOME + 180) % 360 - 180) < NEAR:
+            return None
+        home, sat = SECOND_HOME, sat * MUTE
+    elif not (BAND[0] <= deg <= BAND[1]):
+        return None
+    new = ((hue + (deg - home) * SPREAD) % 360) / 360
     out = colorsys.hls_to_rgb(new, l, min(1.0, s * sat))
     return tuple(round(c * 255) for c in out)  # type: ignore[return-value]
 
