@@ -78,6 +78,7 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", "/api/projects"): "read",
     ("GET", "/api/projects/health"): "read",
     ("POST", "/api/open"): "edit",           # the shared recents
+    ("POST", "/api/clone"): "edit",          # a clone in the workspaces, then the shared recents
     ("GET", "/open"): "edit",                # a launch ticket from `operonx studio`: open its project
     ("POST", "/api/forget"): "edit",
     ("POST", "/api/new"): "edit",            # a directory, first-run jobs

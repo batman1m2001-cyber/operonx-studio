@@ -159,7 +159,7 @@ def test_admin_routes_refuse_editors_and_viewers(people):
 def test_edit_routes_refuse_viewers_before_the_handler_runs(people):
     team = people["team"]
     edit_routes = _by_level(team, "edit")
-    assert len(edit_routes) == 50   # + secrets/use, secrets/environment (PROJECT_SOURCE_PLAN S1); + Runs go to (settings/tracing); the process routes (board, git, terminals, environments, deploys, worktrees) left in LEAN_PRODUCT_PLAN P1
+    assert len(edit_routes) == 51   # + clone (PROJECT_SOURCE_PLAN S2); + secrets/use, secrets/environment (PROJECT_SOURCE_PLAN S1); + Runs go to (settings/tracing); the process routes (board, git, terminals, environments, deploys, worktrees) left in LEAN_PRODUCT_PLAN P1
     team.use(people["viewer"]["token"])
     # the real project id: a handler that ran would act on it
     for method, path in edit_routes:

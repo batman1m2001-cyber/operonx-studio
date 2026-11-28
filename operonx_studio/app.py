@@ -49,7 +49,7 @@ try:  # a module-level name: FastAPI resolves route annotations from here
 except ImportError:  # pragma: no cover — fastapi is a dependency
     Request = Any  # type: ignore[misc,assignment]
 
-from operonx_studio import safewrite
+from operonx_studio import gitsource, safewrite
 from operonx_studio import secrets as secretstore
 from operonx_studio.daemon import ProjectWatcher
 from operonx_studio.layout import layout_graph
@@ -1521,7 +1521,7 @@ def build_studio_app(recents: Optional[Recents] = None):
     def home(request: Request):
         # the list and its signal ride in the page: two tunnel round trips
         # (~1.5 s) traded for ~0.2 s of server time (measured, 25 projects)
-        boot = json.dumps({"projects": [r.as_dict() for r in recents.ordered()],
+        boot = json.dumps({"projects": _project_rows(),
                            "health": _projects_health(),
                            "sessions": [_session_out(x) for x in
                                         chat_store.sessions(None, owner=request.state.user["id"], limit=6)]},
@@ -1529,9 +1529,13 @@ def build_studio_app(recents: Optional[Recents] = None):
         return _page("home.html", '<script id="home-boot" type="application/json">'
                      + boot.replace("</", "<\\/") + "</script>", request)
 
+    def _project_rows() -> List[Dict[str, Any]]:
+        """The recents, each with where it comes from (a git remote and branch, or nothing)."""
+        return [{**r.as_dict(), "source": gitsource.source(r.root)} for r in recents.ordered()]
+
     @app.get("/api/projects")
     def projects() -> JSONResponse:
-        return JSONResponse({"projects": [r.as_dict() for r in recents.ordered()]})
+        return JSONResponse({"projects": _project_rows()})
 
     @app.get("/api/projects/health")
     def projects_health() -> JSONResponse:
@@ -1633,6 +1637,18 @@ def build_studio_app(recents: Optional[Recents] = None):
             )
         ref = recents.touch(root)
         return JSONResponse({"id": ref.id, "name": ref.name})
+
+    @app.post("/api/clone")
+    def clone_project(body: Dict[str, Any]) -> JSONResponse:
+        """Add a project from a git remote: clone it into the studio's
+        workspaces and open that folder. ``tracked_env`` names the
+        ``.env*`` files the repository carries, which should not be there."""
+        try:
+            root = gitsource.clone(str(body.get("url") or ""), str(body.get("branch") or "").strip())
+        except gitsource.CloneError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        ref = recents.touch(root)
+        return JSONResponse({"id": ref.id, "name": ref.name, "tracked_env": gitsource.tracked_env_files(root)})
 
     @app.post("/api/forget")
     def forget(body: Dict[str, Any]) -> JSONResponse:
