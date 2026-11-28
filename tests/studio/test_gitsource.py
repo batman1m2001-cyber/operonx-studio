@@ -89,3 +89,88 @@ def test_a_refused_sign_in_says_where_the_token_goes(remote):
     tmp, _ = remote
     failed = subprocess.CompletedProcess([], 128, "", "fatal: could not read Username for 'https://example.test': terminal prompts disabled")
     assert "example.test=<token>" in gitsource._why(failed, "example.test")
+
+
+# ── S3: pull and push ─────────────────────────────────────────────────
+
+def _git(cwd, *args):
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+@pytest.fixture
+def cloned(remote):
+    tmp, point = remote
+    bare = _repo(tmp / "bare.git")
+    point(URL, bare)
+    return gitsource.clone(URL), bare, tmp
+
+
+def _upstream(tmp, bare, name, text):
+    """Someone else commits to the remote's main."""
+    other = tmp / "other"
+    if not other.exists():
+        subprocess.run(["git", "clone", "-q", str(bare), str(other)], check=True, capture_output=True)
+    _git(other, "pull", "-q")
+    (other / name).write_text(text)
+    _git(other, "add", "-A")
+    _git(other, "commit", "-q", "-m", f"upstream {name}")
+    _git(other, "push", "-q")
+
+
+def test_push_sends_the_edits_to_the_studio_branch_and_leaves_the_folder_alone(cloned):
+    root, bare, _ = cloned
+    assert gitsource.status(root, "demo") == {"remote": "example.test/org/demo", "branch": "main", "edits": 0,
+                                               "files": [], "pushed": False, "push_branch": "studio/demo", "link": None}
+    with pytest.raises(gitsource.GitRefused, match="nothing was edited"):
+        gitsource.push(root, "demo", "ann")
+    (root / "prompts").mkdir()
+    (root / "prompts" / "a.md").write_text("hello\n")
+    (root / "operonx.toml").write_text("[project]\nname = 'demo'\n# edited\n")
+    (root / ".env").write_text("SECRET=1\n")                               # never sent
+    (root / ".operonx" / "runs").mkdir(parents=True)
+    (root / ".operonx" / "runs" / ".index.sqlite").write_text("runs")      # the studio's own files: never sent
+    head = _git(root, "rev-parse", "HEAD")
+    done = gitsource.push(root, "demo", "ann")
+    assert done == {"branch": "studio/demo", "files": 2, "link": None}     # example.test: no known merge page
+    assert _git(bare, "show", "--name-only", "--format=%an|%s", "studio/demo").splitlines() == [
+        "ann|studio: edits to operonx.toml, prompts/a.md", "", "operonx.toml", "prompts/a.md"]
+    assert _git(bare, "rev-parse", "studio/demo~1") == head                # one commit on top of the folder's
+    assert _git(bare, "rev-parse", "main") == head                         # the default branch is not touched
+    assert _git(root, "rev-parse", "HEAD") == head and _git(root, "status", "--porcelain") != ""   # still edits here
+    st = gitsource.status(root, "demo")
+    assert st["edits"] == 2 and st["pushed"] is True
+    (root / "prompts" / "a.md").write_text("hello again\n")
+    assert gitsource.status(root, "demo")["pushed"] is False               # a new edit is not the pushed one
+
+
+def test_pull_keeps_edits_drops_the_ones_the_remote_now_holds_and_refuses_a_clash(cloned):
+    root, bare, tmp = cloned
+    (root / "notes.md").write_text("mine\n")                               # an edit the remote never touches
+    _upstream(tmp, bare, "src.py", "x = 1\n")
+    assert gitsource.pull(root) == {"updated": True, "commits": 1}
+    assert (root / "src.py").read_text() == "x = 1\n" and (root / "notes.md").read_text() == "mine\n"
+    assert gitsource.pull(root) == {"updated": False, "commits": 0}
+    # the pushed edit was merged upstream as it is: after the pull it is no longer an edit
+    _upstream(tmp, bare, "notes.md", "mine\n")
+    gitsource.pull(root)
+    assert gitsource.status(root, "demo")["edits"] == 0
+    # the remote and the folder changed the same file differently: nothing is pulled, nothing is lost
+    (root / "src.py").write_text("x = 2  # here\n")
+    _upstream(tmp, bare, "src.py", "x = 3  # there\n")
+    with pytest.raises(gitsource.GitRefused, match="src.py"):
+        gitsource.pull(root)
+    assert (root / "src.py").read_text() == "x = 2  # here\n"
+
+
+def test_the_merge_page_is_known_for_github_and_gitlab():
+    assert gitsource._merge_link("github.com/o/r", "main", "studio/r") == "https://github.com/o/r/compare/main...studio/r?expand=1"
+    assert "gitlab.tguru.vn/g/r/-/merge_requests/new?" in gitsource._merge_link("gitlab.tguru.vn/g/r", "main", "studio/r")
+    assert gitsource._merge_link("example.test/o/r", "main", "studio/r") is None
+    assert gitsource.push_branch("Mr Finance!") == "studio/Mr-Finance"
+
+
+def test_a_plain_folder_has_no_git(tmp_path):
+    assert gitsource.status(tmp_path, "x") == {"remote": None}
+    with pytest.raises(gitsource.GitRefused):
+        gitsource.pull(tmp_path)

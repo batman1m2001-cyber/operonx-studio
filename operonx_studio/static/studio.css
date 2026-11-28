@@ -703,6 +703,15 @@ header.bar {
   border: 1px solid var(--border); border-radius: var(--r-md); color: var(--text); font-weight: 600; font-size: var(--fs-sm);
   text-decoration: none; white-space: nowrap; }
 .appbtn:hover { background: var(--surface-2); }
+/* Pull and Push, beside it: quiet until there is something to push */
+.gitbtn { flex: none; min-height: 30px; padding: 0 10px; margin-right: 6px; gap: 6px; font-size: var(--fs-sm); }
+.gitbtn svg { width: 14px; height: 14px; }
+.gitbtn b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.gitbtn.working { opacity: .6; pointer-events: none; }
+@media (max-width: 1300px) { .gitbtn > span { display: none; } .gitbtn { padding: 0 8px; margin-right: 4px; } }
+/* under 1100 px the screens' tabs leave the middle and share the row with the crumbs: no room is left, and
+   two more buttons pushed the crumbs over the tabs. Pulling and pushing wait for a wider screen */
+@media (max-width: 1099px) { .gitbtn { display: none; } }
 .appbtn[aria-disabled="true"] { color: var(--text-3); border-style: dashed; cursor: not-allowed; }
 .appbtn[aria-disabled="true"]:hover { background: none; }
 .crumbbtn[aria-expanded="true"] { background: var(--surface-3); }

@@ -2246,6 +2246,38 @@ def build_studio_app(recents: Optional[Recents] = None):
             return JSONResponse({"error": str(exc)}, status_code=400)
         return secrets_get(pid)
 
+    # ── git: where the project comes from, Pull and Push (PROJECT_SOURCE_PLAN S3) ──
+
+    @app.get("/api/p/{pid}/git")
+    def git_status(pid: str) -> JSONResponse:
+        """The project's remote and branch, and how many files hold edits
+        that were not pushed. ``remote`` is null for a plain folder."""
+        ref = recents.get(pid)
+        if ref is None or not ref.exists:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        return JSONResponse(gitsource.status(ref.root, ref.name))
+
+    @app.post("/api/p/{pid}/git/pull")
+    def git_pull(pid: str) -> JSONResponse:
+        return _git_do(pid, lambda ref: gitsource.pull(ref.root))
+
+    @app.post("/api/p/{pid}/git/push")
+    def git_push(pid: str, request: Request) -> JSONResponse:
+        """The edits made here, to the remote's ``studio/<project>`` branch."""
+        return _git_do(pid, lambda ref: gitsource.push(ref.root, ref.name, _who(request) or ""))
+
+    def _git_do(pid: str, act: Any) -> JSONResponse:
+        ref = recents.get(pid)
+        if ref is None or not ref.exists:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        try:
+            done = act(ref)
+        except gitsource.GitRefused as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except subprocess.TimeoutExpired:
+            return JSONResponse({"error": "git took too long and was stopped"}, status_code=504)
+        return JSONResponse({**done, "status": gitsource.status(ref.root, ref.name)})
+
     @app.post("/api/p/{pid}/resources/delete")
     def resources_delete(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
         """A resource out of the project's file — refused while an op names it."""
