@@ -50,6 +50,7 @@ except ImportError:  # pragma: no cover — fastapi is a dependency
     Request = Any  # type: ignore[misc,assignment]
 
 from operonx_studio import safewrite
+from operonx_studio import secrets as secretstore
 from operonx_studio.daemon import ProjectWatcher
 from operonx_studio.layout import layout_graph
 from operonx_studio.registry import MANIFEST, ProjectRef, Recents
@@ -1480,6 +1481,10 @@ def build_studio_app(recents: Optional[Recents] = None):
         if ref is None or not ref.exists:
             return None
         watchers[pid] = ProjectWatcher(root=ref.root)
+        try:
+            secretstore.sync(ref.root)   # a project with no .env gets its saved one back
+        except OSError:
+            _LOG.warning("secrets of %s were not synced", ref.root, exc_info=True)
         return watchers[pid]
 
     def _prewarm() -> None:
@@ -2184,7 +2189,46 @@ def build_studio_app(recents: Optional[Recents] = None):
                                  scope=safewrite.env_scope([var]), what=f"set {var} in .env", who=_who(request))
         except safewrite.WriteRefused as exc:
             return JSONResponse({"error": str(exc), "code": exc.code}, status_code=409)
+        secretstore.sync(watcher.root)   # the current environment's copy follows the .env
         return JSONResponse({"var": var, "applied": True, "write": w.id})
+
+    @app.get("/api/p/{pid}/secrets")
+    def secrets_get(pid: str) -> JSONResponse:
+        """The project's environments (named sets of secrets) and, for the
+        current one, each name the project asks for: set, missing or
+        default. Names only; a value is never sent."""
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        out = secretstore.describe(watcher.root)
+        status = _env_status(watcher)
+        have = set(next(e["names"] for e in out["environments"] if e["name"] == out["current"]))
+        for name in out.pop("example"):
+            status.setdefault(name, "set" if name in have or name in os.environ else "missing")
+        for name in have:
+            status.setdefault(name, "set")
+        out["needed"] = [{"name": n, "status": status[n]} for n in sorted(status, key=lambda n: (status[n] != "missing", n))]
+        return JSONResponse(out)
+
+    @app.post("/api/p/{pid}/secrets/use")
+    def secrets_use(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """Switch the project's ``.env`` to another environment's secrets."""
+        return _secrets_change(pid, body, secretstore.use)
+
+    @app.post("/api/p/{pid}/secrets/environment")
+    def secrets_add(pid: str, body: Dict[str, Any]) -> JSONResponse:
+        """A new, empty environment."""
+        return _secrets_change(pid, body, secretstore.add)
+
+    def _secrets_change(pid: str, body: Dict[str, Any], change: Any) -> JSONResponse:
+        watcher = _watcher(pid)
+        if watcher is None:
+            return JSONResponse({"error": "unknown project"}, status_code=404)
+        try:
+            change(watcher.root, str(body.get("environment") or "").strip())
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return secrets_get(pid)
 
     @app.post("/api/p/{pid}/resources/delete")
     def resources_delete(pid: str, body: Dict[str, Any], request: Request) -> JSONResponse:
