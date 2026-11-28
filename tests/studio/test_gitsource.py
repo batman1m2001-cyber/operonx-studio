@@ -88,7 +88,32 @@ def test_the_token_reaches_git_by_the_environment_only(remote, monkeypatch):
 def test_a_refused_sign_in_says_where_the_token_goes(remote):
     tmp, _ = remote
     failed = subprocess.CompletedProcess([], 128, "", "fatal: could not read Username for 'https://example.test': terminal prompts disabled")
-    assert "example.test=<token>" in gitsource._why(failed, "example.test")
+    assert "Git access" in gitsource._why(failed, "example.test")
+    gitsource.set_token("example.test", "old")
+    assert "refused its token" in gitsource._why(failed, "example.test")
+
+
+def test_a_token_is_set_replaced_and_removed_in_a_private_file(remote):
+    tmp, _ = remote
+    gitsource.set_token("GitHub.com", "t-one")
+    gitsource.set_token("gitlab.example.test:8443", "t-two")
+    gitsource.set_token("github.com", "t-three")                 # replaced, the other host kept
+    assert gitsource.tokens() == {"github.com": "t-three", "gitlab.example.test:8443": "t-two"}
+    path = tmp / "state" / "secrets" / "git-tokens.env"
+    assert path.stat().st_mode & 0o777 == 0o600
+    gitsource.set_token("github.com", "")                        # removed
+    assert gitsource.tokens() == {"gitlab.example.test:8443": "t-two"}
+    for host, token in (("not a host", "t"), ("", "t"), ("github.com", "two words"), ("github.com", "a\nb=c")):
+        with pytest.raises(gitsource.CloneError):
+            gitsource.set_token(host, token)
+    assert gitsource.tokens() == {"gitlab.example.test:8443": "t-two"}
+
+
+def test_a_token_is_tested_against_a_repository_of_its_host(remote):
+    tmp, point = remote
+    point(URL, _repo(tmp / "remote.git"))
+    assert gitsource.test_token("example.test", "example.test/org/demo") is None
+    assert gitsource.test_token("example.test", "example.test/org/missing")       # says why, in words
 
 
 # ── S3: pull and push ─────────────────────────────────────────────────

@@ -72,6 +72,9 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", "/api/admin/users"): "admin",
     ("GET", "/api/admin/activity"): "admin",
     ("POST", "/api/admin/users"): "admin",
+    ("GET", "/api/admin/git-tokens"): "admin",        # which git hosts have a token: names only
+    ("POST", "/api/admin/git-tokens"): "admin",       # set or remove one
+    ("POST", "/api/admin/git-tokens/test"): "admin",  # ask the host with it
     ("PATCH", "/api/admin/users/{uid}"): "admin",
     ("POST", "/api/admin/users/{uid}/password"): "admin",
     ("DELETE", "/api/admin/users/{uid}"): "admin",

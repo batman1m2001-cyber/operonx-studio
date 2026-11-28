@@ -2232,6 +2232,7 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
 .secretenvs .cf-text { width: 140px; }
 .secretrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .secretrow .factkey { width: 240px; overflow-wrap: anywhere; }
+.secretrow .githost { flex: 0 0 240px; min-width: 0; }
 .secretrow .pill { min-width: 72px; justify-content: center; }
 .secretrow .cf-text { flex: 1; min-width: 140px; }
 .sethelp { color: var(--text-3); font-size: var(--fs-sm); }

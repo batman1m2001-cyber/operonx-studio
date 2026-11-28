@@ -12,7 +12,7 @@ never commits on the folder's branch and never touches the default one: the
 edits stay in the folder as edits until they come back by a pull.
 
 Access is one token per host, in ``<state>/secrets/git-tokens.env`` (0600),
-a line ``host=token``. The token reaches git through ``GIT_ASKPASS`` and the
+a line ``host=token``, set by an admin in Settings (``set_token``). The token reaches git through ``GIT_ASKPASS`` and the
 environment only: it is never in a command line, a URL or ``.git/config``.
 """
 
@@ -29,7 +29,7 @@ from urllib.parse import urlparse
 
 from .registry import MANIFEST, state_dir
 
-__all__ = ["CloneError", "GitRefused", "clone", "pull", "push", "source", "status", "tokens", "tracked_env_files", "workspaces"]
+__all__ = ["CloneError", "GitRefused", "clone", "pull", "push", "set_token", "source", "status", "test_token", "tokens", "tracked_env_files", "workspaces"]
 
 _ASKPASS = '#!/bin/sh\ncase "$1" in Username*) printf "%s\\n" "$OX_GIT_USER";; *) printf "%s\\n" "$OX_GIT_TOKEN";; esac\n'
 _URL = re.compile(r"https://[A-Za-z0-9.-]+(:\d+)?/[A-Za-z0-9._~/-]+")
@@ -60,6 +60,40 @@ def tokens() -> Dict[str, str]:
     return out
 
 
+_HOST = re.compile(r"[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(:\d{1,5})?")
+
+
+def set_token(host: str, token: str) -> None:
+    """Write (or, with an empty *token*, remove) the token of *host*. The
+    other hosts' lines are kept; the file is 0600 from its first byte."""
+    host, token = host.strip().lower(), token.strip()
+    if not _HOST.fullmatch(host):
+        raise CloneError("a host name like github.com")
+    if len(token) > 400 or re.search(r"\s", token):
+        raise CloneError("a token is one word, without spaces")
+    kept = tokens()
+    kept.pop(host, None)
+    if token:
+        kept[host] = token
+    path = state_dir() / "secrets" / "git-tokens.env"
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("".join(f"{h}={t}\n" for h, t in sorted(kept.items())))
+    os.replace(tmp, path)
+
+
+def test_token(host: str, remote: str) -> Optional[str]:
+    """Ask *host* for the branches of *remote* (``host/org/repo``) with the
+    token it has: ``None`` when it answers, else why not, in words."""
+    try:
+        result = git(["ls-remote", "--heads", "--", f"https://{remote}.git"], host, timeout=30)
+    except subprocess.TimeoutExpired:
+        return f"{host} did not answer in 30 seconds"
+    return None if result.returncode == 0 else _why(result, host)
+
+
 def _askpass() -> Path:
     path = state_dir() / "secrets" / "git-askpass.sh"
     if not path.is_file() or path.read_text(encoding="utf-8") != _ASKPASS:
@@ -86,8 +120,8 @@ def _why(result: subprocess.CompletedProcess, host: str) -> str:
     low = err.lower()
     if "could not read username" in low or "authentication failed" in low or "terminal prompts disabled" in low:
         if host.lower() in tokens():
-            return f"{host} refused the token in git-tokens.env"
-        return f"{host} asks for a sign-in: add a line {host}=<token> to {state_dir() / 'secrets' / 'git-tokens.env'}"
+            return f"{host} refused its token (wrong or expired): an admin sets a new one in Settings › Project › Git access"
+        return f"{host} asks for a sign-in: an admin sets its token in Settings › Project › Git access"
     if "not found" in low:
         return "the repository or branch was not found (a private one also answers this without a token)"
     return " ".join(err.split())[:300] if err else "git failed"
