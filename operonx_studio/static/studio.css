@@ -2210,6 +2210,13 @@ button.pchip:hover { border-color: var(--border-strong); background: var(--surfa
   padding: 12px 14px; }
 .setrow:last-child { border-bottom: none; }
 .setname { font-weight: 600; font-size: var(--fs-base); }
+/* Settings › Project: secrets — the environment picker, then one row per name */
+.secretenvs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.secretenvs .cf-text { width: 140px; }
+.secretrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.secretrow .factkey { width: 240px; overflow-wrap: anywhere; }
+.secretrow .pill { min-width: 72px; justify-content: center; }
+.secretrow .cf-text { flex: 1; min-width: 140px; }
 .sethelp { color: var(--text-3); font-size: var(--fs-sm); }
 .setctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .setdays { width: 84px !important; text-align: right; font-variant-numeric: tabular-nums; min-height: 34px; }

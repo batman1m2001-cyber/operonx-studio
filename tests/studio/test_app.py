@@ -924,6 +924,26 @@ def test_resource_hub_shows_declarations_never_values(client, project):
     assert health["env"]["DEMO_HUB_MODEL"] == "default"
     assert "super-secret" not in json.dumps(health)
 
+    # S1: the same names per environment; a new environment starts empty, and
+    # going back brings the first one's .env back
+    sec = client.get(f"/api/p/{pid}/secrets").json()
+    assert sec["current"] == "dev" and [e["name"] for e in sec["environments"]] == ["dev"]
+    assert {n["name"]: n["status"] for n in sec["needed"]} == {
+        "DEMO_HUB_URL": "missing", "DEMO_HUB_KEY": "set", "DEMO_HUB_MODEL": "default"}
+    assert sec["needed"][0]["name"] == "DEMO_HUB_URL"   # what is missing comes first
+    assert client.post(f"/api/p/{pid}/secrets/environment", json={"environment": "Bad Name"}).status_code == 400
+    assert client.post(f"/api/p/{pid}/secrets/environment", json={"environment": "staging"}).status_code == 200
+    sec = client.post(f"/api/p/{pid}/secrets/use", json={"environment": "staging"}).json()
+    assert sec["current"] == "staging"
+    assert {n["name"]: n["status"] for n in sec["needed"]}["DEMO_HUB_KEY"] == "missing"
+    assert (project / ".env").read_text() == ""
+    assert client.post(f"/api/p/{pid}/env", json={"var": "DEMO_HUB_KEY", "value": "staging-secret"}).status_code == 200
+    sec = client.post(f"/api/p/{pid}/secrets/use", json={"environment": "dev"}).json()
+    assert "export DEMO_HUB_KEY=super-secret" in (project / ".env").read_text()
+    sec = client.post(f"/api/p/{pid}/secrets/use", json={"environment": "staging"}).json()
+    assert "staging-secret" in (project / ".env").read_text()
+    assert "secret" not in json.dumps(sec).replace("/secrets", "")
+
 
 def test_flow_endpoint_serves_the_run_canvas_contract(client, project, tmp_path):
     """One shape for the run canvas: relative start_ms in time order,
