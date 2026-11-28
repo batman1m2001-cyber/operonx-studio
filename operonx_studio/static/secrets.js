@@ -79,6 +79,74 @@
       sec.append(el("div", "note", "This project asks for no secrets: resources.yaml names no ${VAR}, and there is no .env.example."));
     }
     box.append(sec);
+    if (isAdmin()) { const git = el("section", "setsection"); box.append(git); gitAccess(git); }
+  }
+
+  /* Git access: one token per git host, for every project of this studio (operonx_studio/gitsource.py).
+   * Admins only. A token is typed here and never shown again; Test asks the host with the one it has. */
+  function isAdmin() {
+    const me = window.Account && Account.me();
+    return !(me && me.user) || me.user.role === "admin";      // no accounts (a studio on a laptop): its one person
+  }
+
+  function gitRow(item, redraw) {
+    const r = el("div", "factrow secretrow");
+    const state = el("div", "pill" + (item.set ? "" : " p-bad"), item.set ? "Set" : "Missing");
+    const host = item.host ? el("div", "factkey mono", item.host) : el("input", "cf-text githost");
+    if (!item.host) { host.placeholder = "gitlab.example.com"; host.setAttribute("aria-label", "A git host"); host.spellcheck = false; }
+    else if (item.projects.length) host.title = "Used by " + item.projects.join(", ");
+    const val = el("input", "cf-text");
+    val.type = "password"; val.autocomplete = "off"; val.spellcheck = false;
+    val.placeholder = item.set ? "A new token" : "A token";
+    val.setAttribute("aria-label", `A token for ${item.host || "the host"}`);
+    const go = el("button", "small", item.set ? "Replace" : "Set");
+    go.type = "button";
+    const save = async () => {
+      const name = item.host || host.value.trim();
+      if (!name || !val.value) return;
+      try { const got = await api("/api/admin/git-tokens", {host: name, token: val.value}); toast(`Token for ${name} set`); redraw(got); }
+      catch (e) { toast(e.message, true); }
+    };
+    go.onclick = save;
+    val.onkeydown = (e) => { if (e.key === "Enter") save(); };
+    r.append(host, item.host ? state : el("div", "pill", "Other host"), val, go);
+    if (item.host) {
+      const test = el("button", "small", "Test");
+      test.type = "button";
+      test.disabled = !item.projects.length;
+      test.title = item.projects.length ? `Ask ${item.host} with this token` : "No project comes from this host yet";
+      test.onclick = async () => {
+        test.disabled = true;
+        try { const got = await api("/api/admin/git-tokens/test", {host: item.host}); toast(got.message, !got.ok); }
+        catch (e) { toast(e.message, true); }
+        test.disabled = false;
+      };
+      r.append(test);
+      if (item.set) {
+        const drop = el("button", "small", "Remove");
+        drop.type = "button";
+        drop.onclick = async () => {
+          try { redraw(await api("/api/admin/git-tokens", {host: item.host, token: ""})); toast(`Token for ${item.host} removed`); }
+          catch (e) { toast(e.message, true); }
+        };
+        r.append(drop);
+      }
+    }
+    return r;
+  }
+
+  async function gitAccess(sec, got) {
+    try { got = got || await api("/api/admin/git-tokens"); }
+    catch (e) { sec.textContent = ""; sec.append(loadError(e, () => gitAccess(sec))); return; }
+    sec.textContent = "";
+    sec.append(el("h3", "setsectitle", "Git access"));
+    sec.append(el("p", "setintro",
+      "One token per git host, for every project of this studio: Add from git, Pull and Push use it. Admins only."));
+    const facts = el("div", "facts");
+    const redraw = (next) => gitAccess(sec, next);
+    for (const item of got.hosts) facts.append(gitRow(item, redraw));
+    facts.append(gitRow({host: "", set: false, projects: []}, redraw));
+    sec.append(facts);
   }
 
   async function show() {

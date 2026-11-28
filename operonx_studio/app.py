@@ -1688,6 +1688,41 @@ def build_studio_app(recents: Optional[Recents] = None):
         ref = recents.touch(root)
         return JSONResponse({"id": ref.id, "name": ref.name, "tracked_env": gitsource.tracked_env_files(root)})
 
+    def _git_hosts() -> List[Dict[str, Any]]:
+        """Every git host the studio knows: the ones with a token and the ones a project comes from.
+        Names and set/missing only: a token is written here and never read back."""
+        have = gitsource.tokens()
+        used: Dict[str, List[str]] = {}
+        for r in recents.ordered():
+            src = gitsource.source(r.root)
+            if src:
+                used.setdefault(src["remote"].split("/", 1)[0].lower(), []).append(r.name)
+        return [{"host": h, "set": h in have, "projects": used.get(h, [])} for h in sorted(set(have) | set(used))]
+
+    @app.get("/api/admin/git-tokens")
+    def git_tokens() -> JSONResponse:
+        return JSONResponse({"hosts": _git_hosts()})
+
+    @app.post("/api/admin/git-tokens")
+    def git_token_set(body: Dict[str, Any]) -> JSONResponse:
+        """Set a host's token, or remove it with an empty one."""
+        try:
+            gitsource.set_token(str(body.get("host") or ""), str(body.get("token") or ""))
+        except gitsource.CloneError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"hosts": _git_hosts()})
+
+    @app.post("/api/admin/git-tokens/test")
+    def git_token_test(body: Dict[str, Any]) -> JSONResponse:
+        """Does the host answer with the token it has? Asked about one project that comes from it."""
+        host = str(body.get("host") or "").strip().lower()
+        for r in recents.ordered():
+            src = gitsource.source(r.root)
+            if src and src["remote"].split("/", 1)[0].lower() == host:
+                why = gitsource.test_token(host, src["remote"])
+                return JSONResponse({"ok": why is None, "message": why or f"{host} answers for {r.name}"})
+        return JSONResponse({"ok": False, "message": f"No project comes from {host}: there is nothing to ask it about."})
+
     @app.post("/api/forget")
     def forget(body: Dict[str, Any]) -> JSONResponse:
         pid = str(body.get("id") or "")

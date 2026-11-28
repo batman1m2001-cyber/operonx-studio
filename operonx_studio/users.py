@@ -158,7 +158,7 @@ CREATE INDEX IF NOT EXISTS audit_by_pid ON audit (pid, id);
 #: code, a webhook, dataset rows, inputs and messages are never among them.
 #: username/role/disabled name who an admin acted on (P6: the Team page's rows).
 AUDIT_KEYS = ("name", "key", "action", "graph", "resource", "apply", "dry_run", "dataset", "service", "op",
-              "template", "path", "username", "role", "disabled")
+              "template", "path", "username", "role", "disabled", "host")
 AUDIT_DAYS = 180
 
 

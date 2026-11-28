@@ -141,7 +141,7 @@ def test_anonymous_gets_401_or_the_login_page_everywhere_but_open(people):
 def test_admin_routes_refuse_editors_and_viewers(people):
     team = people["team"]
     admin_routes = _by_level(team, "admin")
-    assert len(admin_routes) == 7   # /team, the five /api/admin/users routes, the activity log
+    assert len(admin_routes) == 10   # /team, the five /api/admin/users routes, the activity log, the three git-tokens routes
     for who in ("editor", "viewer"):
         team.use(people[who]["token"])
         for method, path in admin_routes:
@@ -154,6 +154,21 @@ def test_admin_routes_refuse_editors_and_viewers(people):
     for method, path in admin_routes:
         res = _call(team.client, method, _url(path, "x"), people["tmp"])
         assert res.status_code not in (401, 403), (method, path, res.status_code)
+
+
+def test_an_admin_sets_a_git_token_and_it_is_never_sent_back(people):
+    team = people["team"]
+    team.use(team.admin_token)
+    res = team.client.post("/api/admin/git-tokens", json={"host": "git.example.test", "token": "s3cret-token"})
+    assert res.status_code == 200 and "s3cret-token" not in res.text
+    assert {"host": "git.example.test", "set": True, "projects": []} in res.json()["hosts"]
+    listed = team.client.get("/api/admin/git-tokens")
+    assert "s3cret-token" not in listed.text and listed.json() == res.json()
+    assert team.client.post("/api/admin/git-tokens", json={"host": "no host", "token": "x"}).status_code == 400
+    asked = team.client.post("/api/admin/git-tokens/test", json={"host": "git.example.test"}).json()
+    assert asked["ok"] is False and "No project" in asked["message"]
+    gone = team.client.post("/api/admin/git-tokens", json={"host": "git.example.test", "token": ""}).json()
+    assert all(h["host"] != "git.example.test" for h in gone["hosts"])
 
 
 def test_edit_routes_refuse_viewers_before_the_handler_runs(people):
