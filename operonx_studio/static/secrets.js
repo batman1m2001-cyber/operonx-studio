@@ -11,6 +11,11 @@
 
 (() => {
   const box = $("#projectsettings");
+  // a note the home page left for this project (a clone that tracks .env files)
+  try {
+    const note = sessionStorage.getItem("ox-note");
+    if (note) { sessionStorage.removeItem("ox-note"); setTimeout(() => toast(note, true), 800); }
+  } catch { /* no session storage: no note */ }
   const WORD = {set: "Set", missing: "Missing", default: "Default used"};
 
   function row(item, redraw) {

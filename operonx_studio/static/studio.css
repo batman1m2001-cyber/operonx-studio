@@ -468,6 +468,14 @@ button.primary, .btn.primary {
   background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600;
 }
 button.primary:hover, .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+/* the action a screen leads with: glass with a lavender tint, not a solid block of the accent */
+button.tinted, .btn.tinted {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 58%, transparent); color: var(--text); font-weight: 600;
+}
+button.tinted:hover, .btn.tinted:hover {
+  background: color-mix(in srgb, var(--accent) 34%, transparent); border-color: color-mix(in srgb, var(--accent) 75%, transparent);
+}
 button.ghost, .btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
 button.ghost:hover, .btn.ghost:hover { background: var(--surface-2); color: var(--text); }
 button.small, .btn.small { min-height: 28px; padding: 0 10px; font-size: var(--fs-sm); }

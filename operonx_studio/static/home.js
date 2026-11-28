@@ -54,14 +54,16 @@ function emptyState() {
   box.append(Icons.svg("graph", "emptyicon"));
   box.append(el("h2", null, "No projects yet"));
   box.append(el("p", null,
-    "A project is a folder with an operonx.toml. Open one you already have, "
-    + "or create a new one with a working example graph."));
+    "A project is a folder with an operonx.toml. Add one from git, open one "
+    + "already on this machine, or create a new one with a working example graph."));
   const row = el("div", "actions");
   const neu = Icons.button("plus", "New project", "needs-edit");
   neu.onclick = () => $("#btn-new").click();
-  const open = Icons.button("folder", "Open project", "primary needs-edit");
+  const open = Icons.button("folder", "Open project", "needs-edit");
   open.onclick = () => $("#btn-open").click();
-  row.append(neu, open);
+  const git = Icons.button("download", "Add from git", "tinted needs-edit");
+  git.onclick = () => $("#btn-clone").click();
+  row.append(neu, open, git);
   box.append(row);
   return box;
 }
@@ -92,7 +94,7 @@ async function loadProjects() {
   const parts = (root) => String(root).split("/").filter(Boolean);
   for (const p of projects) {
     const row = el("div", "projrow");
-    row.dataset.hay = `${p.name} ${p.root}`.toLowerCase();
+    row.dataset.hay = `${p.name} ${p.root} ${p.source ? p.source.remote : ""}`.toLowerCase();
     row.dataset.pid = p.id;
     const dot = el("span", "hdot");
     dot.title = "checking…";
@@ -103,7 +105,9 @@ async function loadProjects() {
     if (seen[p.name] > 1 && segs.length > 1) top.append(el("span", "twin", segs[segs.length - 2]));
     main.append(top);
     // the folder's last two steps; the whole path on hover
-    const path = el("div", "path mono", segs.length > 2 ? `…/${segs.slice(-2).join("/")}` : p.root);
+    // a project from git shows its remote and branch; a plain folder its last two steps
+    const path = el("div", "path mono", p.source ? `${p.source.remote} · ${p.source.branch}`
+      : segs.length > 2 ? `…/${segs.slice(-2).join("/")}` : p.root);
     path.title = p.root;
     main.append(path);
     const sig = el("div", "sig");
@@ -271,7 +275,7 @@ function footer(box, close, label, action) {
   const cancel = el("button", null, "Cancel");
   cancel.type = "button";
   cancel.onclick = close;
-  const ok = el("button", "primary", label);
+  const ok = el("button", "tinted", label);
   ok.type = "button";
   ok.onclick = async () => {
     err.textContent = "";
@@ -282,6 +286,29 @@ function footer(box, close, label, action) {
   foot.append(cancel, ok);
   box.append(err, foot);
 }
+
+/* Add from git: an https address and, optionally, a branch. The studio clones it into its
+ * own workspaces; a repository that carries .env files is opened with a warning. */
+$("#btn-clone").onclick = () => modal("Add from git", (box, close) => {
+  box.append(el("p", "modalhint", "The studio clones the repository and opens it. It must hold an operonx.toml at the top."));
+  const field = (label, placeholder) => {
+    const f = el("div", "field");
+    f.append(el("label", null, label));
+    const input = el("input"); input.type = "text"; input.className = "mono"; input.spellcheck = false;
+    input.placeholder = placeholder; input.setAttribute("aria-label", label);
+    f.append(input);
+    box.append(f);
+    return input;
+  };
+  const url = field("Repository", "https://github.com/org/repo");
+  const branch = field("Branch", "The repository's default");
+  footer(box, close, "Clone", async () => {
+    const got = await api("/api/clone", {url: url.value, branch: branch.value});
+    if (got.tracked_env && got.tracked_env.length)
+      sessionStorage.setItem("ox-note", `This repository tracks ${got.tracked_env.join(", ")}: secrets belong in Settings › Project, not in git.`);
+    location.href = `/p/${got.id}`;
+  });
+});
 
 $("#btn-open").onclick = () => modal("Open project", (box, close) => {
   box.append(el("p", "modalhint", "Pick the folder that holds the project's operonx.toml."));
