@@ -65,10 +65,11 @@ Find how that colour reaches the browser, in this order:
 2. **A colour form `recolor` does not read.** It reads `#rrggbb(aa)`, `%23rrggbb`, `rgb()/rgba()`
    and quoted `"r,g,b"`. `hsl()`, three-digit hex and colours computed at run time are not read:
    write the colour in a form that is.
-3. **A colour outside the band.** Only hues 226–295° with some saturation count as lavender
-   (`BAND` in `palette.py`). Blues below 226° are type colours (a call, a resource) and stay, as
-   red and green do. Move the colour into the band if it is the brand's; do not widen the band
-   without looking at every screen again.
+3. **A colour outside the two bands.** Hues 226–295° are the brand (`BAND` in `palette.py`) and
+   turn fully. Hues 200–226° are the studio's second colour, the blue of selections, links, wires
+   and code ops (`SECOND`): they turn to the theme's hue too, with less colour (`MUTE`), so the two
+   still differ; a theme that is itself blue leaves them. Everything else (green, amber, red,
+   greys) stays. Do not widen a band without looking at every screen again.
 4. **A picture not drawn again.** Run the palette command again; it redraws all of `static/`.
 
 Tests: `tests/studio/test_palette.py`, and the theme test in `tests/studio/test_app.py`.

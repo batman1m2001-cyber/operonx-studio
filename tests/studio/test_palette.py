@@ -36,7 +36,7 @@ def test_lavender_turns_and_what_means_something_stays():
     assert 30 < _hue(turned) < 55
     assert "#a78bfa" not in out and out.endswith("80}")       # the alpha of an eight-digit colour is kept
     assert out[out.index("b:") + 2:out.index("b:") + 9].isupper() is True     # written in capitals, kept so
-    for kept in ("#12733f", "#c93a30", "#98540b", "#1f6fe0", "#888888", "#ffffff", "#0f1419"):   # ok, error, warning, signal, greys
+    for kept in ("#12733f", "#c93a30", "#98540b", "#888888", "#ffffff"):   # ok, error, warning, greys
         assert palette.recolor(kept, GOLD) == kept
 
 
@@ -80,3 +80,20 @@ def test_the_command_sets_and_reports(state, capsys):
         palette.main(["no-such"])
     palette.main(["lavender"])
     assert json.loads((state / "theme.json").read_text()) == {}
+
+
+def test_the_second_colour_follows_muted_and_a_blue_theme_leaves_it():
+    """The blue of selections, links and wires (hue 200-226) turns to the theme's hue with less
+    colour than the brand's; a theme that is blue itself, and no theme, leave it as written."""
+    import colorsys
+
+    from operonx_studio import palette
+
+    blue = "#4d8eff"                       # --signal in the dark studio
+    gold = palette.recolor(blue, ("golden", 42.0, 0.95))
+    r, g, b = (int(gold[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    h, _, s = colorsys.rgb_to_hls(r, g, b)
+    assert 30 <= h * 360 <= 55 and s < 0.6
+    assert palette.recolor(blue, ("blue", 214.0, 1.0)) == blue
+    assert palette.recolor(blue, None) == blue
+    assert palette.recolor("#22c55e #ef4444", ("golden", 42.0, 0.95)) == "#22c55e #ef4444"   # ok green, error red
