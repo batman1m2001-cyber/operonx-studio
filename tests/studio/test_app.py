@@ -1349,3 +1349,29 @@ def test_an_edit_applies_against_the_file_it_previewed_and_can_be_undone(client,
     undone = client.post(f"/api/p/{pid}/writes/{done['write']}/undo")
     assert undone.status_code == 200
     assert "times=7" not in main.read_text() and "times=2" in main.read_text()
+
+
+def test_the_stylesheet_and_the_pictures_follow_the_colour_theme(client, tmp_path, monkeypatch):
+    """operonx_studio/palette.py: no theme serves the files as they are; a theme turns the
+    lavender in the stylesheet and serves the pictures drawn for it."""
+    from operonx_studio import palette
+
+    plain = client.get("/static/studio.css").text
+    # the Picture's module is imported by itself, outside the page's bundle: it has its own route
+    canvas = client.get("/static/factory2d.js").text
+    assert canvas == (palette.STATIC / "factory2d.js").read_text(encoding="utf-8")
+    picture = client.get("/static/backdrop-dark.webp")
+    assert picture.status_code == 200 and picture.content == (palette.STATIC / "backdrop-dark.webp").read_bytes()
+    assert client.get("/static/../app.png").status_code in (404, 400)
+    palette.use({"preset": "golden"})
+    try:
+        gold = client.get("/static/studio.css").text
+        assert gold != plain and len(gold) == len(plain)       # the same rules, other colours
+        assert client.get("/static/factory2d.js").text != canvas
+        drawn = palette.state_dir() / "theme" / "golden" / "backdrop-dark.webp"
+        drawn.parent.mkdir(parents=True, exist_ok=True)
+        drawn.write_bytes(b"gold")
+        assert client.get("/static/backdrop-dark.webp").content == b"gold"
+    finally:
+        palette.use({})
+    assert client.get("/static/studio.css").text == plain

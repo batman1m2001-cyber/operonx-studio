@@ -57,6 +57,9 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("POST", "/api/login/google/poll"): "open",
     ("GET", "/logout"): "open",
     ("GET", "/static/{name}.css"): "open",
+    ("GET", "/static/{name}.js"): "open",    # a script imported by itself, in the colour theme
+    ("GET", "/static/{name}.webp"): "open",  # the backdrop, as drawn for the colour theme
+    ("GET", "/static/{name}.png"): "open",
     ("GET", "/static/bundle/{stem}.js"): "open",
 
     # ── yourself ──
