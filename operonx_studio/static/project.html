@@ -48,6 +48,9 @@
     <button id="btn-screen" class="crumbbtn screenbtn" aria-haspopup="true" aria-controls="rail" title="Screens"><i data-icon="menu"></i><span id="screen-label">Flow</span></button>
     <div class="spacer"></div>
     <!-- the project's own app (web/ served at / by operonx serve), in a new tab; greyed with the reason -->
+    <!-- all the git the studio does (gitbar.js): greyed, with the reason, when the project has no remote -->
+    <button id="btn-pull" class="gitbtn needs-edit" type="button" disabled title="Looking for the project's remote…"><i data-icon="download"></i><span>Pull</span></button>
+    <button id="btn-push" class="gitbtn needs-edit" type="button" disabled title="Looking for the project's remote…"><i data-icon="up"></i><span>Push</span><b id="push-count" hidden></b></button>
     <a id="btn-app" class="appbtn" target="_blank" rel="noopener" aria-disabled="true" title="Looking for the app…">Open app ↗</a>
     <span id="themeslot"></span>
     <button id="btn-right" class="iconbtn paneltoggle" aria-label="Toggle the side panel" title="Side panel — inspect · assistant  ( ] )"><i data-icon="panel"></i></button>
@@ -190,6 +193,7 @@
 <script src="/static/alerts.js"></script>
 <script src="/static/settings.js"></script>
 <script src="/static/secrets.js"></script>
+<script src="/static/gitbar.js"></script>
 <script src="/static/choreo.js"></script>
 <script src="/static/hand.js"></script>
 <script src="/static/paste.js"></script>

@@ -157,6 +157,9 @@ ACCESS: Dict[Tuple[str, str], str] = {
     ("GET", f"{P}/secrets"): "read",   # names and set/missing, never a value
     ("POST", f"{P}/secrets/use"): "edit",
     ("POST", f"{P}/secrets/environment"): "edit",
+    ("GET", f"{P}/git"): "read",
+    ("POST", f"{P}/git/pull"): "edit",
+    ("POST", f"{P}/git/push"): "edit",
     ("POST", f"{P}/yaml"): "edit",
     ("POST", f"{P}/op-decorator"): "edit",
     ("POST", f"{P}/writes/{{wid}}/undo"): "edit",

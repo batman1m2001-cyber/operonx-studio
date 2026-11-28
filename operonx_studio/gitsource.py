@@ -1,9 +1,15 @@
-"""A project that comes from a git remote (PROJECT_SOURCE_PLAN S2).
+"""A project that comes from a git remote (PROJECT_SOURCE_PLAN S2, S3).
 
 ``clone`` puts a repository under ``<state>/workspaces/`` and the studio
 opens that folder like any other: a cloned project and an opened folder are
 the same thing from then on. ``source`` says where a folder comes from, read
 from its ``.git`` files, for the home page.
+
+``pull`` and ``push`` are all the git the studio does (S3): bring the
+folder up to date, and send what was edited in the studio to one branch,
+``studio/<project>``, for the team to merge with its own tools. ``push``
+never commits on the folder's branch and never touches the default one: the
+edits stay in the folder as edits until they come back by a pull.
 
 Access is one token per host, in ``<state>/secrets/git-tokens.env`` (0600),
 a line ``host=token``. The token reaches git through ``GIT_ASKPASS`` and the
@@ -23,7 +29,7 @@ from urllib.parse import urlparse
 
 from .registry import MANIFEST, state_dir
 
-__all__ = ["CloneError", "clone", "source", "tokens", "tracked_env_files", "workspaces"]
+__all__ = ["CloneError", "GitRefused", "clone", "pull", "push", "source", "status", "tokens", "tracked_env_files", "workspaces"]
 
 _ASKPASS = '#!/bin/sh\ncase "$1" in Username*) printf "%s\\n" "$OX_GIT_USER";; *) printf "%s\\n" "$OX_GIT_TOKEN";; esac\n'
 _URL = re.compile(r"https://[A-Za-z0-9.-]+(:\d+)?/[A-Za-z0-9._~/-]+")
@@ -148,3 +154,141 @@ def tracked_env_files(root: Path) -> List[str]:
     except (OSError, subprocess.TimeoutExpired):
         return []
     return sorted(n for n in out.stdout.split("\n") if n and n not in (".env.example", ".env.sample", ".env.template"))
+
+
+# ── S3: pull and push ─────────────────────────────────────────────────
+
+class GitRefused(ValueError):
+    """Why a pull or a push did not happen, in words for the person who asked."""
+
+
+def _host(root: Path) -> str:
+    src = source(root)
+    return src["remote"].split("/", 1)[0] if src else ""
+
+
+def _local(root: Path, *args: str, env: Optional[Dict[str, str]] = None) -> str:
+    """A git command that talks to no remote; its output, or GitRefused."""
+    out = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=60,
+                         env={**os.environ, **(env or {})}, stdin=subprocess.DEVNULL)
+    if out.returncode != 0:
+        raise GitRefused(" ".join((out.stderr or out.stdout).split())[:300] or "git failed")
+    return out.stdout.rstrip()   # not the front: a status line starts with a space
+
+
+def _edited(root: Path) -> List[str]:
+    """Files that differ from the last commit, new ones included. Never
+    ``.env`` (secrets) nor ``.operonx/`` (runs and caches the studio and
+    operonx write there), whatever the project's ``.gitignore`` says."""
+    lines = _local(root, "status", "--porcelain", "--untracked-files=all").splitlines()
+    names = [line[3:].split(" -> ")[-1].strip('"') for line in lines if len(line) > 3]
+    return sorted(n for n in names if n != ".env" and not n.startswith(".operonx/"))
+
+
+def _tree(root: Path) -> str:
+    """The tree of the folder as it is now, written through a scratch index:
+    the real index and the branch are left alone."""
+    index = Path(_local(root, "rev-parse", "--absolute-git-dir")) / "ox-index"
+    env = {"GIT_INDEX_FILE": str(index)}
+    try:
+        _local(root, "read-tree", "HEAD", env=env)
+        _local(root, "add", "-A", "--", ".", ":(exclude).env", ":(exclude).operonx", env=env)
+        return _local(root, "write-tree", env=env)
+    finally:
+        index.unlink(missing_ok=True)
+
+
+def _pushed_file(root: Path) -> Path:
+    return Path(_local(root, "rev-parse", "--absolute-git-dir")) / "ox-pushed"
+
+
+def _merge_link(remote: str, base: str, branch: str) -> Optional[str]:
+    host = remote.split("/", 1)[0]
+    if host == "github.com":
+        return f"https://{remote}/compare/{base}...{branch}?expand=1"
+    if "gitlab" in host:
+        return (f"https://{remote}/-/merge_requests/new?merge_request%5Bsource_branch%5D={branch}"
+                f"&merge_request%5Btarget_branch%5D={base}")
+    return None
+
+
+def push_branch(name: str) -> str:
+    return "studio/" + (re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.") or "project")
+
+
+def status(root: Path, name: str) -> Dict:
+    """What the two buttons show: the remote and branch, how many files the
+    studio's edits touch, and whether exactly those edits were pushed."""
+    src = source(root)
+    if src is None:
+        return {"remote": None}
+    try:
+        files = _edited(root)
+        pushed = bool(files) and _pushed_file(root).is_file() and _pushed_file(root).read_text().strip() == _tree(root)
+    except (GitRefused, OSError, subprocess.TimeoutExpired) as exc:
+        return {**src, "error": str(exc), "edits": 0, "files": [], "pushed": False}
+    branch = push_branch(name)
+    return {**src, "edits": len(files), "files": files[:20], "pushed": pushed, "push_branch": branch,
+            "link": _merge_link(src["remote"], src["branch"], branch) if pushed else None}
+
+
+def pull(root: Path) -> Dict:
+    """Bring the folder's branch up to date. Edits to files the remote did
+    not change stay; an edit the remote now holds as it is (it was pushed
+    and merged) is no longer an edit; any other clash refuses the pull."""
+    src = source(root)
+    if src is None:
+        raise GitRefused("this project has no git remote")
+    host, branch = _host(root), src["branch"]
+    got = git(["fetch", "--quiet", "origin", branch], host, cwd=root)
+    if got.returncode != 0:
+        raise GitRefused(_why(got, host))
+    before = _local(root, "rev-parse", "HEAD")
+    theirs = _local(root, "rev-parse", "FETCH_HEAD")
+    changed = set(_local(root, "diff", "--name-only", "HEAD", theirs).splitlines())
+    clash, same = [], []
+    for name in _edited(root):
+        if name not in changed:
+            continue
+        path = Path(root) / name
+        mine = _local(root, "hash-object", "--", name) if path.is_file() else ""
+        try:
+            upstream = _local(root, "rev-parse", f"{theirs}:{name}")
+        except GitRefused:
+            upstream = ""
+        (same if mine == upstream else clash).append(name)
+    if clash:
+        raise GitRefused("the remote changed files that also have edits here: " + ", ".join(clash[:8])
+                         + ". Push the edits and merge them first.")
+    for name in same:      # the remote holds this edit already: let the pull write the file
+        tracked = subprocess.run(["git", "ls-files", "--error-unmatch", "--", name], cwd=root, capture_output=True).returncode == 0
+        if tracked:
+            _local(root, "checkout", "HEAD", "--", name)
+        else:
+            (Path(root) / name).unlink(missing_ok=True)
+    _local(root, "merge", "--ff-only", "--quiet", theirs)
+    return {"updated": before != theirs, "commits": int(_local(root, "rev-list", "--count", f"{before}..{theirs}") or 0)}
+
+
+def push(root: Path, name: str, who: str) -> Dict:
+    """Send the folder's edits, as one commit on top of the folder's commit,
+    to ``studio/<project>`` on the remote. That branch is the studio's: each
+    push replaces it with the edits as they are now."""
+    src = source(root)
+    if src is None:
+        raise GitRefused("this project has no git remote")
+    files = _edited(root)
+    if not files:
+        raise GitRefused("nothing was edited")
+    host, branch = _host(root), push_branch(name)
+    tree = _tree(root)
+    person = re.sub(r"[^\w .@-]", "", who or "") or "studio"
+    ident = {"GIT_AUTHOR_NAME": person, "GIT_AUTHOR_EMAIL": f"{person.replace(' ', '.')}@studio.invalid",
+             "GIT_COMMITTER_NAME": "operonx studio", "GIT_COMMITTER_EMAIL": "studio@studio.invalid"}
+    shown = ", ".join(files[:5]) + (f" and {len(files) - 5} more" if len(files) > 5 else "")
+    commit = _local(root, "commit-tree", tree, "-p", "HEAD", "-m", f"studio: edits to {shown}", env=ident)
+    sent = git(["push", "--quiet", "--force", "origin", f"{commit}:refs/heads/{branch}"], host, cwd=root)
+    if sent.returncode != 0:
+        raise GitRefused(_why(sent, host))
+    _pushed_file(root).write_text(tree + "\n")
+    return {"branch": branch, "files": len(files), "link": _merge_link(src["remote"], src["branch"], branch)}
