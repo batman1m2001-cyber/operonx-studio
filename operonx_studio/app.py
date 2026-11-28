@@ -49,7 +49,7 @@ try:  # a module-level name: FastAPI resolves route annotations from here
 except ImportError:  # pragma: no cover — fastapi is a dependency
     Request = Any  # type: ignore[misc,assignment]
 
-from operonx_studio import gitsource, safewrite
+from operonx_studio import gitsource, palette, safewrite
 from operonx_studio import secrets as secretstore
 from operonx_studio.daemon import ProjectWatcher
 from operonx_studio.layout import layout_graph
@@ -813,6 +813,7 @@ def build_studio_app(recents: Optional[Recents] = None):
         for f in (Path(__file__).parent / "minify.py", Path(__file__).parent / "theme.py"):
             if f.is_file():
                 digest.update(f"{f.name}:{f.stat().st_mtime_ns};".encode())
+        digest.update(palette.stamp().encode())     # another colour theme is another version
         return digest.hexdigest()[:10]
 
     # One script per page. Through the tunnel every extra request is
@@ -843,7 +844,7 @@ def build_studio_app(recents: Optional[Recents] = None):
                 parts.append(f"\n/* ── {script} ── */\n")
                 parts.append((STATIC / script).read_text(encoding="utf-8"))
                 parts.append("\n;\n")
-            joined = "".join(parts)
+            joined = palette.recolor("".join(parts), palette.active())   # the canvas code's colours follow the theme
             if minify:
                 from .minify import strip_js
 
@@ -909,6 +910,7 @@ def build_studio_app(recents: Optional[Recents] = None):
                 dark = STATIC / "studio-dark.css"
                 if dark.is_file():
                     text += "\n" + dark.read_text(encoding="utf-8")
+            text = palette.recolor(text, palette.active())   # the colour theme (operonx_studio/palette.py)
             if minify:
                 try:
                     from .minify import strip_css
@@ -918,6 +920,41 @@ def build_studio_app(recents: Optional[Recents] = None):
                     pass
             got = styles[name] = (version, text.encode("utf-8"))
         return Response(got[1], media_type="text/css; charset=utf-8")
+
+    @app.get("/static/{name}.webp")
+    def picture_webp(name: str) -> Any:
+        return _picture(f"{name}.webp")
+
+    @app.get("/static/{name}.png")
+    def picture_png(name: str) -> Any:
+        return _picture(f"{name}.png")
+
+    def _picture(name: str) -> Any:
+        """A picture of the studio, as drawn for the colour theme in use."""
+        from fastapi.responses import FileResponse
+
+        if not re.fullmatch(r"[A-Za-z0-9_-]+\.(webp|png)", name) or not (STATIC / name).is_file():
+            return JSONResponse({"error": "no such picture"}, status_code=404)
+        return FileResponse(palette.picture(name))
+
+    scripts: Dict[str, Tuple[str, bytes]] = {}      # script -> (asset version, served bytes)
+
+    @app.get("/static/{name}.js")
+    def script(name: str) -> Any:
+        """A script asked for by itself (the Picture's module is imported on first use, outside the
+        page's bundle), with its colours in the colour theme."""
+        from fastapi.responses import Response
+
+        path = STATIC / f"{name}.js"
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name) or not path.is_file():
+            return JSONResponse({"error": "no such script"}, status_code=404)
+        version = _asset_version()
+        got = scripts.get(name)
+        if got is None or got[0] != version:
+            text = palette.recolor(path.read_text(encoding="utf-8"), palette.active())
+            got = scripts[name] = (version, text.encode("utf-8"))
+        return Response(got[1], media_type="text/javascript; charset=utf-8",
+                        headers={"Cache-Control": "no-cache"})
 
     @app.get("/static/bundle/{stem}.js")
     def page_bundle(stem: str) -> Any:
