@@ -21,7 +21,7 @@
   function row(item, redraw) {
     const r = el("div", "factrow secretrow");
     const state = el("div", "pill" + (item.status === "missing" ? " p-bad" : ""), WORD[item.status] || item.status);
-    const val = el("input", "cf-text");
+    const val = el("input", "cf-text needs-edit");      // a viewer sees the names and set/missing, nothing to type in
     val.type = "password"; val.autocomplete = "off"; val.spellcheck = false;
     val.placeholder = item.status === "set" ? "A new value" : "A value";
     val.setAttribute("aria-label", `A value for ${item.name}`);
